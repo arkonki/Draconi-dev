@@ -1,0 +1,44 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  # Apply these headers to all paths
+  for = "/*"
+  [headers.values]
+    # Prevent clickjacking
+    X-Frame-Options = "DENY"
+    # Enable XSS filtering in browsers that support it
+    X-XSS-Protection = "1; mode=block"
+    # Prevent MIME-sniffing
+    X-Content-Type-Options = "nosniff"
+    # Control referrer information sent
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # Content Security Policy (CSP) - Define allowed sources
+    # Adjust this policy based on your specific needs and external resources
+    Content-Security-Policy = """
+      default-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co; \
+      script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+      img-src 'self' data: https:; \
+      font-src 'self' https://fonts.gstatic.com; \
+      connect-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co wss://tkenxulvmzhhkuhfvcpt.supabase.co; \
+      frame-src 'self'; \
+      object-src 'none'; \
+      base-uri 'self'; \
+      form-action 'self'; \
+      frame-ancestors 'none'; \
+      upgrade-insecure-requests;
+    """
+    # Permissions Policy (Optional but recommended)
+    # Disable features not explicitly needed, e.g., interest-cohort
+    Permissions-Policy = "interest-cohort=()"
