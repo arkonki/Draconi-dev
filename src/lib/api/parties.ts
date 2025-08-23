@@ -126,6 +126,7 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
       description,
       created_by,
       created_at,
+			invite_code,
       members:party_members (
         characters (
           *

@@ -13,6 +13,7 @@ import { fetchAvailableCharacters } from '../lib/api/parties'; // Assuming this 
 export function PartyJoinPage() {
   // 1. Get inviteCode from URL params. Make sure your Route is `/party/join/:inviteCode`
   const { inviteCode } = useParams<{ inviteCode: string }>();
+	console.log("Invite Code from URL:", inviteCode); // <-- ADD THIS LINE
   const navigate = useNavigate();
   const { user } = useAuth();
   const queryClient = useQueryClient();

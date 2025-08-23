@@ -74,7 +74,9 @@ export function PartyView() {
   };
 
   const isPartyOwner = user && party && user.id === party.created_by && isDM();
-  const joinLink = `${window.location.origin}/party/join/${partyId}`;
+  const joinLink = party?.invite_code
+  ? `${window.location.origin}/party/join/${party.invite_code}`
+  : ''; // If the party data isn't loaded yet, the link is empty
 
   if (isLoading) {
     return <div className="flex justify-center items-center p-8"><LoadingSpinner size="lg" /></div>;
