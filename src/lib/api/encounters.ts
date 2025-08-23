@@ -1,9 +1,5 @@
 import { supabase } from '../supabase';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
-// Character and MonsterData types are not directly used in this file's function signatures
-// but are relevant for understanding the data structure of combatants.
-// import type { Character } from '../../types/character';
-// import type { MonsterData } from '../../types/bestiary';
 
 export async function fetchLatestEncounterForParty(partyId: string): Promise<Encounter | null> {
   const { data, error } = await supabase
@@ -18,6 +14,20 @@ export async function fetchLatestEncounterForParty(partyId: string): Promise<Enc
     throw error;
   }
   return data?.[0] || null;
+}
+
+export async function fetchAllEncountersForParty(partyId: string): Promise<Encounter[]> {
+  const { data, error } = await supabase
+    .from('encounters')
+    .select('*')
+    .eq('party_id', partyId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching all encounters:', error);
+    throw error;
+  }
+  return data || [];
 }
 
 export async function fetchEncounterDetails(encounterId: string): Promise<Encounter | null> {
@@ -37,9 +47,9 @@ export async function fetchEncounterDetails(encounterId: string): Promise<Encoun
 export async function fetchEncounterCombatants(encounterId: string): Promise<EncounterCombatant[]> {
   const { data, error } = await supabase
     .from('encounter_combatants')
-    .select('*, characters(name, level), monsters(name)') // Include related data for display names
+    .select('*, characters(name), monsters(name)')
     .eq('encounter_id', encounterId)
-    .order('initiative_roll', { ascending: false, nullsLast: true }) // Higher initiative first
+    .order('initiative_roll', { ascending: false, nullsLast: true })
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -48,8 +58,7 @@ export async function fetchEncounterCombatants(encounterId: string): Promise<Enc
   }
   return (data || []).map(c => ({
     ...c,
-    // Ensure display_name is populated if not already set, using fetched related data
-    display_name: c.display_name || (c.character_id && c.characters ? `${c.characters.name} (Lvl ${c.characters.level || 'N/A'})` : (c.monster_id && c.monsters ? c.monsters.name : 'Unknown Combatant'))
+    display_name: c.display_name || (c.character_id && c.characters ? c.characters.name : (c.monster_id && c.monsters ? c.monsters.name : 'Unknown Combatant'))
   }));
 }
 
@@ -79,6 +88,80 @@ export async function createEncounter(
   return data;
 }
 
+export async function deleteEncounter(encounterId: string): Promise<void> {
+  // First delete all combatants
+  const { error: combatantsError } = await supabase
+    .from('encounter_combatants')
+    .delete()
+    .eq('encounter_id', encounterId);
+
+  if (combatantsError) {
+    console.error('Error deleting encounter combatants:', combatantsError);
+    throw combatantsError;
+  }
+
+  // Then delete the encounter
+  const { error: encounterError } = await supabase
+    .from('encounters')
+    .delete()
+    .eq('id', encounterId);
+
+  if (encounterError) {
+    console.error('Error deleting encounter:', encounterError);
+    throw encounterError;
+  }
+}
+
+export async function duplicateEncounter(
+  encounterId: string,
+  newName: string,
+  newDescription?: string
+): Promise<Encounter> {
+  // Fetch the original encounter
+  const originalEncounter = await fetchEncounterDetails(encounterId);
+  if (!originalEncounter) {
+    throw new Error('Original encounter not found');
+  }
+
+  // Create new encounter
+  const newEncounter = await createEncounter(
+    originalEncounter.party_id,
+    newName,
+    newDescription || originalEncounter.description || undefined
+  );
+
+  // Fetch and duplicate combatants
+  const originalCombatants = await fetchEncounterCombatants(encounterId);
+  
+  if (originalCombatants.length > 0) {
+    const combatantsToInsert = originalCombatants.map(c => ({
+      encounter_id: newEncounter.id,
+      character_id: c.character_id,
+      monster_id: c.monster_id,
+      display_name: c.display_name,
+      max_hp: c.max_hp,
+      current_hp: c.max_hp, // Reset to full health
+      max_wp: c.max_wp,
+      current_wp: c.max_wp, // Reset to full willpower
+      is_player_character: c.is_player_character,
+      initiative_roll: null, // Reset initiative
+      is_active_turn: false,
+      status_effects: [],
+    }));
+
+    const { error: insertError } = await supabase
+      .from('encounter_combatants')
+      .insert(combatantsToInsert);
+
+    if (insertError) {
+      console.error('Error duplicating combatants:', insertError);
+      throw insertError;
+    }
+  }
+
+  return newEncounter;
+}
+
 interface AddCharacterCombatantPayload {
   type: 'character';
   characterId: string;
@@ -90,6 +173,7 @@ interface AddMonsterCombatantPayload {
   monsterId: string;
   customName?: string;
   initiativeRoll?: number | null;
+  instanceCount?: number;
 }
 
 export type AddCombatantPayload = AddCharacterCombatantPayload | AddMonsterCombatantPayload;
@@ -97,16 +181,11 @@ export type AddCombatantPayload = AddCharacterCombatantPayload | AddMonsterComba
 export async function addCombatantToEncounter(
   encounterId: string,
   payload: AddCombatantPayload
-): Promise<EncounterCombatant> {
-  let combatantBaseData: Partial<EncounterCombatant> = {
-    encounter_id: encounterId,
-    initiative_roll: payload.initiativeRoll,
-  };
-
+): Promise<EncounterCombatant[]> {
   if (payload.type === 'character') {
     const { data: charData, error: charError } = await supabase
       .from('characters')
-      .select('id, name, max_health, current_health, max_willpower, current_willpower, level')
+      .select('id, name, max_health, current_health, max_willpower, current_willpower')
       .eq('id', payload.characterId)
       .single();
 
@@ -115,10 +194,10 @@ export async function addCombatantToEncounter(
       throw new Error(`Character (ID: ${payload.characterId}) not found or error fetching details.`);
     }
     
-    const displayName = `${charData.name || 'Unnamed Character'}${charData.level ? ` (Lvl ${charData.level})` : ''}`;
+    const displayName = charData.name || 'Unnamed Character';
 
-    combatantBaseData = {
-      ...combatantBaseData,
+    const combatantData = {
+      encounter_id: encounterId,
       character_id: charData.id,
       display_name: displayName,
       max_hp: charData.max_health ?? 10,
@@ -126,7 +205,21 @@ export async function addCombatantToEncounter(
       max_wp: charData.max_willpower,
       current_wp: charData.current_willpower,
       is_player_character: true,
+      initiative_roll: payload.initiativeRoll,
     };
+
+    const { data: newCombatant, error: insertError } = await supabase
+      .from('encounter_combatants')
+      .insert(combatantData)
+      .select()
+      .single();
+    
+    if (insertError) {
+      console.error('Error inserting character combatant:', insertError.message);
+      throw insertError;
+    }
+    return [newCombatant];
+
   } else if (payload.type === 'monster') {
     const { data: monsterData, error: monsterError } = await supabase
       .from('monsters')
@@ -140,41 +233,68 @@ export async function addCombatantToEncounter(
     }
     
     const monsterHp = monsterData.stats?.HP ?? 10;
+    const instanceCount = payload.instanceCount ?? 1;
+    const combatantsToInsert = [];
 
-    combatantBaseData = {
-      ...combatantBaseData,
-      monster_id: monsterData.id,
-      display_name: payload.customName || monsterData.name || 'Unnamed Monster',
-      max_hp: monsterHp,
-      current_hp: monsterHp,
-      max_wp: null, 
-      current_wp: null,
-      is_player_character: false,
-    };
-  } else {
-    console.error('Invalid combatant type specified in payload:', payload);
-    throw new Error('Invalid combatant type specified.');
+    for (let i = 0; i < instanceCount; i++) {
+      const displayName = instanceCount > 1 
+        ? `${payload.customName || monsterData.name || 'Unnamed Monster'} ${i + 1}`
+        : payload.customName || monsterData.name || 'Unnamed Monster';
+
+      combatantsToInsert.push({
+        encounter_id: encounterId,
+        monster_id: monsterData.id,
+        display_name: displayName,
+        max_hp: monsterHp,
+        current_hp: monsterHp,
+        max_wp: null, 
+        current_wp: null,
+        is_player_character: false,
+        initiative_roll: payload.initiativeRoll,
+      });
+    }
+
+    const { data: newCombatants, error: insertError } = await supabase
+      .from('encounter_combatants')
+      .insert(combatantsToInsert)
+      .select();
+    
+    if (insertError) {
+      console.error('Error inserting monster combatants:', insertError.message);
+      throw insertError;
+    }
+    return newCombatants || [];
   }
 
-  const { data: newCombatant, error: insertError } = await supabase
+  throw new Error('Invalid combatant type specified.');
+}
+
+export async function joinEncounterAsCharacter(
+  encounterId: string,
+  characterId: string
+): Promise<EncounterCombatant> {
+  const { data: existing } = await supabase
     .from('encounter_combatants')
-    .insert(combatantBaseData)
-    .select()
+    .select('id')
+    .eq('encounter_id', encounterId)
+    .eq('character_id', characterId)
     .single();
-  
-  if (insertError) {
-    console.error('Error inserting combatant into encounter:', insertError.message, 'Payload:', combatantBaseData);
-    throw insertError;
+
+  if (existing) {
+    throw new Error('Character is already in this encounter');
   }
-  if (!newCombatant) {
-    throw new Error('Combatant creation returned no data from insert operation.');
-  }
-  return newCombatant;
+
+  const result = await addCombatantToEncounter(encounterId, {
+    type: 'character',
+    characterId: characterId,
+  });
+
+  return result[0];
 }
 
 export async function updateEncounter(
   encounterId: string,
-  updates: Partial<Pick<Encounter, 'name' | 'description' | 'status' | 'current_round'>>
+  updates: Partial<Pick<Encounter, 'name' | 'description' | 'status' | 'current_round' | 'active_combatant_id'>>
 ): Promise<Encounter> {
   const { data, error } = await supabase
     .from('encounters')
@@ -224,4 +344,102 @@ export async function removeCombatant(combatantId: string): Promise<void> {
     console.error('Error removing combatant:', error);
     throw error;
   }
+}
+
+export async function rollInitiativeForCombatants(
+  encounterId: string,
+  combatantIds: string[]
+): Promise<EncounterCombatant[]> {
+  const { data: combatants, error: fetchError } = await supabase
+    .from('encounter_combatants')
+    .select('*, monsters(stats)')
+    .eq('encounter_id', encounterId)
+    .in('id', combatantIds);
+
+  if (fetchError) {
+    console.error('Error fetching combatants for initiative:', fetchError);
+    throw fetchError;
+  }
+
+  const updates = combatants?.map(combatant => {
+    let initiativeRoll: number;
+
+    if (combatant.is_player_character) {
+      initiativeRoll = Math.floor(Math.random() * 10) + 1;
+    } else {
+      const ferocity = combatant.monsters?.stats?.ferocity ?? 1;
+      const maxRolls = Math.max(1, Math.min(ferocity, 5));
+      const rolls = Array.from({ length: maxRolls }, () => Math.floor(Math.random() * 10) + 1);
+      initiativeRoll = Math.max(...rolls);
+    }
+
+    return {
+      id: combatant.id,
+      initiative_roll: initiativeRoll,
+    };
+  }) || [];
+
+  const updatePromises = updates.map(update =>
+    updateCombatant(update.id, { initiative_roll: update.initiative_roll })
+  );
+
+  return Promise.all(updatePromises);
+}
+
+export async function swapInitiative(
+  combatantId1: string,
+  combatantId2: string
+): Promise<[EncounterCombatant, EncounterCombatant]> {
+  const { data: combatants, error } = await supabase
+    .from('encounter_combatants')
+    .select('id, initiative_roll')
+    .in('id', [combatantId1, combatantId2]);
+
+  if (error || !combatants || combatants.length !== 2) {
+    throw new Error('Could not fetch combatants for initiative swap');
+  }
+
+  const [c1, c2] = combatants;
+  
+  const [updated1, updated2] = await Promise.all([
+    updateCombatant(c1.id, { initiative_roll: c2.initiative_roll }),
+    updateCombatant(c2.id, { initiative_roll: c1.initiative_roll }),
+  ]);
+
+  return [updated1, updated2];
+}
+
+export async function startEncounter(encounterId: string): Promise<Encounter> {
+  const encounter = await updateEncounter(encounterId, {
+    status: 'active',
+    current_round: 1,
+  });
+
+  return encounter;
+}
+
+export async function endEncounter(encounterId: string): Promise<Encounter> {
+  const encounter = await updateEncounter(encounterId, {
+    status: 'completed',
+    active_combatant_id: null,
+  });
+
+  return encounter;
+}
+
+export async function nextRound(encounterId: string): Promise<Encounter> {
+  const { data: currentEncounter } = await supabase
+    .from('encounters')
+    .select('current_round')
+    .eq('id', encounterId)
+    .single();
+
+  if (!currentEncounter) {
+    throw new Error('Encounter not found');
+  }
+
+  return updateEncounter(encounterId, {
+    current_round: currentEncounter.current_round + 1,
+    active_combatant_id: null,
+  });
 }

@@ -29,7 +29,7 @@ export async function fetchParties(userId: string | undefined, isDM: boolean): P
     description,
     created_by,
     created_at,
-    members:party_members!inner (
+    members:party_members!left (
       characters!inner (
         *
       )
@@ -156,6 +156,26 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
   };
 
   return party;
+}
+
+/**
+ * Adds a single character to a party.
+ * This should be called by a player who is joining a party.
+ * RLS policies should ensure the user owns the character.
+ */
+export async function addPartyMember(partyId: string, characterId: string): Promise<void> {
+  const { error } = await supabase
+    .from('party_members')
+    .insert([{ party_id: partyId, character_id: characterId }]);
+
+  if (error) {
+    console.error('Error adding party member:', error);
+    // Handle potential duplicate entry errors gracefully
+    if (error.code === '23505') { // unique_violation
+      throw new Error('This character is already in the party.');
+    }
+    throw new Error(error.message || 'Failed to join party');
+  }
 }
 
 /**

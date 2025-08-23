@@ -161,7 +161,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
     const itemData = findItemDetails(itemToEquip.name);
     if (!itemData) {
       setError(`Details not found for item: ${itemToEquip.name}`);
-      // console.error("Could not find item details in allGameItems for:", itemToEquip.name); // Removed debug
       return;
     }
 
@@ -173,7 +172,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
     const inventoryItem = currentInventory[itemIndex];
     if (!inventoryItem || inventoryItem.id !== itemToEquip.id) {
         setError(`Item "${itemToEquip.name}" not found at expected index ${itemIndex}. Inventory might be out of sync.`);
-        // console.error("Inventory state mismatch on equip:", currentInventory, itemToEquip, itemIndex); // Removed debug
         return;
     }
 
@@ -197,10 +195,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                 const oldItemDetails = findItemDetails(oldItemName);
                 itemAddedToInventory = parseItemString(oldItemName, allGameItems); // Parse back into object
                 itemAddedToInventory.quantity = 1;
-                if (!oldItemDetails) {
-                    // console.warn(`Could not find details for previously equipped item: ${oldItemName}`); // Removed debug
-                    // Keep basic object if details missing
-                }
             }
             currentEquipped[slot] = itemToEquip.name; // Equip new item (store base name)
 
@@ -253,11 +247,7 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
         updateCharacterData({ equipment: currentEquipment });
 
     } catch (equipError: any) {
-        // console.error("Error during equip:", equipError); // Removed debug
         setError(equipError.message || "Failed to equip item.");
-        // IMPORTANT: Do not persist changes if an error occurred during equip logic
-        // The optimistic update in updateCharacterData will be reverted by the store if the API call fails,
-        // but here we prevent the API call altogether if the equip logic itself fails.
     }
   };
 
@@ -284,7 +274,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           updatedEquipped.weapons.splice(identifier, 1);
       } else {
           setError(`Could not find item to unequip (${type}, ${identifier})`);
-          // console.error("Unequip failed:", type, identifier, updatedEquipped); // Removed debug
           return;
       }
 
@@ -295,10 +284,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
 
           itemToAddBack = parseItemString(itemNameToUnequip, allGameItems); // Parse back into object
           itemToAddBack.quantity = 1; // Unequipping one item
-          if (!itemDetails) {
-              // console.warn(`Details not found for unequipped item: ${itemNameToUnequip}. Adding basic entry.`); // Removed debug
-              // Keep the basic parsed object
-          }
 
           updatedInventory = mergeIntoInventory(updatedInventory, itemToAddBack);
 
@@ -360,7 +345,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           return;
       }
       currentInventory.splice(itemIndex, 1); // Remove the item object
-      // console.log("Dropped item:", droppedItem[0]?.name); // Removed debug
       updateInventory(currentInventory); // Update store via specific action
   };
 
@@ -374,10 +358,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
       }
 
       const itemToUse = { ...currentInventory[itemIndex] }; // Copy item
-
-      // Basic consumable logic: decrement quantity or remove
-      // More complex logic (applying effects) would go here or be triggered from here
-      // console.log(`Using item: ${itemToUse.name}`); // Removed debug
 
       if (itemToUse.quantity > 1) {
           itemToUse.quantity -= 1;
@@ -393,36 +373,47 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
   // Filter inventory using character from store
   const filteredInventory = (character.equipment?.inventory || []).filter(item => {
     if (!item || typeof item.name !== 'string') {
-        // console.warn("Inventory item missing or has invalid name:", item); // Removed debug
-        return false; // Skip this item if name is invalid
+        return false;
     }
-    const nameLower = item.name.toLowerCase(); // Now safe to call
     const searchLower = filters.search.toLowerCase();
-    const itemDetails = findItemDetails(item.name); // Find details for category
+    
+    // **UPDATE START**: Implement "search as you type" logic
+    // If a search term exists, it takes precedence over the category filter.
+    if (searchLower) {
+        const nameLower = item.name.toLowerCase();
+        const originalNameLower = typeof item.originalName === 'string' ? item.originalName.toLowerCase() : '';
+        return nameLower.includes(searchLower) || originalNameLower.includes(searchLower);
+    }
+    // **UPDATE END**
+
+    // If no search term, filter by the selected category as before.
+    const itemDetails = findItemDetails(item.name);
     const categoryUpper = typeof itemDetails?.category === 'string' ? itemDetails.category.toUpperCase() : '';
-
-    const originalNameLower = typeof item.originalName === 'string' ? item.originalName.toLowerCase() : '';
-    const matchesSearch = nameLower.includes(searchLower) || originalNameLower.includes(searchLower);
     const matchesCategory = filters.category === 'all' || categoryUpper === filters.category.toUpperCase();
-
-    return matchesSearch && matchesCategory;
+    return matchesCategory;
   });
 
   // Filter shop items
   const filteredShopItems = allGameItems.filter(item => {
       if (!item || typeof item.name !== 'string') {
-          // console.warn("Shop item missing or has invalid name:", item); // Removed debug
           return false;
       }
-      const nameLower = item.name.toLowerCase();
       const searchLower = filters.search.toLowerCase();
-      const categoryUpper = typeof item.category === 'string' ? item.category.toUpperCase() : '';
 
-      const matchesSearch = nameLower.includes(searchLower);
+      // **UPDATE START**: Implement "search as you type" logic for the shop
+      // If a search term is provided, search globally across all shop items.
+      if (searchLower) {
+          const nameLower = item.name.toLowerCase();
+          return nameLower.includes(searchLower);
+      }
+      // **UPDATE END**
+
+      // If no search term, apply the group/category filters as before.
+      const categoryUpper = typeof item.category === 'string' ? item.category.toUpperCase() : '';
       const matchesCategory = selectedShopGroup
           ? selectedShopGroup.categories.includes(categoryUpper || '')
           : filters.category === 'all' || categoryUpper === filters.category.toUpperCase();
-      return matchesSearch && matchesCategory;
+      return matchesCategory;
   });
 
   // Render Equipped Items
@@ -626,12 +617,13 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
 
               {/* Inventory List */}
               <div className="space-y-3">
-                {(character.equipment?.inventory || []).map((item, index) => {
-                  if (!filteredInventory.includes(item)) return null;
-
+                {filteredInventory.map((item, index) => {
                   if (!item || typeof item.name !== 'string') {
                       return null;
                   }
+
+                  // Find the original index in the unfiltered inventory array for actions like equip/drop
+                  const originalIndex = character.equipment!.inventory.findIndex(invItem => invItem.id === item.id);
 
                   const itemData = findItemDetails(item.name);
                   const categoryUpper = typeof itemData?.category === 'string' ? itemData.category.toUpperCase() : '';
@@ -642,14 +634,14 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                   );
                   const canBeUsed = item.quantity > 0 && (
                       itemData?.category?.toUpperCase() === 'MEDICINE' ||
-                      itemData?.category?.toUpperCase() === 'STUDIES & MAGIC' || 
+                      itemData?.category?.toUpperCase() === 'STUDIES & MAGIC' ||
                       itemData?.category?.toUpperCase() === 'LIGHT SOURCES' ||
-                      item.name.toLowerCase().includes('ration') 
+                      item.name.toLowerCase().includes('ration')
                   );
 
                   return (
                     <div
-                      key={item.id || `${item.name}-${index}`}
+                      key={item.id || `${item.name}-${originalIndex}`}
                       className="group relative p-3 border rounded-lg hover:shadow-sm transition-shadow flex items-center justify-between gap-2 bg-white"
                     >
                       <div className="flex-1 min-w-0">
@@ -673,7 +665,7 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                                 variant="outline"
                                 size="xs"
                                 icon={MinusCircle}
-                                onClick={() => handleUseItem(index)}
+                                onClick={() => handleUseItem(originalIndex)}
                                 disabled={isSaving}
                                 title={`Use one ${item.name}`}
                             >
@@ -685,7 +677,7 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                              variant="secondary"
                              size="xs"
                              icon={CheckSquare}
-                             onClick={() => handleEquipItem(item, index)}
+                             onClick={() => handleEquipItem(item, originalIndex)}
                              disabled={isSaving}
                              title={`Equip ${item.name}`}
                            >
@@ -696,7 +688,7 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                             variant="dangerOutline"
                             size="xs"
                             icon={Trash2}
-                            onClick={() => handleDropItem(index)}
+                            onClick={() => handleDropItem(originalIndex)}
                             disabled={isSaving}
                             title={`Drop ${formatInventoryItemName(item)}`}
                          >
@@ -757,9 +749,9 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
               )}
             </>
           )}
-        </div> 
+        </div>
 
-      </div> 
-    </div> 
+      </div>
+    </div>
   );
 }

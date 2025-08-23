@@ -6,13 +6,14 @@ import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parti
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
-import { Users, Sword, Trash2, UserX, Link as LinkIcon, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText } from 'lucide-react';
+import { Users, Sword, Trash2, UserX, Link as LinkIcon, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyNotes } from '../components/party/PartyNotes';
 import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
 
 type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter';
 
@@ -105,13 +106,25 @@ export function PartyView() {
               <p className="text-gray-500 mt-1">A band of brave adventurers.</p>
             </div>
             {isPartyOwner && (
-              <div className="flex items-center gap-2 mt-4 md:mt-0">
-                <Button variant="primary" icon={LinkIcon} onClick={() => setIsInviteVisible(!isInviteVisible)}>
-                  Invite Player
-                </Button>
-                <Button variant="danger" icon={Trash2} onClick={() => setDialogOpen('deleteParty')}>
-                  Delete Party
-                </Button>
+              <div className="mt-4 md:mt-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger>
+                    <Button variant="outline" size="icon" aria-label="Party Actions">
+                      <MoreVertical className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => setIsInviteVisible(prev => !prev)}>
+                      <UserPlus className="w-4 h-4" />
+                      Invite Player
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-500 hover:text-red-700 hover:bg-red-50 focus:bg-red-50">
+                      <Trash2 className="w-4 h-4" />
+                      Delete Party
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
           </div>
