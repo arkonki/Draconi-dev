@@ -1,58 +1,74 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '../lib/supabase'; // Ensure this path is correct
 import { useAuth } from '../contexts/AuthContext';
 import { Users, Check } from 'lucide-react';
 import { Button } from '../components/shared/Button';
-import { Character } from '../types/character';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
-import { fetchPartyById, fetchAvailableCharacters } from '../lib/api/parties';
+import { fetchAvailableCharacters } from '../lib/api/parties'; // Assuming this API is still valid
 
+// This component no longer fetches party data directly
 export function PartyJoinPage() {
-  const { id: partyId } = useParams<{ id: string }>();
+  // 1. Get inviteCode from URL params. Make sure your Route is `/party/join/:inviteCode`
+  const { inviteCode } = useParams<{ inviteCode: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedCharacter, setSelectedCharacter] = useState<string>('');
 
-  // Fetch party details
-  const { data: party, isLoading: isLoadingParty, error: errorParty } = useQuery({
-    queryKey: ['party', partyId],
-    queryFn: () => fetchPartyById(partyId),
-    enabled: !!partyId,
-  });
-
-  // Fetch user's available characters
-  const { data: characters = [], isLoading: isLoadingChars, error: errorChars } = useQuery({
+  // 2. We ONLY fetch the user's available characters.
+  const { 
+    data: characters = [], 
+    isLoading: isLoadingChars, 
+    error: errorChars 
+  } = useQuery({
     queryKey: ['availableCharacters', user?.id],
     queryFn: () => fetchAvailableCharacters(user?.id),
     enabled: !!user,
   });
 
-  // Mutation to join the party
+  // 3. The mutation is now completely different. It calls the RPC.
   const joinPartyMutation = useMutation({
     mutationFn: async (characterId: string) => {
-      if (!characterId) {
-        throw new Error('Please select a character');
-      }
-      if (!partyId) {
-        throw new Error('Party ID is missing');
-      }
+      if (!characterId) throw new Error('Please select a character');
+      if (!inviteCode) throw new Error('Invite code is missing');
 
-      const { error } = await supabase
-        .from('party_members')
-        .insert([{ party_id: partyId, character_id: characterId }]);
+      // Call the secure RPC function with both parameters
+      const { data, error } = await supabase.rpc('join_party_with_character', {
+        p_invite_code: inviteCode,
+        p_character_id: characterId,
+      });
 
-      if (error) throw error;
+      if (error) {
+        // Translate database errors into user-friendly messages
+        if (error.message.includes('invalid_invite_code')) {
+          throw new Error('This invite link is invalid or has expired.');
+        }
+        if (error.message.includes('character_already_in_a_party')) {
+          throw new Error('This character is already in a party.');
+        }
+        if (error.message.includes('user_already_in_party')) {
+            throw new Error('You are already a member of this party.');
+        }
+        throw error; // Throw original error for other cases
+      }
+      return data; // Return the success data
     },
-    onSuccess: () => {
-      // Invalidate queries to refetch party data and available characters
-      queryClient.invalidateQueries({ queryKey: ['party', partyId] });
-      queryClient.invalidateQueries({ queryKey: ['parties'] });
-      queryClient.invalidateQueries({ queryKey: ['availableCharacters', user?.id] });
-      navigate(`/party/${partyId}`);
+    onSuccess: (data) => {
+      // On success, the RPC returns the party_id for redirection
+      const partyId = data?.party_id;
+      if (partyId) {
+        // Invalidate queries to make sure everything is fresh
+        queryClient.invalidateQueries({ queryKey: ['parties'] }); // A general key for party lists
+        queryClient.invalidateQueries({ queryKey: ['party', partyId] }); // The specific party we just joined
+        queryClient.invalidateQueries({ queryKey: ['availableCharacters', user?.id] });
+        navigate(`/party/${partyId}`);
+      } else {
+        // Fallback if something goes wrong
+        navigate('/adventure-party');
+      }
     },
   });
 
@@ -61,9 +77,10 @@ export function PartyJoinPage() {
       joinPartyMutation.mutate(selectedCharacter);
     }
   };
-
-  const isLoading = isLoadingParty || isLoadingChars;
-  const error = errorParty?.message || errorChars?.message || joinPartyMutation.error?.message;
+  
+  // 4. Simplified loading and error states
+  const isLoading = isLoadingChars;
+  const error = errorChars?.message || joinPartyMutation.error?.message;
 
   if (isLoading) {
     return (
@@ -73,25 +90,11 @@ export function PartyJoinPage() {
     );
   }
 
+  // 5. Custom error page for invalid invite links
   if (error) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 text-center">
         <ErrorMessage message={error} />
-        <Button
-          variant="secondary"
-          onClick={() => navigate('/adventure-party')}
-          className="mt-4"
-        >
-          Back to Parties
-        </Button>
-      </div>
-    );
-  }
-
-  if (!party) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <ErrorMessage message="Party not found." />
         <Button
           variant="secondary"
           onClick={() => navigate('/adventure-party')}
@@ -108,15 +111,16 @@ export function PartyJoinPage() {
       <div className="max-w-2xl mx-auto bg-white p-8 rounded-xl shadow-lg">
         <div className="text-center mb-8">
           <Users className="w-12 h-12 text-blue-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Join Adventure Party</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Join an Adventure</h1>
+          {/* We can't display party name anymore, so we use a generic title */}
           <p className="text-gray-600 text-lg">
-            You've been invited to join <b>{party.name}</b>.
+            You've been invited to join a new party!
           </p>
         </div>
 
         {characters.length > 0 ? (
           <div className="space-y-6">
-            <p className="text-center text-gray-700">Select one of your available characters to join the party.</p>
+            <p className="text-center text-gray-700">Select one of your available characters to join with.</p>
             <div className="space-y-3">
               {characters.map((character) => (
                 <div
@@ -156,7 +160,7 @@ export function PartyJoinPage() {
                 disabled={!selectedCharacter || joinPartyMutation.isPending}
                 onClick={handleJoin}
               >
-                Join Party
+                Join with Selected Character
               </Button>
             </div>
           </div>
@@ -167,7 +171,7 @@ export function PartyJoinPage() {
             </p>
             <Button
               variant="primary"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/')} // Redirect to character creation or dashboard
             >
               Create a Character
             </Button>

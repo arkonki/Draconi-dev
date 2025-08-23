@@ -45,7 +45,7 @@ export function AppRoutes() {
                     <Route path="/compendium" element={<Compendium />} />
                     <Route path="/adventure-party" element={<AdventureParty />} />
                     <Route path="/party/:id" element={<PartyView />} />
-                    <Route path="/party/join/:id" element={<PartyJoinPage />} />
+                    <Route path="/party/join/:inviteCode" element={<PartyJoinPage />} />
                     <Route path="/notes" element={<Notes />} />
                     <Route path="/settings" element={<Settings />} />
                     {/* Fallback route within authenticated area */}
