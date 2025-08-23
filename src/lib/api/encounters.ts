@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
+import { v4 as uuidv4 } from 'uuid'; // Make sure you have run `npm install uuid @types/uuid`
 
 export async function fetchLatestEncounterForParty(partyId: string): Promise<Encounter | null> {
   const { data, error } = await supabase
@@ -73,7 +74,7 @@ export async function createEncounter(
       party_id: partyId,
       name: name,
       description: description,
-      status: 'planning', 
+      status: 'planning',
     })
     .select()
     .single();
@@ -89,7 +90,6 @@ export async function createEncounter(
 }
 
 export async function deleteEncounter(encounterId: string): Promise<void> {
-  // First delete all combatants
   const { error: combatantsError } = await supabase
     .from('encounter_combatants')
     .delete()
@@ -100,7 +100,6 @@ export async function deleteEncounter(encounterId: string): Promise<void> {
     throw combatantsError;
   }
 
-  // Then delete the encounter
   const { error: encounterError } = await supabase
     .from('encounters')
     .delete()
@@ -117,20 +116,17 @@ export async function duplicateEncounter(
   newName: string,
   newDescription?: string
 ): Promise<Encounter> {
-  // Fetch the original encounter
   const originalEncounter = await fetchEncounterDetails(encounterId);
   if (!originalEncounter) {
     throw new Error('Original encounter not found');
   }
 
-  // Create new encounter
   const newEncounter = await createEncounter(
     originalEncounter.party_id,
     newName,
     newDescription || originalEncounter.description || undefined
   );
 
-  // Fetch and duplicate combatants
   const originalCombatants = await fetchEncounterCombatants(encounterId);
   
   if (originalCombatants.length > 0) {
@@ -138,13 +134,14 @@ export async function duplicateEncounter(
       encounter_id: newEncounter.id,
       character_id: c.character_id,
       monster_id: c.monster_id,
+      monster_instance_id: c.monster_instance_id,
       display_name: c.display_name,
       max_hp: c.max_hp,
-      current_hp: c.max_hp, // Reset to full health
+      current_hp: c.max_hp,
       max_wp: c.max_wp,
-      current_wp: c.max_wp, // Reset to full willpower
+      current_wp: c.max_wp,
       is_player_character: c.is_player_character,
-      initiative_roll: null, // Reset initiative
+      initiative_roll: null,
       is_active_turn: false,
       status_effects: [],
     }));
@@ -162,6 +159,7 @@ export async function duplicateEncounter(
   return newEncounter;
 }
 
+// --- PAYLOAD TYPES ---
 interface AddCharacterCombatantPayload {
   type: 'character';
   characterId: string;
@@ -177,6 +175,9 @@ interface AddMonsterCombatantPayload {
 }
 
 export type AddCombatantPayload = AddCharacterCombatantPayload | AddMonsterCombatantPayload;
+
+
+// --- MODIFIED & NEW FUNCTIONS ---
 
 export async function addCombatantToEncounter(
   encounterId: string,
@@ -194,12 +195,10 @@ export async function addCombatantToEncounter(
       throw new Error(`Character (ID: ${payload.characterId}) not found or error fetching details.`);
     }
     
-    const displayName = charData.name || 'Unnamed Character';
-
     const combatantData = {
       encounter_id: encounterId,
       character_id: charData.id,
-      display_name: displayName,
+      display_name: charData.name || 'Unnamed Character',
       max_hp: charData.max_health ?? 10,
       current_hp: charData.current_health ?? charData.max_health ?? 10,
       max_wp: charData.max_willpower,
@@ -208,12 +207,7 @@ export async function addCombatantToEncounter(
       initiative_roll: payload.initiativeRoll,
     };
 
-    const { data: newCombatant, error: insertError } = await supabase
-      .from('encounter_combatants')
-      .insert(combatantData)
-      .select()
-      .single();
-    
+    const { data: newCombatant, error: insertError } = await supabase.from('encounter_combatants').insert(combatantData).select().single();
     if (insertError) {
       console.error('Error inserting character combatant:', insertError.message);
       throw insertError;
@@ -221,44 +215,43 @@ export async function addCombatantToEncounter(
     return [newCombatant];
 
   } else if (payload.type === 'monster') {
-    const { data: monsterData, error: monsterError } = await supabase
-      .from('monsters')
-      .select('id, name, stats') 
-      .eq('id', payload.monsterId)
-      .single();
-
+    const { data: monsterData, error: monsterError } = await supabase.from('monsters').select('id, name, stats').eq('id', payload.monsterId).single();
     if (monsterError || !monsterData) {
       console.error('Error fetching monster for combatant:', monsterError?.message);
       throw new Error(`Monster (ID: ${payload.monsterId}) not found or error fetching details.`);
     }
     
-    const monsterHp = monsterData.stats?.HP ?? 10;
+    const monsterStats = monsterData.stats as any || {};
+    const monsterHp = monsterStats.HP ?? 10;
+    const ferocity = monsterStats.FEROCITY ?? 1;
     const instanceCount = payload.instanceCount ?? 1;
     const combatantsToInsert = [];
 
     for (let i = 0; i < instanceCount; i++) {
-      const displayName = instanceCount > 1 
-        ? `${payload.customName || monsterData.name || 'Unnamed Monster'} ${i + 1}`
-        : payload.customName || monsterData.name || 'Unnamed Monster';
+      const monsterInstanceId = uuidv4();
+      const baseDisplayName = instanceCount > 1 
+        ? `${payload.customName || monsterData.name} ${i + 1}`
+        : payload.customName || monsterData.name;
 
-      combatantsToInsert.push({
-        encounter_id: encounterId,
-        monster_id: monsterData.id,
-        display_name: displayName,
-        max_hp: monsterHp,
-        current_hp: monsterHp,
-        max_wp: null, 
-        current_wp: null,
-        is_player_character: false,
-        initiative_roll: payload.initiativeRoll,
-      });
+      for (let j = 0; j < ferocity; j++) {
+        const turnDisplayName = ferocity > 1
+          ? `${baseDisplayName} (Turn ${j + 1}/${ferocity})`
+          : baseDisplayName;
+
+        combatantsToInsert.push({
+          encounter_id: encounterId,
+          monster_id: monsterData.id,
+          monster_instance_id: monsterInstanceId,
+          display_name: turnDisplayName,
+          max_hp: monsterHp,
+          current_hp: monsterHp,
+          is_player_character: false,
+          initiative_roll: payload.initiativeRoll,
+        });
+      }
     }
 
-    const { data: newCombatants, error: insertError } = await supabase
-      .from('encounter_combatants')
-      .insert(combatantsToInsert)
-      .select();
-    
+    const { data: newCombatants, error: insertError } = await supabase.from('encounter_combatants').insert(combatantsToInsert).select();
     if (insertError) {
       console.error('Error inserting monster combatants:', insertError.message);
       throw insertError;
@@ -268,6 +261,24 @@ export async function addCombatantToEncounter(
 
   throw new Error('Invalid combatant type specified.');
 }
+
+export async function updateMonsterInstance(
+  monsterInstanceId: string,
+  updates: Partial<Pick<EncounterCombatant, 'current_hp' | 'current_wp'>>
+): Promise<void> {
+    const { error } = await supabase
+        .from('encounter_combatants')
+        .update(updates)
+        .eq('monster_instance_id', monsterInstanceId);
+
+    if (error) {
+        console.error('Error updating monster instance:', error);
+        throw error;
+    }
+}
+
+
+// --- THE REST OF THE FUNCTIONS ---
 
 export async function joinEncounterAsCharacter(
   encounterId: string,
@@ -367,6 +378,9 @@ export async function rollInitiativeForCombatants(
     if (combatant.is_player_character) {
       initiativeRoll = Math.floor(Math.random() * 10) + 1;
     } else {
+      // Note: This initiative roll logic doesn't use FEROCITY for the roll itself,
+      // as the multiple turns are handled by creating multiple combatant slots.
+      // Kept the original ferocity-based roll in case it's a desired house rule.
       const ferocity = combatant.monsters?.stats?.ferocity ?? 1;
       const maxRolls = Math.max(1, Math.min(ferocity, 5));
       const rolls = Array.from({ length: maxRolls }, () => Math.floor(Math.random() * 10) + 1);
@@ -410,21 +424,17 @@ export async function swapInitiative(
 }
 
 export async function startEncounter(encounterId: string): Promise<Encounter> {
-  const encounter = await updateEncounter(encounterId, {
+  return await updateEncounter(encounterId, {
     status: 'active',
     current_round: 1,
   });
-
-  return encounter;
 }
 
 export async function endEncounter(encounterId: string): Promise<Encounter> {
-  const encounter = await updateEncounter(encounterId, {
+  return await updateEncounter(encounterId, {
     status: 'completed',
     active_combatant_id: null,
   });
-
-  return encounter;
 }
 
 export async function nextRound(encounterId: string): Promise<Encounter> {

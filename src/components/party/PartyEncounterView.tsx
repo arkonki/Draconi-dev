@@ -17,6 +17,7 @@ import {
   startEncounter,
   endEncounter,
   nextRound,
+  updateMonsterInstance, // Import the new function for Ferocity
 } from '../../lib/api/encounters';
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
@@ -49,49 +50,17 @@ import type { Encounter, EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
 
 // --- TYPE DEFINITIONS ---
-export interface MonsterStats {
-  HP?: number;
-  SIZE?: string;
-  ARMOR?: number;
-  FEROCITY?: number;
-  MOVEMENT?: number;
-  [key: string]: any;
-}
-
-export interface MonsterAttack {
-  name: string;
-  effects: any[];
-  description: string;
-  roll_values: string;
-}
-
-export interface MonsterData {
-  id: string;
-  name: string;
-  category?: string;
-  stats?: MonsterStats;
-  attacks?: MonsterAttack[];
-  effectsSummary?: string;
-}
-
-// --- COMPONENT PROPS & STATE INTERFACES ---
-interface PartyEncounterViewProps {
-  partyId: string;
-  partyMembers: Character[];
-  isDM: boolean;
-}
-
-interface EditableCombatantStats {
-  current_hp: string;
-  current_wp?: string;
-  initiative_roll?: string;
-}
+export interface MonsterStats { HP?: number; SIZE?: string; ARMOR?: number; FEROCITY?: number; MOVEMENT?: number; [key: string]: any; }
+export interface MonsterAttack { name: string; effects: any[]; description: string; roll_values: string; }
+export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
+interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
+interface EditableCombatantStats { current_hp: string; current_wp?: string; initiative_roll?: string; }
 
 // --- THE COMPONENT ---
 export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncounterViewProps) {
   const queryClient = useQueryClient();
 
-  // --- STATE MANAGEMENT (Refactored for clarity) ---
+  // --- STATE MANAGEMENT ---
   const [newEncounterName, setNewEncounterName] = useState('');
   const [newEncounterDescription, setNewEncounterDescription] = useState('');
   const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null);
@@ -115,7 +84,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [showMonsterDetails, setShowMonsterDetails] = useState<Record<string, boolean>>({});
   const [currentMonsterAttacks, setCurrentMonsterAttacks] = useState<Record<string, MonsterAttack | null>>({});
 
-  // --- DATA FETCHING (QUERIES) ---
+  // --- DATA FETCHING ---
   const { data: allEncounters, isLoading: loadingAllEncounters, error: errorAllEncounters } = useQuery<Encounter[], Error>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
   const currentEncounterId = useMemo(() => { if (selectedEncounterId) return selectedEncounterId; if (allEncounters && allEncounters.length > 0) return allEncounters[0].id; return null; }, [selectedEncounterId, allEncounters]);
   useEffect(() => { if (!loadingAllEncounters) { if (!allEncounters || allEncounters.length === 0) { setViewMode('create'); } else { setViewMode('details'); } } }, [allEncounters, loadingAllEncounters]);
@@ -127,10 +96,22 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   useEncounterRealtime(currentEncounterId);
   const monstersById = useMemo(() => { if (!allMonsters) return new Map<string, MonsterData>(); return new Map(allMonsters.map((m) => [m.id, m])); }, [allMonsters]);
   const combatants = useMemo(() => (combatantsData?.slice().sort((a, b) => { const ia = a.initiative_roll ?? -Infinity; const ib = b.initiative_roll ?? -Infinity; if (ia !== ib) return ib - ia; return (a.display_name ?? '').localeCompare(b.display_name ?? ''); }) || []), [combatantsData]);
+  
+  const uniqueCombatantCount = useMemo(() => {
+    if (!combatants) return 0;
+    const uniqueIds = new Set<string>();
+    combatants.forEach(c => {
+        if (c.monster_instance_id) { uniqueIds.add(c.monster_instance_id); } 
+        else { uniqueIds.add(c.id); }
+    });
+    return uniqueIds.size;
+  }, [combatants]);
+
   useEffect(() => { if (!combatants) return; const init: Record<string, EditableCombatantStats> = {}; combatants.forEach((c) => { init[c.id] = { current_hp: String(c.current_hp ?? c.max_hp ?? 0), current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp ?? '') : undefined, initiative_roll: c.initiative_roll != null ? String(c.initiative_roll) : '' }; }); setEditingStats(init); }, [combatants]);
   useEffect(() => { if (encounterDetails) { setEditedEncounterName(encounterDetails.name); setEditedEncounterDescription(encounterDetails.description || ''); } }, [encounterDetails]);
 
   // --- DATA MUTATIONS ---
+  const updateMonsterInstanceMu = useMutation({ mutationFn: (data: { monsterInstanceId: string; updates: Partial<EncounterCombatant> }) => updateMonsterInstance(data.monsterInstanceId, data.updates), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants', currentEncounterId] }); } });
   const createEncounterMu = useMutation({ mutationFn: (payload: { name: string; description?: string }) => createEncounter(partyId, payload.name, payload.description), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); setNewEncounterName(''); setNewEncounterDescription(''); } });
   const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: (_, deletedId) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); if (selectedEncounterId === deletedId) setSelectedEncounterId(null); } });
   const duplicateEncounterMu = useMutation({ mutationFn: ({ encounterId, name }: { encounterId: string; name: string }) => duplicateEncounter(encounterId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); setSelectedEncounterId(newEnc.id); } });
@@ -145,12 +126,36 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const nextRoundMu = useMutation({ mutationFn: () => { if (!currentEncounterId) throw new Error('No encounter for next round'); return nextRound(currentEncounterId); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails', currentEncounterId] }); } });
 
   // --- EVENT HANDLERS ---
+  const handleSaveStats = (combatant: EncounterCombatant) => {
+    const stats = editingStats[combatant.id];
+    if (!stats) return;
+    const updates: Partial<EncounterCombatant> = {};
+    const newHp = parseInt(stats.current_hp, 10);
+    const newWp = stats.current_wp != null ? parseInt(stats.current_wp, 10) : undefined;
+    const newInit = stats.initiative_roll?.trim() === '' ? null : parseInt(stats.initiative_roll || '', 10);
+    if (combatant.monster_instance_id) {
+        const instanceUpdates: Partial<EncounterCombatant> = {};
+        if (!isNaN(newHp) && newHp !== combatant.current_hp) instanceUpdates.current_hp = newHp;
+        if (newWp !== undefined && !isNaN(newWp) && newWp !== combatant.current_wp) instanceUpdates.current_wp = newWp;
+        if (Object.keys(instanceUpdates).length > 0) {
+            updateMonsterInstanceMu.mutate({ monsterInstanceId: combatant.monster_instance_id, updates: instanceUpdates });
+        }
+    } else {
+        if (!isNaN(newHp) && newHp !== combatant.current_hp) updates.current_hp = newHp;
+        if (newWp !== undefined && !isNaN(newWp) && newWp !== combatant.current_wp) updates.current_wp = newWp;
+    }
+    if (newInit !== undefined && (newInit === null || !isNaN(newInit)) && newInit !== combatant.initiative_roll) {
+        updates.initiative_roll = newInit;
+    }
+    if (Object.keys(updates).length > 0) {
+        updateCombatantMu.mutate({ id: combatant.id, updates });
+    }
+  };
   const handleCreateEncounter = (e: React.FormEvent) => { e.preventDefault(); if (!newEncounterName.trim()) return; createEncounterMu.mutate({ name: newEncounterName.trim(), description: newEncounterDescription.trim() || undefined }); };
   const handleDuplicateEncounter = (encounterId: string, name: string) => { duplicateEncounterMu.mutate({ encounterId, name: `${name} (Copy)` }); };
   const handleSelectEncounter = (encounterId: string) => { setSelectedEncounterId(encounterId); setShowEncounterList(false); };
   const handleAddParty = () => { if (!selectedPartyMember || !currentEncounterId) return; addCombatantMu.mutate({ type: 'character', characterId: selectedPartyMember, initiativeRoll: partyInitiativeInput ? parseInt(partyInitiativeInput) : null }); };
   const handleAddMonster = () => { if (!selectedMonster || !currentEncounterId) return; addCombatantMu.mutate({ type: 'monster', monsterId: selectedMonster, customName: customMonsterName.trim() || undefined, instanceCount: monsterInstanceCount, initiativeRoll: monsterInitiativeInput ? parseInt(monsterInitiativeInput) : null }); };
-  const handleSaveStats = (id: string) => { const stats = editingStats[id]; const c = combatants.find((c) => c.id === id); if (!stats || !c) return; const u: Partial<EncounterCombatant> = {}; const nH = parseInt(stats.current_hp, 10); if (!isNaN(nH) && nH !== c.current_hp) u.current_hp = nH; if (stats.initiative_roll != null) { const nI = stats.initiative_roll.trim() === '' ? null : parseInt(stats.initiative_roll, 10); if ((nI === null || !isNaN(nI)) && nI !== c.initiative_roll) u.initiative_roll = nI; } if (c.max_wp != null && stats.current_wp != null) { const nW = stats.current_wp.trim() === '' ? null : parseInt(stats.current_wp, 10); if ((nW === null || !isNaN(nW)) && nW !== c.current_wp) u.current_wp = nW; } if (Object.keys(u).length > 0) updateCombatantMu.mutate({ id, updates: u }); };
   const handleRollInitiative = () => { if (selectedCombatantsForInitiative.length === 0) return; rollInitiativeMu.mutate(selectedCombatantsForInitiative); };
   const handleCombatantSwap = (combatantId: string) => { if (!swapMode) return; if (!firstSwapCombatant) setFirstSwapCombatant(combatantId); else if (firstSwapCombatant !== combatantId) swapInitiativeMu.mutate({ id1: firstSwapCombatant, id2: combatantId }); };
   const toggleMonsterDetails = (combatantId: string) => { setShowMonsterDetails(prev => ({ ...prev, [combatantId]: !prev[combatantId] })); };
@@ -240,7 +245,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
           {currentEncounter.status === 'planning' && (
             <div className="bg-gray-50 p-6 rounded-lg shadow space-y-4">
-              <div className="flex items-center justify-between"><h4 className="text-lg font-medium flex items-center gap-2"><Users className="w-5 h-5" /> Add Combatants</h4>{addStep !== 'idle' && (<Button variant="ghost" size="sm" onClick={() => setAddStep('idle')} Icon={ArrowLeft}>Back</Button>)}</div>
+              <div className="flex items-center justify-between"><h4 className="text-lg font-medium flex items-center gap-2"><Users className="w-5 h-5" /> Prepare Combatants</h4>{addStep !== 'idle' && (<Button variant="ghost" size="sm" onClick={() => setAddStep('idle')} Icon={ArrowLeft}>Back</Button>)}</div>
               {addStep === 'idle' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2"><Button onClick={() => setAddStep('characters')} Icon={UserPlus} size="lg" variant="outline">Add Party Members</Button><Button onClick={() => setAddStep('monsters')} Icon={ShieldPlus} size="lg" variant="outline">Add Monsters</Button></div>)}
               {addStep === 'characters' && (<div className="space-y-2 animate-fade-in"><label className="block text-sm font-medium text-gray-700">Add Party Member</label><select value={selectedPartyMember} onChange={(e) => setSelectedPartyMember(e.target.value)} className="w-full px-3 py-2 border rounded-md"><option value="">Select Party Member</option>{availableParty.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select><input type="number" placeholder="Initiative (Optional)" value={partyInitiativeInput} onChange={(e) => setPartyInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/><Button onClick={handleAddParty} Icon={UserPlus} isLoading={addCombatantMu.isPending} disabled={!selectedPartyMember}>Add Member</Button></div>)}
               {addStep === 'monsters' && (<div className="space-y-2 animate-fade-in"><label className="block text-sm font-medium text-gray-700">Add Monster</label><select value={selectedMonster} onChange={(e) => setSelectedMonster(e.target.value)} className="w-full px-3 py-2 border rounded-md"><option value="">Select Monster</option>{allMonsters?.map((m) => (<option key={m.id} value={m.id}>{m.name} {m.category && `(${m.category})`}</option>))}</select>{selectedMonsterData && (<div className="text-xs text-gray-600 p-2 bg-white rounded border"><p><strong>HP:</strong> {selectedMonsterData.stats?.HP || 'N/A'}</p><p><strong>Ferocity:</strong> {selectedMonsterData.stats?.FEROCITY || 'N/A'}</p></div>)}<div className="grid grid-cols-2 gap-2"><input type="text" placeholder="Custom Name (Optional)" value={customMonsterName} onChange={(e) => setCustomMonsterName(e.target.value)} className="px-3 py-2 border rounded-md"/><input type="number" placeholder="Count" value={monsterInstanceCount} onChange={(e) => setMonsterInstanceCount(Math.max(1, parseInt(e.target.value) || 1))} min="1" className="px-3 py-2 border rounded-md"/></div><input type="number" placeholder="Initiative (Optional)" value={monsterInitiativeInput} onChange={(e) => setMonsterInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/><Button onClick={handleAddMonster} Icon={ShieldPlus} isLoading={addCombatantMu.isPending} disabled={!selectedMonster}>Add Monster{monsterInstanceCount > 1 ? `s (${monsterInstanceCount})` : ''}</Button></div>)}
@@ -256,62 +261,37 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           )}
 
           <div>
-            <h4 className="text-lg font-medium mb-4 flex items-center gap-2"><Users className="w-5 h-5" /> Combatants {combatants.length > 0 && `(${combatants.length})`}</h4>
+            <h4 className="text-lg font-medium mb-4 flex items-center gap-2"><Users className="w-5 h-5" /> Combatants {uniqueCombatantCount > 0 && `(${uniqueCombatantCount})`}</h4>
             {loadingCombatants ? <LoadingSpinner /> : errorCombatants ? <ErrorMessage message={errorCombatants.message} /> : combatants.length === 0 ? <p className="text-gray-600 text-center py-8">No combatants added yet.</p> : (
               <ul className="space-y-3">
                 {combatants.map((c) => {
-                  if (c.monster_id) {
-                    const combatantMonsterId = c.monster_id;
-                    const monsterData = monstersById.get(combatantMonsterId.trim()); // Defensive trim
-                    
-                    if (!monsterData) {
-                      console.group(`%c[CRITICAL] LOOKUP FAILED FOR MONSTER: ${c.display_name}`, 'color: red; font-weight: bold;');
-                      console.log(`ID from combatant record: "${combatantMonsterId}" (Length: ${combatantMonsterId.length})`);
-                      console.log(`Is this ID in the monstersById Map? ->`, monstersById.has(combatantMonsterId));
-                      console.log('Does a trimmed ID exist in the map?', monstersById.has(combatantMonsterId.trim()));
-                      console.groupEnd();
-                    }
+                  const monsterData = c.monster_id ? monstersById.get(c.monster_id.trim()) : undefined;
+                  const isDetailsVisible = !!showMonsterDetails[c.id];
+                  const currentAttack = currentMonsterAttacks[c.id];
 
-                    const isDetailsVisible = !!showMonsterDetails[c.id];
-                    const currentAttack = currentMonsterAttacks[c.id];
-
-                    return (
-                      <li key={c.id} className={`p-4 rounded-lg shadow border-l-4 bg-red-50 border-red-500 ${swapMode ? 'cursor-pointer hover:bg-opacity-80' : ''} ${firstSwapCombatant === c.id ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`} onClick={() => handleCombatantSwap(c.id)}>
-                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                          <div className="flex items-center gap-3 flex-grow">{currentEncounter.status !== 'completed' && (<input type="checkbox" className="h-5 w-5 rounded" checked={selectedCombatantsForInitiative.includes(c.id)} onChange={(e) => { if (e.target.checked) { setSelectedCombatantsForInitiative((p) => [...p, c.id]); } else { setSelectedCombatantsForInitiative((p) => p.filter((id) => id !== c.id)); } }} onClick={(e) => e.stopPropagation()}/>)}<div className="text-center font-bold text-lg w-8">{c.initiative_roll ?? '-'}</div><div><p className="font-semibold">{c.display_name}</p><p className="text-xs text-gray-500">{monsterData?.name || 'Monster (Details Missing)'}</p></div></div>
-                          <div className="flex flex-wrap items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center gap-1"><Heart className="w-4 h-4 text-red-500" /><input type="number" value={editingStats[c.id]?.current_hp ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], current_hp: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/><span className="text-sm text-gray-600">/ {c.max_hp}</span></div>
-                            <div className="flex items-center gap-1"><Dice6 className="w-4 h-4 text-gray-500" /><input type="number" value={editingStats[c.id]?.initiative_roll ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], initiative_roll: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/></div>
-                            <div className="flex items-center gap-2"><Button size="sm" onClick={() => handleSaveStats(c.id)} Icon={Save} isLoading={updateCombatantMu.isPending && updateCombatantMu.variables?.id === c.id}/><Button size="sm" variant="danger" onClick={() => removeCombatantMu.mutate(c.id)} Icon={Trash2} isLoading={removeCombatantMu.isPending && removeCombatantMu.variables === c.id}/></div>
+                  return (
+                    <li key={c.id} className={`p-4 rounded-lg shadow border-l-4 ${c.monster_id ? 'bg-red-50 border-red-500' : 'bg-blue-50 border-blue-500'} ${swapMode ? 'cursor-pointer hover:bg-opacity-80' : ''} ${firstSwapCombatant === c.id ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`} onClick={() => handleCombatantSwap(c.id)}>
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-grow">{currentEncounter.status !== 'completed' && (<input type="checkbox" className="h-5 w-5 rounded" checked={selectedCombatantsForInitiative.includes(c.id)} onChange={(e) => { if (e.target.checked) { setSelectedCombatantsForInitiative((p) => [...p, c.id]); } else { setSelectedCombatantsForInitiative((p) => p.filter((id) => id !== c.id)); } }} onClick={(e) => e.stopPropagation()}/>)}<div className="text-center font-bold text-lg w-8">{c.initiative_roll ?? '-'}</div><div><p className="font-semibold">{c.display_name}</p><p className="text-xs text-gray-500">{c.monster_id ? (monsterData?.name || 'Monster') : 'Player Character'}</p></div></div>
+                        <div className="flex flex-wrap items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1"><Heart className="w-4 h-4 text-red-500" /><input type="number" value={editingStats[c.id]?.current_hp ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], current_hp: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/><span className="text-sm text-gray-600">/ {c.max_hp}</span></div>
+                          {c.max_wp != null && (<div className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /><input type="number" value={editingStats[c.id]?.current_wp ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], current_wp: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/><span className="text-sm text-gray-600">/ {c.max_wp}</span></div>)}
+                          <div className="flex items-center gap-1"><Dice6 className="w-4 h-4 text-gray-500" /><input type="number" value={editingStats[c.id]?.initiative_roll ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], initiative_roll: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/></div>
+                          <div className="flex items-center gap-2"><Button size="sm" onClick={() => handleSaveStats(c)} Icon={Save} isLoading={updateCombatantMu.isPending && updateCombatantMu.variables?.id === c.id}/><Button size="sm" variant="danger" onClick={() => removeCombatantMu.mutate(c.id)} Icon={Trash2} isLoading={removeCombatantMu.isPending && removeCombatantMu.variables === c.id}/></div>
+                        </div>
+                      </div>
+                      {c.monster_id && monsterData && (
+                        <div className="mt-4 pt-4 border-t border-red-200 space-y-3">
+                          <div className="flex justify-between items-center"><h5 className="font-semibold text-sm text-gray-700">Monster Info</h5><Button size="sm" variant="ghost" onClick={() => toggleMonsterDetails(c.id)}>{isDetailsVisible ? 'Hide' : 'Show'} Details{isDetailsVisible ? (<ChevronUp className="w-4 h-4 ml-1" />) : (<ChevronDown className="w-4 h-4 ml-1" />)}</Button></div>
+                          {isDetailsVisible && monsterData.stats && (<div className="text-xs text-gray-600 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 bg-white p-3 rounded-md border">{Object.entries(monsterData.stats).map(([key, value]) => (<div key={key}><span className="font-semibold uppercase">{key}:</span> {String(value)}</div>))}</div>)}
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                            <Button size="sm" Icon={Dice6} onClick={(e) => { e.stopPropagation(); handleRollMonsterAttack(c.id, monsterData); }} disabled={!monsterData.attacks || monsterData.attacks.length === 0}>Roll Attack (D6)</Button>
+                            {currentAttack && (<div className="p-2 bg-yellow-50 border border-yellow-300 rounded-md text-sm w-full"><p className="font-bold text-yellow-800"><span className="text-xs mr-2" role="img" aria-label="dice">🎲</span>{currentAttack.name}</p><p className="text-yellow-900 mt-1">{currentAttack.description}</p></div>)}
                           </div>
                         </div>
-                        {monsterData && (
-                          <div className="mt-4 pt-4 border-t border-red-200 space-y-3">
-                            <div className="flex justify-between items-center"><h5 className="font-semibold text-sm text-gray-700">Monster Info</h5><Button size="sm" variant="ghost" onClick={() => toggleMonsterDetails(c.id)}>{isDetailsVisible ? 'Hide' : 'Show'} Details{isDetailsVisible ? (<ChevronUp className="w-4 h-4 ml-1" />) : (<ChevronDown className="w-4 h-4 ml-1" />)}</Button></div>
-                            {isDetailsVisible && monsterData.stats && (<div className="text-xs text-gray-600 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 bg-white p-3 rounded-md border">{Object.entries(monsterData.stats).map(([key, value]) => (<div key={key}><span className="font-semibold uppercase">{key}:</span> {String(value)}</div>))}</div>)}
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                              <Button size="sm" Icon={Dice6} onClick={(e) => { e.stopPropagation(); handleRollMonsterAttack(c.id, monsterData); }} disabled={!monsterData.attacks || monsterData.attacks.length === 0}>Roll Attack (D6)</Button>
-                              {currentAttack && (<div className="p-2 bg-yellow-50 border border-yellow-300 rounded-md text-sm w-full"><p className="font-bold text-yellow-800"><span className="text-xs mr-2" role="img" aria-label="dice">🎲</span>{currentAttack.name}</p><p className="text-yellow-900 mt-1">{currentAttack.description}</p></div>)}
-                            </div>
-                          </div>
-                        )}
-                      </li>
-                    );
-                  } else {
-                    return (
-                      <li key={c.id} className={`p-4 rounded-lg shadow border-l-4 bg-blue-50 border-blue-500 ${swapMode ? 'cursor-pointer hover:bg-opacity-80' : ''} ${firstSwapCombatant === c.id ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`} onClick={() => handleCombatantSwap(c.id)}>
-                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                          <div className="flex items-center gap-3 flex-grow">{currentEncounter.status !== 'completed' && (<input type="checkbox" className="h-5 w-5 rounded" checked={selectedCombatantsForInitiative.includes(c.id)} onChange={(e) => { if (e.target.checked) { setSelectedCombatantsForInitiative((p) => [...p, c.id]); } else { setSelectedCombatantsForInitiative((p) => p.filter((id) => id !== c.id)); } }} onClick={(e) => e.stopPropagation()}/>)}<div className="text-center font-bold text-lg w-8">{c.initiative_roll ?? '-'}</div><div><p className="font-semibold">{c.display_name}</p><p className="text-xs text-gray-500">Player Character</p></div></div>
-                          <div className="flex flex-wrap items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center gap-1"><Heart className="w-4 h-4 text-red-500" /><input type="number" value={editingStats[c.id]?.current_hp ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], current_hp: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/><span className="text-sm text-gray-600">/ {c.max_hp}</span></div>
-                            {c.max_wp != null && (<div className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /><input type="number" value={editingStats[c.id]?.current_wp ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], current_wp: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/><span className="text-sm text-gray-600">/ {c.max_wp}</span></div>)}
-                            <div className="flex items-center gap-1"><Dice6 className="w-4 h-4 text-gray-500" /><input type="number" value={editingStats[c.id]?.initiative_roll ?? ''} onChange={(e) => setEditingStats((p) => ({ ...p, [c.id]: { ...p[c.id], initiative_roll: e.target.value }}))} className="w-16 px-2 py-1 border rounded-md text-sm"/></div>
-                            <div className="flex items-center gap-2"><Button size="sm" onClick={() => handleSaveStats(c.id)} Icon={Save} isLoading={updateCombatantMu.isPending && updateCombatantMu.variables?.id === c.id}/><Button size="sm" variant="danger" onClick={() => removeCombatantMu.mutate(c.id)} Icon={Trash2} isLoading={removeCombatantMu.isPending && removeCombatantMu.variables === c.id}/></div>
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  }
+                      )}
+                    </li>
+                  );
                 })}
               </ul>
             )}
