@@ -6,6 +6,16 @@ import { parseSkillLevels } from '../lib/utils';
 import { parseItemString } from '../lib/inventoryUtils';
 import { fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant } from '../lib/api/encounters';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
+import { supabase } from '../lib/supabase'; // ADDED: Import supabase to fetch abilities directly
+
+// ADDED: Define the shape of a single heroic ability from your database
+export interface HeroicAbility {
+  id: string;
+  name: string;
+  description: string;
+  willpower_cost: number | null;
+  // Add other fields from your heroic_abilities table if needed
+}
 
 interface CharacterSheetState {
   character: Character | null;
@@ -16,16 +26,26 @@ interface CharacterSheetState {
   markedSkillsThisSession: Set<string>;
   allGameItems: GameItem[];
   isLoadingGameItems: boolean;
+  
+  // ADDED: State to hold the "dictionary" of all abilities
+  allHeroicAbilities: HeroicAbility[];
+  isLoadingAbilities: boolean;
+
   activeStatusMessage: string | null;
   statusMessageTimeoutId: NodeJS.Timeout | null;
   activeEncounter: Encounter | null;
   currentCombatant: EncounterCombatant | null;
   isLoadingEncounter: boolean;
   encounterError: string | null;
+
   fetchCharacter: (id: string, userId: string) => Promise<void>;
   setCharacter: (character: Character | null) => void;
   _saveCharacter: (updates: Partial<Character>) => Promise<void>;
   _loadGameItems: () => Promise<void>;
+  
+  // ADDED: Action to load the abilities "dictionary"
+  _loadAllHeroicAbilities: () => Promise<void>;
+  
   updateCharacterData: (updates: Partial<Character>) => Promise<void>;
   adjustStat: (stat: 'current_hp' | 'current_wp', amount: number) => Promise<void>;
   toggleCondition: (conditionName: keyof Character['conditions']) => Promise<void>;
@@ -60,13 +80,18 @@ interface CharacterSheetState {
 
 export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => ({
   character: null,
-  isLoading: false,
+  isLoading: true,
   isSaving: false,
   error: null,
   saveError: null,
   markedSkillsThisSession: new Set(),
   allGameItems: [],
   isLoadingGameItems: false,
+  
+  // ADDED: Initialize the new state for abilities
+  allHeroicAbilities: [],
+  isLoadingAbilities: false,
+
   activeStatusMessage: null,
   statusMessageTimeoutId: null,
   activeEncounter: null,
@@ -74,19 +99,22 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   isLoadingEncounter: false,
   encounterError: null,
 
+  // UPDATED: fetchCharacter now also loads the abilities "dictionary"
   fetchCharacter: async (id, userId) => {
     set({ character: null, isLoading: true, error: null, saveError: null });
     try {
-      if (get().allGameItems.length === 0 && !get().isLoadingGameItems) {
-        await get()._loadGameItems();
-      }
-      const currentGameItems = get().allGameItems;
+      // Trigger all necessary compendium data loads in parallel for efficiency
+      await Promise.all([
+        get()._loadGameItems(),
+        get()._loadAllHeroicAbilities() // This is the crucial new call
+      ]);
 
       const characterData = await fetchCharacterById(id, userId);
       if (!characterData) {
         throw new Error(`Character with ID ${id} not found.`);
       }
 
+      // Ensure equipment structure exists to prevent runtime errors
       if (!characterData.equipment) {
         characterData.equipment = { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } };
       } else {
@@ -95,13 +123,14 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         if (!characterData.equipment.money) characterData.equipment.money = { gold: 0, silver: 0, copper: 0 };
       }
 
+      // Parse inventory if it's in the old string format
       if (
         Array.isArray(characterData.equipment.inventory) &&
         characterData.equipment.inventory.length > 0 &&
         typeof characterData.equipment.inventory[0] === 'string'
       ) {
         characterData.equipment.inventory = (characterData.equipment.inventory as string[]).map(itemStr =>
-          parseItemString(itemStr, currentGameItems)
+          parseItemString(itemStr, get().allGameItems)
         );
       }
 
@@ -113,7 +142,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
           get().clearActiveEncounter();
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch character';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch character and related data';
       set({ error: errorMessage, isLoading: false });
     }
   },
@@ -127,7 +156,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-  // --- THIS IS THE CORRECTED FUNCTION ---
   _saveCharacter: async (updates) => {
     const currentCharacter = get().character;
     if (!currentCharacter?.id) {
@@ -139,24 +167,17 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ isSaving: true, saveError: null });
     
     try {
-      // The `updateCharacter` API call should ONLY receive the fields that have changed.
-      // We pass the `updates` object directly, without merging it with the full character state.
       const savedCharacter = await updateCharacter(currentCharacter.id, updates);
-      
-      // After a successful save, update the local state with the complete character
-      // object returned from the database.
       set({ character: savedCharacter, isSaving: false });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
-      throw err; // Re-throw the error so the calling component knows about it
+      throw err;
     }
   },
 
   _loadGameItems: async () => {
-    if (get().isLoadingGameItems || get().allGameItems.length > 0) {
-      return;
-    }
+    if (get().isLoadingGameItems || get().allGameItems.length > 0) return;
     set({ isLoadingGameItems: true });
     try {
       const items = await fetchItems();
@@ -167,19 +188,40 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
+  // ADDED: The new function to fetch all heroic abilities
+  _loadAllHeroicAbilities: async () => {
+    // Prevent re-fetching if data is already loaded or is currently loading
+    if (get().isLoadingAbilities || get().allHeroicAbilities.length > 0) {
+      return;
+    }
+    set({ isLoadingAbilities: true });
+    try {
+      const { data, error } = await supabase
+        .from('heroic_abilities')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      
+      set({ allHeroicAbilities: data || [], isLoadingAbilities: false });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load heroic abilities';
+      // Set the main error state so the user is aware
+      set({ isLoadingAbilities: false, error: errorMessage });
+    }
+  },
+
   updateCharacterData: async (updates) => {
     return get()._saveCharacter(updates);
   },
-
+  
   adjustStat: async (stat, amount) => {
     const character = get().character;
     if (!character) return;
-
     if (stat === 'current_hp') {
       const currentHP = character.current_hp ?? 0;
       const maxHP = character.max_hp ?? 0;
       const newValue = Math.max(0, Math.min(maxHP, currentHP + amount));
-
       if (newValue !== currentHP) {
         const updates: Partial<Character> = { current_hp: newValue };
         if (currentHP <= 0 && newValue > 0) {
@@ -203,25 +245,19 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     const character = get().character;
     if (!character) return;
     const currentConditions = character.conditions ?? { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false };
-    const newConditions = {
-      ...currentConditions,
-      [conditionName]: !currentConditions[conditionName],
-    };
+    const newConditions = { ...currentConditions, [conditionName]: !currentConditions[conditionName] };
     await get()._saveCharacter({ conditions: newConditions });
   },
 
   performRest: async (type, healerPresent) => {
     const character = get().character;
     if (!character) return;
-
     const updates: Partial<Character> = {};
     const currentHP = character.current_hp ?? 0;
     const maxHP = character.max_hp ?? 0;
     const currentWP = character.current_wp ?? 0;
     const maxWP = character.max_wp ?? 0;
-
     const rollD6 = () => Math.floor(Math.random() * 6) + 1;
-
     if (type === 'round') {
       updates.current_wp = Math.min(maxWP, currentWP + rollD6());
     } else if (type === 'stretch') {
@@ -232,7 +268,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       const hpToHeal = healerPresent ? rollD6() + rollD6() : rollD6();
       updates.current_hp = Math.min(maxHP, currentHP + hpToHeal);
       updates.current_wp = Math.min(maxWP, currentWP + rollD6());
-
       const currentConditions = character.conditions ?? {};
       const newConditions = { ...currentConditions };
       for (const key of Object.keys(newConditions) as Array<keyof typeof newConditions>) {
@@ -250,17 +285,13 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       updates.death_rolls_passed = 0;
       updates.is_rallied = false;
     }
-
     if (Object.keys(updates).length > 0) {
       await get()._saveCharacter(updates);
     }
   },
 
   setDeathRollState: async (successes, failures, rallied) => {
-    const updates: Partial<Character> = {
-      death_rolls_passed: successes,
-      death_rolls_failed: failures,
-    };
+    const updates: Partial<Character> = { death_rolls_passed: successes, death_rolls_failed: failures };
     if (rallied !== undefined) {
       updates.is_rallied = rallied;
     }
@@ -272,7 +303,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (!character) return;
     const newAttributes = { ...(character.attributes || {}), [attribute]: value };
     const updates: Partial<Character> = { attributes: newAttributes };
-
     if (attribute === 'CON') {
       updates.max_hp = value;
       updates.current_hp = Math.min(character.current_hp ?? 0, value);
@@ -320,12 +350,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     const currentSkillLevels = parseSkillLevels(character.skill_levels);
     const currentLevel = currentSkillLevels[skillName] ?? 0;
     if (currentLevel >= 18) return;
-
     const newLevel = Math.min(currentLevel + 1, 18);
-    const updates: Partial<Character> = {
-        skill_levels: { ...currentSkillLevels, [skillName]: newLevel }
-    };
-
+    const updates: Partial<Character> = { skill_levels: { ...currentSkillLevels, [skillName]: newLevel } };
     if (character.teacher?.skillUnderStudy === skillName) {
         updates.teacher = null;
     }
@@ -344,15 +370,10 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   learnSpell: async (spellName) => {
     const character = get().character;
     if (!character) return;
-
     const currentSpells = character.spells ?? { known: [] };
     const allKnownSpells = currentSpells.known || [];
-
     if (!allKnownSpells.includes(spellName)) {
-      const newSpells: CharacterSpells = {
-        ...currentSpells,
-        known: [...allKnownSpells, spellName],
-      };
+      const newSpells: CharacterSpells = { ...currentSpells, known: [...allKnownSpells, spellName] };
       await get()._saveCharacter({ spells: newSpells });
     }
   },
@@ -362,9 +383,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   },
 
   markSkillThisSession: (skillName) => {
-    set(state => ({
-      markedSkillsThisSession: new Set(state.markedSkillsThisSession).add(skillName)
-    }));
+    set(state => ({ markedSkillsThisSession: new Set(state.markedSkillsThisSession).add(skillName) }));
   },
 
   clearMarkedSkillsThisSession: () => set({ markedSkillsThisSession: new Set() }),
@@ -408,7 +427,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       get().setActiveStatusMessage("Cannot draw initiative: Not in an active encounter.", 5000);
       return;
     }
-
     set({ isSaving: true, saveError: null });
     try {
       const initiativeRoll = Math.floor(Math.random() * 10) + 1;
