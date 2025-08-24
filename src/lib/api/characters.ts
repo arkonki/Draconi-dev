@@ -1,97 +1,87 @@
+// src/lib/api/characters.ts
+
 import { supabase } from '../supabase';
-import { Character, InventoryItem, AttributeName } from '../../types/character'; // Import InventoryItem and AttributeName
+import { Character, InventoryItem, AttributeName } from '../../types/character';
 
-// Helper function to map raw character data to Character type
+// Helper function to map raw character data to the strict Character type
 export const mapCharacterData = (char: any): Character => {
-  // Default attributes using uppercase keys consistent with Character type
+  // Establish default attributes to prevent errors if the DB field is null
   const defaultAttributes = { STR: 10, AGL: 10, INT: 10, CON: 10, WIL: 10, CHA: 10 };
-
-  // Get attributes from DB or use an empty object
   const dbAttributes = char.attributes || {};
-
-  // Explicitly map potential lowercase keys from DB to uppercase keys, using defaults if necessary
   const attributes = {
-    STR: dbAttributes.strength ?? dbAttributes.STR ?? defaultAttributes.STR,
-    AGL: dbAttributes.agility ?? dbAttributes.AGL ?? defaultAttributes.AGL,
-    INT: dbAttributes.intelligence ?? dbAttributes.INT ?? defaultAttributes.INT,
-    CHA: dbAttributes.charisma ?? dbAttributes.CHA ?? defaultAttributes.CHA,
-    CON: dbAttributes.constitution ?? dbAttributes.CON ?? defaultAttributes.CON,
-    WIL: dbAttributes.willpower ?? dbAttributes.WIL ?? defaultAttributes.WIL,
+    STR: dbAttributes.STR ?? defaultAttributes.STR,
+    AGL: dbAttributes.AGL ?? defaultAttributes.AGL,
+    INT: dbAttributes.INT ?? defaultAttributes.INT,
+    CHA: dbAttributes.CHA ?? defaultAttributes.CHA,
+    CON: dbAttributes.CON ?? defaultAttributes.CON,
+    WIL: dbAttributes.WIL ?? defaultAttributes.WIL,
   };
 
-  const max_hp = attributes.CON; // Max HP derived from CON
-  const max_wp = attributes.WIL;   // Max WP derived from WIL
+  const max_hp = attributes.CON;
+  const max_wp = attributes.WIL;
 
+  // Ensure equipment is always a valid object
   const equipmentData = char.equipment || {};
-  const inventory: InventoryItem[] = equipmentData.inventory || [];
-  const equipped = equipmentData.equipped || { weapons: [] };
-  const money = equipmentData.money || { gold: 0, silver: 0, copper: 0 };
 
-  let teacherData = char.teacher;
-  if (typeof teacherData !== 'object' || teacherData === null) {
-      teacherData = null;
-  } else if (teacherData.skillUnderStudy === undefined) {
-      teacherData = { ...teacherData, skillUnderStudy: null };
-  }
-
-  return {
+  // Construct a valid Character object, strictly adhering to the interface
+  const character: Character = {
     id: char.id,
     user_id: char.user_id,
-    name: char.name,
-    kin: char.kin,
-    profession: char.profession,
-    magicSchool: char.magic_school, // Kept from original, though not in Character type from character.ts
+    name: char.name || 'Unnamed Character',
+    kin: char.kin || 'Unknown',
+    profession: char.profession || 'Unknown',
     age: char.age,
-    attributes: attributes,
+    appearance: char.appearance || '',
+    background: char.background || '',
+    notes: char.notes || '',
+    portrait_url: char.portrait_url,
     
-    // Standardized health and willpower fields to match DB and desired Character type
-    max_hp: max_hp,
-    current_hp: char.current_hp ?? max_hp, // Default current_hp to max_hp if null/undefined
-    max_wp: max_wp,
-    current_wp: char.current_wp ?? max_wp,   // Default current_wp to max_wp if null/undefined
-    // temporary_hp is optional in Character type, map if present in char, e.g. char.temporary_hp
+    // FIX: Map the correct memento and flaw fields from the database
+    memento: char.memento || '',
+    flaw: char.weak_spot || '',
 
-    movement: char.movement ?? 10, // Kept from original (Character type has `speed`)
-    damage_bonus: char.damage_bonus ?? 0, // Kept from original, not in Character type
-    conditions: char.conditions || { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
+    attributes: attributes,
+    max_hp: max_hp,
+    current_hp: char.current_hp ?? max_hp,
+    max_wp: max_wp,
+    current_wp: char.current_wp ?? max_wp,
+    
+    // FIX: Only include skill_levels as defined in the Character type
+    skill_levels: char.skill_levels || {},
+    
+    spells: char.spells || { known: [] },
+    heroic_abilities: char.heroic_ability || [], // Note: DB is singular, frontend is plural
+    
     equipment: {
-        inventory: inventory,
-        equipped: equipped,
-        money: money,
+        inventory: equipmentData.inventory || [],
+        equipped: equipmentData.equipped || { weapons: [] },
+        money: equipmentData.money || { gold: 0, silver: 0, copper: 0 },
     },
-    trainedSkills: char.trained_skills || [], // Kept from original (Character type has `skill_levels`)
-    untrainedSkills: char.other_skills || [], // Kept from original (Character type has `skill_levels`)
-    heroic_ability: char.heroic_ability || [],
-    spells: char.spells || { school: null, general: [] },
-    prepared_spells: char.prepared_spells || [],
+    conditions: char.conditions || { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
+    is_rallied: char.is_rallied ?? false,
+    death_rolls_failed: char.death_rolls_failed ?? 0,
+    
     experience: char.experience ?? 0,
+    teacher: char.teacher || null,
     reputation: char.reputation ?? 0,
-    corruption: char.corruption ?? 0,
-    notes: char.notes ?? '',
+
     created_at: char.created_at,
     updated_at: char.updated_at,
     party_id: char.party_id,
-    is_npc: char.is_npc ?? false, // Kept from original, not in Character type
-    key_attribute: char.key_attribute as AttributeName | null, // Kept from original, not in Character type
-    death_rolls_failed: char.death_rolls_failed ?? 0,
-    death_rolls_passed: char.death_rolls_passed ?? 0,
-    appearance: char.appearance ?? '',
-    skill_levels: char.skill_levels || {},
-    teacher: teacherData,
-  } as Character; // Using 'as Character' to bridge potential discrepancies for unmapped/extra fields.
+    party_info: char.party_info, // Assuming RLS and select allows this
+  };
+  
+  // No 'as Character' needed because we constructed a valid object
+  return character;
 };
 
-
 export async function fetchCharacters(userId: string | undefined): Promise<Character[]> {
-  if (!userId) {
-    return [];
-  }
+  if (!userId) return [];
 
+  // Using '*' is fine here as mapCharacterData will sanitize the output
   const { data, error } = await supabase
     .from('characters')
-    .select(`
-      *
-    `)
+    .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
@@ -100,83 +90,60 @@ export async function fetchCharacters(userId: string | undefined): Promise<Chara
     throw new Error(error.message || 'Failed to fetch characters');
   }
 
-  const characters: Character[] = (data || []).map(mapCharacterData);
-  return characters;
+  return (data || []).map(mapCharacterData);
 }
 
 export async function fetchCharacterById(id: string | undefined, userId: string | undefined): Promise<Character | null> {
-  if (!id) {
-    return null;
-  }
+  if (!id || !userId) return null;
 
-  const query = supabase
+  const { data, error } = await supabase
     .from('characters')
-    .select(`
-      *
-    `)
-    .eq('id', id);
-
-  const { data, error } = await query.maybeSingle();
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId) // Important for security (RLS)
+    .single(); // Use single() as we expect one character
 
   if (error) {
-    console.error('Error fetching character by ID:', error);
-    if (error.code !== 'PGRST116') { 
-      throw new Error(error.message || 'Failed to fetch character');
+    // It's normal for single() to error if no rows are found, so we handle that case.
+    if (error.code === 'PGRST116') {
+      console.warn(`Character with ID ${id} not found.`);
+      return null;
     }
+    console.error('Error fetching character by ID:', error);
+    throw new Error(error.message || 'Failed to fetch character');
   }
 
-  if (!data) {
-    return null;
-  }
-
-  const safeCharacter: Character = mapCharacterData(data);
-  return safeCharacter;
+  return data ? mapCharacterData(data) : null;
 }
 
+// FIX: Radically simplified and corrected update logic
 export async function updateCharacter(characterId: string, updates: Partial<Character>): Promise<Character | null> {
-  const dbUpdates: { [key: string]: any } = {};
-
-  // Mapping for keys that differ between frontend Character model and DB columns
-  const frontendToDbKeyMappings: Record<string, string> = {
-    untrainedSkills: 'other_skills', 
-    trainedSkills: 'trained_skills', 
-  };
-
-  for (const key in updates) {
-    if (Object.prototype.hasOwnProperty.call(updates, key)) {
-      const value = (updates as any)[key as keyof Character];
-      
-      const dbKey = frontendToDbKeyMappings[key] || key;
-      dbUpdates[dbKey] = value;
-    }
+  // The `updates` object is already a Partial<Character>, so its keys
+  // should align with the database columns. No complex mapping needed.
+  
+  // The only exception might be pluralization, like heroic_abilities
+  const dbUpdates: Record<string, any> = { ...updates };
+  if (dbUpdates.heroic_abilities) {
+    dbUpdates.heroic_ability = dbUpdates.heroic_abilities;
+    delete dbUpdates.heroic_abilities;
   }
 
-  dbUpdates['updated_at'] = new Date().toISOString();
+  // Always set the updated_at timestamp
+  dbUpdates.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase
     .from('characters')
     .update(dbUpdates)
     .eq('id', characterId)
-    .select(`
-      *
-    `)
+    .select('*')
     .single();
 
   if (error) {
     console.error('Error updating character:', error);
-    if (error.code === 'PGRST116') {
-        console.error(`Update failed: Character ${characterId} not found or RLS prevented access.`);
-         throw new Error(`Character ${characterId} not found or update permission denied.`);
-    }
     throw new Error(error.message || 'Failed to update character');
   }
 
-  if (!data) {
-     console.error(`Update seemed successful but no data returned for character ${characterId}.`);
-     return null;
-  }
-
-  return mapCharacterData(data);
+  return data ? mapCharacterData(data) : null;
 }
 
 export async function deleteCharacters(characterIds: string[]): Promise<void> {

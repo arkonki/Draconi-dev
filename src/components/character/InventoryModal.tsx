@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Package, Search, Filter, ShoppingBag, Coins, AlertCircle, Shield, Sword,
   ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, CheckSquare, MinusSquare,
-  MinusCircle, Info // Added Info for tooltip trigger
+  MinusCircle, Info
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../shared/Button';
@@ -12,7 +12,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { formatCost, subtractCost, parseCost } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { Character, InventoryItem, EquippedItems, EquippedWeapon } from '../../types/character'; // Import necessary types
+import { Character, InventoryItem, EquippedItems, EquippedWeapon } from '../../types/character';
 import { parseItemString, formatInventoryItemName, mergeIntoInventory } from '../../lib/inventoryUtils';
 
 interface InventoryModalProps {
@@ -34,7 +34,7 @@ const shopGroups = [
   { name: 'Containers & Medicine', categories: ['CONTAINERS', 'MEDICINE'], Icon: Package },
   { name: 'Services', categories: ['SERVICES'], Icon: ShoppingBag },
   { name: 'Hunting & Travel', categories: ['HUNTING & FISHING', 'MEANS OF TRAVEL'], Icon: ArrowRight },
-  { name: 'Animals', categories: ['ANIMALS'], Icon: Edit2 } // Assuming Edit2 is appropriate
+  { name: 'Animals', categories: ['ANIMALS'], Icon: Edit2 }
 ];
 
 export function InventoryModal({ onClose }: InventoryModalProps) {
@@ -46,7 +46,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
   const [showCustomItemForm, setShowCustomItemForm] = useState(false);
   const [selectedShopGroup, setSelectedShopGroup] = useState<{name: string; categories: string[]; Icon: React.ComponentType<{ className?: string }>; } | null>(null);
 
-  // Use store for character data and actions
   const {
       character,
       updateCharacterData,
@@ -55,7 +54,7 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
       saveError,
       allGameItems,
       isLoadingGameItems,
-      _loadGameItems // Get internal action to load items if needed
+      _loadGameItems
   } = useCharacterSheetStore(state => ({
       character: state.character,
       updateCharacterData: state.updateCharacterData,
@@ -64,10 +63,9 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
       saveError: state.saveError,
       allGameItems: state.allGameItems,
       isLoadingGameItems: state.isLoadingGameItems,
-      _loadGameItems: state._loadGameItems, // Include the action
+      _loadGameItems: state._loadGameItems,
   }));
 
-  // Trigger loading game items on mount if not already loaded/loading
   useEffect(() => {
       if (allGameItems.length === 0 && !isLoadingGameItems) {
           _loadGameItems();
@@ -78,7 +76,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
   useEffect(() => {
     if (saveError) {
         setError(`Save failed: ${saveError}`);
-        // Optionally clear the error after a delay
         const timer = setTimeout(() => setError(null), 5000);
         return () => clearTimeout(timer);
     } else {
@@ -98,10 +95,8 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
     );
   }
 
-  // Helper to find item details from the fetched list
   const findItemDetails = (itemName: string): GameItem | undefined => {
     if (!itemName || typeof itemName !== 'string') return undefined;
-    // Use the game items loaded into the store
     return allGameItems.find(item => item.name?.toLowerCase() === itemName.toLowerCase());
   };
 
@@ -110,10 +105,9 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
     const currentMoney = character.equipment?.money || { gold: 0, silver: 0, copper: 0 };
     const newMoneyValue = Math.max(0, (currentMoney[type] || 0) + amount);
 
-    // Update via updateCharacterData as it modifies the nested money object
     updateCharacterData({
         equipment: {
-            ...(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } }), // Ensure base structure
+            ...(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } }),
             money: {
                 ...currentMoney,
                 [type]: newMoneyValue
@@ -134,108 +128,104 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
         return;
     }
 
-    // Create the InventoryItem object
     const newItem: InventoryItem = {
-        id: `custom-${Date.now()}-${Math.random().toString(36).substring(7)}`, // More robust unique ID
+        id: `custom-${Date.now()}-${Math.random().toString(36).substring(7)}`,
         name: customItem.name.trim(),
         quantity: customItem.quantity > 0 ? customItem.quantity : 1,
         unit: customItem.unit?.trim() || undefined,
-        originalName: formatInventoryItemName({ name: customItem.name.trim(), quantity: customItem.quantity, unit: customItem.unit?.trim() }), // Use formatter for consistency
-        cost: customItem.cost, // Store the string cost
+        originalName: formatInventoryItemName({ name: customItem.name.trim(), quantity: customItem.quantity, unit: customItem.unit?.trim() }),
+        cost: customItem.cost,
         weight: customItem.weight,
         category: customItem.category,
-        effect: customItem.effect || undefined, // Store effect or undefined
+        effect: customItem.effect || undefined,
     };
 
     const currentInventory = character.equipment?.inventory || [];
     const newInventory = mergeIntoInventory(currentInventory, newItem);
-    updateInventory(newInventory); // Use the dedicated inventory update action
+    updateInventory(newInventory);
 
     setShowCustomItemForm(false);
-    setCustomItem({ name: '', category: 'TRADE GOODS', cost: '1 silver', weight: 1, effect: '', quantity: 1, unit: '' }); // Reset form
+    setCustomItem({ name: '', category: 'TRADE GOODS', cost: '1 silver', weight: 1, effect: '', quantity: 1, unit: '' });
   };
 
-  // --- Updated Equip Logic ---
+  // --- UPDATED Equip Logic with Dragonbane Rules ---
   const handleEquipItem = (itemToEquip: InventoryItem, itemIndex: number) => {
     setError(null);
     const itemData = findItemDetails(itemToEquip.name);
     if (!itemData) {
       setError(`Details not found for item: ${itemToEquip.name}`);
-      // console.error("Could not find item details in allGameItems for:", itemToEquip.name); // Removed debug
       return;
     }
+
+    // Dragonbane Rule: Up to 3 weapons/shields can be "at hand".
+    const MAX_WEAPONS_AT_HAND = 3;
 
     const currentEquipment = structuredClone(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } });
     const currentInventory = currentEquipment.inventory;
     const currentEquipped = currentEquipment.equipped;
+    if (!currentEquipped.weapons) currentEquipped.weapons = [];
 
-    // 1. Verify and Update Inventory
+    // 1. Verify and Update Inventory (remains the same)
     const inventoryItem = currentInventory[itemIndex];
     if (!inventoryItem || inventoryItem.id !== itemToEquip.id) {
         setError(`Item "${itemToEquip.name}" not found at expected index ${itemIndex}. Inventory might be out of sync.`);
-        // console.error("Inventory state mismatch on equip:", currentInventory, itemToEquip, itemIndex); // Removed debug
         return;
     }
 
     if (inventoryItem.quantity > 1) {
         currentInventory[itemIndex] = { ...inventoryItem, quantity: inventoryItem.quantity - 1 };
     } else {
-        currentInventory.splice(itemIndex, 1); // Remove item completely
+        currentInventory.splice(itemIndex, 1);
     }
 
-    // 2. Handle Equipped Update
-    const categoryUpper = typeof itemData.category === 'string' ? itemData.category.toUpperCase() : '';
-    let itemAddedToInventory: InventoryItem | null = null; // Track item being unequipped
+    // 2. Handle Equipped Update with new rules
+    const categoryUpper = itemData.category?.toUpperCase() || '';
+    let itemAddedToInventory: InventoryItem | null = null;
 
-    try { // Wrap equip logic in try-catch for better error handling
-        if (categoryUpper === 'ARMOR & HELMETS') {
-            const isHelmet = itemData.name.toLowerCase().includes('helmet');
-            const slot = isHelmet ? 'helmet' : 'armor';
-            const oldItemName = currentEquipped[slot];
+    // Determine the type of item being equipped
+    const isWeapon = categoryUpper === 'MELEE WEAPONS' || categoryUpper === 'RANGED WEAPONS';
+    const isShield = categoryUpper === 'ARMOR & HELMETS' && itemData.name.toLowerCase().includes('shield');
+    const isHelmet = categoryUpper === 'ARMOR & HELMETS' && itemData.name.toLowerCase().includes('helmet');
+    // Armor is anything in the category that is not a shield or helmet
+    const isArmor = categoryUpper === 'ARMOR & HELMETS' && !isShield && !isHelmet;
 
-            if (oldItemName) {
-                const oldItemDetails = findItemDetails(oldItemName);
-                itemAddedToInventory = parseItemString(oldItemName, allGameItems); // Parse back into object
-                itemAddedToInventory.quantity = 1;
-                if (!oldItemDetails) {
-                    // console.warn(`Could not find details for previously equipped item: ${oldItemName}`); // Removed debug
-                    // Keep basic object if details missing
-                }
-            }
-            currentEquipped[slot] = itemToEquip.name; // Equip new item (store base name)
 
-        } else if (categoryUpper === 'MELEE WEAPONS' || categoryUpper === 'RANGED WEAPONS') {
-            if (!currentEquipped.weapons) currentEquipped.weapons = [];
-
-            // Check for two-handed weapon replacing others
-            if (itemData.grip === '2H' && currentEquipped.weapons.length > 0) {
-                 // Unequip all existing weapons
-                 currentEquipped.weapons.forEach(wpn => {
-                     const unequipped = parseItemString(wpn.name, allGameItems);
-                     unequipped.quantity = 1;
-                     // Ensure itemAddedToInventory is an array before merging
-                     const baseInventoryForMerge = itemAddedToInventory ? [itemAddedToInventory] : [];
-                     itemAddedToInventory = mergeIntoInventory(baseInventoryForMerge, unequipped)[0];
-                 });
-                 currentEquipped.weapons = []; // Clear existing weapons
-            }
-            // Check if adding a weapon exceeds hand limits (e.g., already holding 2H or two 1H)
-            const handsUsed = currentEquipped.weapons.reduce((sum, w) => sum + (w.grip === '2H' ? 2 : 1), 0);
-            const newWeaponHands = itemData.grip === '2H' ? 2 : 1;
-            if (handsUsed + newWeaponHands > 2) {
-                 throw new Error(`Cannot equip ${itemToEquip.name}. Not enough free hands.`);
+    try {
+        if (isWeapon || isShield) {
+            // --- NEW WEAPON & SHIELD LOGIC ---
+            if (currentEquipped.weapons.length >= MAX_WEAPONS_AT_HAND) {
+                throw new Error(`Cannot equip ${itemToEquip.name}. You can only have up to ${MAX_WEAPONS_AT_HAND} weapons or shields at hand.`);
             }
 
-            // Add the new weapon
-            const newWeapon: EquippedWeapon = {
+            // Add the new weapon or shield to the "at hand" slots
+            const newItem: EquippedWeapon = {
                 name: itemToEquip.name,
-                grip: itemData.grip || '1H',
-                range: itemData.range || 'Melee',
-                damage: itemData.damage || '1d6',
+                // Shields are effectively 1H for slot purposes, but grip is a weapon-specific term.
+                grip: itemData.grip || (isShield ? 'Shield' : '1H'),
+                range: itemData.range,
+                damage: itemData.damage,
                 durability: itemData.durability,
-                features: itemData.features || [], // Ensure features is an array
+                features: itemData.features || [],
             };
-            currentEquipped.weapons.push(newWeapon);
+            currentEquipped.weapons.push(newItem);
+
+        } else if (isArmor) {
+            const slot = 'armor';
+            const oldItemName = currentEquipped[slot];
+            if (oldItemName) {
+                itemAddedToInventory = parseItemString(oldItemName, allGameItems);
+                itemAddedToInventory.quantity = 1;
+            }
+            currentEquipped[slot] = itemToEquip.name;
+
+        } else if (isHelmet) {
+            const slot = 'helmet';
+            const oldItemName = currentEquipped[slot];
+            if (oldItemName) {
+                itemAddedToInventory = parseItemString(oldItemName, allGameItems);
+                itemAddedToInventory.quantity = 1;
+            }
+            currentEquipped[slot] = itemToEquip.name;
 
         } else {
             throw new Error(`Item "${itemToEquip.name}" category "${itemData.category}" is not directly equippable.`);
@@ -245,37 +235,31 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
         if (itemAddedToInventory) {
             currentEquipment.inventory = mergeIntoInventory(currentInventory, itemAddedToInventory);
         } else {
-             currentEquipment.inventory = currentInventory; // Assign updated inventory if nothing was unequipped
+            currentEquipment.inventory = currentInventory;
         }
-
 
         // 4. Persist Changes
         updateCharacterData({ equipment: currentEquipment });
 
     } catch (equipError: any) {
-        // console.error("Error during equip:", equipError); // Removed debug
         setError(equipError.message || "Failed to equip item.");
-        // IMPORTANT: Do not persist changes if an error occurred during equip logic
-        // The optimistic update in updateCharacterData will be reverted by the store if the API call fails,
-        // but here we prevent the API call altogether if the equip logic itself fails.
+        // We don't save changes if the equip logic fails.
     }
   };
 
-  // --- Updated Unequip Logic ---
   const handleUnequipItem = (type: 'armor' | 'helmet' | 'weapon', identifier: string | number) => {
       setError(null);
       const currentEquipment = structuredClone(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } });
 
-      if (!currentEquipment.equipped) return; // Nothing equipped
+      if (!currentEquipment.equipped) return;
 
       let itemNameToUnequip: string | null = null;
       let updatedEquipped = currentEquipment.equipped;
       let updatedInventory = currentEquipment.inventory;
 
-      // 1. Remove from Equipped
       if (type === 'armor' && updatedEquipped.armor) {
           itemNameToUnequip = updatedEquipped.armor;
-          updatedEquipped.armor = undefined; // Use undefined to remove key
+          updatedEquipped.armor = undefined;
       } else if (type === 'helmet' && updatedEquipped.helmet) {
           itemNameToUnequip = updatedEquipped.helmet;
           updatedEquipped.helmet = undefined;
@@ -284,39 +268,30 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           updatedEquipped.weapons.splice(identifier, 1);
       } else {
           setError(`Could not find item to unequip (${type}, ${identifier})`);
-          // console.error("Unequip failed:", type, identifier, updatedEquipped); // Removed debug
           return;
       }
 
-      // 2. Add back to Inventory
       if (itemNameToUnequip) {
           const itemDetails = findItemDetails(itemNameToUnequip);
           let itemToAddBack: InventoryItem;
 
-          itemToAddBack = parseItemString(itemNameToUnequip, allGameItems); // Parse back into object
-          itemToAddBack.quantity = 1; // Unequipping one item
-          if (!itemDetails) {
-              // console.warn(`Details not found for unequipped item: ${itemNameToUnequip}. Adding basic entry.`); // Removed debug
-              // Keep the basic parsed object
-          }
+          itemToAddBack = parseItemString(itemNameToUnequip, allGameItems);
+          itemToAddBack.quantity = 1;
 
           updatedInventory = mergeIntoInventory(updatedInventory, itemToAddBack);
 
-          // 3. Persist Changes
           updateCharacterData({
               equipment: {
-                  ...currentEquipment, // Keep money etc.
+                  ...currentEquipment,
                   inventory: updatedInventory,
                   equipped: updatedEquipped
               }
           });
       } else {
-          // If somehow itemNameToUnequip was null, still save potential equipped changes (like empty weapon array)
           updateCharacterData({ equipment: currentEquipment });
       }
   };
 
-  // --- Updated Buy Logic ---
   const handleBuyItem = (item: GameItem) => {
       setError(null);
       const itemCost = parseCost(item.cost);
@@ -334,24 +309,21 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           return;
       }
 
-      // Parse the bought GameItem into an InventoryItem
       const newItemObject = parseItemString(item.name || 'Unknown Item', allGameItems);
-      if (newItemObject.quantity <= 0) newItemObject.quantity = 1; // Ensure quantity is at least 1
+      if (newItemObject.quantity <= 0) newItemObject.quantity = 1;
 
       const currentInventory = character.equipment?.inventory || [];
       const newInventory = mergeIntoInventory(currentInventory, newItemObject);
 
-      // Persist changes (inventory and money)
       updateCharacterData({
           equipment: {
-              ...(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } }), // Base structure
+              ...(character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } }),
               inventory: newInventory,
               money: newMoney
           }
       });
   };
 
-  // --- Updated Drop Logic ---
   const handleDropItem = (itemIndex: number) => {
       setError(null);
       const currentInventory = [...(character.equipment?.inventory || [])];
@@ -359,12 +331,10 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           setError("Invalid item index for dropping.");
           return;
       }
-      currentInventory.splice(itemIndex, 1); // Remove the item object
-      // console.log("Dropped item:", droppedItem[0]?.name); // Removed debug
-      updateInventory(currentInventory); // Update store via specific action
+      currentInventory.splice(itemIndex, 1);
+      updateInventory(currentInventory);
   };
 
-  // --- NEW: Use Item Logic ---
   const handleUseItem = (itemIndex: number) => {
       setError(null);
       const currentInventory = [...(character.equipment?.inventory || [])];
@@ -373,32 +343,25 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
           return;
       }
 
-      const itemToUse = { ...currentInventory[itemIndex] }; // Copy item
-
-      // Basic consumable logic: decrement quantity or remove
-      // More complex logic (applying effects) would go here or be triggered from here
-      // console.log(`Using item: ${itemToUse.name}`); // Removed debug
+      const itemToUse = { ...currentInventory[itemIndex] };
 
       if (itemToUse.quantity > 1) {
           itemToUse.quantity -= 1;
-          currentInventory[itemIndex] = itemToUse; // Update item in array
+          currentInventory[itemIndex] = itemToUse;
       } else {
-          currentInventory.splice(itemIndex, 1); // Remove item if quantity becomes 0
+          currentInventory.splice(itemIndex, 1);
       }
 
-      updateInventory(currentInventory); // Update store via specific action
+      updateInventory(currentInventory);
   };
 
-
-  // Filter inventory using character from store
   const filteredInventory = (character.equipment?.inventory || []).filter(item => {
     if (!item || typeof item.name !== 'string') {
-        // console.warn("Inventory item missing or has invalid name:", item); // Removed debug
-        return false; // Skip this item if name is invalid
+        return false;
     }
-    const nameLower = item.name.toLowerCase(); // Now safe to call
+    const nameLower = item.name.toLowerCase();
     const searchLower = filters.search.toLowerCase();
-    const itemDetails = findItemDetails(item.name); // Find details for category
+    const itemDetails = findItemDetails(item.name);
     const categoryUpper = typeof itemDetails?.category === 'string' ? itemDetails.category.toUpperCase() : '';
 
     const originalNameLower = typeof item.originalName === 'string' ? item.originalName.toLowerCase() : '';
@@ -408,10 +371,8 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
     return matchesSearch && matchesCategory;
   });
 
-  // Filter shop items
   const filteredShopItems = allGameItems.filter(item => {
       if (!item || typeof item.name !== 'string') {
-          // console.warn("Shop item missing or has invalid name:", item); // Removed debug
           return false;
       }
       const nameLower = item.name.toLowerCase();
@@ -425,11 +386,11 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
       return matchesSearch && matchesCategory;
   });
 
-  // Render Equipped Items
+  // --- UPDATED Render Equipped Items with better labels ---
   const renderEquippedItems = () => {
     const equipped = character.equipment?.equipped;
     if (!equipped || (!equipped.armor && !equipped.helmet && (!equipped.weapons || equipped.weapons.length === 0))) {
-      return null; // Render nothing if no items are equipped
+      return null;
     }
 
     return (
@@ -448,12 +409,15 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
               <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem('helmet', equipped.helmet!)} disabled={isSaving} title={`Unequip ${equipped.helmet}`}>Unequip</Button>
             </div>
           )}
-          {equipped.weapons?.map((weapon, index) => (
-            <div key={`${weapon.name}-${index}`} className="flex items-center justify-between p-2 bg-gray-100 rounded">
-              <span className="text-sm font-medium">{weapon.name} ({weapon.grip} Weapon)</span>
-              <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem('weapon', index)} disabled={isSaving} title={`Unequip ${weapon.name}`}>Unequip</Button>
-            </div>
-          ))}
+          {equipped.weapons?.map((weapon, index) => {
+            const itemTypeLabel = weapon.grip === 'Shield' ? 'Shield' : `${weapon.grip} Weapon`;
+            return (
+                <div key={`${weapon.name}-${index}`} className="flex items-center justify-between p-2 bg-gray-100 rounded">
+                    <span className="text-sm font-medium">{weapon.name} ({itemTypeLabel})</span>
+                    <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem('weapon', index)} disabled={isSaving} title={`Unequip ${weapon.name}`}>Unequip</Button>
+                </div>
+            )
+          })}
         </div>
       </div>
     );
@@ -463,7 +427,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col shadow-xl">
-        {/* Header */}
          <div className="p-4 md:p-6 border-b flex-shrink-0 bg-gray-50 rounded-t-lg">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
              <div className="flex items-center gap-3">
@@ -476,7 +439,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                </div>
              </div>
              <div className="flex gap-2">
-                {/* Tab Buttons */}
                 <Button size="sm" variant={activeTab === 'inventory' ? 'primary' : 'secondary'} onClick={() => { setActiveTab('inventory'); setSelectedShopGroup(null); }}>Inventory</Button>
                 <Button size="sm" variant={activeTab === 'shop' ? 'primary' : 'secondary'} onClick={() => { setActiveTab('shop'); setSelectedShopGroup(null); }}>Shop</Button>
                 <Button size="sm" variant={activeTab === 'money' ? 'primary' : 'secondary'} onClick={() => { setActiveTab('money'); setSelectedShopGroup(null); }}>Money</Button>
@@ -485,7 +447,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                 </button>
              </div>
            </div>
-           {/* Filters */}
            {(activeTab === 'inventory' || (activeTab === 'shop' && !selectedShopGroup)) && (
              <div className="flex flex-col md:flex-row gap-3 mt-3">
                <div className="relative flex-1">
@@ -514,17 +475,13 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                )}
              </div>
            )}
-           {/* Shop Group Back Button */}
            {activeTab === 'shop' && selectedShopGroup && (
                 <Button variant="secondary" size="sm" icon={ArrowLeft} onClick={() => setSelectedShopGroup(null)} className="mt-3">Back to Categories</Button>
            )}
          </div>
 
-        {/* Scrollable Content Area */}
         <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-white">
-          {/* Error Display */}
           {error && <div className="mb-4"><ErrorMessage message={error} /></div>}
-          {/* Loading/Saving Indicator */}
           {(isLoadingGameItems || isSaving) && (
             <div className="flex justify-center items-center py-10">
               <LoadingSpinner />
@@ -532,11 +489,9 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
             </div>
           )}
 
-          {/* Money Tab Content */}
           {activeTab === 'money' && !isSaving && (
              <div className="space-y-6">
                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-                 {/* Gold */}
                  <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                    <h3 className="font-medium mb-3 text-yellow-800 text-center">Gold</h3>
                    <div className="flex items-center justify-center gap-3">
@@ -545,7 +500,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                      <Button size="sm" variant="secondary" onClick={() => handleMoneyChange('gold', 1)} disabled={isSaving}>+1</Button>
                    </div>
                  </div>
-                 {/* Silver */}
                  <div className="p-4 bg-gray-100 rounded-lg border border-gray-200">
                    <h3 className="font-medium mb-3 text-gray-800 text-center">Silver</h3>
                    <div className="flex items-center justify-center gap-3">
@@ -554,7 +508,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
                      <Button size="sm" variant="secondary" onClick={() => handleMoneyChange('silver', 1)} disabled={isSaving}>+1</Button>
                    </div>
                  </div>
-                 {/* Copper */}
                  <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
                    <h3 className="font-medium mb-3 text-orange-800 text-center">Copper</h3>
                    <div className="flex items-center justify-center gap-3">
@@ -577,7 +530,6 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
              </div>
           )}
 
-          {/* Shop Tab Content */}
           {activeTab === 'shop' && !isLoadingGameItems && !isSaving && (
             selectedShopGroup === null ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 md:gap-4">
@@ -615,23 +567,16 @@ export function InventoryModal({ onClose }: InventoryModalProps) {
             )
           )}
 
-          {/* Inventory Tab Content */}
           {activeTab === 'inventory' && !isSaving && (
             <>
-              {/* Equipped Items Section */}
               {renderEquippedItems()}
 
-              {/* Inventory List Title */}
               <h3 className="font-medium text-sm text-gray-600 mt-6 mb-3 pt-4 border-t">Inventory Items</h3>
 
-              {/* Inventory List */}
               <div className="space-y-3">
                 {(character.equipment?.inventory || []).map((item, index) => {
                   if (!filteredInventory.includes(item)) return null;
-
-                  if (!item || typeof item.name !== 'string') {
-                      return null;
-                  }
+                  if (!item || typeof item.name !== 'string') return null;
 
                   const itemData = findItemDetails(item.name);
                   const categoryUpper = typeof itemData?.category === 'string' ? itemData.category.toUpperCase() : '';

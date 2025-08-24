@@ -27,6 +27,7 @@
             case 'profession': return 'professions';
             case 'skills': return 'game_skills';
             case 'monsters': return 'monsters'; // Added monsters table
+						case 'bio': return 'bio_data';
             default:
               console.error(`Invalid data category passed to getTableName: ${category}`);
               throw new Error(`Invalid data category: ${category}`);

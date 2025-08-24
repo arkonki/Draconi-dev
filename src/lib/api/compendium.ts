@@ -1,6 +1,12 @@
 import { supabase } from '../supabase';
 import { CompendiumEntry, CompendiumTemplate } from '../../types/compendium';
 
+export interface BioOptions {
+  appearance: string[];
+  mementos: string[];
+  flaws: string[];
+}
+
 export async function fetchCompendiumEntries(): Promise<CompendiumEntry[]> {
   const { data, error } = await supabase
     .from('compendium')
@@ -29,4 +35,29 @@ export async function fetchCompendiumTemplates(): Promise<CompendiumTemplate[]> 
   return (data as CompendiumTemplate[]) || [];
 }
 
-// Add mutation functions later if needed (create, update, delete)
+export async function fetchBioData(): Promise<BioOptions> {
+  const { data, error } = await supabase
+    .from('bio_data')
+    .select('appearance, mementos, flaws');
+
+  if (error) {
+    console.error('Error fetching bio data:', error);
+    throw new Error(error.message || 'Failed to load bio data');
+  }
+
+  const allAppearance = new Set<string>();
+  const allMementos = new Set<string>();
+  const allFlaws = new Set<string>();
+
+  (data || []).forEach(row => {
+    (row.appearance || []).forEach(item => allAppearance.add(item));
+    (row.mementos || []).forEach(item => allMementos.add(item));
+    (row.flaws || []).forEach(item => allFlaws.add(item));
+  });
+
+  return {
+    appearance: Array.from(allAppearance).sort(),
+    mementos: Array.from(allMementos).sort(),
+    flaws: Array.from(allFlaws).sort(),
+  };
+}

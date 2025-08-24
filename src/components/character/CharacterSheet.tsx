@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Character, AttributeName } from '../../types/character'; // Import AttributeName
 import { calculateMovement } from '../../lib/movement';
 import {
-  Shield, Heart, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather // Added icons
+  Shield, Heart, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
@@ -14,7 +14,8 @@ import { HeroicAbilitiesView } from './HeroicAbilitiesView';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { AdvancementSystem } from './AdvancementSystem';
 import { DeathRollTracker } from './DeathRollTracker';
-import { StatusPanelView } from './StatusPanelView'; // Import the StatusPanelView component
+import { StatusPanelView } from './StatusPanelView';
+import { BioModal } from './modals/BioModal';
 
 interface CharacterSheetProps {
   // No props needed, relies solely on store
@@ -45,6 +46,7 @@ export function CharacterSheet({}: CharacterSheetProps) {
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [showAdvancementSystem, setShowAdvancementSystem] = useState(false);
   const [showHeroicAbilitiesModal, setShowHeroicAbilitiesModal] = useState(false);
+  const [showBioModal, setShowBioModal] = useState(false);
   const [healerPresent, setHealerPresent] = useState(false);
 
 
@@ -234,6 +236,13 @@ export function CharacterSheet({}: CharacterSheetProps) {
         </div>
         <div className="flex items-center flex-wrap gap-2">
           <button
+            onClick={() => setShowBioModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm transition-colors"
+          >
+            <UserSquare className="w-4 h-4" />
+            Bio
+          </button>
+          <button
             onClick={() => setShowInventoryModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors"
           >
@@ -372,6 +381,10 @@ export function CharacterSheet({}: CharacterSheetProps) {
       </div>
 
       <EquipmentSection character={character} />
+
+      {showBioModal && (
+        <BioModal onClose={() => setShowBioModal(false)} />
+      )}
 
       {showSkillsModal && (
         <SkillsModal
