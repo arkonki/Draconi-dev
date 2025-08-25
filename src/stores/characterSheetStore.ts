@@ -92,36 +92,24 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   fetchCharacter: async (id, userId) => {
     set({ character: null, isLoading: true, error: null, saveError: null });
     try {
+      // Fetch supporting data in parallel for efficiency
       await Promise.all([
         get()._loadGameItems(),
         get()._loadAllHeroicAbilities()
       ]);
 
+      // Use the abstracted API function, which is now fixed
       const characterData = await fetchCharacterById(id, userId);
+
       if (!characterData) {
-        throw new Error(`Character with ID ${id} not found.`);
+        throw new Error(`Character with ID ${id} not found or you do not have permission to view it.`);
       }
 
-      if (!characterData.equipment) {
-        characterData.equipment = { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } };
-      } else {
-        if (!characterData.equipment.inventory) characterData.equipment.inventory = [];
-        if (!characterData.equipment.equipped) characterData.equipment.equipped = { weapons: [] };
-        if (!characterData.equipment.money) characterData.equipment.money = { gold: 0, silver: 0, copper: 0 };
-      }
-
-      if (
-        Array.isArray(characterData.equipment.inventory) &&
-        characterData.equipment.inventory.length > 0 &&
-        typeof characterData.equipment.inventory[0] === 'string'
-      ) {
-        characterData.equipment.inventory = (characterData.equipment.inventory as string[]).map(itemStr =>
-          parseItemString(itemStr, get().allGameItems)
-        );
-      }
-
+      // The data mapping is handled by `mapCharacterData` in the API file,
+      // so we can set the character directly without any further processing.
       set({ character: characterData, isLoading: false });
 
+      // After setting the character, check for an active encounter
       if (characterData?.party_id) {
           get().fetchActiveEncounter(characterData.party_id, characterData.id);
       } else {
@@ -142,7 +130,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-  // --- FIX: Updated to perform client-side state merging ---
   _saveCharacter: async (updates) => {
     const currentCharacter = get().character;
     if (!currentCharacter?.id) {
@@ -154,29 +141,22 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ isSaving: true, saveError: null });
     
     try {
-      // 1. Call the update function but IGNORE its return value,
-      //    as it might be stale due to replication lag. We only care if it throws an error.
       await updateCharacter(currentCharacter.id, updates);
 
-      // 2. If the call succeeds, create the new character state on the client
-      //    by merging the successful updates into our current state. This makes the UI instant.
       const newCharacterState: Character = {
         ...currentCharacter,
         ...updates,
-        // Also update the timestamp on the client for immediate feedback
         updated_at: new Date().toISOString(), 
       };
 
-      // 3. Set the store with our new, guaranteed-to-be-correct state.
       set({ character: newCharacterState, isSaving: false });
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
-      throw err; // Re-throw the error so the calling component knows about it
+      throw err;
     }
   },
-  // --- End of Fix ---
 
   _loadGameItems: async () => {
     if (get().isLoadingGameItems || get().allGameItems.length > 0) return;
