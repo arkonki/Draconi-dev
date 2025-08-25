@@ -1,20 +1,19 @@
+// src/stores/characterSheetStore.ts
+
 import { create } from 'zustand';
 import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells, GameItem } from '../types/character';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
-import { parseSkillLevels } from '../lib/utils';
 import { parseItemString } from '../lib/inventoryUtils';
 import { fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant } from '../lib/api/encounters';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
-import { supabase } from '../lib/supabase'; // ADDED: Import supabase to fetch abilities directly
+import { supabase } from '../lib/supabase';
 
-// ADDED: Define the shape of a single heroic ability from your database
 export interface HeroicAbility {
   id: string;
   name: string;
   description: string;
   willpower_cost: number | null;
-  // Add other fields from your heroic_abilities table if needed
 }
 
 interface CharacterSheetState {
@@ -26,11 +25,8 @@ interface CharacterSheetState {
   markedSkillsThisSession: Set<string>;
   allGameItems: GameItem[];
   isLoadingGameItems: boolean;
-  
-  // ADDED: State to hold the "dictionary" of all abilities
   allHeroicAbilities: HeroicAbility[];
   isLoadingAbilities: boolean;
-
   activeStatusMessage: string | null;
   statusMessageTimeoutId: NodeJS.Timeout | null;
   activeEncounter: Encounter | null;
@@ -42,10 +38,7 @@ interface CharacterSheetState {
   setCharacter: (character: Character | null) => void;
   _saveCharacter: (updates: Partial<Character>) => Promise<void>;
   _loadGameItems: () => Promise<void>;
-  
-  // ADDED: Action to load the abilities "dictionary"
   _loadAllHeroicAbilities: () => Promise<void>;
-  
   updateCharacterData: (updates: Partial<Character>) => Promise<void>;
   adjustStat: (stat: 'current_hp' | 'current_wp', amount: number) => Promise<void>;
   toggleCondition: (conditionName: keyof Character['conditions']) => Promise<void>;
@@ -87,11 +80,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   markedSkillsThisSession: new Set(),
   allGameItems: [],
   isLoadingGameItems: false,
-  
-  // ADDED: Initialize the new state for abilities
   allHeroicAbilities: [],
   isLoadingAbilities: false,
-
   activeStatusMessage: null,
   statusMessageTimeoutId: null,
   activeEncounter: null,
@@ -99,14 +89,12 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   isLoadingEncounter: false,
   encounterError: null,
 
-  // UPDATED: fetchCharacter now also loads the abilities "dictionary"
   fetchCharacter: async (id, userId) => {
     set({ character: null, isLoading: true, error: null, saveError: null });
     try {
-      // Trigger all necessary compendium data loads in parallel for efficiency
       await Promise.all([
         get()._loadGameItems(),
-        get()._loadAllHeroicAbilities() // This is the crucial new call
+        get()._loadAllHeroicAbilities()
       ]);
 
       const characterData = await fetchCharacterById(id, userId);
@@ -114,7 +102,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         throw new Error(`Character with ID ${id} not found.`);
       }
 
-      // Ensure equipment structure exists to prevent runtime errors
       if (!characterData.equipment) {
         characterData.equipment = { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } };
       } else {
@@ -123,7 +110,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         if (!characterData.equipment.money) characterData.equipment.money = { gold: 0, silver: 0, copper: 0 };
       }
 
-      // Parse inventory if it's in the old string format
       if (
         Array.isArray(characterData.equipment.inventory) &&
         characterData.equipment.inventory.length > 0 &&
@@ -156,6 +142,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
+  // --- FIX: Updated to perform client-side state merging ---
   _saveCharacter: async (updates) => {
     const currentCharacter = get().character;
     if (!currentCharacter?.id) {
@@ -167,14 +154,29 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ isSaving: true, saveError: null });
     
     try {
-      const savedCharacter = await updateCharacter(currentCharacter.id, updates);
-      set({ character: savedCharacter, isSaving: false });
+      // 1. Call the update function but IGNORE its return value,
+      //    as it might be stale due to replication lag. We only care if it throws an error.
+      await updateCharacter(currentCharacter.id, updates);
+
+      // 2. If the call succeeds, create the new character state on the client
+      //    by merging the successful updates into our current state. This makes the UI instant.
+      const newCharacterState: Character = {
+        ...currentCharacter,
+        ...updates,
+        // Also update the timestamp on the client for immediate feedback
+        updated_at: new Date().toISOString(), 
+      };
+
+      // 3. Set the store with our new, guaranteed-to-be-correct state.
+      set({ character: newCharacterState, isSaving: false });
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
-      throw err;
+      throw err; // Re-throw the error so the calling component knows about it
     }
   },
+  // --- End of Fix ---
 
   _loadGameItems: async () => {
     if (get().isLoadingGameItems || get().allGameItems.length > 0) return;
@@ -188,25 +190,15 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-  // ADDED: The new function to fetch all heroic abilities
   _loadAllHeroicAbilities: async () => {
-    // Prevent re-fetching if data is already loaded or is currently loading
-    if (get().isLoadingAbilities || get().allHeroicAbilities.length > 0) {
-      return;
-    }
+    if (get().isLoadingAbilities || get().allHeroicAbilities.length > 0) return;
     set({ isLoadingAbilities: true });
     try {
-      const { data, error } = await supabase
-        .from('heroic_abilities')
-        .select('*')
-        .order('name');
-
+      const { data, error } = await supabase.from('heroic_abilities').select('*').order('name');
       if (error) throw error;
-      
       set({ allHeroicAbilities: data || [], isLoadingAbilities: false });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load heroic abilities';
-      // Set the main error state so the user is aware
       set({ isLoadingAbilities: false, error: errorMessage });
     }
   },
@@ -339,7 +331,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   updateSkillLevel: async (skillName, level) => {
     const character = get().character;
     if (!character) return;
-    const currentSkillLevels = parseSkillLevels(character.skill_levels);
+    const currentSkillLevels = character.skill_levels || {};
     const newSkillLevels = { ...currentSkillLevels, [skillName]: level };
     await get()._saveCharacter({ skill_levels: newSkillLevels });
   },
@@ -347,7 +339,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   increaseSkillLevel: async (skillName) => {
     const character = get().character;
     if (!character) return;
-    const currentSkillLevels = parseSkillLevels(character.skill_levels);
+    const currentSkillLevels = character.skill_levels || {};
     const currentLevel = currentSkillLevels[skillName] ?? 0;
     if (currentLevel >= 18) return;
     const newLevel = Math.min(currentLevel + 1, 18);

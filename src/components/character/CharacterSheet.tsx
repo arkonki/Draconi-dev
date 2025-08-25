@@ -212,7 +212,7 @@ export function CharacterSheet({}: CharacterSheetProps) {
   const canCastSpells = () => {
     const trainedSkillsArray = Array.isArray(character?.trainedSkills) ? character.trainedSkills : [];
     return (
-      character?.profession === 'Mage' ||
+      character?.profession?.endsWith('Mage') ||
       trainedSkillsArray.some(skillName =>
         typeof skillName === 'string' && ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(skillName.toUpperCase())
       )

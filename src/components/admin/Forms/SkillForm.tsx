@@ -8,9 +8,6 @@ interface SkillFormProps {
   onChange: (field: string, value: any) => void;
 }
 
-// Define common attributes or allow free text? Start with free text.
-// const attributes = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'];
-
 export const SkillForm: React.FC<SkillFormProps> = ({ entry, onChange }) => {
   return (
     <div className="space-y-4">
@@ -43,6 +40,24 @@ export const SkillForm: React.FC<SkillFormProps> = ({ entry, onChange }) => {
         />
       </div>
 
+      {/* --- NEW FIELD START --- */}
+      <div className="flex items-center gap-3 pt-2">
+        <input
+          id="is_magic_skill"
+          type="checkbox"
+          checked={entry.is_magic || false} // Bind to the 'is_magic' field, default to false
+          onChange={(e) => onChange('is_magic', e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+        />
+        <div>
+            <label htmlFor="is_magic_skill" className="text-sm font-medium text-gray-900">
+                Is this a magic skill?
+            </label>
+            <p className="text-xs text-gray-500">Check if this skill is related to magic or spellcasting.</p>
+        </div>
+      </div>
+      {/* --- NEW FIELD END --- */}
+
       {/* Attribute Input */}
       <div>
         <label htmlFor="skill-attribute" className="block text-sm font-medium text-gray-700 mb-1">
@@ -53,7 +68,7 @@ export const SkillForm: React.FC<SkillFormProps> = ({ entry, onChange }) => {
           type="text"
           value={entry.attribute || ''}
           onChange={(e) => onChange('attribute', e.target.value || null)} // Store null if empty
-          placeholder="e.g., STR, AGL, INT..."
+          placeholder="e.g., STR, AGL, WIL..."
           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
         />
          <p className="mt-1 text-xs text-gray-500">The primary attribute associated with this skill.</p>
