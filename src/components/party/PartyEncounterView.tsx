@@ -48,6 +48,7 @@ import {
   LogIn,
   LogOut,
   ChevronsRight,
+  ClipboardList,
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
@@ -63,16 +64,26 @@ interface EditableCombatantStats { current_hp: string; current_wp?: string; init
 
 
 // =====================================================================================
-//  AttackDescriptionRenderer Component
+//  Helper Components
 // =====================================================================================
-interface AttackDescriptionRendererProps {
-  description: string;
-  attackName: string;
-}
 
-function AttackDescriptionRenderer({ description, attackName }: AttackDescriptionRendererProps) {
+/** Renders a stats object into a clean table format */
+const StatsTableView = ({ stats }: { stats: object }) => (
+  <table className="w-full text-sm mt-1">
+    <tbody>
+      {Object.entries(stats).map(([key, value]) => (
+        <tr key={key} className="border-b border-gray-200 last:border-b-0">
+          <td className="py-1 pr-2 font-semibold text-gray-600 capitalize">{key.replace(/_/g, ' ')}</td>
+          <td className="py-1 text-gray-800">{String(value)}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+/** Renders an attack description with clickable dice rolls */
+function AttackDescriptionRenderer({ description, attackName }: { description: string; attackName: string; }) {
   const { toggleDiceRoller } = useDice();
-
   const diceRegex = /(\d*d\d+)/gi;
   const parts = description.split(diceRegex);
 
@@ -81,14 +92,7 @@ function AttackDescriptionRenderer({ description, attackName }: AttackDescriptio
       {parts.map((part, index) => {
         if (part.match(diceRegex)) {
           return (
-            <button
-              key={index}
-              className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5"
-              onClick={() => toggleDiceRoller?.({
-                dice: part.toLowerCase(),
-                label: `${attackName} - Damage Roll`,
-              })}
-            >
+            <button key={index} className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5" onClick={() => toggleDiceRoller?.({ dice: part.toLowerCase(), label: `${attackName} - Damage Roll`, })} >
               {part}
             </button>
           );
@@ -99,6 +103,69 @@ function AttackDescriptionRenderer({ description, attackName }: AttackDescriptio
   );
 }
 
+/** Renders a single formatted log entry */
+function LogEntry({ entry }: { entry: any }) {
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let content = null;
+  switch (entry.type) {
+    case 'round_advanced':
+      content = <p className="font-bold text-blue-600 text-center py-1">--- Round {entry.round} ---</p>;
+      break;
+    case 'turn_start':
+      content = <><LogOut className="w-4 h-4 inline mr-2 text-gray-500" />Turn started for <strong>{entry.name}</strong>.</>;
+      break;
+    case 'turn_end':
+      content = <><LogIn className="w-4 h-4 inline mr-2 text-gray-500" />Turn ended for <strong>{entry.name}</strong>.</>;
+      break;
+    case 'hp_change':
+      const isDamage = entry.delta < 0;
+      content = (
+        <span className={isDamage ? 'text-red-700' : 'text-green-700'}>
+          <Heart className="w-4 h-4 inline mr-2" />
+          <strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(entry.delta)} damage` : `healed ${entry.delta} HP`}. ({entry.from} → {entry.to})
+        </span>
+      );
+      break;
+    case 'monster_attack':
+      content = (
+        <span className="text-yellow-800">
+          <Dice6 className="w-4 h-4 inline mr-2" />
+          <strong>{entry.name}</strong> used <strong>{entry.attack?.name || 'an attack'}</strong> (Rolled {entry.roll}).
+        </span>
+      );
+      break;
+    default:
+      content = <span>{JSON.stringify(entry)}</span>;
+  }
+
+  // Round advance doesn't need a timestamp
+  if (entry.type === 'round_advanced') {
+    return <div className="w-full">{content}</div>
+  }
+
+  return (
+    <div className="flex items-start gap-2 text-sm py-1.5">
+      <time className="text-xs text-gray-400 mt-0.5 whitespace-nowrap">{formatTime(entry.ts)}</time>
+      <div className="flex-grow">{content}</div>
+    </div>
+  );
+}
+
+/** Renders the entire combat log */
+function CombatLogView({ log }: { log: any[] }) {
+  if (!log || log.length === 0) {
+    return <p className="text-sm text-gray-500 mt-2 px-1">No events have been logged yet.</p>;
+  }
+
+  return (
+    <div className="space-y-1 divide-y divide-gray-100">
+      {log.slice().reverse().map((entry, index) => (
+        <LogEntry key={index} entry={entry} />
+      ))}
+    </div>
+  );
+}
 
 // =====================================================================================
 //  PartyEncounterView — Main Component
@@ -115,7 +182,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [viewMode, setViewMode] = useState<'details' | 'create'>('details');
   const [addStep, setAddStep] = useState<'idle' | 'characters' | 'monsters'>('idle');
   const [isAddingMidFight, setIsAddingMidFight] = useState(false);
-  const [selectedPartyMember, setSelectedPartyMember] = useState('');
+  const [selectedPartyMembersToAdd, setSelectedPartyMembersToAdd] = useState<string[]>([]);
   const [selectedMonster, setSelectedMonster] = useState('');
   const [customMonsterName, setCustomMonsterName] = useState('');
   const [monsterInstanceCount, setMonsterInstanceCount] = useState(1);
@@ -131,6 +198,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [showMonsterDetails, setShowMonsterDetails] = useState<Record<string, boolean>>({});
   const [currentMonsterAttacks, setCurrentMonsterAttacks] = useState<Record<string, MonsterAttack | null>>({});
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
+  const [temporaryNotes, setTemporaryNotes] = useState('');
 
   // --- QUERIES ---
   const { data: allEncounters, isLoading: loadingAllEncounters, error: errorAllEncounters } = useQuery<Encounter[], Error>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
@@ -148,6 +216,13 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const ia = a.initiative_roll ?? -Infinity; const ib = b.initiative_roll ?? -Infinity; if (ia !== ib) return ib - ia; return (a.display_name ?? '').localeCompare(b.display_name ?? '');
   }) || []), [combatantsData]);
   const activeCombatant = useMemo(() => combatants.find(c => c.id === selectedActorId), [combatants, selectedActorId]);
+  const activeCombatantMonsterData = useMemo(() => {
+    if (activeCombatant?.monster_id) {
+      return monstersById.get(activeCombatant.monster_id);
+    }
+    return null;
+  }, [activeCombatant, monstersById]);
+
 
   useEffect(() => { if (!combatants) return; const init: Record<string, EditableCombatantStats> = {}; combatants.forEach((c) => { init[c.id] = { current_hp: String(c.current_hp ?? c.max_hp ?? 0), current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp ?? '') : undefined, initiative_roll: c.initiative_roll != null ? String(c.initiative_roll) : '' }; }); setEditingStats(init); }, [combatants]);
   useEffect(() => { if (encounterDetails) { setEditedEncounterName(encounterDetails.name); setEditedEncounterDescription(encounterDetails.description || ''); } }, [encounterDetails]);
@@ -156,7 +231,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const createEncounterMu = useMutation({ mutationFn: (payload: { name: string; description?: string }) => createEncounter(partyId, payload.name, payload.description), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); setNewEncounterName(''); setNewEncounterDescription(''); } });
   const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: (_, deletedId) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); if (selectedEncounterId === deletedId) setSelectedEncounterId(null); } });
   const duplicateEncounterMu = useMutation({ mutationFn: ({ encounterId, name }: { encounterId: string; name: string }) => duplicateEncounter(encounterId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); setSelectedEncounterId(newEnc.id); } });
-  const addCombatantMu = useMutation({ mutationFn: (payload: AddCombatantPayload) => { if (!currentEncounterId) throw new Error('No active encounter'); return addCombatantToEncounter(currentEncounterId, payload); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants', currentEncounterId] }); setSelectedPartyMember(''); setSelectedMonster(''); setCustomMonsterName(''); setMonsterInstanceCount(1); setPartyInitiativeInput(''); setMonsterInitiativeInput(''); setIsAddingMidFight(false); } });
+  const addCombatantMu = useMutation({ mutationFn: (payload: AddCombatantPayload) => { if (!currentEncounterId) throw new Error('No active encounter'); return addCombatantToEncounter(currentEncounterId, payload); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants', currentEncounterId] }); setSelectedPartyMembersToAdd([]); setSelectedMonster(''); setCustomMonsterName(''); setMonsterInstanceCount(1); setPartyInitiativeInput(''); setMonsterInitiativeInput(''); setIsAddingMidFight(false); } });
   const updateCombatantMu = useMutation({ mutationFn: (data: { id: string; updates: Partial<EncounterCombatant> }) => updateCombatant(data.id, data.updates), onSuccess: (updated) => { queryClient.setQueryData<EncounterCombatant[]>(['encounterCombatants', currentEncounterId], (old) => old?.map((c) => (c.id === updated.id ? updated : c)) ?? []); } });
   const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants', currentEncounterId] }); } });
   const updateEncounterMu = useMutation({ mutationFn: (updates: Partial<Pick<Encounter, 'name' | 'description'>>) => { if (!currentEncounterId) throw new Error('No active encounter to update'); return updateEncounter(currentEncounterId, updates); }, onSuccess: (updatedEnc) => { queryClient.setQueryData(['encounterDetails', currentEncounterId], updatedEnc); queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); setIsEditingEncounter(false); } });
@@ -164,14 +239,14 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const swapInitiativeMu = useMutation({ mutationFn: ({ id1, id2 }: { id1: string; id2: string }) => swapInitiative(id1, id2), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants', currentEncounterId] }); setSwapMode(false); setFirstSwapCombatant(null); } });
   const startEncounterMu = useMutation({ mutationFn: () => { if (!currentEncounterId) throw new Error('No encounter to start'); return startEncounter(currentEncounterId); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails', currentEncounterId] }); queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); } });
   const endEncounterMu = useMutation({ mutationFn: () => { if (!currentEncounterId) throw new Error('No encounter to end'); return endEncounter(currentEncounterId); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails', currentEncounterId] }); queryClient.invalidateQueries({ queryKey: ['allEncounters', partyId] }); } });
-  const appendLogMu = useMutation({ mutationFn: (entry: any) => { if (!currentEncounterId) throw new Error('No encounter to log'); return appendEncounterLog(currentEncounterId, entry); }, });
+  const appendLogMu = useMutation({ mutationFn: (entry: any) => { if (!currentEncounterId) throw new Error('No encounter to log'); return appendEncounterLog(currentEncounterId, entry); }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails', currentEncounterId] }); } });
   const nextRoundMu = useMutation({
     mutationFn: () => { if (!currentEncounterId) throw new Error('No encounter for next round'); return nextRound(currentEncounterId); },
     onSuccess: async () => {
+      await appendLogMu.mutateAsync({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 });
       queryClient.setQueryData<EncounterCombatant[]>(['encounterCombatants', currentEncounterId], (old) => old?.map((c) => ({ ...c, initiative_roll: null })) ?? []);
       setSelectedCombatantsForInitiative([]);
       setSelectedActorId(null);
-      appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 });
       queryClient.invalidateQueries({ queryKey: ['encounterDetails', currentEncounterId] });
     },
   });
@@ -193,7 +268,23 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const handleCreateEncounter = (e: React.FormEvent) => { e.preventDefault(); if (!newEncounterName.trim()) return; createEncounterMu.mutate({ name: newEncounterName.trim(), description: newEncounterDescription.trim() || undefined }); };
   const handleDuplicateEncounter = (encounterId: string, name: string) => duplicateEncounterMu.mutate({ encounterId, name: `${name} (Copy)` });
   const handleSelectEncounter = (encounterId: string) => { setSelectedEncounterId(encounterId); setShowEncounterList(false); };
-  const handleAddParty = () => { if (!selectedPartyMember || !currentEncounterId) return; addCombatantMu.mutate({ type: 'character', characterId: selectedPartyMember, initiativeRoll: partyInitiativeInput ? parseInt(partyInitiativeInput) : null }); };
+  
+  const handleAddPartyMembers = () => {
+    if (selectedPartyMembersToAdd.length === 0 || !currentEncounterId) return;
+    selectedPartyMembersToAdd.forEach(characterId => {
+      addCombatantMu.mutate({
+        type: 'character',
+        characterId: characterId,
+        initiativeRoll: partyInitiativeInput ? parseInt(partyInitiativeInput) : null,
+      });
+    });
+  };
+
+  const handleTogglePartyMember = (id: string) => {
+    setSelectedPartyMembersToAdd(prev =>
+      prev.includes(id) ? prev.filter(memberId => memberId !== id) : [...prev, id]
+    );
+  };
   
   const handleAddMonster = () => {
     const monsterData = allMonsters?.find(m => m.id === selectedMonster);
@@ -229,18 +320,11 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const handleCombatantSwap = (combatantId: string) => { if (!swapMode) return; if (!firstSwapCombatant) setFirstSwapCombatant(combatantId); else if (firstSwapCombatant !== combatantId) swapInitiativeMu.mutate({ id1: firstSwapCombatant, id2: combatantId }); };
   const toggleMonsterDetails = (combatantId: string) => setShowMonsterDetails((prev) => ({ ...prev, [combatantId]: !prev[combatantId] }));
   
-  // UPDATED: handleRollMonsterAttack is now instant
   const handleRollMonsterAttack = (combatantId: string, monster: MonsterData) => {
     if (!monster.attacks || monster.attacks.length === 0) return;
-
-    // Instantly roll 1d6 to determine the attack
     const roll = Math.floor(Math.random() * 6) + 1;
     const attack = monster.attacks.find((att) => att.roll_values.split(',').includes(String(roll)));
-
-    // Update state to immediately show the attack description
     setCurrentMonsterAttacks((prev) => ({ ...prev, [combatantId]: attack || null }));
-
-    // Log the event
     appendLogMu.mutate({
       type: 'monster_attack',
       ts: Date.now(),
@@ -305,7 +389,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <Button onClick={() => toggleDiceRoller?.()} Icon={Dice6} variant="outline">Dice</Button>
             <Button onClick={() => setViewMode('create')} Icon={PlusCircle}>New</Button>
             {currentEncounter?.status === 'planning' && (<Button onClick={() => startEncounterMu.mutate()} Icon={Play}>Start</Button>)}
-            {currentEncounter?.status === 'active' && (<><Button onClick={() => nextRoundMu.mutate()} Icon={SkipForward}>Next Round</Button><Button onClick={() => setIsAddingMidFight(true)} Icon={ShieldPlus} variant="outline">Reinforcements</Button><Button onClick={() => endEncounterMu.mutate()} Icon={Square} variant="secondary">End</Button></>)}
+            {currentEncounter?.status === 'active' && (<><Button onClick={() => nextRoundMu.mutate()} Icon={SkipForward} isLoading={nextRoundMu.isPending}>Next Round</Button><Button onClick={() => setIsAddingMidFight(true)} Icon={ShieldPlus} variant="outline">Reinforcements</Button><Button onClick={() => endEncounterMu.mutate()} Icon={Square} variant="secondary">End</Button></>)}
           </div>
         </div>
       </div>
@@ -326,13 +410,72 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                   <h4 className="text-lg font-semibold mb-3">Build the encounter</h4>
                   <div className="flex items-center justify-between"><h5 className="text-base font-medium flex items-center gap-2"><Users className="w-5 h-5" /> Add Combatants</h5>{addStep !== 'idle' && (<Button variant="ghost" size="sm" onClick={() => setAddStep('idle')} Icon={ArrowLeft}>Back</Button>)}</div>
                   {addStep === 'idle' && (<div className="grid grid-cols-1 gap-4 pt-2"><Button onClick={() => setAddStep('characters')} Icon={UserPlus} size="lg" variant="outline">Add Party Members</Button><Button onClick={() => setAddStep('monsters')} Icon={ShieldPlus} size="lg" variant="outline">Add Monsters</Button></div>)}
-                  {addStep === 'characters' && (<div className="space-y-2 animate-fade-in mt-4"><label className="block text-sm font-medium text-gray-700">Add Party Member</label><select value={selectedPartyMember} onChange={(e) => setSelectedPartyMember(e.target.value)} className="w-full px-3 py-2 border rounded-md"><option value="">Select Party Member</option>{availableParty.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select><div className="flex items-center gap-2"><input type="number" placeholder="Initiative (Optional)" value={partyInitiativeInput} onChange={(e) => setPartyInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/><Button type="button" variant="outline" Icon={Dice6} onClick={() => toggleDiceRoller?.({ dice: '1d20', label: 'Party Initiative', onRoll: (result) => setPartyInitiativeInput(String(result.total))})} /></div><Button onClick={handleAddParty} Icon={UserPlus} isLoading={addCombatantMu.isPending} disabled={!selectedPartyMember}>Add Member</Button></div>)}
-                  {addStep === 'monsters' && (<div className="space-y-2 animate-fade-in mt-4"><label className="block text-sm font-medium text-gray-700">Add Monster</label><select value={selectedMonster} onChange={(e) => setSelectedMonster(e.target.value)} className="w-full px-3 py-2 border rounded-md"><option value="">Select Monster</option>{allMonsters?.map((m) => (<option key={m.id} value={m.id}>{m.name} {m.category && `(${m.category})`}</option>))}</select>{selectedMonsterData && (<div className="text-xs text-gray-600 p-2 bg-white rounded border"><p><strong>HP:</strong> {selectedMonsterData.stats?.HP || 'N/A'}</p><p><strong>Ferocity:</strong> {selectedMonsterData.stats?.FEROCITY || 'N/A'}</p></div>)}<div className="grid grid-cols-2 gap-2"><input type="text" placeholder="Custom Name (Optional)" value={customMonsterName} onChange={(e) => setCustomMonsterName(e.target.value)} className="px-3 py-2 border rounded-md"/><input type="number" placeholder="Count" value={monsterInstanceCount} onChange={(e) => setMonsterInstanceCount(Math.max(1, parseInt(e.target.value) || 1))} min="1" className="px-3 py-2 border rounded-md"/></div><div className="flex items-center gap-2"><input type="number" placeholder="Initiative (Optional)" value={monsterInitiativeInput} onChange={(e) => setMonsterInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/><Button type="button" variant="outline" Icon={Dice6} onClick={() => toggleDiceRoller?.({ dice: '1d20', label: 'Monster Initiative', onRoll: (result) => setMonsterInitiativeInput(String(result.total))})} /></div><Button onClick={handleAddMonster} Icon={ShieldPlus} isLoading={addCombatantMu.isPending} disabled={!selectedMonster}>Add Monster{monsterInstanceCount > 1 ? `s (${monsterInstanceCount})` : ''}</Button></div>)}
+                  
+                  {addStep === 'characters' && (<div className="space-y-3 animate-fade-in mt-4">
+                    <label className="block text-sm font-medium text-gray-700">Select Party Members</label>
+                    <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-2 bg-gray-50">
+                      {availableParty.length > 0 ? availableParty.map((m) => (
+                        <div key={m.id} className="flex items-center gap-2 p-1 rounded hover:bg-gray-100">
+                          <input type="checkbox" id={`member-${m.id}`} checked={selectedPartyMembersToAdd.includes(m.id)} onChange={() => handleTogglePartyMember(m.id)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"/>
+                          <label htmlFor={`member-${m.id}`} className="text-sm font-medium text-gray-800">{m.name}</label>
+                        </div>
+                      )) : <p className="text-xs text-gray-500 p-2">All party members have been added.</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" placeholder="Initiative (Optional)" value={partyInitiativeInput} onChange={(e) => setPartyInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/>
+                      <Button type="button" variant="outline" Icon={Dice6} onClick={() => toggleDiceRoller?.({ dice: '1d20', label: 'Party Initiative', onRoll: (result) => setPartyInitiativeInput(String(result.total))})} />
+                    </div>
+                    <Button onClick={handleAddPartyMembers} Icon={UserPlus} isLoading={addCombatantMu.isPending} disabled={selectedPartyMembersToAdd.length === 0}>Add Members ({selectedPartyMembersToAdd.length})</Button>
+                  </div>)}
+
+                  {addStep === 'monsters' && (<div className="space-y-2 animate-fade-in mt-4">
+                    <label className="block text-sm font-medium text-gray-700">Add Monster</label>
+                    <select value={selectedMonster} onChange={(e) => setSelectedMonster(e.target.value)} className="w-full px-3 py-2 border rounded-md"><option value="">Select Monster</option>{allMonsters?.map((m) => (<option key={m.id} value={m.id}>{m.name} {m.category && `(${m.category})`}</option>))}</select>
+                    
+                    {selectedMonsterData && (
+                        <div className="space-y-2 text-xs text-gray-600 p-2 bg-gray-50 rounded border max-h-60 overflow-y-auto">
+                            {selectedMonsterData.stats && (
+                                <>
+                                    <h6 className="font-bold text-gray-700">Stats:</h6>
+                                    <StatsTableView stats={selectedMonsterData.stats} />
+                                </>
+                            )}
+                            {selectedMonsterData.effectsSummary && (
+                                <div className="mt-2 pt-2 border-t">
+                                     <h6 className="font-bold text-gray-700">Effects Summary:</h6>
+                                     <p className="text-gray-800 whitespace-pre-wrap">{selectedMonsterData.effectsSummary}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2"><input type="text" placeholder="Custom Name (Optional)" value={customMonsterName} onChange={(e) => setCustomMonsterName(e.target.value)} className="px-3 py-2 border rounded-md"/><input type="number" placeholder="Count" value={monsterInstanceCount} onChange={(e) => setMonsterInstanceCount(Math.max(1, parseInt(e.target.value) || 1))} min="1" className="px-3 py-2 border rounded-md"/></div>
+                    <div className="flex items-center gap-2"><input type="number" placeholder="Initiative (Optional)" value={monsterInitiativeInput} onChange={(e) => setMonsterInitiativeInput(e.target.value)} className="w-full px-3 py-2 border rounded-md"/><Button type="button" variant="outline" Icon={Dice6} onClick={() => toggleDiceRoller?.({ dice: '1d20', label: 'Monster Initiative', onRoll: (result) => setMonsterInitiativeInput(String(result.total))})} /></div>
+                    <Button onClick={handleAddMonster} Icon={ShieldPlus} isLoading={addCombatantMu.isPending} disabled={!selectedMonster}>Add Monster{monsterInstanceCount > 1 ? `s (${monsterInstanceCount})` : ''}</Button>
+                  </div>)}
                 </div>
               ) : (
-                <div className="bg-white p-4 rounded-lg shadow lg:sticky lg:top-24 self-start">
-                  <h4 className="text-lg font-semibold">Combat Log</h4>
-                  <p className="text-sm text-gray-500 mt-1">Events are persisted via <code>appendEncounterLog</code>.</p>
+                // MODIFIED: Container for Notes and Log
+                <div className="lg:sticky lg:top-24 self-start space-y-4">
+                  <div className="bg-white p-4 rounded-lg shadow">
+                    <h4 className="text-lg font-semibold flex items-center gap-2"><ClipboardList className="w-5 h-5" /> Temporary Notes</h4>
+                     <textarea
+                      placeholder="Use this space for temporary notes, conditions, or reminders..."
+                      value={temporaryNotes}
+                      onChange={(e) => setTemporaryNotes(e.target.value)}
+                      rows={6}
+                      className="w-full px-3 py-2 border rounded-md mt-2 text-sm"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Note: These notes are not saved with the encounter.</p>
+                  </div>
+                  
+                  {/* NEW: Combat Log Panel */}
+                  <div className="bg-white p-4 rounded-lg shadow">
+                    <h4 className="text-lg font-semibold mb-2">Combat Log</h4>
+                    <div className="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                      <CombatLogView log={currentEncounter.log || []} />
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
@@ -343,15 +486,49 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                   <h4 className="text-lg font-semibold flex items-center gap-2"><LogIn className="w-5 h-5"/> Now Acting</h4>
                   {activeCombatant ? (
                     <div>
-                      <p className="text-xl font-bold mt-1">{activeCombatant.display_name}</p>
+                      <div className="flex justify-between items-start">
+                        <p className="text-xl font-bold mt-1">{activeCombatant.display_name}</p>
+                        <Button size="sm" Icon={ChevronsRight} onClick={handleAdvanceTurn}>Next Turn</Button>
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                          <Button size="sm" Icon={ChevronsRight} onClick={handleAdvanceTurn}>Next Turn</Button>
-                          <Button size="sm" Icon={Heart} variant='secondary'>Damage/Heal</Button>
                           {activeCombatant.monster_id && monstersById.get(activeCombatant.monster_id) && (
                             <Button size="sm" Icon={Dice6} variant='danger_outline' onClick={() => handleRollMonsterAttack(activeCombatant.id, monstersById.get(activeCombatant.monster_id!)!)}>Roll Attack</Button>
                           )}
                           <Button size="sm" Icon={LogOut} variant="outline" onClick={() => setSelectedActorId(null)}>Clear Actor</Button>
                       </div>
+                      
+                      <div className="mt-3 border-t pt-3 space-y-3">
+                          <div>
+                              <h5 className="font-semibold text-sm text-gray-700 mb-2">Combatant Stats:</h5>
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2 p-2 bg-white rounded-md border">
+                                    <Heart className="w-5 h-5 text-red-600" />
+                                    <input 
+                                        type="number" 
+                                        value={editingStats[activeCombatant.id]?.current_hp ?? ''} 
+                                        onChange={(e) => setEditingStats((p) => ({ ...p, [activeCombatant.id]: { ...p[activeCombatant.id], current_hp: e.target.value }}))}
+                                        className="w-20 px-2 py-1 border rounded-md text-sm font-semibold"
+                                    />
+                                    <span className="text-sm text-gray-600">/ {activeCombatant.max_hp} HP</span>
+                                    <Button size="sm" onClick={() => handleSaveStats(activeCombatant.id)} Icon={Save} isLoading={updateCombatantMu.isPending && updateCombatantMu.variables?.id === activeCombatant.id}>Save</Button>
+                                </div>
+                                {activeCombatantMonsterData?.stats && (
+                                    <div className="p-2 bg-gray-50 rounded-md border">
+                                        <StatsTableView stats={Object.fromEntries(Object.entries(activeCombatantMonsterData.stats).filter(([key]) => key !== 'HP'))} />
+                                    </div>
+                                )}
+                              </div>
+                          </div>
+                          {activeCombatantMonsterData?.effectsSummary && (
+                              <div>
+                                  <h5 className="font-semibold text-sm text-gray-700 mb-1">Effects Summary:</h5>
+                                  <div className="text-sm p-2 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
+                                      <p className="whitespace-pre-wrap">{activeCombatantMonsterData.effectsSummary}</p>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+
                       {activeCombatant.monster_id && currentMonsterAttacks[activeCombatant.id] && (
                         <div className="mt-3 p-3 bg-yellow-50 border border-yellow-300 rounded text-sm">
                             <p className="font-bold text-yellow-900">{currentMonsterAttacks[activeCombatant.id]!.name}</p>
@@ -382,7 +559,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                 {combatants.length === 0 ? <p className="text-sm text-gray-500 mt-2">No combatants in the encounter yet.</p> : (
                   <ul className="divide-y divide-gray-200">
                     {combatants.map((c) => (
-                      <li key={c.id} className={`flex flex-wrap items-center justify-between py-2 px-2 -mx-2 rounded-md transition-all ${swapMode ? 'cursor-pointer hover:bg-blue-50' : ''} ${firstSwapCombatant === c.id ? 'ring-2 ring-blue-500' : ''} ${selectedActorId === c.id ? 'bg-blue-100' : ''}`} onClick={() => swapMode ? handleCombatantSwap(c.id) : handleSelectActor(c.id)}>
+                      <li key={c.id} className={`flex flex-wrap items-center justify-between py-2 px-2 -mx-2 rounded-md transition-all ${swapMode ? 'cursor-pointer hover:bg-blue-50' : 'cursor-pointer'} ${firstSwapCombatant === c.id ? 'ring-2 ring-blue-500' : ''} ${selectedActorId === c.id ? 'bg-blue-100' : ''}`} onClick={() => swapMode ? handleCombatantSwap(c.id) : handleSelectActor(c.id)}>
                         <div className="flex items-center gap-3">
                           <input type="checkbox" className="ml-1" checked={selectedCombatantsForInitiative.includes(c.id)} onChange={(e) => { e.target.checked ? setSelectedCombatantsForInitiative((p) => [...p, c.id]) : setSelectedCombatantsForInitiative((p) => p.filter((id) => id !== c.id)); }} onClick={(e) => e.stopPropagation()}/>
                           <span className="w-8 text-center text-lg font-bold text-gray-700">{c.initiative_roll ?? '-'}</span>
