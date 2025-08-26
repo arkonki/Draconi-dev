@@ -56,9 +56,12 @@ export async function fetchEncounterCombatants(encounterId: string): Promise<Enc
     console.error('Error fetching encounter combatants:', error);
     throw error;
   }
-  return (data || []).map(c => ({
+  return (data || []).map((c: any) => ({
     ...c,
-    display_name: c.display_name || (c.character_id && c.characters ? c.characters.name : (c.monster_id && c.monsters ? c.monsters.name : 'Unknown Combatant'))
+    display_name:
+      c.display_name ||
+      (c.character_id && c.characters ? c.characters.name :
+       c.monster_id && c.monsters ? c.monsters.name : 'Unknown Combatant'),
   }));
 }
 
@@ -71,9 +74,12 @@ export async function createEncounter(
     .from('encounters')
     .insert({
       party_id: partyId,
-      name: name,
-      description: description,
-      status: 'planning', 
+      name,
+      description,
+      status: 'planning',
+      // ensure the column exists; if not, add via migration:
+      // ALTER TABLE encounters ADD COLUMN log jsonb NOT NULL DEFAULT '[]'::jsonb;
+      log: [], // initialize as empty JSON array
     })
     .select()
     .single();
@@ -85,11 +91,10 @@ export async function createEncounter(
   if (!data) {
     throw new Error('Encounter creation returned no data');
   }
-  return data;
+  return data as Encounter;
 }
 
 export async function deleteEncounter(encounterId: string): Promise<void> {
-  // First delete all combatants
   const { error: combatantsError } = await supabase
     .from('encounter_combatants')
     .delete()
@@ -100,7 +105,6 @@ export async function deleteEncounter(encounterId: string): Promise<void> {
     throw combatantsError;
   }
 
-  // Then delete the encounter
   const { error: encounterError } = await supabase
     .from('encounters')
     .delete()
@@ -117,24 +121,19 @@ export async function duplicateEncounter(
   newName: string,
   newDescription?: string
 ): Promise<Encounter> {
-  // Fetch the original encounter
   const originalEncounter = await fetchEncounterDetails(encounterId);
-  if (!originalEncounter) {
-    throw new Error('Original encounter not found');
-  }
+  if (!originalEncounter) throw new Error('Original encounter not found');
 
-  // Create new encounter
   const newEncounter = await createEncounter(
     originalEncounter.party_id,
     newName,
     newDescription || originalEncounter.description || undefined
   );
 
-  // Fetch and duplicate combatants
   const originalCombatants = await fetchEncounterCombatants(encounterId);
-  
+
   if (originalCombatants.length > 0) {
-    const combatantsToInsert = originalCombatants.map(c => ({
+    const combatantsToInsert = originalCombatants.map((c) => ({
       encounter_id: newEncounter.id,
       character_id: c.character_id,
       monster_id: c.monster_id,
@@ -193,7 +192,7 @@ export async function addCombatantToEncounter(
       console.error('Error fetching character for combatant:', charError?.message);
       throw new Error(`Character (ID: ${payload.characterId}) not found or error fetching details.`);
     }
-    
+
     const displayName = charData.name || 'Unnamed Character';
 
     const combatantData = {
@@ -213,17 +212,16 @@ export async function addCombatantToEncounter(
       .insert(combatantData)
       .select()
       .single();
-    
+
     if (insertError) {
       console.error('Error inserting character combatant:', insertError.message);
       throw insertError;
     }
-    return [newCombatant];
-
-  } else if (payload.type === 'monster') {
+    return [newCombatant as EncounterCombatant];
+  } else {
     const { data: monsterData, error: monsterError } = await supabase
       .from('monsters')
-      .select('id, name, stats') 
+      .select('id, name, stats')
       .eq('id', payload.monsterId)
       .single();
 
@@ -231,15 +229,16 @@ export async function addCombatantToEncounter(
       console.error('Error fetching monster for combatant:', monsterError?.message);
       throw new Error(`Monster (ID: ${payload.monsterId}) not found or error fetching details.`);
     }
-    
-    const monsterHp = monsterData.stats?.HP ?? 10;
+
+    const monsterHp = (monsterData as any).stats?.HP ?? (monsterData as any).stats?.hp ?? 10;
     const instanceCount = payload.instanceCount ?? 1;
-    const combatantsToInsert = [];
+    const combatantsToInsert: any[] = [];
 
     for (let i = 0; i < instanceCount; i++) {
-      const displayName = instanceCount > 1 
-        ? `${payload.customName || monsterData.name || 'Unnamed Monster'} ${i + 1}`
-        : payload.customName || monsterData.name || 'Unnamed Monster';
+      const displayName =
+        instanceCount > 1
+          ? `${payload.customName || monsterData.name || 'Unnamed Monster'} ${i + 1}`
+          : payload.customName || monsterData.name || 'Unnamed Monster';
 
       combatantsToInsert.push({
         encounter_id: encounterId,
@@ -247,7 +246,7 @@ export async function addCombatantToEncounter(
         display_name: displayName,
         max_hp: monsterHp,
         current_hp: monsterHp,
-        max_wp: null, 
+        max_wp: null,
         current_wp: null,
         is_player_character: false,
         initiative_roll: payload.initiativeRoll,
@@ -258,15 +257,13 @@ export async function addCombatantToEncounter(
       .from('encounter_combatants')
       .insert(combatantsToInsert)
       .select();
-    
+
     if (insertError) {
       console.error('Error inserting monster combatants:', insertError.message);
       throw insertError;
     }
-    return newCombatants || [];
+    return (newCombatants || []) as EncounterCombatant[];
   }
-
-  throw new Error('Invalid combatant type specified.');
 }
 
 export async function joinEncounterAsCharacter(
@@ -286,7 +283,7 @@ export async function joinEncounterAsCharacter(
 
   const result = await addCombatantToEncounter(encounterId, {
     type: 'character',
-    characterId: characterId,
+    characterId,
   });
 
   return result[0];
@@ -294,11 +291,11 @@ export async function joinEncounterAsCharacter(
 
 export async function updateEncounter(
   encounterId: string,
-  updates: Partial<Pick<Encounter, 'name' | 'description' | 'status' | 'current_round' | 'active_combatant_id'>>
+  updates: Partial<Pick<Encounter, 'name' | 'description' | 'status' | 'current_round' | 'active_combatant_id' | 'log'>>
 ): Promise<Encounter> {
   const { data, error } = await supabase
     .from('encounters')
-    .update(updates)
+    .update(updates as any)
     .eq('id', encounterId)
     .select()
     .single();
@@ -310,7 +307,7 @@ export async function updateEncounter(
   if (!data) {
     throw new Error('Encounter update returned no data');
   }
-  return data;
+  return data as Encounter;
 }
 
 export async function updateCombatant(
@@ -319,7 +316,7 @@ export async function updateCombatant(
 ): Promise<EncounterCombatant> {
   const { data, error } = await supabase
     .from('encounter_combatants')
-    .update(updates)
+    .update(updates as any)
     .eq('id', combatantId)
     .select()
     .single();
@@ -331,7 +328,7 @@ export async function updateCombatant(
   if (!data) {
     throw new Error('Combatant update returned no data');
   }
-  return data;
+  return data as EncounterCombatant;
 }
 
 export async function removeCombatant(combatantId: string): Promise<void> {
@@ -361,28 +358,27 @@ export async function rollInitiativeForCombatants(
     throw fetchError;
   }
 
-  const updates = combatants?.map(combatant => {
-    let initiativeRoll: number;
+  const updates =
+    combatants?.map((combatant: any) => {
+      let initiativeRoll: number;
 
-    if (combatant.is_player_character) {
-      initiativeRoll = Math.floor(Math.random() * 10) + 1;
-    } else {
-      const ferocity = combatant.monsters?.stats?.ferocity ?? 1;
-      const maxRolls = Math.max(1, Math.min(ferocity, 5));
-      const rolls = Array.from({ length: maxRolls }, () => Math.floor(Math.random() * 10) + 1);
-      initiativeRoll = Math.max(...rolls);
-    }
+      if (combatant.is_player_character) {
+        initiativeRoll = Math.floor(Math.random() * 10) + 1;
+      } else {
+        // Be defensive about case of FEROCITY vs ferocity
+        const ferocity =
+          combatant.monsters?.stats?.FEROCITY ??
+          combatant.monsters?.stats?.ferocity ??
+          1;
+        const maxRolls = Math.max(1, Math.min(ferocity, 5));
+        const rolls = Array.from({ length: maxRolls }, () => Math.floor(Math.random() * 10) + 1);
+        initiativeRoll = Math.max(...rolls);
+      }
 
-    return {
-      id: combatant.id,
-      initiative_roll: initiativeRoll,
-    };
-  }) || [];
+      return { id: combatant.id, initiative_roll: initiativeRoll };
+    }) || [];
 
-  const updatePromises = updates.map(update =>
-    updateCombatant(update.id, { initiative_roll: update.initiative_roll })
-  );
-
+  const updatePromises = updates.map((u) => updateCombatant(u.id, { initiative_roll: u.initiative_roll }));
   return Promise.all(updatePromises);
 }
 
@@ -399,8 +395,8 @@ export async function swapInitiative(
     throw new Error('Could not fetch combatants for initiative swap');
   }
 
-  const [c1, c2] = combatants;
-  
+  const [c1, c2] = combatants as { id: string; initiative_roll: number | null }[];
+
   const [updated1, updated2] = await Promise.all([
     updateCombatant(c1.id, { initiative_roll: c2.initiative_roll }),
     updateCombatant(c2.id, { initiative_roll: c1.initiative_roll }),
@@ -414,7 +410,8 @@ export async function startEncounter(encounterId: string): Promise<Encounter> {
     status: 'active',
     current_round: 1,
   });
-
+  // Optional: seed a log entry
+  await appendEncounterLog(encounterId, { type: 'start', round: 1 });
   return encounter;
 }
 
@@ -423,7 +420,7 @@ export async function endEncounter(encounterId: string): Promise<Encounter> {
     status: 'completed',
     active_combatant_id: null,
   });
-
+  await appendEncounterLog(encounterId, { type: 'end' });
   return encounter;
 }
 
@@ -434,12 +431,85 @@ export async function nextRound(encounterId: string): Promise<Encounter> {
     .eq('id', encounterId)
     .single();
 
-  if (!currentEncounter) {
-    throw new Error('Encounter not found');
-  }
+  if (!currentEncounter) throw new Error('Encounter not found');
 
-  return updateEncounter(encounterId, {
-    current_round: currentEncounter.current_round + 1,
+  const updated = await updateEncounter(encounterId, {
+    current_round: (currentEncounter.current_round ?? 0) + 1,
     active_combatant_id: null,
   });
+
+  await appendEncounterLog(encounterId, {
+    type: 'round_advanced',
+    round: updated.current_round,
+  });
+
+  return updated;
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Encounter Log helpers (JSONB array in encounters.log)
+ * - appendEncounterLog: append a single entry (adds ISO timestamp if missing)
+ * - appendEncounterLogs: append multiple entries
+ * - getEncounterLog: fetch the current log array (always returns an array)
+ * ------------------------------------------------------------------------------------------------ */
+
+type EncounterLogEntry = Record<string, any> & { ts?: string };
+
+export async function getEncounterLog(encounterId: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('encounters')
+    .select('log')
+    .eq('id', encounterId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching encounter log:', error);
+    throw error;
+  }
+  const log = (data?.log ?? []);
+  return Array.isArray(log) ? log : [];
+}
+
+export async function appendEncounterLog(
+  encounterId: string,
+  entry: EncounterLogEntry
+): Promise<void> {
+  // fetch current log
+  const log = await getEncounterLog(encounterId);
+
+  // ensure timestamp
+  const stamped: EncounterLogEntry = {
+    ts: entry.ts ?? new Date().toISOString(),
+    ...entry,
+  };
+
+  log.push(stamped);
+
+  const { error } = await supabase
+    .from('encounters')
+    .update({ log })
+    .eq('id', encounterId);
+
+  if (error) {
+    console.error('Error appending encounter log:', error);
+    throw error;
+  }
+}
+
+export async function appendEncounterLogs(
+  encounterId: string,
+  entries: EncounterLogEntry[]
+): Promise<void> {
+  if (!entries || entries.length === 0) return;
+  const log = await getEncounterLog(encounterId);
+  const stamped = entries.map((e) => ({ ts: e.ts ?? new Date().toISOString(), ...e }));
+  const { error } = await supabase
+    .from('encounters')
+    .update({ log: [...log, ...stamped] })
+    .eq('id', encounterId);
+
+  if (error) {
+    console.error('Error appending encounter logs:', error);
+    throw error;
+  }
 }
