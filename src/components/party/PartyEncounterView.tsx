@@ -85,19 +85,19 @@ const StatsTableView = ({ stats }: { stats: object }) => (
 /** Renders an attack description with clickable dice rolls */
 function AttackDescriptionRenderer({ description, attackName }: AttackDescriptionRendererProps) {
   const { toggleDiceRoller } = useDice();
-  const diceRegex = /(\d*d\d+)/gi;
+  const diceRegex = /(\d*d\d+\s*[+-]?\s*\d*)/gi;
   const parts = description.split(diceRegex);
 
   return (
     <p className="text-gray-800 mt-1">
       {parts.map((part, index) => {
-        if (part.match(diceRegex)) {
+        if (part.match(diceRegex) && part.match(/[dD]/)) {
           return (
             <button
               key={index}
               className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5"
               onClick={() => toggleDiceRoller?.({
-                dice: part.toLowerCase(),
+                dice: part.toLowerCase().replace(/\s/g, ''),
                 label: `${attackName} - Damage Roll`,
               })}
             >
@@ -108,6 +108,45 @@ function AttackDescriptionRenderer({ description, attackName }: AttackDescriptio
         return <span key={index}>{part}</span>;
       })}
     </p>
+  );
+}
+
+/** NEW: Renders text with Markdown and clickable dice rolls */
+function MarkdownDiceRenderer({ text, contextLabel }: { text: string; contextLabel: string; }) {
+  const { toggleDiceRoller } = useDice();
+
+  if (!text) return null;
+
+  const diceRegex = /(\d*d\d+\s*[+-]?\s*\d*)/gi;
+  const parts = text.split(diceRegex);
+
+  const applyMarkdown = (str: string) => {
+    return str
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>');
+  };
+
+  return (
+    <div className="whitespace-pre-wrap leading-relaxed">
+      {parts.map((part, index) => {
+        if (part.match(diceRegex) && part.match(/[dD]/)) {
+          return (
+            <button
+              key={index}
+              className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5"
+              onClick={() => toggleDiceRoller?.({
+                dice: part.toLowerCase().replace(/\s/g, ''),
+                label: `${contextLabel} - Effects Roll`,
+              })}
+            >
+              {part}
+            </button>
+          );
+        }
+        const html = applyMarkdown(part);
+        return <span key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+      })}
+    </div>
   );
 }
 
@@ -451,7 +490,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                             {selectedMonsterData.effectsSummary && (
                                 <div className="mt-2 pt-2 border-t">
                                      <h6 className="font-bold text-gray-700">Effects Summary:</h6>
-                                     <p className="text-gray-800 whitespace-pre-wrap">{selectedMonsterData.effectsSummary}</p>
+                                     <MarkdownDiceRenderer text={selectedMonsterData.effectsSummary} contextLabel={selectedMonsterData.name} />
                                 </div>
                             )}
                         </div>
@@ -529,7 +568,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                               <div>
                                   <h5 className="font-semibold text-sm text-gray-700 mb-1">Effects Summary:</h5>
                                   <div className="text-sm p-2 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
-                                      <p className="whitespace-pre-wrap">{activeCombatantMonsterData.effectsSummary}</p>
+                                      <MarkdownDiceRenderer text={activeCombatantMonsterData.effectsSummary} contextLabel={activeCombatant.display_name} />
                                   </div>
                               </div>
                           )}
