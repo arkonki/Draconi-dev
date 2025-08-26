@@ -61,6 +61,7 @@ export interface MonsterData { id: string; name: string; category?: string; stat
 
 interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
 interface EditableCombatantStats { current_hp: string; current_wp?: string; initiative_roll?: string; }
+interface AttackDescriptionRendererProps { description: string; attackName: string; }
 
 
 // =====================================================================================
@@ -82,7 +83,7 @@ const StatsTableView = ({ stats }: { stats: object }) => (
 );
 
 /** Renders an attack description with clickable dice rolls */
-function AttackDescriptionRenderer({ description, attackName }: { description: string; attackName: string; }) {
+function AttackDescriptionRenderer({ description, attackName }: AttackDescriptionRendererProps) {
   const { toggleDiceRoller } = useDice();
   const diceRegex = /(\d*d\d+)/gi;
   const parts = description.split(diceRegex);
@@ -92,7 +93,14 @@ function AttackDescriptionRenderer({ description, attackName }: { description: s
       {parts.map((part, index) => {
         if (part.match(diceRegex)) {
           return (
-            <button key={index} className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5" onClick={() => toggleDiceRoller?.({ dice: part.toLowerCase(), label: `${attackName} - Damage Roll`, })} >
+            <button
+              key={index}
+              className="font-bold text-blue-600 hover:underline bg-blue-100 px-1 py-0.5 rounded-md mx-0.5"
+              onClick={() => toggleDiceRoller?.({
+                dice: part.toLowerCase(),
+                label: `${attackName} - Damage Roll`,
+              })}
+            >
               {part}
             </button>
           );
@@ -102,6 +110,7 @@ function AttackDescriptionRenderer({ description, attackName }: { description: s
     </p>
   );
 }
+
 
 /** Renders a single formatted log entry */
 function LogEntry({ entry }: { entry: any }) {
@@ -139,7 +148,6 @@ function LogEntry({ entry }: { entry: any }) {
       content = <span>{JSON.stringify(entry)}</span>;
   }
 
-  // Round advance doesn't need a timestamp
   if (entry.type === 'round_advanced') {
     return <div className="w-full">{content}</div>
   }
@@ -455,7 +463,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                   </div>)}
                 </div>
               ) : (
-                // MODIFIED: Container for Notes and Log
                 <div className="lg:sticky lg:top-24 self-start space-y-4">
                   <div className="bg-white p-4 rounded-lg shadow">
                     <h4 className="text-lg font-semibold flex items-center gap-2"><ClipboardList className="w-5 h-5" /> Temporary Notes</h4>
@@ -469,7 +476,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                     <p className="text-xs text-gray-500 mt-1">Note: These notes are not saved with the encounter.</p>
                   </div>
                   
-                  {/* NEW: Combat Log Panel */}
                   <div className="bg-white p-4 rounded-lg shadow">
                     <h4 className="text-lg font-semibold mb-2">Combat Log</h4>
                     <div className="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
