@@ -6,18 +6,18 @@ import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../../../components/shared/ErrorMessage';
 import { Button } from '../../../components/shared/Button';
-import { GameItem, fetchItems } from '../../../lib/api/items'; // Import fetchItems and GameItem
-import { normalizeCurrency, parseCost } from '../../../lib/equipment'; // Import utility
+import { GameItem, fetchItems } from '../../../lib/api/items';
+import { normalizeCurrency } from '../../../lib/equipment';
 
 interface EquipmentOption {
   option: number;
-  items: string[]; // Names of items
+  items: string[];
   description: string;
 }
 
 interface ProfessionData {
-  starting_equipment: string[]; // Array of strings like "Dagger, Torch" or "D6 Silver"
-  equipment_description: string[]; // Descriptions for each option
+  starting_equipment: string[];
+  equipment_description: string[];
 }
 
 export function GearSelection() {
@@ -30,14 +30,12 @@ export function GearSelection() {
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [errorOptions, setErrorOptions] = useState('');
 
-  // Fetch all game items for looking up details
   const { data: allItems = [], isLoading: isLoadingItems, error: errorItems } = useQuery<GameItem[], Error>({
-    queryKey: ['gameItems'], // Use the same key as InventoryModal to share cache
+    queryKey: ['gameItems'],
     queryFn: fetchItems,
     staleTime: 1000 * 60 * 10,
   });
 
-  // Fetch starting equipment options from Supabase for the selected profession
   useEffect(() => {
     async function fetchEquipmentOptions() {
       if (!character.profession) {
@@ -60,16 +58,13 @@ export function GearSelection() {
           const options: EquipmentOption[] = (professionData.starting_equipment || []).map(
             (optionString: string, idx: number) => ({
               option: idx + 1,
-              items: optionString.split(',').map((item: string) => item.trim()).filter(Boolean), // Ensure no empty strings
+              items: optionString.split(',').map((item: string) => item.trim()).filter(Boolean),
               description: (professionData.equipment_description || [])[idx] || ''
             })
           );
           setAvailableOptions(options);
-        } else {
-          setAvailableOptions([]);
         }
       } catch (err) {
-        console.error('Error fetching equipment options:', err);
         setErrorOptions('Failed to load equipment options.');
       } finally {
         setLoadingOptions(false);
@@ -78,15 +73,11 @@ export function GearSelection() {
     fetchEquipmentOptions();
   }, [character.profession]);
 
-  // Helper to find item details from the fetched list
   const findItemDetails = (itemName: string): GameItem | undefined => {
-    // Handle cases like "Dagger or Short Sword" - find details for the first part
     const baseItemName = itemName.split(' or ')[0].trim();
-    // Handle cases like "2 Torches" - find details for "Torch"
     const nameWithoutCount = baseItemName.replace(/^\d+\s+/, '');
-    return allItems.find(item => item.name === nameWithoutCount);
+    return allItems.find(item => item.name.toLowerCase() === nameWithoutCount.toLowerCase());
   };
-
 
   const parseDiceNotation = (item: string) => {
     const match = item.match(/^(\d*D\d+)/i);
@@ -109,12 +100,11 @@ export function GearSelection() {
 
   const handleOptionSelect = (option: number) => {
     setSelectedOption(option);
-    setEquipmentConfirmed(false); // Reset confirmation when changing selection
+    setEquipmentConfirmed(false);
   };
 
   const handleConfirmEquipment = () => {
     if (selectedOption === null) return;
-
     const selectedGear = availableOptions.find(opt => opt.option === selectedOption);
     if (!selectedGear) return;
 
@@ -125,27 +115,21 @@ export function GearSelection() {
     if (requiresResolution) {
       const initialResults = selectedGear.items.reduce((acc, item, idx) => {
         if (item.toLowerCase().includes(' or ')) {
-          const alternatives = item.split(/\s+or\s+/i).map(alt => alt.trim());
-          acc[idx] = alternatives[0]; // Default to first option
+          acc[idx] = item.split(/\s+or\s+/i)[0].trim();
         } else {
-          acc[idx] = ''; // Needs dice roll or is fixed
+          acc[idx] = '';
         }
         return acc;
       }, {} as { [key: number]: string });
       setDiceResults(initialResults);
       setShowDiceModal(true);
     } else {
-      // Directly update character if no resolution needed
-      const currentMoney = character.equipment?.money || { gold: 0, silver: 0, copper: 0 };
       updateCharacter({
-        startingEquipment: { // Store the chosen option index and resolved items
-            option: selectedOption,
-            items: selectedGear.items
-        },
-        equipment: { // Populate the actual equipment
-          money: currentMoney,
+        startingEquipment: { option: selectedOption, items: selectedGear.items },
+        equipment: {
+          money: character.equipment?.money || { gold: 0, silver: 0, copper: 0 },
           equipped: character.equipment?.equipped || { weapons: [] },
-          inventory: [...selectedGear.items] // Add all items to inventory initially
+          inventory: [...selectedGear.items]
         }
       });
       setEquipmentConfirmed(true);
@@ -163,91 +147,64 @@ export function GearSelection() {
 
     selectedGear.items.forEach((item, idx) => {
       if (item.toLowerCase().includes(' or ')) {
-        // Use the selected alternative from the modal state
-        const chosenItem = diceResults[idx] || item.split(/\s+or\s+/i)[0].trim(); // Default to first if somehow not set
-        finalItems.push(chosenItem);
+        finalItems.push(diceResults[idx] || item.split(/\s+or\s+/i)[0].trim());
       } else {
         const diceInfo = parseDiceNotation(item);
         if (diceInfo) {
-          // Use entered/rolled result
           const result = diceResults[idx] ? parseInt(diceResults[idx]) : rollDice(diceInfo.count, diceInfo.sides);
           const restText = diceInfo.rest.toLowerCase();
           if (restText.includes('gold')) updatedMoney.gold += result;
           else if (restText.includes('silver')) updatedMoney.silver += result;
           else if (restText.includes('copper')) updatedMoney.copper += result;
-          else finalItems.push(`${result} ${diceInfo.rest}`); // Add item with quantity
+          else finalItems.push(`${result} ${diceInfo.rest}`);
         } else {
-          // Fixed item, just add it
           finalItems.push(item);
         }
       }
     });
 
     updateCharacter({
-      startingEquipment: { // Store the chosen option index and resolved items
-        option: selectedOption,
-        items: finalItems
-      },
-      equipment: { // Populate the actual equipment
+      startingEquipment: { option: selectedOption, items: finalItems },
+      equipment: {
         money: normalizeCurrency(updatedMoney),
         equipped: character.equipment?.equipped || { weapons: [] },
-        inventory: [...finalItems] // Add resolved items to inventory
+        inventory: [...finalItems]
       }
     });
     setShowDiceModal(false);
     setEquipmentConfirmed(true);
   };
 
-  // Check if all dice/choices in the modal are resolved
   const allDiceModalFilled = selectedOption !== null && availableOptions
     .find(g => g.option === selectedOption)
     ?.items.every((item, idx) => {
       if (item.toLowerCase().includes(' or ')) return !!diceResults[idx];
       if (parseDiceNotation(item)) return !!diceResults[idx];
-      return true; // Fixed items don't need input
+      return true;
     });
-
 
   if (loadingOptions || isLoadingItems) return <LoadingSpinner />;
   if (errorOptions || errorItems) return <ErrorMessage message={errorOptions || errorItems?.message || 'Failed to load data.'} />;
-  if (!character.profession) {
-    return (
-      <div className="p-6 text-center">
-        <p className="text-gray-600">Please select a profession before choosing equipment.</p>
-      </div>
-    );
-  }
+  if (!character.profession) return <div className="p-6 text-center"><p className="text-gray-600">Please select a profession first.</p></div>;
 
   return (
     <div className="space-y-6">
       <div className="prose">
         <h3 className="text-xl font-bold mb-4">Choose Starting Equipment</h3>
-        <p className="text-gray-600">
-          Select one of the available equipment packages for your {character.profession}.
-        </p>
+        <p className="text-gray-600">Select one of the equipment packages for your {character.profession}.</p>
       </div>
 
       <div className="flex items-start gap-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
         <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
         <div>
           <h4 className="font-medium text-blue-800">Equipment Selection</h4>
-          <p className="text-sm text-blue-700">
-            Choose carefully – this will be your starting gear. Items with <Dice4 className="inline w-4 h-4 text-amber-600" /> require a dice roll, items with <Spline className="inline w-4 h-4 text-purple-600" /> offer a choice.
-          </p>
+          <p className="text-sm text-blue-700">Items with <Dice4 className="inline w-4 h-4 text-amber-600" /> require a roll, items with <Spline className="inline w-4 h-4 text-purple-600" /> offer a choice.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {availableOptions.map((option) => (
-          <div
-            key={option.option}
-            onClick={() => handleOptionSelect(option.option)}
-            className={`p-6 border rounded-lg cursor-pointer transition-all ${
-              selectedOption === option.option
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-200 hover:border-blue-300'
-            }`}
-          >
+          <div key={option.option} onClick={() => handleOptionSelect(option.option)} className={`p-6 border rounded-lg cursor-pointer transition-all ${selectedOption === option.option ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}>
             <div className="flex items-center gap-3 mb-4">
               <Package className="w-6 h-6 text-gray-500" />
               <div>
@@ -257,38 +214,36 @@ export function GearSelection() {
             </div>
             <div className="space-y-2">
               <h5 className="font-medium text-gray-700">Equipment List:</h5>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {option.items.map((item, index) => {
                   const hasDice = !!parseDiceNotation(item);
                   const hasChoice = item.toLowerCase().includes(' or ');
-                  const itemDetails = findItemDetails(item); // Use updated helper
+                  const itemDetails = findItemDetails(item);
                   return (
-                    <li key={index} className="flex items-center gap-2 text-sm text-gray-600 group relative">
-                      {hasDice ? (
-                        <Dice4 className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                      ) : hasChoice ? (
-                        <Spline className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                      ) : (
-                        <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                      )}
+                    <li key={index} className="flex items-center gap-2 text-sm text-gray-600">
+                      {hasDice ? (<Dice4 className="w-4 h-4 text-amber-500 flex-shrink-0" />)
+                       : hasChoice ? (<Spline className="w-4 h-4 text-purple-500 flex-shrink-0" />)
+                       : (<CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />)}
                       <span>{item}</span>
-                      {/* Tooltip for item details */}
+
+                      {/* --- FIX: Individual info icon and tooltip for each item --- */}
                       {itemDetails?.effect && (
-                         <div className="absolute bottom-full left-0 mb-2 bg-gray-800 text-white text-xs p-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-normal z-10 max-w-xs">
-                           {itemDetails.effect} (W: {itemDetails.weight}, Cost: {itemDetails.cost})
-                         </div>
-                       )}
+                        <span className="relative group flex items-center">
+                          <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help" />
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs bg-gray-800 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-normal z-20 pointer-events-none">
+                            <p className="font-bold">{itemDetails.name}</p>
+                            <p>{itemDetails.effect}</p>
+                            <p className="mt-1 text-gray-300">Weight: {itemDetails.weight}, Cost: {itemDetails.cost}</p>
+                          </div>
+                        </span>
+                      )}
+                      {/* --- END OF FIX --- */}
                     </li>
                   );
                 })}
               </ul>
             </div>
-            {selectedOption === option.option && (
-              <div className="mt-4 flex items-center gap-2 text-blue-600">
-                <CheckCircle2 className="w-5 h-5" />
-                <span className="text-sm font-medium">Selected</span>
-              </div>
-            )}
+            {selectedOption === option.option && <div className="mt-4 flex items-center gap-2 text-blue-600"><CheckCircle2 className="w-5 h-5" /><span className="text-sm font-medium">Selected</span></div>}
           </div>
         ))}
       </div>
@@ -300,22 +255,11 @@ export function GearSelection() {
         </div>
       )}
 
-      {/* Confirm Button */}
-       <button
-         onClick={handleConfirmEquipment}
-         disabled={!selectedOption || equipmentConfirmed} // Disable if not selected or already confirmed
-         className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-           equipmentConfirmed
-             ? 'bg-green-600 text-white cursor-default'
-             : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
-         }`}
-       >
+       <button onClick={handleConfirmEquipment} disabled={!selectedOption || equipmentConfirmed} className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${equipmentConfirmed ? 'bg-green-600 text-white cursor-default' : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
          <Backpack className="w-5 h-5" />
          {equipmentConfirmed ? 'Equipment Confirmed' : 'Confirm Equipment Selection'}
        </button>
 
-
-      {/* Dice Modal */}
       {showDiceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
@@ -329,11 +273,7 @@ export function GearSelection() {
                 return (
                   <div key={index} className="mb-4 p-3 border rounded bg-purple-50 border-purple-200">
                     <label className="block text-sm font-medium text-gray-700 mb-1">{item}</label>
-                    <select
-                      value={diceResults[index] || ''}
-                      onChange={(e) => setDiceResults(prev => ({ ...prev, [index]: e.target.value }))}
-                      className="mt-1 w-full border rounded px-2 py-1 text-sm"
-                    >
+                    <select value={diceResults[index] || ''} onChange={(e) => setDiceResults(prev => ({ ...prev, [index]: e.target.value }))} className="mt-1 w-full border rounded px-2 py-1 text-sm">
                       <option value="" disabled>Select one...</option>
                       {alternatives.map((alt, i) => <option key={i} value={alt}>{alt}</option>)}
                     </select>
@@ -341,52 +281,28 @@ export function GearSelection() {
                 );
               }
               const diceInfo = parseDiceNotation(item);
-              if (!diceInfo) return null; // Skip items without dice/choice
+              if (!diceInfo) return null;
               return (
                 <div key={index} className="mb-4 p-3 border rounded bg-amber-50 border-amber-200">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium">{item}</span>
-                    <Button
-                      size="sm" variant="secondary"
-                      onClick={() => {
-                        const roll = rollDice(diceInfo.count, diceInfo.sides);
-                        setDiceResults(prev => ({ ...prev, [index]: roll.toString() }));
-                      }}
-                    >
+                    <Button size="sm" variant="secondary" onClick={() => { const roll = rollDice(diceInfo.count, diceInfo.sides); setDiceResults(prev => ({ ...prev, [index]: roll.toString() })); }}>
                       Roll {diceInfo.count}D{diceInfo.sides}
                     </Button>
                   </div>
-                  <input
-                    type="number"
-                    min={diceInfo.count} // Min possible roll
-                    max={diceInfo.count * diceInfo.sides} // Max possible roll
-                    value={diceResults[index] || ''}
+                  <input type="number" min={diceInfo.count} max={diceInfo.count * diceInfo.sides} value={diceResults[index] || ''}
                     onChange={(e) => {
                       const valStr = e.target.value;
-                      // Allow empty input temporarily
-                      if (valStr === '') {
-                          setDiceResults(prev => ({ ...prev, [index]: '' }));
-                      } else {
-                          const val = parseInt(valStr);
-                          if (!isNaN(val)) {
-                              const clampedVal = Math.max(diceInfo.count, Math.min(diceInfo.count * diceInfo.sides, val));
-                              setDiceResults(prev => ({ ...prev, [index]: clampedVal.toString() }));
-                          }
-                      }
+                      if (valStr === '') { setDiceResults(prev => ({ ...prev, [index]: '' })); }
+                      else { const val = parseInt(valStr); if (!isNaN(val)) { const clampedVal = Math.max(diceInfo.count, Math.min(diceInfo.count * diceInfo.sides, val)); setDiceResults(prev => ({ ...prev, [index]: clampedVal.toString() })); } }
                     }}
-                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
-                    placeholder={`Enter result (${diceInfo.count}-${diceInfo.count * diceInfo.sides})`}
-                  />
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder={`Enter result (${diceInfo.count}-${diceInfo.count * diceInfo.sides})`} />
                 </div>
               );
             })}
             <div className="flex justify-end gap-4 mt-6">
               <Button variant="secondary" onClick={() => setShowDiceModal(false)}>Cancel</Button>
-              <Button
-                variant="primary"
-                onClick={handleConfirmDice}
-                disabled={!allDiceModalFilled}
-              >
+              <Button variant="primary" onClick={handleConfirmDice} disabled={!allDiceModalFilled}>
                 Confirm Rolls/Choices
               </Button>
             </div>

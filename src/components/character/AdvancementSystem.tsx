@@ -8,7 +8,6 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { useDice, RollHistoryEntry } from '../dice/DiceContext';
 import { fetchHeroicAbilities } from '../../lib/api/abilities';
 import { fetchSpells, fetchMagicSchools } from '../../lib/api/magic';
-// --- FIX: Removed unused parseSkillLevels import ---
 import { GraduationCap, AlertCircle, Check, Star, Info, Dices, BookOpen, ChevronLeft, ChevronRight, Loader2, Award, X, Zap, Wand2 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -42,37 +41,15 @@ const MAGE_SKILLS: Record<string, AttributeName> = {
   'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL',
 };
 
-const getBaseChance = (value: number): number => {
-  if (value <= 5) return 3;
-  if (value <= 8) return 4;
-  if (value <= 12) return 5;
-  if (value <= 15) return 6;
-  return 7;
-};
-
 const getSkillLevelFromStore = (skillName: string): number => {
   const currentStoreCharacter = useCharacterSheetStore.getState().character;
-  // --- FIX: Use skill_levels directly as it's now a guaranteed object ---
   const skillLevels = currentStoreCharacter?.skill_levels || {};
   return skillLevels?.[skillName] ?? 0;
 };
 
-
+// --- CORRECTED FUNCTION ---
+// This function now uses character.skill_levels as the single, definitive source of truth.
 function getCharacterSkillInfo(character: Character): SkillDisplayInfo[] {
-  const baseSkills = [
-    'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft',
-    'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 'Languages', 'Myths & Legends',
-    'Performance', 'Persuasion', 'Riding', 'Seamanship', 'Sleight of Hand', 'Sneaking',
-    'Spot Hidden', 'Swimming', 'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers',
-    'Knives', 'Slings', 'Spears', 'Staves', 'Swords'
-  ];
-
-  const allSkillNames = new Set([...(character.trainedSkills || []), ...baseSkills]);
-
-  if (!!character.magicSchool) {
-    Object.keys(MAGE_SKILLS).forEach(skill => allSkillNames.add(skill));
-  }
-
   const skillAttributeMap: Record<string, AttributeName> = {
     'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT',
     'Bluffing': 'CHA', 'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL',
@@ -85,33 +62,33 @@ function getCharacterSkillInfo(character: Character): SkillDisplayInfo[] {
   };
 
   const skillInfoList: SkillDisplayInfo[] = [];
-  // --- FIX: Use character.skill_levels directly ---
-  const skillLevels = character.skill_levels || {};
+  const characterSkills = character.skill_levels || {};
 
-  allSkillNames.forEach(skillName => {
+  // Iterate directly over the skills the character actually has.
+  // No fallbacks or special calculations are needed here.
+  for (const skillName in characterSkills) {
     const attribute = skillAttributeMap[skillName];
-    if (!attribute) return;
+    if (!attribute) {
+      console.warn(`[AdvancementSystem] Skill "${skillName}" exists on character but is missing from the attribute map.`);
+      continue; // Skip skills not in our master map to prevent errors.
+    }
 
+    const level = characterSkills[skillName];
     const isTrained = character.trainedSkills?.includes(skillName) ?? false;
-    const levelFromObject = skillLevels?.[skillName];
-
-    const currentLevel = levelFromObject ?? (() => {
-        const baseValue = character.attributes[attribute];
-        const baseChance = getBaseChance(baseValue);
-        return isTrained ? baseChance * 2 : baseChance;
-    })();
 
     skillInfoList.push({
       name: skillName,
       attribute: attribute,
-      level: currentLevel,
+      level: level,
       isTrained: isTrained,
     });
-  });
+  }
 
+  // Sort the final, accurate list for consistent UI.
   skillInfoList.sort((a, b) => a.name.localeCompare(b.name));
   return skillInfoList;
 }
+
 
 const checkAbilityRequirements = (ability: Ability, character: Character | null): boolean => {
   if (!character) return false;
@@ -119,7 +96,6 @@ const checkAbilityRequirements = (ability: Ability, character: Character | null)
 
   const requirements = ability.requirement;
   const characterAttributes = character.attributes;
-  // --- FIX: Use character.skill_levels directly ---
   const characterSkillLevels = character.skill_levels || {};
   
   const upperCaseAttributes = Object.fromEntries(
@@ -162,7 +138,6 @@ const checkAbilityRequirements = (ability: Ability, character: Character | null)
   return false;
 };
 
-// ... (getKnownSpellNamesUpper remains unchanged)
 const getKnownSpellNamesUpper = (characterSpells: CharacterSpells | null): string[] => {
   if (!characterSpells?.known) return [];
   return Array.from(new Set(characterSpells.known.map(s => s.toUpperCase())));
@@ -178,7 +153,6 @@ const checkSpellPrerequisite = (
   if (!prerequisiteString) return true;
 
   const knownSpellsUpper = getKnownSpellNamesUpper(character.spells);
-  // --- FIX: Use character.skill_levels directly ---
   const characterSkillLevels = character.skill_levels || {};
   const characterAttributes = character.attributes;
 
@@ -276,7 +250,6 @@ interface AdvancementSystemProps {
   onClose: () => void;
 }
 
-// ... (The rest of your AdvancementSystem component remains the same)
 export function AdvancementSystem({ character: initialCharacter, onClose }: AdvancementSystemProps) {
   const {
     character: storeCharacter,
@@ -368,7 +341,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
           let currentSpells = allSpells.length > 0 ? allSpells : await fetchSpells();
           if (allSpells.length === 0) setAllSpells(currentSpells);
           
-          const schoolObject = currentSchools.find(s => s.id === storeCharacter.magicSchool);
+          const schoolObject = currentSchools.find(s => s.id === (storeCharacter.magicSchool as { id: string }).id);
           const currentCharacterSchoolName = schoolObject ? schoolObject.name : null;
           setMagicSchoolName(currentCharacterSchoolName);
 
@@ -659,9 +632,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     onClose();
   };
   
-  // ... (The renderStepContent and JSX part of your component remains the same)
   const renderStepContent = () => {
-    // Use characterForInfo for checks where initialCharacter prop might be relevant
     if (!characterForInfo && step !== 'initial') { 
         return <LoadingSpinner text="Loading character data..." />;
     }
@@ -694,7 +665,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               id="advancementMarks"
               name="advancementMarks"
               min="1"
-              value={advancementMarks === 0 ? '' : advancementMarks} // Show empty for 0
+              value={advancementMarks === 0 ? '' : advancementMarks}
               onChange={(e) => setAdvancementMarks(parseInt(e.target.value, 10) || 0)}
               className="w-full p-2 border rounded focus:ring-blue-500 focus:border-blue-500"
               required

@@ -1,21 +1,17 @@
-// src/components/character/SkillsModal.tsx
-
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react'; // Removed useState and useEffect
 import { X } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
 import { useDice } from '../../dice/DiceContext';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { Button } from '../../shared/Button';
-import { supabase } from '../../../lib/supabase';
-import { MagicSchool } from '../../../types/magic';
+// No longer need supabase or MagicSchool type in this file
 
 interface SkillsModalProps {
   onClose: () => void;
 }
 
-// --- Constants and Helpers ---
-
+// --- Constants and Helpers (Unchanged) ---
 const skillAttributeMap: Record<string, AttributeName> = {
     'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT',
     'Bluffing': 'CHA', 'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL',
@@ -26,7 +22,6 @@ const skillAttributeMap: Record<string, AttributeName> = {
     'Knives': 'AGL', 'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR',
     'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL',
 };
-
 const baseSkills = [
     'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft',
     'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 'Languages', 'Myths & Legends',
@@ -37,7 +32,6 @@ const weaponSkillsList = [
     'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords'
 ];
 const allMageSkillsList = ['Mentalism', 'Animism', 'Elementalism'];
-
 const getBaseChance = (value: number): number => {
   if (value <= 5) return 3;
   if (value <= 8) return 4;
@@ -45,7 +39,6 @@ const getBaseChance = (value: number): number => {
   if (value <= 15) return 6;
   return 7;
 };
-
 const calculateFallbackLevel = (character: Character, skillName: string, attribute: AttributeName): number => {
     console.warn(`[SkillsModal] Calculating fallback level for ${skillName}.`);
     const isTrained = character.trainedSkills?.includes(skillName) ?? false;
@@ -57,30 +50,11 @@ const calculateFallbackLevel = (character: Character, skillName: string, attribu
 export function SkillsModal({ onClose }: SkillsModalProps) {
   const { toggleDiceRoller } = useDice();
   const { character } = useCharacterSheetStore();
-  const [magicSchools, setMagicSchools] = useState<MagicSchool[]>([]);
-  const [isLoadingSchools, setIsLoadingSchools] = useState(false);
-  const [errorSchools, setErrorSchools] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchSchools = async () => {
-      setIsLoadingSchools(true);
-      setErrorSchools(null);
-      try {
-        const { data, error } = await supabase
-          .from('magic_schools')
-          .select('id, name');
-
-        if (error) throw error;
-        setMagicSchools(data || []);
-      } catch (err: any) {
-        console.error("[SkillsModal] Error fetching magic schools:", err);
-        setErrorSchools("Failed to load magic schools data.");
-      } finally {
-        setIsLoadingSchools(false);
-      }
-    };
-    fetchSchools();
-  }, []);
+  // --- REFACTORED LOGIC ---
+  // No more fetching! We check if character.magicSchool is an object with a name.
+  const isMage = !!(character?.magicSchool && typeof character.magicSchool === 'object');
+  const characterSchoolName = isMage ? (character.magicSchool as { name: string }).name : null;
 
   if (!character) {
     return (
@@ -90,22 +64,15 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     );
   }
 
-  // --- FIX: The parsing logic is removed from this component ---
-  // The `character` object from the store now has a guaranteed `skill_levels` object.
-  // We can use `character.skill_levels` directly.
+  // Use the school name directly from the character object to find the magic skill.
+  const mageSkills = useMemo(() => {
+    if (!characterSchoolName) return [];
+    
+    return allMageSkillsList
+      .filter(name => name === characterSchoolName)
+      .map(name => ({ name, attr: skillAttributeMap[name] }));
+  }, [characterSchoolName]);
 
-  const characterSchoolId = character.magicSchool;
-  const isMage = !!characterSchoolId;
-
-  let characterSchoolName: string | null = null;
-  if (isMage && !isLoadingSchools && magicSchools.length > 0) {
-    const foundSchool = magicSchools.find(school => school.id === characterSchoolId);
-    if (foundSchool) {
-      characterSchoolName = foundSchool.name;
-    } else {
-      console.warn(`[SkillsModal] Could not find magic school name for ID: ${characterSchoolId}`);
-    }
-  }
 
   const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => {
     const conditionMap: Record<AttributeName, keyof Character['conditions']> = {
@@ -135,18 +102,9 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     .map(name => ({ name, attr: skillAttributeMap[name] }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const mageSkills = characterSchoolName
-    ? allMageSkillsList
-        .filter(name => name === characterSchoolName)
-        .map(name => ({ name, attr: skillAttributeMap[name] }))
-    : [];
-
   const renderSkillRow = (skill: { name: string; attr: AttributeName }) => {
     const isTrained = character.trainedSkills?.includes(skill.name) ?? false;
-    
-    // --- FIX: Directly use the skill_levels object from the character ---
     const skillValue = character.skill_levels?.[skill.name] ?? calculateFallbackLevel(character, skill.name, skill.attr);
-    
     const condition = getConditionForAttribute(skill.attr);
     const isAffected = character.conditions?.[condition] ?? false;
 
@@ -187,6 +145,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
             Click a skill to roll a d20 check. Roll ≤ Skill Level for success. 1 is Dragon (Crit Success), 20 is Demon (Crit Fail). Conditions apply Bane (roll 2d20, take highest/worst). Trained skills are bolded.
           </p>
         </div>
+        {/* Simplified Grid Logic */}
         <div className={`grid grid-cols-1 ${isMage ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 p-6 overflow-y-auto flex-grow`}>
           <div>
             <h3 className="font-bold mb-4 text-gray-700">General Skills</h3>
@@ -200,36 +159,17 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
               {weaponSkills.map(renderSkillRow)}
             </div>
           </div>
-          {isMage && (
+          {/* Simplified and robust magic section */}
+          {isMage && characterSchoolName && (
             <div>
-              {isLoadingSchools && (
-                <div className="text-center text-gray-500 p-4">
-                  <LoadingSpinner size="sm" /> Loading magic info...
-                </div>
-              )}
-              {errorSchools && !isLoadingSchools && (
-                <div className="text-center text-red-600 p-4 border border-red-200 bg-red-50 rounded">
-                  {errorSchools}
-                </div>
-              )}
-              {!isLoadingSchools && !errorSchools && characterSchoolName && (
-                <>
-                  <h3 className="font-bold mb-4 text-gray-700">Magic Skill ({characterSchoolName})</h3>
-                  <div className="space-y-1">
-                    {mageSkills.length > 0 ? (
-                      mageSkills.map(renderSkillRow)
-                    ) : (
-                      <p className="text-sm text-gray-500 italic px-2 py-1">No matching magic skill component found for {characterSchoolName}.</p>
-                    )}
-                  </div>
-                </>
-              )}
-              {!isLoadingSchools && !errorSchools && !characterSchoolName && (
-                <div>
-                  <h3 className="font-bold mb-4 text-gray-700">Magic Skill</h3>
-                  <p className="text-sm text-orange-600 italic px-2 py-1 bg-orange-50 border border-orange-200 rounded">Could not determine magic school name from ID ({characterSchoolId}).</p>
-                </div>
-              )}
+              <h3 className="font-bold mb-4 text-gray-700">Magic Skill ({characterSchoolName})</h3>
+              <div className="space-y-1">
+                {mageSkills.length > 0 ? (
+                  mageSkills.map(renderSkillRow)
+                ) : (
+                  <p className="text-sm text-gray-500 italic px-2 py-1">No matching magic skill found for "{characterSchoolName}".</p>
+                )}
+              </div>
             </div>
           )}
         </div>

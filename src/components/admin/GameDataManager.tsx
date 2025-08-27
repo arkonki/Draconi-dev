@@ -17,9 +17,9 @@ import { BioForm } from './Forms/BioForm';
 import { useGameData, DataCategory, GameDataEntry } from '../../hooks/useGameData';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { isSkillNameRequirement } from '../../types/character';
-import { MonsterData, ItemData, SpellData, AbilityData, KinData, ProfessionData, SkillData, BioData } from '../../types/gameData'; // Assuming you have these specific types
+import { MonsterData, ItemData, SpellData, AbilityData, KinData, ProfessionData, SkillData, BioData } from '../../types/gameData';
 
-// Define the categories and their display properties
+// CATEGORIES and formatAbilityRequirement are unchanged...
 const CATEGORIES: { id: DataCategory; label:string; icon: React.ElementType }[] = [
     { id: 'items', label: 'Items', icon: Sword },
     { id: 'spells', label: 'Spells', icon: Wand2 },
@@ -31,9 +31,7 @@ const CATEGORIES: { id: DataCategory; label:string; icon: React.ElementType }[] 
     { id: 'bio', label: 'Bio Options', icon: BookUser },
 ];
 
-// Helper function to format ability requirements for display - GUARANTEED TO RETURN STRING
 const formatAbilityRequirement = (requirement: any): string => {
-  // ... (original function is fine, no changes needed)
   try {
     if (isSkillNameRequirement(requirement)) {
       const skills = Object.entries(requirement);
@@ -58,7 +56,6 @@ const formatAbilityRequirement = (requirement: any): string => {
   }
 };
 
-// Type definition for a column in our data table
 interface ColumnDef<T extends GameDataEntry> {
   header: string;
   accessor: (entry: T) => React.ReactNode;
@@ -78,8 +75,8 @@ export function GameDataManager() {
   const {
     entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData, switchCategory, activeCategory
   } = useGameData('items');
-
-  // ANALYSIS & FIX: Encapsulated fetch logic into useCallback for stability.
+  
+  // Data fetching and handlers are mostly unchanged...
   const fetchItemCategories = useCallback(async () => {
     const { data, error } = await supabase.from('game_items').select('category');
     if (error) console.error("Error fetching item categories:", error);
@@ -106,7 +103,6 @@ export function GameDataManager() {
     else if (activeCategory === 'monsters') fetchMonsterCategories();
   }, [activeCategory, fetchItemCategories, fetchMagicSchools, fetchMonsterCategories]);
 
-  // ANALYSIS & FIX: Targeted sub-category refetching on success.
   const handleSaveSuccess = useCallback((savedEntry: GameDataEntry) => {
     setEditingEntry(null);
     setSaveError(null);
@@ -122,17 +118,17 @@ export function GameDataManager() {
   const handleDelete = useCallback(async (id: string) => {
     if (!id) return;
     await deleteData(activeCategory, id);
-    if (activeCategory === 'items') fetchItemCategories(); // Also consider removing from state instead of refetch
+    if (activeCategory === 'items') fetchItemCategories();
     if (activeCategory === 'monsters') fetchMonsterCategories();
   }, [activeCategory, deleteData, fetchItemCategories, fetchMonsterCategories]);
 
   const handleFieldChange = useCallback((field: string, value: any) => {
     setEditingEntry(prev => prev ? ({ ...prev, [field]: value }) : null);
   }, []);
-
+  
   const createNewEntry = useCallback(() => {
     setSaveError(null);
-    let newEntry: Partial<GameDataEntry> = { name: '' }; // Use Partial for easier construction
+    let newEntry: Partial<GameDataEntry> = { name: '' };
     switch (activeCategory) {
       case 'spells': newEntry = { ...newEntry, description: '', rank: 1, school_id: null, casting_time: '', range: '', duration: '', willpower_cost: 0 }; break;
       case 'items': newEntry = { ...newEntry, description: '', category: '', cost: 0, weight: 0 }; break;
@@ -145,10 +141,9 @@ export function GameDataManager() {
     }
     setEditingEntry(newEntry as GameDataEntry);
   }, [activeCategory]);
-
+  
   const renderForm = useCallback(() => {
     if (!editingEntry) return null;
-    // Using specific types would be better here, but this works
     switch (activeCategory) {
       case 'spells': return <SpellForm entry={editingEntry as any} onChange={handleFieldChange} magicSchools={magicSchools} />;
       case 'items': return <ItemForm entry={editingEntry as any} onChange={handleFieldChange} />;
@@ -162,6 +157,8 @@ export function GameDataManager() {
     }
   }, [editingEntry, activeCategory, handleFieldChange, magicSchools]);
 
+
+  // FIX: This filtering logic now correctly looks up the school name using the school_id.
   const filteredEntries = useMemo(() => entries.filter(entry => {
     const nameMatch = entry.name?.toLowerCase().includes(searchTerm.toLowerCase());
     if (!nameMatch) return false;
@@ -171,17 +168,20 @@ export function GameDataManager() {
         return (entry as ItemData).category?.toLowerCase() === selectedSubCategory.toLowerCase();
       }
       if (activeCategory === 'spells') {
-        // ANALYSIS & FIX: Correctly check the nested 'name' property of the magic_schools object.
-        const schoolName = (entry as SpellData).magic_schools?.name;
-        if (selectedSubCategory === 'General') return !schoolName;
-        return schoolName?.toLowerCase() === selectedSubCategory.toLowerCase();
+        const spell = entry as SpellData;
+        if (selectedSubCategory === 'General') {
+          return !spell.school_id; // A spell is General if it has no school_id
+        }
+        // Find the school in our state and compare its name
+        const school = magicSchools.find(s => s.id === spell.school_id);
+        return school?.name?.toLowerCase() === selectedSubCategory.toLowerCase();
       }
       if (activeCategory === 'monsters') {
         return (entry as MonsterData).category?.toLowerCase() === selectedSubCategory.toLowerCase();
       }
     }
     return true;
-  }), [entries, searchTerm, selectedSubCategory, activeCategory]);
+  }), [entries, searchTerm, selectedSubCategory, activeCategory, magicSchools]);
 
   const closeModal = useCallback(() => {
     setEditingEntry(null);
@@ -195,8 +195,7 @@ export function GameDataManager() {
     return [];
   }, [activeCategory, itemCategories, magicSchools, monsterCategories]);
 
-  // ANALYSIS & FIX: Refactored table column definitions into a configuration object.
-  // This makes the JSX much cleaner and the logic easier to manage.
+  // FIX: The table column definition now correctly looks up the school name from the school_id.
   const tableColumns = useMemo((): ColumnDef<GameDataEntry>[] => {
     const baseCols: ColumnDef<GameDataEntry>[] = [{ header: 'Name', accessor: e => e.name }];
     const commonTruncateClass = "text-sm text-gray-600 max-w-xs truncate";
@@ -204,10 +203,20 @@ export function GameDataManager() {
     switch (activeCategory) {
       case 'spells':
         return [...baseCols,
-          { header: 'School', accessor: e => (e as SpellData).magic_schools?.name || 'General' },
+          {
+            header: 'School',
+            accessor: (e) => {
+              const spell = e as SpellData;
+              if (!spell.school_id) return 'General';
+              // Find the school name from the magicSchools state array
+              const school = magicSchools.find(s => s.id === spell.school_id);
+              return school?.name || 'Unknown School'; // Fallback for safety
+            }
+          },
           { header: 'Rank', accessor: e => (e as SpellData).rank === 0 ? 'Trick' : `Rank ${(e as SpellData).rank}` },
           { header: 'WP Cost', accessor: e => `${(e as SpellData).willpower_cost} WP` },
         ];
+      // Other cases are unchanged...
       case 'items':
         return [...baseCols,
           { header: 'Category', accessor: e => (e as ItemData).category },
@@ -250,9 +259,9 @@ export function GameDataManager() {
       default:
         return baseCols;
     }
-  }, [activeCategory]);
+  }, [activeCategory, magicSchools]); // <-- Add magicSchools as a dependency for the tableColumns memo
 
-
+  // The rest of the JSX for rendering the component is unchanged.
   return (
     <div className="space-y-6">
       {/* Header and Controls */}
@@ -295,8 +304,7 @@ export function GameDataManager() {
           </div>
         )}
       </div>
-
-      {/* ANALYSIS & FIX: Corrected and refactored table structure */}
+      
       {loading && !entries.length ? (<p className="text-center py-4">Loading {activeCategory}...</p>) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px]">
