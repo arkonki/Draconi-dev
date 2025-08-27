@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Character, AttributeName } from '../../types/character'; // Import AttributeName
+import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
   Shield, Heart, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare
@@ -28,6 +28,7 @@ export function CharacterSheet({}: CharacterSheetProps) {
   // Get everything from the Zustand store
   const {
     character,
+    fetchCharacter, // <-- ADDED: Get the fetch function
     adjustStat,
     toggleCondition,
     performRest,
@@ -36,7 +37,7 @@ export function CharacterSheet({}: CharacterSheetProps) {
     error,
     isSaving,
     saveError,
-    setActiveStatusMessage, // Get the action to set status messages
+    setActiveStatusMessage,
   } = useCharacterSheetStore();
 
   // Local UI state
@@ -209,20 +210,25 @@ export function CharacterSheet({}: CharacterSheetProps) {
     );
   };
 
+  // --- FIX #1: UPDATED canCastSpells LOGIC ---
   const canCastSpells = () => {
-    const trainedSkillsArray = Array.isArray(character?.trainedSkills) ? character.trainedSkills : [];
+    // Get the names of all skills the character has a level in.
+    const knownSkillNames = Object.keys(character?.skill_levels || {});
+
     return (
+      // Keep the original check for Mage professions
       character?.profession?.endsWith('Mage') ||
-      trainedSkillsArray.some(skillName =>
-        typeof skillName === 'string' && ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(skillName.toUpperCase())
+      // Also check if any of the character's known skills is a magic school
+      knownSkillNames.some(skillName =>
+        ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(skillName.toUpperCase())
       )
     );
   };
 
   const currentHP = character?.current_hp ?? 0;
   const currentWP = character?.current_wp ?? 0;
-  const maxHP = character?.max_hp ?? (character?.attributes?.CON ?? 10); // Fallback if max_hp isn't set directly
-  const maxWP = character?.max_wp ?? (character?.attributes?.WIL ?? 10);   // Fallback if max_wp isn't set directly
+  const maxHP = character?.max_hp ?? (character?.attributes?.CON ?? 10);
+  const maxWP = character?.max_wp ?? (character?.attributes?.WIL ?? 10);
 
 
   return (
@@ -405,9 +411,15 @@ export function CharacterSheet({}: CharacterSheetProps) {
       )}
 
       {showAdvancementSystem && (
+        // --- FIX #2: UPDATED onClose HANDLER ---
         <AdvancementSystem
           character={character}
-          onClose={() => setShowAdvancementSystem(false)}
+          onClose={() => {
+            setShowAdvancementSystem(false);
+            if (character?.id && character?.user_id) {
+              fetchCharacter(character.id, character.user_id);
+            }
+          }}
         />
       )}
 

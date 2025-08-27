@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells, GameItem } from '../types/character';
+import { Spell, MagicSchool } from '../types/magic'; // Ensure Spell and MagicSchool are imported
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
 import { parseItemString } from '../lib/inventoryUtils';
@@ -60,7 +61,8 @@ interface CharacterSheetState {
   updateSkillLevel: (skillName: string, level: number) => Promise<void>;
   increaseSkillLevel: (skillName: string) => Promise<void>;
   addHeroicAbility: (abilityName: string) => Promise<void>;
-  learnSpell: (spellName: string) => Promise<void>;
+  learnSpell: (spell: Spell) => Promise<void>; // MODIFIED
+  addMagicSchool: (school: MagicSchool, level: number) => Promise<void>;
   setSkillUnderStudy: (skillName: string | null) => Promise<void>;
   markSkillThisSession: (skillName: string) => void;
   clearMarkedSkillsThisSession: () => void;
@@ -92,24 +94,15 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   fetchCharacter: async (id, userId) => {
     set({ character: null, isLoading: true, error: null, saveError: null });
     try {
-      // Fetch supporting data in parallel for efficiency
       await Promise.all([
         get()._loadGameItems(),
         get()._loadAllHeroicAbilities()
       ]);
-
-      // Use the abstracted API function, which is now fixed
       const characterData = await fetchCharacterById(id, userId);
-
       if (!characterData) {
         throw new Error(`Character with ID ${id} not found or you do not have permission to view it.`);
       }
-
-      // The data mapping is handled by `mapCharacterData` in the API file,
-      // so we can set the character directly without any further processing.
       set({ character: characterData, isLoading: false });
-
-      // After setting the character, check for an active encounter
       if (characterData?.party_id) {
           get().fetchActiveEncounter(characterData.party_id, characterData.id);
       } else {
@@ -137,20 +130,15 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       set({ saveError: errorMsg });
       throw new Error(errorMsg);
     }
-
     set({ isSaving: true, saveError: null });
-    
     try {
       await updateCharacter(currentCharacter.id, updates);
-
       const newCharacterState: Character = {
         ...currentCharacter,
         ...updates,
         updated_at: new Date().toISOString(), 
       };
-
       set({ character: newCharacterState, isSaving: false });
-
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
@@ -339,15 +327,64 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-  learnSpell: async (spellName) => {
+  // --- REPLACED learnSpell function ---
+  learnSpell: async (spell) => {
     const character = get().character;
     if (!character) return;
-    const currentSpells = character.spells ?? { known: [] };
-    const allKnownSpells = currentSpells.known || [];
-    if (!allKnownSpells.includes(spellName)) {
-      const newSpells: CharacterSpells = { ...currentSpells, known: [...allKnownSpells, spellName] };
-      await get()._saveCharacter({ spells: newSpells });
+
+    const currentSpells = character.spells ?? { school: { name: null, spells: [] }, general: [] };
+    
+    if (!currentSpells.school) {
+        const { data: schoolData } = await supabase
+            .from('magic_schools')
+            .select('name')
+            .eq('id', character.magic_school)
+            .single();
+        currentSpells.school = { name: schoolData?.name ?? null, spells: [] };
     }
+    
+    let updatedSpells;
+
+    if (spell.school_id) {
+        const schoolSpells = currentSpells.school.spells || [];
+        if (!schoolSpells.includes(spell.name)) {
+            updatedSpells = {
+                ...currentSpells,
+                school: {
+                    ...currentSpells.school,
+                    spells: [...schoolSpells, spell.name]
+                }
+            };
+        }
+    } else {
+        const generalSpells = currentSpells.general || [];
+        if (!generalSpells.includes(spell.name)) {
+            updatedSpells = {
+                ...currentSpells,
+                general: [...generalSpells, spell.name]
+            };
+        }
+    }
+    
+    if (updatedSpells) {
+        await get()._saveCharacter({ spells: updatedSpells });
+    }
+  },
+
+  addMagicSchool: async (school, level) => {
+    const character = get().character;
+    if (!character) return;
+    const newSkillLevels = {
+      ...character.skill_levels,
+      [school.name]: level,
+    };
+    const updates: Partial<Character> = {
+      skill_levels: newSkillLevels,
+    };
+    if (!character.magic_school) {
+      updates.magic_school = school.id;
+    }
+    await get()._saveCharacter(updates);
   },
 
   setSkillUnderStudy: async (skillName) => {
