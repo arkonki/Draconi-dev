@@ -1,17 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-// ... other imports (keep them as they are)
 import { MessageSquare, Dices, Loader2, X, Heart } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 
-
-// The CombatantCard component does not need any changes.
+// CombatantCard Sub-Component
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
-  // ... Paste the full CombatantCard code from the previous version here ...
   const { setInitiativeForCombatant, isSaving } = useCharacterSheetStore();
-  const [initiativeValue, setInitiativeValue] = React.useState<string>(combatant.initiative_roll?.toString() ?? '');
+  const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
+
   const handleSetInitiative = () => {
     const initiative = parseInt(initiativeValue, 10);
     if (!isNaN(initiative) && initiative >= 1 && initiative <= 10) {
@@ -20,10 +18,13 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
       alert("Please enter a number between 1 and 10.");
     }
   };
-  React.useEffect(() => {
+
+  useEffect(() => {
     setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
   }, [combatant.initiative_roll]);
+
   const isPlayer = !!combatant.character_id;
+
   return (
     <div className={`p-3 rounded-lg border-l-4 ${isPlayer ? 'border-blue-500 bg-blue-50' : 'border-red-500 bg-red-50'}`}>
       <div className="flex justify-between items-start">
@@ -46,7 +47,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   );
 };
 
-
+// Main View Component
 export function EncounterChatView() {
   const {
     character,
@@ -56,24 +57,23 @@ export function EncounterChatView() {
     fetchActiveEncounter,
   } = useCharacterSheetStore();
 
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
-  // --- NEW DIAGNOSTIC LOG ---
-  // This log will run every time the component renders.
-  console.log('EncounterChatView Render. Character from store:', character);
+  // This log will run every time the component re-renders, showing us the data as it arrives.
+  console.log('EncounterChatView Render State:', { character });
 
-  // --- Real-Time Listener ---
-  React.useEffect(() => {
+  // Real-Time Listener Effect
+  useEffect(() => {
+    // This check now correctly waits for the character object to be loaded from the store.
     if (!character?.party_id || !character?.id) {
-      // This is the gate that is likely stopping us.
+      console.log('Subscription waiting for character with party_id...');
       return;
     }
 
-    // The rest of this hook is from the previous correct version.
     const partyId = character.party_id;
     const characterId = character.id;
 
-    console.log(`Attempting to subscribe to real-time updates with Party ID: ${partyId}`);
+    console.log(`Attempting to subscribe to real-time updates for Party ID: ${partyId}`);
 
     const channel = supabase.channel(`party-encounter-updates-${partyId}`);
     
@@ -98,19 +98,21 @@ export function EncounterChatView() {
       console.log(`Unsubscribing from party updates: ${partyId}`);
       supabase.removeChannel(channel);
     };
-  }, [character?.party_id, character?.id, fetchActiveEncounter]);
+  }, [character, fetchActiveEncounter]); // Dependency array now correctly watches the whole character object.
 
 
-  // --- The rest of the component's JSX is unchanged ---
-  if (!character?.party_id) {
-    // This is a failsafe, but our useEffect already checks this.
+  // --- Render Logic ---
+
+  if (!character) {
+    // Render nothing until the character object is at least loaded.
     return null;
   }
-  
+
   const isInActiveEncounter = activeEncounter?.status === 'active';
   const buttonColorClass = isInActiveEncounter ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700';
   const buttonText = isInActiveEncounter ? 'Encounter Active' : 'Party Chat';
-  
+  const allInitiativesSet = isInActiveEncounter && encounterCombatants.every(c => c.initiative_roll !== null);
+
   return (
     <>
       <button className={`fixed bottom-4 right-4 p-4 rounded-full shadow-lg text-white transition-colors duration-200 z-40 ${buttonColorClass}`} onClick={() => setIsOpen(!isOpen)} aria-label={buttonText}>
@@ -134,7 +136,7 @@ export function EncounterChatView() {
                      <p className="text-sm">Round: <span className="font-medium">{activeEncounter.current_round}</span></p>
                   </div>
                   <div className="border-t pt-4">
-                    <h4 className="font-semibold mb-2">Turn Order</h4>
+                    <h4 className="font-semibold mb-2">{allInitiativesSet ? 'Turn Order' : 'Set Initiative'}</h4>
                     <div className="space-y-3">
                       {encounterCombatants.length > 0 ? (
                         encounterCombatants.map(combatant => <CombatantCard key={combatant.id} combatant={combatant} />)
