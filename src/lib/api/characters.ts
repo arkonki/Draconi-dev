@@ -5,7 +5,7 @@ import { Character } from '../../types/character';
 
 const CHARACTER_SELECT_QUERY = `*, magic_school:magic_schools!left(*)`;
 
-// Helper function to map raw character data to the strict Character type
+// This helper function is excellent. We will continue to use it.
 export const mapCharacterData = (char: any): Character => {
   const defaultAttributes = { STR: 10, AGL: 10, INT: 10, CON: 10, WIL: 10, CHA: 10 };
   const dbAttributes = char.attributes || {};
@@ -70,6 +70,7 @@ export const mapCharacterData = (char: any): Character => {
     corruption: char.corruption ?? 0,
     created_at: char.created_at,
     updated_at: char.updated_at,
+    // The party_id will now be correctly included from our database function
     party_id: char.party_id,
     party_info: char.party_info,
   };
@@ -77,6 +78,7 @@ export const mapCharacterData = (char: any): Character => {
   return character;
 };
 
+// This function for fetching the list of characters remains unchanged.
 export async function fetchCharacters(userId: string | undefined): Promise<Character[]> {
   if (!userId) return [];
   const { data, error } = await supabase
@@ -89,29 +91,36 @@ export async function fetchCharacters(userId: string | undefined): Promise<Chara
   return (data || []).map(mapCharacterData);
 }
 
-export async function fetchCharacterById(id: string | undefined): Promise<Character | null> {
-  // The userId is no longer needed for this query, as RLS will handle security.
-  if (!id) return null;
-
-  // --- FIX: Removed the .eq('user_id', userId) check ---
-  // The application should just ask for the character. RLS will decide if the user has permission.
-  const { data, error } = await supabase
-    .from('characters')
-    .select(CHARACTER_SELECT_QUERY)
-    .eq('id', id)
-    .single();
-  // --- End of Fix ---
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw new Error(error.message || 'Failed to fetch character');
+// --- THIS IS THE MODIFIED FUNCTION ---
+// It now calls the database RPC function to get the character WITH their party_id.
+export async function fetchCharacterById(id: string, userId: string): Promise<Character | null> {
+  if (!id || !userId) {
+    console.warn("fetchCharacterById requires both character ID and user ID.");
+    return null;
   }
 
-  return data ? mapCharacterData(data) : null;
+  try {
+    const { data, error } = await supabase.rpc('get_character_details_with_party', {
+      p_character_id: id,
+      p_user_id: userId,
+    });
+
+    if (error) {
+      console.error('Error fetching character via RPC:', error);
+      // Don't throw, just return null so the UI can handle it gracefully.
+      return null;
+    }
+
+    // The data from the RPC is a single JSON object that our mapCharacterData can handle.
+    return data ? mapCharacterData(data) : null;
+  } catch (err) {
+    console.error("Unexpected error in fetchCharacterById:", err);
+    return null;
+  }
 }
 
+// The updateCharacter function remains unchanged.
 export async function updateCharacter(characterId: string, updates: Partial<Character>): Promise<Character | null> {
-  // ... (rest of the file is unchanged)
   const dbUpdates: Record<string, any> = { ...updates };
   if (dbUpdates.heroic_abilities) {
     dbUpdates.heroic_ability = dbUpdates.heroic_abilities;
@@ -136,6 +145,7 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
   return data ? mapCharacterData(data) : null;
 }
 
+// The deleteCharacters function remains unchanged.
 export async function deleteCharacters(characterIds: string[]): Promise<void> {
   if (characterIds.length === 0) return;
   const { error } = await supabase
