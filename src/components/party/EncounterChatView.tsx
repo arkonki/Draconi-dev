@@ -6,6 +6,8 @@ import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 
 // CombatantCard Sub-Component
+// This component is well-structured and does not need changes.
+// Its local state will automatically update when its props change from the store.
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, isSaving } = useCharacterSheetStore();
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
@@ -19,6 +21,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
     }
   };
 
+  // This effect correctly syncs the input field if the data changes from the server
   useEffect(() => {
     setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
   }, [combatant.initiative_roll]);
@@ -59,14 +62,11 @@ export function EncounterChatView() {
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // This log will run every time the component re-renders, showing us the data as it arrives.
-  console.log('EncounterChatView Render State:', { character });
-
-  // Real-Time Listener Effect
+  // --- ⭐️ FIX: REAL-TIME LISTENER EFFECT ---
+  // This hook is now updated to listen to changes on BOTH the encounter
+  // itself and the individual combatants within it.
   useEffect(() => {
-    // This check now correctly waits for the character object to be loaded from the store.
     if (!character?.party_id || !character?.id) {
-      console.log('Subscription waiting for character with party_id...');
       return;
     }
 
@@ -74,44 +74,65 @@ export function EncounterChatView() {
     const characterId = character.id;
 
     console.log(`Attempting to subscribe to real-time updates for Party ID: ${partyId}`);
-
     const channel = supabase.channel(`party-encounter-updates-${partyId}`);
-    
+
+    // LISTENER 1: For changes to the encounter itself (e.g., round change, status change)
     channel.on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'encounters', filter: `party_id=eq.${partyId}` },
-        (payload) => {
-          console.log('%cREAL-TIME UPDATE RECEIVED (Encounters)', 'color: lightgreen; font-weight: bold;', payload);
-          fetchActiveEncounter(partyId, characterId);
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('%cSuccessfully subscribed to real-time channel!', 'color: green; font-weight: bold;');
-        }
-        if (status === 'CHANNEL_ERROR') {
-          console.error('%cCHANNEL_ERROR: Failed to subscribe.', 'color: red; font-weight: bold;', err);
-        }
-      });
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'encounters', filter: `party_id=eq.${partyId}` },
+      (payload) => {
+        console.log('%cREAL-TIME UPDATE (Encounters): Refetching encounter.', 'color: cyan;', payload);
+        fetchActiveEncounter(partyId, characterId);
+      }
+    );
+
+    // LISTENER 2: For changes to the combatants (HP, initiative, conditions, etc.)
+    // This is the key fix for your issue.
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'encounter_combatants',
+        // This advanced filter listens for changes to combatants
+        // whose encounter_id belongs to an encounter for the current party.
+        filter: `encounter_id=in.(select id from encounters where party_id=eq.${partyId})`
+      },
+      (payload) => {
+        console.log('%cREAL-TIME UPDATE (Combatants): Refetching encounter.', 'color: lightgreen;', payload);
+        // We call the same function, as it correctly re-fetches all encounter data.
+        fetchActiveEncounter(partyId, characterId);
+      }
+    );
+
+    channel.subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('%cSuccessfully subscribed to real-time channel!', 'color: green; font-weight: bold;');
+      }
+      if (status === 'CHANNEL_ERROR') {
+        console.error('%cCHANNEL_ERROR: Failed to subscribe.', 'color: red; font-weight: bold;', err);
+      }
+    });
 
     return () => {
       console.log(`Unsubscribing from party updates: ${partyId}`);
       supabase.removeChannel(channel);
     };
-  }, [character, fetchActiveEncounter]); // Dependency array now correctly watches the whole character object.
+  }, [character, fetchActiveEncounter]);
 
 
-  // --- Render Logic ---
+  // --- Render Logic (No changes needed here) ---
 
   if (!character) {
-    // Render nothing until the character object is at least loaded.
     return null;
   }
 
   const isInActiveEncounter = activeEncounter?.status === 'active';
   const buttonColorClass = isInActiveEncounter ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700';
   const buttonText = isInActiveEncounter ? 'Encounter Active' : 'Party Chat';
-  const allInitiativesSet = isInActiveEncounter && encounterCombatants.every(c => c.initiative_roll !== null);
+  // Sort combatants by initiative for display
+  const sortedCombatants = [...encounterCombatants].sort((a, b) => (b.initiative_roll ?? 0) - (a.initiative_roll ?? 0));
+  const allInitiativesSet = isInActiveEncounter && sortedCombatants.every(c => c.initiative_roll !== null);
 
   return (
     <>
@@ -138,8 +159,8 @@ export function EncounterChatView() {
                   <div className="border-t pt-4">
                     <h4 className="font-semibold mb-2">{allInitiativesSet ? 'Turn Order' : 'Set Initiative'}</h4>
                     <div className="space-y-3">
-                      {encounterCombatants.length > 0 ? (
-                        encounterCombatants.map(combatant => <CombatantCard key={combatant.id} combatant={combatant} />)
+                      {sortedCombatants.length > 0 ? (
+                        sortedCombatants.map(combatant => <CombatantCard key={combatant.id} combatant={combatant} />)
                       ) : (
                         <p className="text-sm text-gray-500">No combatants in this encounter yet.</p>
                       )}
