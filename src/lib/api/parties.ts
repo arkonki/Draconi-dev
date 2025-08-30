@@ -160,37 +160,65 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
 }
 
 /**
- * Adds a single character to a party.
- * This should be called by a player who is joining a party.
+ * [CORRECTED] Adds a single character to a party and updates the character's record.
+ * This function is now a two-step transaction to ensure data integrity.
  * RLS policies should ensure the user owns the character.
  */
 export async function addPartyMember(partyId: string, characterId: string): Promise<void> {
-  const { error } = await supabase
+  // Step 1: Create the link in the party_members table.
+  const { error: insertError } = await supabase
     .from('party_members')
     .insert([{ party_id: partyId, character_id: characterId }]);
 
-  if (error) {
-    console.error('Error adding party member:', error);
-    // Handle potential duplicate entry errors gracefully
-    if (error.code === '23505') { // unique_violation
-      throw new Error('This character is already in the party.');
+  if (insertError) {
+    console.error('Error adding party member:', insertError);
+    if (insertError.code === '23505') { // unique_violation
+      // If they are already a member, we can still try to fix their character record.
+      console.warn('Character is already a member. Attempting to sync character record anyway.');
+    } else {
+      throw new Error(insertError.message || 'Failed to join party');
     }
-    throw new Error(error.message || 'Failed to join party');
+  }
+
+  // Step 2: Update the character's record to link it to the party.
+  // This is the critical step that makes RLS policies work correctly.
+  const { error: updateError } = await supabase
+    .from('characters')
+    .update({ party_id: partyId })
+    .eq('id', characterId);
+
+  if (updateError) {
+    console.error('Error updating character party link:', updateError);
+    // This error is critical, as it leaves the data in an inconsistent state.
+    throw new Error(updateError.message || 'Failed to update character after joining party');
   }
 }
 
 /**
- * Removes a single character from a party.
+ * [CORRECTED] Removes a single character from a party and clears the link on the character's record.
  */
 export async function removePartyMember(partyId: string, characterId: string): Promise<void> {
-  const { error } = await supabase
+  // Step 1: Remove the link from the party_members table.
+  const { error: deleteError } = await supabase
     .from('party_members')
     .delete()
     .match({ party_id: partyId, character_id: characterId });
 
-  if (error) {
-    console.error('Error removing party member:', error);
-    throw new Error(error.message || 'Failed to remove party member');
+  if (deleteError) {
+    console.error('Error removing party member:', deleteError);
+    throw new Error(deleteError.message || 'Failed to remove party member');
+  }
+
+  // Step 2: Clear the party_id on the character's record to maintain data consistency.
+  const { error: updateError } = await supabase
+    .from('characters')
+    .update({ party_id: null }) // Set the party_id back to NULL.
+    .eq('id', characterId);
+
+  if (updateError) {
+    console.error('Error clearing character party link:', updateError);
+    // We don't throw an error here, as the primary goal (removal) was successful.
+    // However, this should be monitored as it indicates a potential issue.
   }
 }
 

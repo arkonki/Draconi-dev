@@ -50,7 +50,6 @@ const magicSkillNames = ['Mentalism', 'Animism', 'Elementalism'];
 
 export function CharacterCreationWizard() {
   const { user } = useAuth();
-  // We still use 'character' for validation checks, which is fine as it triggers re-renders for the 'canProceed' logic.
   const { step, setStep, character, resetCharacter } = useCharacterCreation();
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -68,7 +67,6 @@ export function CharacterCreationWizard() {
   }, []);
 
   const canProceed = () => {
-    // ... canProceed logic remains the same
     switch (step) {
       case 0: return !!character.kin && character.kinAbilityNames !== undefined && character.kinAbilityNames.length > 0;
       case 1:
@@ -80,7 +78,7 @@ export function CharacterCreationWizard() {
         if (character.magicSchool) return character.spells?.general && character.spells.general.length >= 3;
         return true;
       case 5: return character.trainedSkills && character.trainedSkills.length >= 6 && !!character.attributes;
-      case 6: return character.startingEquipment && character.startingEquipment.items.length >= 0; // This now works correctly
+      case 6: return character.startingEquipment && character.startingEquipment.items.length >= 0;
       case 7:
         return !!character.appearance && character.appearance.trim().length > 0 &&
                !!character.mementos && character.mementos.length > 0 &&
@@ -91,15 +89,12 @@ export function CharacterCreationWizard() {
   };
 
   const handleSave = async () => {
-    // --- FIX: Get the absolute latest character state directly from the store ---
-    // This avoids using the potentially stale 'character' object from the component's render scope.
     const finalCharacterState = useCharacterCreation.getState().character;
 
     if (!user || !finalCharacterState.attributes) {
       setError('User or attributes missing.');
       return;
     }
-    // We can still use 'canProceed' as it's driven by the reactive 'character' object
     if (!canProceed()) {
       setError('Please complete all required fields for the final step before saving.');
       return;
@@ -134,7 +129,8 @@ export function CharacterCreationWizard() {
         ...(finalCharacterState.professionHeroicAbilityName ? [finalCharacterState.professionHeroicAbilityName] : [])
       ].filter(Boolean);
 
-      // --- FIX: Build the final data object using the fresh `finalCharacterState` ---
+      // --- [THE FIX] ---
+      // Build the final data object, ensuring all derived stats are included.
       const characterData = {
         user_id: user.id,
         name: finalCharacterState.name?.trim(),
@@ -151,8 +147,14 @@ export function CharacterCreationWizard() {
         spells: finalCharacterState.spells || null,
         starting_equipment: finalCharacterState.startingEquipment || { items: [], money: { gold: 0, silver: 0, copper: 0 } },
         experience: { marked_skills: [] },
+        
+        // --- DERIVED STATS ---
+        max_hp: finalCharacterState.attributes.CON,
         current_hp: finalCharacterState.attributes.CON,
+        max_wp: finalCharacterState.attributes.WIL,
         current_wp: finalCharacterState.attributes.WIL,
+        
+        // --- OTHER FIELDS ---
         heroic_ability: combinedHeroicAbilities,
         memento: finalCharacterState.mementos?.[0] || null,
         weak_spot: finalCharacterState.weak_spot || null,
