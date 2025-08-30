@@ -6,16 +6,20 @@ import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parti
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
-import { Users, Sword, Trash2, UserX, Link as LinkIcon, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus } from 'lucide-react';
+// --- MODIFICATION: Added 'Award' icon ---
+import { Users, Sword, Trash2, UserX, Link as LinkIcon, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Award } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyNotes } from '../components/party/PartyNotes';
 import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
+// --- MODIFICATION: Import the new component ---
+import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
 
-type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter';
+// --- MODIFICATION: Add 'sessionEnd' to the Tab type ---
+type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'sessionEnd';
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -76,7 +80,7 @@ export function PartyView() {
   const isPartyOwner = user && party && user.id === party.created_by && isDM();
   const joinLink = party?.invite_code
   ? `${window.location.origin}/party/join/${party.invite_code}`
-  : ''; // If the party data isn't loaded yet, the link is empty
+  : '';
 
   if (isLoading) {
     return <div className="flex justify-center items-center p-8"><LoadingSpinner size="lg" /></div>;
@@ -90,66 +94,65 @@ export function PartyView() {
     return <div className="p-8"><ErrorMessage message="Party not found." /></div>;
   }
 
-  const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
+  // --- MODIFICATION: Add the new tab to the array ---
+  const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Members', icon: Users },
     { id: 'notes', label: 'Notes', icon: Notebook },
     { id: 'tasks', label: 'Tasks', icon: ClipboardList },
     { id: 'inventory', label: 'Inventory', icon: Backpack },
     { id: 'encounter', label: 'Encounter', icon: Swords },
+    { id: 'sessionEnd', label: 'Session End', icon: Award, dmOnly: true },
   ];
+
+  const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isPartyOwner);
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6">
       <div className="bg-white shadow-lg rounded-xl">
         <div className="p-6 border-b border-gray-200">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{party.name}</h1>
-              <p className="text-gray-500 mt-1">A band of brave adventurers.</p>
+            {/* ... (This section is unchanged) ... */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">{party.name}</h1>
+                <p className="text-gray-500 mt-1">A band of brave adventurers.</p>
+              </div>
+              {isPartyOwner && (
+                <div className="mt-4 md:mt-0">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger>
+                      <Button variant="outline" size="icon" aria-label="Party Actions">
+                        <MoreVertical className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem onSelect={() => setIsInviteVisible(prev => !prev)}>
+                        <UserPlus className="w-4 h-4" />
+                        Invite Player
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-500 hover:text-red-700 hover:bg-red-50 focus:bg-red-50">
+                        <Trash2 className="w-4 h-4" />
+                        Delete Party
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
             </div>
-            {isPartyOwner && (
-              <div className="mt-4 md:mt-0">
-                <DropdownMenu>
-                  <DropdownMenuTrigger>
-                    <Button variant="outline" size="icon" aria-label="Party Actions">
-                      <MoreVertical className="h-5 w-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem onSelect={() => setIsInviteVisible(prev => !prev)}>
-                      <UserPlus className="w-4 h-4" />
-                      Invite Player
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-500 hover:text-red-700 hover:bg-red-50 focus:bg-red-50">
-                      <Trash2 className="w-4 h-4" />
-                      Delete Party
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+            {isInviteVisible && isPartyOwner && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                <h3 className="font-semibold text-blue-800">Share this link to invite players:</h3>
+                <div className="flex items-center gap-2 mt-2 bg-white p-2 rounded-md">
+                  <input type="text" readOnly value={joinLink} className="w-full bg-transparent text-gray-700 focus:outline-none"/>
+                  <CopyButton textToCopy={joinLink} />
+                </div>
               </div>
             )}
-          </div>
-
-          {isInviteVisible && isPartyOwner && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
-              <h3 className="font-semibold text-blue-800">Share this link to invite players:</h3>
-              <div className="flex items-center gap-2 mt-2 bg-white p-2 rounded-md">
-                <input
-                  type="text"
-                  readOnly
-                  value={joinLink}
-                  className="w-full bg-transparent text-gray-700 focus:outline-none"
-                />
-                <CopyButton textToCopy={joinLink} />
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-6 px-6" aria-label="Tabs">
-            {tabs.map((tab) => (
+          <nav className="-mb-px flex space-x-6 px-6 overflow-x-auto" aria-label="Tabs">
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -168,6 +171,7 @@ export function PartyView() {
 
         <div className="p-6">
           {activeTab === 'members' && (
+            // ... (Members tab content is unchanged) ...
             <div className="space-y-4">
               {party.members.length > 0 ? (
                 party.members.map((member) => (
@@ -183,21 +187,10 @@ export function PartyView() {
                     </div>
                     {isPartyOwner && (
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/character/${member.id}`)}
-                          aria-label={`View ${member.name}'s sheet`}
-                          icon={FileText}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/character/${member.id}`)} aria-label={`View ${member.name}'s sheet`} icon={FileText}>
                           View Sheet
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRemoveMember(member.id!)}
-                          aria-label={`Remove ${member.name}`}
-                        >
+                        <Button variant="ghost" size="icon" onClick={() => handleRemoveMember(member.id!)} aria-label={`Remove ${member.name}`}>
                           <UserX className="w-5 h-5 text-red-500" />
                         </Button>
                       </div>
@@ -213,32 +206,14 @@ export function PartyView() {
           {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={isPartyOwner} />}
           {activeTab === 'inventory' && <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />}
           {activeTab === 'encounter' && <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />}
+          {/* --- MODIFICATION: Render the new component when its tab is active --- */}
+          {activeTab === 'sessionEnd' && <SessionEndCheatsheet members={party.members} partyId={partyId!} />}
         </div>
       </div>
 
-      <ConfirmationDialog
-        isOpen={dialogOpen === 'removeMember'}
-        onClose={() => setDialogOpen(null)}
-        onConfirm={confirmRemoveMember}
-        title="Remove Member"
-        description={`Are you sure you want to remove this character from the party? This action cannot be undone.`}
-        confirmText="Remove"
-        isDestructive={true}
-        isLoading={removeMemberMutation.isPending}
-        icon={<UserX className="w-6 h-6 text-red-500" />}
-      />
-
-      <ConfirmationDialog
-        isOpen={dialogOpen === 'deleteParty'}
-        onClose={() => setDialogOpen(null)}
-        onConfirm={confirmDeleteParty}
-        title="Delete Party"
-        description="Are you sure you want to permanently delete this party? All members will be removed. This action cannot be undone."
-        confirmText="Delete"
-        isDestructive={true}
-        isLoading={deletePartyMutation.isPending}
-        icon={<ShieldAlert className="w-6 h-6 text-red-500" />}
-      />
+      {/* ... (Confirmation dialogs are unchanged) ... */}
+      <ConfirmationDialog isOpen={dialogOpen === 'removeMember'} onClose={() => setDialogOpen(null)} onConfirm={confirmRemoveMember} title="Remove Member" description={`Are you sure you want to remove this character from the party? This action cannot be undone.`} confirmText="Remove" isDestructive={true} isLoading={removeMemberMutation.isPending} icon={<UserX className="w-6 h-6 text-red-500" />}/>
+      <ConfirmationDialog isOpen={dialogOpen === 'deleteParty'} onClose={() => setDialogOpen(null)} onConfirm={confirmDeleteParty} title="Delete Party" description="Are you sure you want to permanently delete this party? All members will be removed. This action cannot be undone." confirmText="Delete" isDestructive={true} isLoading={deletePartyMutation.isPending} icon={<ShieldAlert className="w-6 h-6 text-red-500" />}/>
     </div>
   );
 }

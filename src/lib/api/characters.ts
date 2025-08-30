@@ -5,7 +5,6 @@ import { Character } from '../../types/character';
 
 const CHARACTER_SELECT_QUERY = `*, magic_school:magic_schools!left(*)`;
 
-// This helper function is excellent. We will continue to use it.
 export const mapCharacterData = (char: any): Character => {
   const defaultAttributes = { STR: 10, AGL: 10, INT: 10, CON: 10, WIL: 10, CHA: 10 };
   const dbAttributes = char.attributes || {};
@@ -18,8 +17,12 @@ export const mapCharacterData = (char: any): Character => {
     WIL: dbAttributes.WIL ?? defaultAttributes.WIL,
   };
 
-  const max_hp = attributes.CON;
-  const max_wp = attributes.WIL;
+  // --- THIS IS THE FIX ---
+  // We now TRUST the max_hp/max_wp from the database first.
+  // We only fall back to calculating from attributes if the database columns are null.
+  const max_hp = char.max_hp ?? attributes.CON;
+  const max_wp = char.max_wp ?? attributes.WIL;
+  // --- END OF FIX ---
 
   let skillLevelsData: Record<string, number> = {};
   if (typeof char.skill_levels === 'string') {
@@ -70,7 +73,6 @@ export const mapCharacterData = (char: any): Character => {
     corruption: char.corruption ?? 0,
     created_at: char.created_at,
     updated_at: char.updated_at,
-    // The party_id will now be correctly included from our database function
     party_id: char.party_id,
     party_info: char.party_info,
   };
@@ -78,7 +80,6 @@ export const mapCharacterData = (char: any): Character => {
   return character;
 };
 
-// This function for fetching the list of characters remains unchanged.
 export async function fetchCharacters(userId: string | undefined): Promise<Character[]> {
   if (!userId) return [];
   const { data, error } = await supabase
@@ -91,8 +92,6 @@ export async function fetchCharacters(userId: string | undefined): Promise<Chara
   return (data || []).map(mapCharacterData);
 }
 
-// --- THIS IS THE MODIFIED FUNCTION ---
-// It now calls the database RPC function to get the character WITH their party_id.
 export async function fetchCharacterById(id: string, userId: string): Promise<Character | null> {
   if (!id || !userId) {
     console.warn("fetchCharacterById requires both character ID and user ID.");
@@ -107,11 +106,10 @@ export async function fetchCharacterById(id: string, userId: string): Promise<Ch
 
     if (error) {
       console.error('Error fetching character via RPC:', error);
-      // Don't throw, just return null so the UI can handle it gracefully.
       return null;
     }
-
-    // The data from the RPC is a single JSON object that our mapCharacterData can handle.
+    
+    // The RPC data will now be correctly processed by our fixed mapper function.
     return data ? mapCharacterData(data) : null;
   } catch (err) {
     console.error("Unexpected error in fetchCharacterById:", err);
@@ -119,7 +117,6 @@ export async function fetchCharacterById(id: string, userId: string): Promise<Ch
   }
 }
 
-// The updateCharacter function remains unchanged.
 export async function updateCharacter(characterId: string, updates: Partial<Character>): Promise<Character | null> {
   const dbUpdates: Record<string, any> = { ...updates };
   if (dbUpdates.heroic_abilities) {
@@ -145,7 +142,6 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
   return data ? mapCharacterData(data) : null;
 }
 
-// The deleteCharacters function remains unchanged.
 export async function deleteCharacters(characterIds: string[]): Promise<void> {
   if (characterIds.length === 0) return;
   const { error } = await supabase

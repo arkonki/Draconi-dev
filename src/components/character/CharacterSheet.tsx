@@ -1,9 +1,11 @@
+// src/components/character/CharacterSheet.tsx
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
-  Shield, Heart, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare
+  Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
@@ -16,6 +18,7 @@ import { AdvancementSystem } from './AdvancementSystem';
 import { DeathRollTracker } from './DeathRollTracker';
 import { StatusPanelView } from './StatusPanelView';
 import { BioModal } from './modals/BioModal';
+import { PlayerAidModal } from './modals/PlayerAidModal';
 
 interface CharacterSheetProps {
   // No props needed, relies solely on store
@@ -25,22 +28,18 @@ export function CharacterSheet({}: CharacterSheetProps) {
   const navigate = useNavigate();
   const { toggleDiceRoller } = useDice();
 
-  // Get everything from the Zustand store
   const {
     character,
-    fetchCharacter, // <-- ADDED: Get the fetch function
+    fetchCharacter,
     adjustStat,
     toggleCondition,
     performRest,
-    updateCharacterData,
     isLoading,
     error,
     isSaving,
     saveError,
-    setActiveStatusMessage,
   } = useCharacterSheetStore();
 
-  // Local UI state
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
   const [showRestOptionsModal, setShowRestOptionsModal] = useState(false);
   const [showSkillsModal, setShowSkillsModal] = useState(false);
@@ -48,8 +47,8 @@ export function CharacterSheet({}: CharacterSheetProps) {
   const [showAdvancementSystem, setShowAdvancementSystem] = useState(false);
   const [showHeroicAbilitiesModal, setShowHeroicAbilitiesModal] = useState(false);
   const [showBioModal, setShowBioModal] = useState(false);
+	const [showPlayerAidModal, setShowPlayerAidModal] = useState(false); // <-- Add state for the new modal
   const [healerPresent, setHealerPresent] = useState(false);
-
 
   if (isLoading) {
       return <div className="p-4 text-center">Loading character...</div>;
@@ -61,15 +60,6 @@ export function CharacterSheet({}: CharacterSheetProps) {
       return <div className="p-4 text-center">Character data is not available. Please select a character.</div>;
   }
 
-
-  const getBaseChance = (value: number): number => {
-    if (value <= 5) return 3;
-    if (value <= 8) return 4;
-    if (value <= 12) return 5;
-    if (value <= 15) return 6;
-    return 7;
-  };
-
   const handleConditionToggle = (condition: keyof Character['conditions']) => {
     toggleCondition(condition);
   };
@@ -79,7 +69,6 @@ export function CharacterSheet({}: CharacterSheetProps) {
     await performRest(type, type === 'stretch' ? healerPresent : undefined);
     setHealerPresent(false);
   };
-
 
   const renderAttribute = (
     name: AttributeName,
@@ -121,10 +110,8 @@ export function CharacterSheet({}: CharacterSheetProps) {
     );
   };
 
-
   const renderRestOptionsModal = () => {
     if (!showRestOptionsModal) return null;
-
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto shadow-xl">
@@ -132,26 +119,13 @@ export function CharacterSheet({}: CharacterSheetProps) {
             <h3 className="text-xl font-semibold flex items-center gap-2">
               <Bed className="w-6 h-6" /> Choose Rest Type
             </h3>
-            <button
-              onClick={() => {
-                setShowRestOptionsModal(false);
-                setHealerPresent(false);
-              }}
-              className="text-gray-500 hover:text-gray-700"
-            >
+            <button onClick={() => { setShowRestOptionsModal(false); setHealerPresent(false); }} className="text-gray-500 hover:text-gray-700">
               <X className="w-6 h-6" />
             </button>
           </div>
-
-
-
           <div className="space-y-4 mb-6">
             <div>
-              <button
-                onClick={() => handleRest('shift')}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                disabled={isSaving}
-              >
+              <button onClick={() => handleRest('shift')} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors" disabled={isSaving}>
                 <Clock className="w-5 h-5" />
                 {isSaving ? 'Resting...' : 'Take Shift Rest'}
               </button>
@@ -159,13 +133,8 @@ export function CharacterSheet({}: CharacterSheetProps) {
                 <strong>Shift Rest (~6 hours):</strong> Requires a safe location. Recovers all HP & WP, heals all standard conditions. Resets death roll state. Interruption negates effects.
               </p>
             </div>
-
             <div>
-              <button
-                onClick={() => handleRest('stretch')}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                disabled={isSaving || (character?.current_hp ?? 0) <= 0}
-              >
+              <button onClick={() => handleRest('stretch')} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors" disabled={isSaving || (character?.current_hp ?? 0) <= 0}>
                 <Sun className="w-5 h-5" />
                 {isSaving ? 'Resting...' : `Take Stretch Rest`}
               </button>
@@ -173,26 +142,15 @@ export function CharacterSheet({}: CharacterSheetProps) {
                 <strong>Stretch Rest (~15 mins):</strong> Heal {healerPresent ? '2d6' : '1d6'} HP, recover 1d6 WP, heal one standard condition. Can only be done once per Shift. Cannot be taken while dying. Interruption negates effects.
               </p>
             </div>
-
-          <div className="mb-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={healerPresent}
-                onChange={(e) => setHealerPresent(e.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>Healer present for Stretch Rest (requires successful HEALING roll)</span>
-            </label>
-            <p className="text-xs text-gray-500 mt-1">Check this if another character is tending to you and succeeds on a HEALING roll during a Stretch Rest.</p>
-          </div>
-
+            <div className="mb-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={healerPresent} onChange={(e) => setHealerPresent(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                <span>Healer present for Stretch Rest (requires successful HEALING roll)</span>
+              </label>
+              <p className="text-xs text-gray-500 mt-1">Check this if another character is tending to you and succeeds on a HEALING roll during a Stretch Rest.</p>
+            </div>
             <div>
-              <button
-                onClick={() => handleRest('round')}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                disabled={isSaving}
-              >
+              <button onClick={() => handleRest('round')} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors" disabled={isSaving}>
                 <Moon className="w-5 h-5" />
                 {isSaving ? 'Resting...' : 'Take Round Rest'}
               </button>
@@ -201,35 +159,29 @@ export function CharacterSheet({}: CharacterSheetProps) {
               </p>
             </div>
           </div>
-
           {isSaving && <div className="mt-4 text-sm text-center text-gray-500">Saving...</div>}
           {saveError && <div className="mt-4 text-sm text-center text-red-500">Error: {saveError}</div>}
-
         </div>
       </div>
     );
   };
 
-  // --- FIX #1: UPDATED canCastSpells LOGIC ---
   const canCastSpells = () => {
-    // Get the names of all skills the character has a level in.
     const knownSkillNames = Object.keys(character?.skill_levels || {});
-
     return (
-      // Keep the original check for Mage professions
       character?.profession?.endsWith('Mage') ||
-      // Also check if any of the character's known skills is a magic school
-      knownSkillNames.some(skillName =>
-        ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(skillName.toUpperCase())
-      )
+      knownSkillNames.some(skillName => ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(skillName.toUpperCase()))
     );
   };
 
+  // --- THIS IS THE FIX ---
+  // We now read directly from the character object's properties, which are populated
+  // from the database. The fallback to 10 is just a safety for brand new characters.
   const currentHP = character?.current_hp ?? 0;
   const currentWP = character?.current_wp ?? 0;
-  const maxHP = character?.max_hp ?? (character?.attributes?.CON ?? 10);
-  const maxWP = character?.max_wp ?? (character?.attributes?.WIL ?? 10);
-
+  const maxHP = character?.max_hp ?? 10;
+  const maxWP = character?.max_wp ?? 10;
+  // --- END OF FIX ---
 
   return (
     <div className="p-4 space-y-6">
@@ -241,34 +193,28 @@ export function CharacterSheet({}: CharacterSheetProps) {
           </p>
         </div>
         <div className="flex items-center flex-wrap gap-2">
-          <button
-            onClick={() => setShowBioModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm transition-colors"
-          >
-            <UserSquare className="w-4 h-4" />
-            Bio
+          <button onClick={() => setShowBioModal(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm transition-colors">
+            <UserSquare className="w-4 h-4" /> Bio
           </button>
-          <button
-            onClick={() => setShowInventoryModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors"
-          >
-            <Package className="w-4 h-4" />
-            Inventory
+          <button onClick={() => setShowInventoryModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors">
+            <Package className="w-4 h-4" /> Inventory
           </button>
-          <button
-            onClick={() => setShowRestOptionsModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm transition-colors"
-          >
-            <Bed className="w-4 h-4" />
-            Rest
+          <button onClick={() => setShowRestOptionsModal(true)} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm transition-colors">
+            <Bed className="w-4 h-4" /> Rest
           </button>
-          <button
-            onClick={() => setShowAdvancementSystem(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-600 text-sm transition-colors"
-          >
-            <Award className="w-4 h-4" />
-            Session
+          <button onClick={() => setShowAdvancementSystem(true)} className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-600 text-sm transition-colors">
+            <Award className="w-4 h-4" /> Session
           </button>
+					 {/* --- NEW BUTTON --- */}
+          <button
+            onClick={() => setShowPlayerAidModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm transition-colors"
+            title="Player Aid"
+          >
+            <HelpCircle className="w-4 h-4" />
+            Actions
+          </button>
+          {/* --- END NEW BUTTON --- */}
         </div>
       </div>
 
@@ -286,28 +232,16 @@ export function CharacterSheet({}: CharacterSheetProps) {
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
         <div className="md:col-span-6 flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => setShowSkillsModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors"
-              >
-                <Book className="w-4 h-4" />
-                Skills
+              <button onClick={() => setShowSkillsModal(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors">
+                <Book className="w-4 h-4" /> Skills
               </button>
               {canCastSpells() && (
-                <button
-                  onClick={() => setShowSpellcastingModal(true)}
-                  className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm transition-colors"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Spells
+                <button onClick={() => setShowSpellcastingModal(true)} className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm transition-colors">
+                  <Sparkles className="w-4 h-4" /> Spells
                 </button>
               )}
-              <button
-                onClick={() => setShowHeroicAbilitiesModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm transition-colors"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                Abilities
+              <button onClick={() => setShowHeroicAbilitiesModal(true)} className="flex items-center gap-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm transition-colors">
+                <ShieldCheck className="w-4 h-4" /> Abilities
               </button>
             </div>
              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-white rounded-lg text-sm self-start">
@@ -318,34 +252,22 @@ export function CharacterSheet({}: CharacterSheetProps) {
              </div>
         </div>
 
-
         <div className="md:col-span-6 grid grid-cols-2 gap-4">
           {currentHP > 0 ? (
             <div className="p-3 rounded-lg shadow bg-white">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="font-semibold flex items-center gap-1 text-sm">
-                  <HeartPulse className="w-4 h-4 text-red-600" />
-                  HP
+                  <HeartPulse className="w-4 h-4 text-red-600" /> HP
                 </h3>
                 <span className="text-sm font-medium">
                   {currentHP} / {maxHP}
                 </span>
               </div>
               <div className="flex gap-2 mt-1">
-                <button
-                  onClick={() => adjustStat('current_hp', -1)}
-                  className="flex-1 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
-                  disabled={isSaving || currentHP <= 0}
-                  title="Decrease HP"
-                >
+                <button onClick={() => adjustStat('current_hp', -1)} className="flex-1 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors" disabled={isSaving || currentHP <= 0} title="Decrease HP">
                   -
                 </button>
-                <button
-                  onClick={() => adjustStat('current_hp', 1)}
-                  className="flex-1 px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 transition-colors"
-                  disabled={currentHP >= maxHP || isSaving}
-                  title="Increase HP"
-                >
+                <button onClick={() => adjustStat('current_hp', 1)} className="flex-1 px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 transition-colors" disabled={currentHP >= maxHP || isSaving} title="Increase HP">
                   +
                 </button>
               </div>
@@ -357,28 +279,17 @@ export function CharacterSheet({}: CharacterSheetProps) {
           <div className="p-3 bg-white rounded-lg shadow">
             <div className="flex items-center justify-between mb-1">
               <h3 className="font-semibold flex items-center gap-1 text-sm">
-                <Zap className="w-4 h-4 text-blue-600" />
-                WP
+                <Zap className="w-4 h-4 text-blue-600" /> WP
               </h3>
               <span className="text-sm font-medium">
                 {currentWP} / {maxWP}
               </span>
             </div>
             <div className="flex gap-2 mt-1">
-              <button
-                onClick={() => adjustStat('current_wp', -1)}
-                className="flex-1 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
-                disabled={currentWP === 0 || isSaving}
-                title="Decrease WP"
-              >
+              <button onClick={() => adjustStat('current_wp', -1)} className="flex-1 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors" disabled={currentWP === 0 || isSaving} title="Decrease WP">
                 -
               </button>
-              <button
-                onClick={() => adjustStat('current_wp', 1)}
-                className="flex-1 px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 transition-colors"
-                disabled={currentWP >= maxWP || isSaving}
-                title="Increase WP"
-              >
+              <button onClick={() => adjustStat('current_wp', 1)} className="flex-1 px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 transition-colors" disabled={currentWP >= maxWP || isSaving} title="Increase WP">
                 +
               </button>
             </div>
@@ -388,30 +299,11 @@ export function CharacterSheet({}: CharacterSheetProps) {
 
       <EquipmentSection character={character} />
 
-      {showBioModal && (
-        <BioModal onClose={() => setShowBioModal(false)} />
-      )}
-
-      {showSkillsModal && (
-        <SkillsModal
-          onClose={() => setShowSkillsModal(false)}
-        />
-      )}
-
-      {showSpellcastingModal && (
-        <SpellcastingView
-          onClose={() => setShowSpellcastingModal(false)}
-        />
-      )}
-
-      {showInventoryModal && (
-        <InventoryModal
-          onClose={() => setShowInventoryModal(false)}
-        />
-      )}
-
+      {showBioModal && ( <BioModal onClose={() => setShowBioModal(false)} /> )}
+      {showSkillsModal && ( <SkillsModal onClose={() => setShowSkillsModal(false)} /> )}
+      {showSpellcastingModal && ( <SpellcastingView onClose={() => setShowSpellcastingModal(false)} /> )}
+      {showInventoryModal && ( <InventoryModal onClose={() => setShowInventoryModal(false)} /> )}
       {showAdvancementSystem && (
-        // --- FIX #2: UPDATED onClose HANDLER ---
         <AdvancementSystem
           character={character}
           onClose={() => {
@@ -422,25 +314,16 @@ export function CharacterSheet({}: CharacterSheetProps) {
           }}
         />
       )}
-
-      {showHeroicAbilitiesModal && (
-        <HeroicAbilitiesView
-          onClose={() => setShowHeroicAbilitiesModal(false)}
-        />
+      {showHeroicAbilitiesModal && ( <HeroicAbilitiesView onClose={() => setShowHeroicAbilitiesModal(false)} /> )}
+			{/* --- RENDER THE NEW MODAL --- */}
+      {showPlayerAidModal && (
+        <PlayerAidModal onClose={() => setShowPlayerAidModal(false)} />
       )}
-
+      {/* --- END MODAL RENDER --- */}
       {renderRestOptionsModal()}
 
-      {isSaving && (
-        <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md text-sm z-50 animate-pulse">
-          Saving...
-        </div>
-      )}
-      {saveError && (
-         <div className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-md text-sm z-50">
-           Save Error: {saveError}
-         </div>
-       )}
+      {isSaving && ( <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md text-sm z-50 animate-pulse"> Saving... </div> )}
+      {saveError && ( <div className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-md text-sm z-50"> Save Error: {saveError} </div> )}
     </div>
   );
 }

@@ -8,21 +8,19 @@ export interface Money {
   copper: number;
 }
 
-// Defines an item as it exists in a character's inventory
 export interface InventoryItem {
-  id: string; // Unique instance ID for this item in the inventory
-  item_id: string; // Foreign Key to the master GameItem
+  id: string;
+  item_id: string;
   name: string;
   quantity: number;
   description?: string;
-  type: string; // e.g., 'weapon', 'armor', 'consumable'
-  properties?: Record<string, any>; // Flexible properties like { "damage": "1d6" }
-  equipped: boolean; // Simplified from equipped_status
+  type: string;
+  properties?: Record<string, any>;
+  equipped: boolean;
   weight?: number;
   cost?: Money;
 }
 
-// Defines a master item template from the database
 export interface GameItem {
   id: string;
   name:string;
@@ -31,15 +29,13 @@ export interface GameItem {
   properties: Record<string, any>;
   weight: number;
   cost: Money;
-  // ... other master item properties
 }
 
 export interface EquippedItems {
   armor?: InventoryItem | null;
   shield?: InventoryItem | null;
   helmet?: InventoryItem | null;
-  weapons: InventoryItem[]; // Can equip multiple weapons
-  // Add other slots as needed
+  weapons: InventoryItem[];
 }
 
 export interface Equipment {
@@ -73,105 +69,61 @@ export interface Conditions {
 
 // --- SPELLS & SKILLS ---
 
-// REFINED: Actual Dragonbane skills for a more accurate type
-export enum SkillName {
-  Acrobatics = "Acrobatics",
-  BeastLore = "Beast Lore",
-  Bladework = "Bladework",
-  Bushcraft = "Bushcraft",
-  Crafting = "Crafting",
-  Evade = "Evade",
-  Healing = "Healing",
-  HuntingAndFishing = "Hunting & Fishing",
-  Languages = "Languages",
-  MythsAndLegends = "Myths & Legends",
-  Performance = "Performance",
-  Persuasion = "Persuasion",
-  Riding = "Riding",
-  SleightOfHand = "Sleight of Hand",
-  Sneaking = "Sneaking",
-  SpotHidden = "Spot Hidden",
-  Swimming = "Swimming",
-  Seamanship = "Seamanship",
-  // Add any other core or optional skills
-}
-
-// A record mapping skill names to their level, e.g., { "Swords": 2, "Stealth": 1 }
 export type SkillLevels = Record<string, number>;
 
-// This is the correct type guard for the requirement format used elsewhere in the app.
-// It checks for an object where keys are skill names and values are numbers (or null).
-export function isSkillNameRequirement(obj: any): obj is Record<string, number | null> {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-    return false;
-  }
-  // Check if all values are either numbers or null
-  return Object.values(obj).every(value => typeof value === 'number' || value === null);
+export interface SkillRequirement {
+  [key: string]: number; // e.g. { "Swords": 12, "Persuasion": 10 }
 }
 
-
-// --- FIX: ADD THE MISSING INTERFACE AND FUNCTION BACK ---
-
-export interface SkillUuidRequirement {
-  skill_id: string; 
-  minimumValue?: number;
-}
-
-export function isSkillUuidRequirement(obj: any): obj is SkillUuidRequirement {
-  if (typeof obj !== 'object' || obj === null) {
-    return false;
-  }
-  return (
-    typeof obj.skill_id === 'string' &&
-    (obj.minimumValue === undefined || typeof obj.minimumValue === 'number')
-  );
-}
-// --- END FIX ---
-
-
-export interface Spell {
-  id: string;
-  name: string;
-  rank: number;
-  school_name?: string; // e.g., "Animism", "Elementalism". General spells won't have this.
-  description: string;
-  // ... other spell properties
-}
-
+// --- CORRECTED: This type now matches the data structure used by the rest of the app ---
 export interface CharacterSpells {
-  known: string[]; // Simple array of known spell names or IDs
+  school: {
+    name: string | null;
+    spells: string[]; // Array of spell names
+  };
+  general: string[]; // Array of general spell names
 }
 
 export interface Teacher {
   skillUnderStudy: string | null;
 }
 
-// --- CHARACTER ---
+// --- STUB TYPES FOR RELATIONSHIPS ---
 
 export interface PartyStub {
   id: string;
   name: string;
 }
 
+// --- ADDED: A proper stub for characters, used in the PartyView/SessionEndCheatsheet ---
+export interface CharacterStub {
+  id: string;
+  name: string;
+  kin: string;
+  profession: string;
+  flaw?: string | null; // The SessionEndCheatsheet needs this
+}
+
+
+// --- THE MAIN CHARACTER INTERFACE ---
+
 export interface Character {
-  id: string; // UUID
-  user_id: string; // UUID of the user who owns this character
+  id: string;
+  user_id: string;
   party_id?: string | null;
   party_info?: PartyStub | null;
 
-  // REFINED: Standardized to Dragonbane terminology and removed redundant fields
+  // Basic Info
   name: string;
   kin: string;
   profession: string;
   age?: number;
   appearance?: string;
   background?: string;
-  notes?: string; // For backstory and other details
+  notes?: string;
   portrait_url?: string;
-  
-  // ADDED: The missing fields for memento and flaw
-  memento?: string | null;
-  flaw?: string | null;
+  memento?: string;
+  flaw?: string | null; // Standardized name (ensure your mapCharacterData maps 'weak_spot' to this)
 
   // Core Attributes
   attributes: Attributes;
@@ -184,27 +136,30 @@ export interface Character {
   
   // Skills, Spells, and Abilities
   skill_levels: SkillLevels;
-  spells?: CharacterSpells;
-  heroic_abilities?: string[]; // Array of heroic ability names
+  spells: CharacterSpells;
+  heroic_abilities: string[]; // Standardized to plural (ensure your API maps this to/from 'heroic_ability')
   
   // Equipment
   equipment: Equipment;
 
   // Status
   conditions: Conditions;
-  is_rallied?: boolean; // For death saves
-  death_rolls_failed?: number;
+  
+  // --- ADDED: Missing death & dying fields ---
+  is_rallied: boolean;
+  death_rolls_passed: number;
+  death_rolls_failed: number;
 
   // Character Progression & Social
-  experience: number; // Single source for experience points
+  experience: number;
   teacher?: Teacher | null;
-  reputation?: number;
+  reputation: number;
+  corruption: number;
 
   // Timestamps
-  created_at: string; // timestamptz
-  updated_at: string; // timestamptz
+  created_at: string;
+  updated_at: string;
 }
 
-// Correctly used Partial<T> with the Character interface
 // This is the data structure for the character creation process
 export type CharacterCreationData = Partial<Character>;

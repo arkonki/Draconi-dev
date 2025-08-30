@@ -256,6 +256,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     clearMarkedSkillsThisSession,
     increaseSkillLevel,
     addHeroicAbility,
+    increaseMaxStat, // <-- ADDED
     setSkillUnderStudy,
     learnSpell,
     addMagicSchool,
@@ -517,22 +518,37 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     }
   };
 
+  // --- MODIFIED: fetchAndFilterAbilities ---
   const fetchAndFilterAbilities = async () => {
     setLoadingAbilities(true);
     setError(null);
     try {
       const allAbilities = await fetchHeroicAbilities();
-      const currentCharacterState = useCharacterSheetStore.getState().character; 
+      const currentCharacterState = useCharacterSheetStore.getState().character;
 
-      if (!currentCharacterState) throw new Error("Character data not available for ability filtering.");
-      
+      if (!currentCharacterState) {
+        throw new Error("Character data not available for ability filtering.");
+      }
+
       const currentKnownAbilities = new Set((currentCharacterState.heroic_abilities || []).map(a => a.toUpperCase()));
-      const filtered = allAbilities.filter(ability => 
-          !currentKnownAbilities.has(ability.name.toUpperCase()) &&
+      const multiTakeAbilities = new Set(['ROBUST', 'FOCUSED', 'MAGIC TALENT']);
+
+      const filtered = allAbilities.filter(ability => {
+        const abilityNameUpper = ability.name.toUpperCase();
+        const isMultiTake = multiTakeAbilities.has(abilityNameUpper);
+
+        const meetsOtherRequirements =
           (!ability.kin || ability.kin.toLowerCase() === currentCharacterState.kin?.toLowerCase()) &&
           (!ability.profession || ability.profession.toLowerCase() === currentCharacterState.profession?.toLowerCase()) &&
-          checkAbilityRequirements(ability, currentCharacterState)
-      );
+          checkAbilityRequirements(ability, currentCharacterState);
+
+        if (!meetsOtherRequirements) {
+          return false;
+        }
+
+        return isMultiTake || !currentKnownAbilities.has(abilityNameUpper);
+      });
+
       setAvailableAbilities(filtered);
     } catch (err) {
       console.error("Error fetching abilities:", err);
@@ -547,6 +563,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     setSelectedAbility(ability);
   };
 
+  // --- MODIFIED: handleConfirmAbilitySelection ---
   const handleConfirmAbilitySelection = async () => {
     if (!selectedAbility) {
       setError("Please select a heroic ability.");
@@ -554,6 +571,15 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     }
     setError(null);
     await addHeroicAbility(selectedAbility.name);
+
+    const abilityNameUpper = selectedAbility.name.toUpperCase();
+
+    if (abilityNameUpper === 'ROBUST') {
+      await increaseMaxStat('max_hp', 2);
+    } else if (abilityNameUpper === 'FOCUSED') {
+      await increaseMaxStat('max_wp', 2);
+    }
+
     setSkillJustReached18(null);
     setSelectedAbility(null);
 
@@ -671,7 +697,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     setSelectedSpell(spell);
   };
 
-  // --- MODIFIED handleConfirmLearnSpell ---
   const handleConfirmLearnSpell = async () => {
     if (!selectedSpell) {
       setError("Please select a spell to learn.");
@@ -679,7 +704,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     }
     setError(null);
     try {
-      await learnSpell(selectedSpell); // Pass the full spell object
+      await learnSpell(selectedSpell); 
       onClose(); 
     } catch (err) {
       console.error("Error learning spell:", err);
@@ -695,8 +720,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     setLearnableSpells([]);
     onClose();
   };
-  
-  // Omitted renderStepContent for brevity, no changes needed inside it
   
   const renderStepContent = () => {
     if (!characterForInfo && step !== 'initial') { 
