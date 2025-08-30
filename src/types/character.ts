@@ -71,17 +71,38 @@ export interface Conditions {
 
 export type SkillLevels = Record<string, number>;
 
-export interface SkillRequirement {
-  [key: string]: number; // e.g. { "Swords": 12, "Persuasion": 10 }
+// --- FIX #1: Restoring the first missing function ---
+export function isSkillNameRequirement(obj: any): obj is Record<string, number | null> {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return false;
+  }
+  return Object.values(obj).every(value => typeof value === 'number' || value === null);
 }
 
-// --- CORRECTED: This type now matches the data structure used by the rest of the app ---
+// --- FIX #2: Restoring the second missing function and its interface ---
+export interface SkillUuidRequirement {
+  skill_id: string; 
+  minimumValue?: number;
+}
+
+export function isSkillUuidRequirement(obj: any): obj is SkillUuidRequirement {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+  return (
+    typeof obj.skill_id === 'string' &&
+    (obj.minimumValue === undefined || typeof obj.minimumValue === 'number')
+  );
+}
+// --- END OF FIX ---
+
+
 export interface CharacterSpells {
   school: {
     name: string | null;
-    spells: string[]; // Array of spell names
+    spells: string[];
   };
-  general: string[]; // Array of general spell names
+  general: string[];
 }
 
 export interface Teacher {
@@ -95,15 +116,13 @@ export interface PartyStub {
   name: string;
 }
 
-// --- ADDED: A proper stub for characters, used in the PartyView/SessionEndCheatsheet ---
 export interface CharacterStub {
   id: string;
   name: string;
   kin: string;
   profession: string;
-  flaw?: string | null; // The SessionEndCheatsheet needs this
+  flaw?: string | null;
 }
-
 
 // --- THE MAIN CHARACTER INTERFACE ---
 
@@ -112,8 +131,6 @@ export interface Character {
   user_id: string;
   party_id?: string | null;
   party_info?: PartyStub | null;
-
-  // Basic Info
   name: string;
   kin: string;
   profession: string;
@@ -123,43 +140,26 @@ export interface Character {
   notes?: string;
   portrait_url?: string;
   memento?: string;
-  flaw?: string | null; // Standardized name (ensure your mapCharacterData maps 'weak_spot' to this)
-
-  // Core Attributes
+  flaw?: string | null;
   attributes: Attributes;
-
-  // Derived Stats
   max_hp: number;
   current_hp: number;
   max_wp: number;
   current_wp: number;
-  
-  // Skills, Spells, and Abilities
   skill_levels: SkillLevels;
   spells: CharacterSpells;
-  heroic_abilities: string[]; // Standardized to plural (ensure your API maps this to/from 'heroic_ability')
-  
-  // Equipment
+  heroic_abilities: string[];
   equipment: Equipment;
-
-  // Status
   conditions: Conditions;
-  
-  // --- ADDED: Missing death & dying fields ---
   is_rallied: boolean;
   death_rolls_passed: number;
   death_rolls_failed: number;
-
-  // Character Progression & Social
   experience: number;
-  teacher?: Teacher | null;
+teacher?: Teacher | null;
   reputation: number;
   corruption: number;
-
-  // Timestamps
   created_at: string;
   updated_at: string;
 }
 
-// This is the data structure for the character creation process
 export type CharacterCreationData = Partial<Character>;
