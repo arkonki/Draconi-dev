@@ -1,20 +1,18 @@
 // src/components/character/AdvancementSystem.tsx
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { supabase } from '../../lib/supabase';
 import { Character, Ability, AttributeName, SkillRequirement, CharacterSpells } from '../../types/character';
 import { Spell, MagicSchool, SpellPrerequisite, SinglePrerequisite, LogicalPrerequisite } from '../../types/magic';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { useDice, RollHistoryEntry } from '../dice/DiceContext';
 import { fetchHeroicAbilities } from '../../lib/api/abilities';
 import { fetchSpells, fetchMagicSchools } from '../../lib/api/magic';
-import { GraduationCap, AlertCircle, Check, Star, Info, Dices, BookOpen, ChevronLeft, ChevronRight, Loader2, Award, X, Zap, Wand2 } from 'lucide-react';
+import { GraduationCap, AlertCircle, Check, Star, Info, Dices, BookOpen, ChevronLeft, ChevronRight, Loader2, Award, X, Zap, Wand2, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 
-// --- Constants and Helpers ---
-
+// --- No changes to helpers like AdvancementStep, etc. ---
 type AdvancementStep =
   | 'initial'
   | 'enterMarks'
@@ -28,26 +26,21 @@ type AdvancementStep =
   | 'studyMagicSelectSchool'
   | 'studyMagicRollSchool'
   | 'finished';
-
 type RollCompletionData = Omit<RollHistoryEntry, 'id' | 'timestamp'>;
-
 interface SkillDisplayInfo {
   name: string;
   attribute: AttributeName;
   level: number;
   isTrained: boolean;
 }
-
 const MAGE_SKILLS: Record<string, AttributeName> = {
   'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL',
 };
-
 const getSkillLevelFromStore = (skillName: string): number => {
   const currentStoreCharacter = useCharacterSheetStore.getState().character;
   const skillLevels = currentStoreCharacter?.skill_levels || {};
   return skillLevels?.[skillName] ?? 0;
 };
-
 function getCharacterSkillInfo(character: Character): SkillDisplayInfo[] {
   const skillAttributeMap: Record<string, AttributeName> = {
     'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT',
@@ -59,45 +52,28 @@ function getCharacterSkillInfo(character: Character): SkillDisplayInfo[] {
     'Knives': 'AGL', 'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR',
     ...MAGE_SKILLS,
   };
-
   const skillInfoList: SkillDisplayInfo[] = [];
   const characterSkills = character.skill_levels || {};
-
   for (const skillName in characterSkills) {
     const attribute = skillAttributeMap[skillName];
     if (!attribute) {
       console.warn(`[AdvancementSystem] Skill "${skillName}" exists on character but is missing from the attribute map.`);
       continue;
     }
-
     const level = characterSkills[skillName];
     const isTrained = character.trainedSkills?.includes(skillName) ?? false;
-
-    skillInfoList.push({
-      name: skillName,
-      attribute: attribute,
-      level: level,
-      isTrained: isTrained,
-    });
+    skillInfoList.push({ name: skillName, attribute: attribute, level: level, isTrained: isTrained, });
   }
-
   skillInfoList.sort((a, b) => a.name.localeCompare(b.name));
   return skillInfoList;
 }
-
-
 const checkAbilityRequirements = (ability: Ability, character: Character | null): boolean => {
   if (!character) return false;
   if (!ability.requirement) return true;
-
   const requirements = ability.requirement;
   const characterAttributes = character.attributes;
   const characterSkillLevels = character.skill_levels || {};
-  
-  const upperCaseAttributes = Object.fromEntries(
-    Object.entries(characterAttributes).map(([k, v]) => [k.toUpperCase(), v])
-  );
-
+  const upperCaseAttributes = Object.fromEntries(Object.entries(characterAttributes).map(([k, v]) => [k.toUpperCase(), v]));
   if (typeof requirements === 'string') {
     const parts = requirements.split(' ');
     if (parts.length === 2) {
@@ -133,55 +109,29 @@ const checkAbilityRequirements = (ability: Ability, character: Character | null)
   }
   return false;
 };
-
-// --- REPLACED getKnownSpellNamesUpper FUNCTION ---
 const getKnownSpellNamesUpper = (characterSpells: CharacterSpells | null): string[] => {
   if (!characterSpells) return [];
-
   const schoolSpells = characterSpells.school?.spells ?? [];
   const generalSpells = characterSpells.general ?? [];
-  
   return Array.from(new Set([...schoolSpells, ...generalSpells].map(s => s.toUpperCase())));
 };
-
-const checkSpellPrerequisite = (
-  prerequisiteString: string | null,
-  character: Character,
-  characterSchoolName: string | null,
-  allMagicSchools: MagicSchool[]
-): boolean => {
+const checkSpellPrerequisite = (prerequisiteString: string | null, character: Character, characterSchoolName: string | null, allMagicSchools: MagicSchool[]): boolean => {
   if (!prerequisiteString) return true;
-
   const knownSpellsUpper = getKnownSpellNamesUpper(character.spells);
   const characterSkillLevels = character.skill_levels || {};
   const characterAttributes = character.attributes;
-
   const evaluateSinglePrerequisite = (prereq: SinglePrerequisite): boolean => {
     let result = false;
     switch (prereq.type) {
-      case "spell":
-        result = knownSpellsUpper.includes(prereq.name.toUpperCase());
-        break;
-      case "school":
-        result = characterSchoolName?.toUpperCase() === prereq.name.toUpperCase();
-        break;
-      case "anySchool":
-        result = !!character.magicSchool;
-        break;
-      case "skill":
-        const skillLevel = characterSkillLevels[prereq.name];
-        result = skillLevel !== undefined && skillLevel >= prereq.value;
-        break;
-      case "attribute":
-        const attrValue = characterAttributes[prereq.name.toUpperCase() as AttributeName];
-        result = attrValue !== undefined && attrValue >= prereq.value;
-        break;
+      case "spell": result = knownSpellsUpper.includes(prereq.name.toUpperCase()); break;
+      case "school": result = characterSchoolName?.toUpperCase() === prereq.name.toUpperCase(); break;
+      case "anySchool": result = !!character.magicSchool; break;
+      case "skill": const skillLevel = characterSkillLevels[prereq.name]; result = skillLevel !== undefined && skillLevel >= prereq.value; break;
+      case "attribute": const attrValue = characterAttributes[prereq.name.toUpperCase() as AttributeName]; result = attrValue !== undefined && attrValue >= prereq.value; break;
     }
     return prereq.negate ? !result : result;
   };
-  
   let evaluateRecursive: (prereq: SpellPrerequisite) => boolean;
-
   const evaluateLogicalPrerequisite = (prereq: LogicalPrerequisite): boolean => {
     const operator = prereq.operator.toUpperCase();
     if (operator === "AND") {
@@ -193,30 +143,23 @@ const checkSpellPrerequisite = (
     }
     return false;
   };
-
   evaluateRecursive = (prereq: SpellPrerequisite): boolean => {
     if ("operator" in prereq) {
       return evaluateLogicalPrerequisite(prereq as LogicalPrerequisite);
     }
     return evaluateSinglePrerequisite(prereq as SinglePrerequisite);
   };
-
   let parsedReq: SpellPrerequisite | null = null;
   try {
     if (prerequisiteString.trim().startsWith("{")) {
         parsedReq = JSON.parse(prerequisiteString) as SpellPrerequisite;
     }
-  } catch (e) {
-    // Fallback proceeds
-  }
-
+  } catch (e) {}
   if (parsedReq) {
     return evaluateRecursive(parsedReq);
   }
-
   const schoolNamesUpper = allMagicSchools.map(s => s.name.toUpperCase());
   const currentCharacterSchoolName = characterSchoolName;
-
   const evaluateOldCondition = (condition: string): boolean => {
     const trimmed = condition.trim().toUpperCase();
     if (trimmed === 'ANY SCHOOL OF MAGIC') return !!character.magicSchool;
@@ -235,19 +178,13 @@ const checkSpellPrerequisite = (
     }
     return false;
   };
-
   const evaluateOldAndGroup = (andGroup: string): boolean => {
     return andGroup.trim().split(/ AND /i).every(evaluateOldCondition);
   };
-
   return prerequisiteString.trim().split(/ OR /i).some(evaluateOldAndGroup);
 };
 
-
-interface AdvancementSystemProps {
-  character: Character;
-  onClose: () => void;
-}
+interface AdvancementSystemProps { character: Character; onClose: () => void; }
 
 export function AdvancementSystem({ character: initialCharacter, onClose }: AdvancementSystemProps) {
   const {
@@ -256,7 +193,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     clearMarkedSkillsThisSession,
     increaseSkillLevel,
     addHeroicAbility,
-    increaseMaxStat, // <-- ADDED
+    increaseMaxStat,
     setSkillUnderStudy,
     learnSpell,
     addMagicSchool,
@@ -265,7 +202,9 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
   } = useCharacterSheetStore();
 
   const { toggleDiceRoller } = useDice();
-
+  
+  const [showManualAdvanceModal, setShowManualAdvanceModal] = useState<boolean>(false);
+  const [manualAdvanceContext, setManualAdvanceContext] = useState<{ skillName: string; context: 'endSession' | 'study' } | null>(null);
   const [step, setStep] = useState<AdvancementStep>('initial');
   const [error, setError] = useState<string | null>(null);
   const [advancementMarks, setAdvancementMarks] = useState<number>(0);
@@ -287,148 +226,37 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
   const [selectedMagicSchool, setSelectedMagicSchool] = useState<MagicSchool | null>(null);
   const [loadingMagicData, setLoadingMagicData] = useState<boolean>(false);
 
-
   const characterForInfo = storeCharacter || initialCharacter;
-  const characterSkillsInfo = useMemo(() => {
-      if (!characterForInfo) return [];
-      return getCharacterSkillInfo(characterForInfo);
-  }, [characterForInfo]);
-
+  const characterSkillsInfo = useMemo(() => { if (!characterForInfo) return []; return getCharacterSkillInfo(characterForInfo); }, [characterForInfo]);
   const skillCurrentlyUnderStudy = storeCharacter?.teacher?.skillUnderStudy;
 
-
-  const resetState = () => {
-    setError(null);
-    setRollResult(null);
-    setStudyRollResult(null);
-    setAdvancementMarks(0);
-    setSelectedSkills(new Set());
-    setSkillsToRoll([]);
-    setCurrentSkillIndex(0);
-    setSkillJustReached18(null);
-    setSelectedAbility(null);
-    setStudySkillSelected(null);
-    setLearnableSpells([]);
-    setSelectedSpell(null);
-    setSelectedMagicSchool(null);
-    setLoadingMagicData(false);
-    setLoadingAbilities(false);
-  };
-
-  const handleStartEndSession = () => {
-    resetState();
-    setStep('enterMarks');
-  };
-
-  const handleStartStudy = () => {
-    resetState();
-    setStep('selectStudyType');
-  };
-
-  const loadAndFilterMagicData = async () => {
-      if (!storeCharacter || !storeCharacter.magicSchool) {
-          setError("Character has no magic school assigned.");
-          setStep('selectStudyType');
-          return;
+  const resetState = () => { setError(null); setRollResult(null); setStudyRollResult(null); setAdvancementMarks(0); setSelectedSkills(new Set()); setSkillsToRoll([]); setCurrentSkillIndex(0); setSkillJustReached18(null); setSelectedAbility(null); setStudySkillSelected(null); setLearnableSpells([]); setSelectedSpell(null); setSelectedMagicSchool(null); setLoadingMagicData(false); setLoadingAbilities(false); };
+  const handleStartEndSession = () => { resetState(); setStep('enterMarks'); };
+  const handleStartStudy = () => { resetState(); setStep('selectStudyType'); };
+  const loadAndFilterMagicData = async () => { if (!storeCharacter || !storeCharacter.magicSchool) { setError("Character has no magic school assigned."); setStep('selectStudyType'); return; } setLoadingMagicData(true); setError(null); try { let currentSchools = allMagicSchools.length > 0 ? allMagicSchools : await fetchMagicSchools(); if (allMagicSchools.length === 0) setAllMagicSchools(currentSchools); let currentSpells = allSpells.length > 0 ? allSpells : await fetchSpells(); if (allSpells.length === 0) setAllSpells(currentSpells); const schoolObject = currentSchools.find(s => s.id === (storeCharacter.magicSchool as any).id); const currentCharacterSchoolName = schoolObject ? schoolObject.name : null; setMagicSchoolName(currentCharacterSchoolName); const knownSpellNamesUpper = getKnownSpellNamesUpper(storeCharacter.spells); const filteredSpells = currentSpells.filter(spell => !knownSpellNamesUpper.includes(spell.name.toUpperCase()) && checkSpellPrerequisite(spell.prerequisite, storeCharacter, currentCharacterSchoolName, currentSchools)); setLearnableSpells(filteredSpells); setStep('studyMagicSelectSpell'); } catch (err) { console.error("Error loading magic data:", err); setError(err instanceof Error ? err.message : "Failed to load magic study data."); setStep('selectStudyType'); } finally { setLoadingMagicData(false); } };
+  const handleSelectStudyType = async (type: 'teacher' | 'magic' | 'learnSchool') => { if (type === 'teacher') { setStep('studyTeacherSelectSkill'); } else if (type === 'magic') { loadAndFilterMagicData(); } else if (type === 'learnSchool') { setLoadingMagicData(true); setError(null); try { const schools = await fetchMagicSchools(); setAllMagicSchools(schools); setStep('studyMagicSelectSchool'); } catch (err) { console.error("Error loading magic schools:", err); setError(err instanceof Error ? err.message : "Failed to load magic schools."); } finally { setLoadingMagicData(false); } } };
+  const handleMarksEntered = (e: React.FormEvent) => { e.preventDefault(); if (advancementMarks > 0) { const initialSelection = new Set<string>(); let count = 0; const availableSkillNames = characterSkillsInfo.map(s => s.name); for (const skill of markedSkillsThisSession) { if (count < advancementMarks && availableSkillNames.includes(skill)) { initialSelection.add(skill); count++; } } setSelectedSkills(initialSelection); setError(null); setStep('selectSkills'); } else { setError("Please enter at least one Advancement Mark."); } };
+  const handleSkillSelectionChange = (skillName: string) => { setSelectedSkills(prev => { const newSelection = new Set(prev); if (newSelection.has(skillName)) { newSelection.delete(skillName); } else if (newSelection.size < advancementMarks) { newSelection.add(skillName); } return newSelection; }); };
+  const handleSkillsSelected = () => { if (selectedSkills.size !== advancementMarks) { setError(`Please select exactly ${advancementMarks} skill(s).`); return; } setError(null); setSkillsToRoll(Array.from(selectedSkills)); setCurrentSkillIndex(0); setRollResult(null); setStep('rollSkills'); };
+  
+  const handleAdvancementOutcome = useCallback(async (skillName: string, success: boolean, context: 'endSession' | 'study') => {
+    const resultSetter = context === 'study' ? setStudyRollResult : setRollResult;
+    const currentLevel = getSkillLevelFromStore(skillName);
+    let resultText = `Manual result for ${skillName}: `;
+    if (success) {
+      resultText += "Success! Skill increased.";
+      await increaseSkillLevel(skillName);
+      const newLevel = getSkillLevelFromStore(skillName); 
+      resultText += ` New Level: ${newLevel}.`;
+      if (newLevel === 18 && currentLevel < 18) {
+        if (context === 'endSession') setSkillJustReached18(skillName);
+        resultText += " Reached level 18!";
       }
-
-      setLoadingMagicData(true);
-      setError(null);
-      try {
-          let currentSchools = allMagicSchools.length > 0 ? allMagicSchools : await fetchMagicSchools();
-          if (allMagicSchools.length === 0) setAllMagicSchools(currentSchools);
-          
-          let currentSpells = allSpells.length > 0 ? allSpells : await fetchSpells();
-          if (allSpells.length === 0) setAllSpells(currentSpells);
-          
-          const schoolObject = currentSchools.find(s => s.id === (storeCharacter.magicSchool as any).id);
-          const currentCharacterSchoolName = schoolObject ? schoolObject.name : null;
-          setMagicSchoolName(currentCharacterSchoolName);
-
-          const knownSpellNamesUpper = getKnownSpellNamesUpper(storeCharacter.spells);
-
-          const filteredSpells = currentSpells.filter(spell => 
-              !knownSpellNamesUpper.includes(spell.name.toUpperCase()) &&
-              checkSpellPrerequisite(spell.prerequisite, storeCharacter, currentCharacterSchoolName, currentSchools)
-          );
-
-          setLearnableSpells(filteredSpells);
-          setStep('studyMagicSelectSpell');
-
-      } catch (err) {
-          console.error("Error loading magic data:", err);
-          setError(err instanceof Error ? err.message : "Failed to load magic study data.");
-          setStep('selectStudyType');
-      } finally {
-          setLoadingMagicData(false);
-      }
-  };
-
-
-  const handleSelectStudyType = async (type: 'teacher' | 'magic' | 'learnSchool') => {
-    if (type === 'teacher') {
-      setStep('studyTeacherSelectSkill');
-    } else if (type === 'magic') {
-      loadAndFilterMagicData();
-    } else if (type === 'learnSchool') {
-      setLoadingMagicData(true);
-      setError(null);
-      try {
-        const schools = await fetchMagicSchools();
-        setAllMagicSchools(schools);
-        setStep('studyMagicSelectSchool');
-      } catch (err) {
-        console.error("Error loading magic schools:", err);
-        setError(err instanceof Error ? err.message : "Failed to load magic schools.");
-      } finally {
-        setLoadingMagicData(false);
-      }
-    }
-  };
-
-  const handleMarksEntered = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (advancementMarks > 0) {
-      const initialSelection = new Set<string>();
-      let count = 0;
-      const availableSkillNames = characterSkillsInfo.map(s => s.name);
-      for (const skill of markedSkillsThisSession) {
-        if (count < advancementMarks && availableSkillNames.includes(skill)) {
-          initialSelection.add(skill);
-          count++;
-        }
-      }
-      setSelectedSkills(initialSelection);
-      setError(null);
-      setStep('selectSkills');
     } else {
-      setError("Please enter at least one Advancement Mark.");
+      resultText += "Failure. Skill did not increase.";
     }
-  };
-
-  const handleSkillSelectionChange = (skillName: string) => {
-    setSelectedSkills(prev => {
-      const newSelection = new Set(prev);
-      if (newSelection.has(skillName)) {
-        newSelection.delete(skillName);
-      } else if (newSelection.size < advancementMarks) {
-        newSelection.add(skillName);
-      }
-      return newSelection;
-    });
-  };
-
-  const handleSkillsSelected = () => {
-    if (selectedSkills.size !== advancementMarks) {
-      setError(`Please select exactly ${advancementMarks} skill(s).`);
-      return;
-    }
-    setError(null);
-    setSkillsToRoll(Array.from(selectedSkills));
-    setCurrentSkillIndex(0);
-    setRollResult(null);
-    setStep('rollSkills');
-  };
+    resultSetter(resultText);
+  }, [increaseSkillLevel]);
 
   const handleRollComplete = useCallback(async (resultEntry: RollCompletionData) => {
     if (!storeCharacter || !resultEntry.results || resultEntry.results.length === 0) {
@@ -438,32 +266,17 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     }
     const { value: rollValue } = resultEntry.results[0];
     const { skillName, targetValue } = resultEntry;
-
     if (!skillName || targetValue === undefined) {
       setRollResult("Error: Roll context missing skill information.");
       toggleDiceRoller();
       return;
     }
-
     const success = rollValue > targetValue;
     let resultText = `Rolled ${rollValue} vs ${skillName} (Target > ${targetValue}). `;
-
-    if (success) {
-      resultText += "Success! Skill increased.";
-      await increaseSkillLevel(skillName);
-      const newLevel = getSkillLevelFromStore(skillName); 
-      resultText += ` New Level: ${newLevel}.`;
-      if (newLevel === 18 && targetValue < 18) {
-        setSkillJustReached18(skillName);
-        resultText += " Reached level 18!";
-      }
-    } else {
-      resultText += "Failed to increase skill.";
-    }
-    setRollResult(resultText);
+    await handleAdvancementOutcome(skillName, success, 'endSession');
+    setRollResult(prev => resultText + (prev || ''));
     toggleDiceRoller();
-  }, [storeCharacter, increaseSkillLevel, toggleDiceRoller]);
-
+  }, [storeCharacter, handleAdvancementOutcome, toggleDiceRoller]);
 
   const performSkillRoll = (skillName: string, rollContext: 'endSession' | 'study') => {
     const currentLevel = getSkillLevelFromStore(skillName);
@@ -477,250 +290,47 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
       rollMode: 'advancementRoll',
       targetValue: currentLevel,
       skillName: skillName,
-      description: `Advancement Roll: ${skillName} (d20 vs > ${currentLevel})`,
+      description: `Advancement Roll: ${skillName} (D20 vs > ${currentLevel})`,
       onRollComplete: rollContext === 'study' ? handleStudyRollComplete : handleRollComplete,
     });
   };
 
-  const handleManualAdvance = async (skillName: string, context: 'endSession' | 'study') => {
-    const resultSetter = context === 'study' ? setStudyRollResult : setRollResult;
-    if (!storeCharacter) {
-        resultSetter("Error: Character data not available.");
-        return;
-    }
+  const handleManualAdvance = (skillName: string, context: 'endSession' | 'study') => {
     const currentLevel = getSkillLevelFromStore(skillName);
-    if (currentLevel >= 18) {
+    const resultSetter = context === 'study' ? setStudyRollResult : setRollResult;
+     if (currentLevel >= 18) {
       resultSetter(`Skill ${skillName} is already at max level (18).`);
       return;
     }
-    resultSetter(null);
-
-    let resultText = `Manually advanced ${skillName}. Skill increased.`;
-    await increaseSkillLevel(skillName);
-    const newLevel = getSkillLevelFromStore(skillName);
-    resultText += ` New Level: ${newLevel}.`;
-    if (newLevel === 18 && currentLevel < 18) {
-        if (context === 'endSession') setSkillJustReached18(skillName);
-        resultText += " Reached level 18!";
-    }
-    resultSetter(resultText);
-  };
-
-  const handleNextSkill = () => {
-    setRollResult(null);
-    if (skillJustReached18) {
-      fetchAndFilterAbilities();
-      setStep('selectAbility');
-    } else if (currentSkillIndex < skillsToRoll.length - 1) {
-      setCurrentSkillIndex(prev => prev + 1);
-    } else {
-      handleFinishSession();
-    }
-  };
-
-  // --- MODIFIED: fetchAndFilterAbilities ---
-  const fetchAndFilterAbilities = async () => {
-    setLoadingAbilities(true);
-    setError(null);
-    try {
-      const allAbilities = await fetchHeroicAbilities();
-      const currentCharacterState = useCharacterSheetStore.getState().character;
-
-      if (!currentCharacterState) {
-        throw new Error("Character data not available for ability filtering.");
-      }
-
-      const currentKnownAbilities = new Set((currentCharacterState.heroic_abilities || []).map(a => a.toUpperCase()));
-      const multiTakeAbilities = new Set(['ROBUST', 'FOCUSED', 'MAGIC TALENT']);
-
-      const filtered = allAbilities.filter(ability => {
-        const abilityNameUpper = ability.name.toUpperCase();
-        const isMultiTake = multiTakeAbilities.has(abilityNameUpper);
-
-        const meetsOtherRequirements =
-          (!ability.kin || ability.kin.toLowerCase() === currentCharacterState.kin?.toLowerCase()) &&
-          (!ability.profession || ability.profession.toLowerCase() === currentCharacterState.profession?.toLowerCase()) &&
-          checkAbilityRequirements(ability, currentCharacterState);
-
-        if (!meetsOtherRequirements) {
-          return false;
-        }
-
-        return isMultiTake || !currentKnownAbilities.has(abilityNameUpper);
-      });
-
-      setAvailableAbilities(filtered);
-    } catch (err) {
-      console.error("Error fetching abilities:", err);
-      setError(err instanceof Error ? err.message : "Failed to load heroic abilities.");
-    } finally {
-      setLoadingAbilities(false);
-    }
-  };
-
-
-  const handleSelectAbility = (ability: Ability) => {
-    setSelectedAbility(ability);
-  };
-
-  // --- MODIFIED: handleConfirmAbilitySelection ---
-  const handleConfirmAbilitySelection = async () => {
-    if (!selectedAbility) {
-      setError("Please select a heroic ability.");
-      return;
-    }
-    setError(null);
-    await addHeroicAbility(selectedAbility.name);
-
-    const abilityNameUpper = selectedAbility.name.toUpperCase();
-
-    if (abilityNameUpper === 'ROBUST') {
-      await increaseMaxStat('max_hp', 2);
-    } else if (abilityNameUpper === 'FOCUSED') {
-      await increaseMaxStat('max_wp', 2);
-    }
-
-    setSkillJustReached18(null);
-    setSelectedAbility(null);
-
-    if (currentSkillIndex < skillsToRoll.length - 1) {
-      setCurrentSkillIndex(prev => prev + 1);
-      setStep('rollSkills');
-    } else {
-      handleFinishSession();
-    }
-  };
-
-  const handleFinishSession = () => {
-    clearMarkedSkillsThisSession();
-    setStep('finished');
-  };
-
-  const handleStudySkillSelection = (skillName: string) => {
-    setStudySkillSelected(skillName);
-  };
-
-  const handleConfirmStudySkill = async () => {
-    if (!studySkillSelected) {
-      setError("Please select a skill to study.");
-      return;
-    }
-    setError(null);
-    setStudyRollResult(null);
-    await setSkillUnderStudy(studySkillSelected);
-    setStep('studyTeacherRollSkill');
-  };
-
-  const handleStudyRollComplete = useCallback(async (resultEntry: RollCompletionData) => {
-    if (!storeCharacter || !resultEntry.results || !resultEntry.results.length) {
-        setStudyRollResult("Error: Roll failed due to missing data.");
-        toggleDiceRoller();
-        return;
-    }
-    const { value: rollValue } = resultEntry.results[0];
-    const { skillName, targetValue } = resultEntry;
-    if (!skillName || targetValue === undefined) {
-      setStudyRollResult("Error: Roll context missing skill information.");
-      toggleDiceRoller();
-      return;
-    }
-
-    const success = rollValue > targetValue;
-    let resultText = `Studied ${skillName}. Rolled ${rollValue} vs Target > ${targetValue}. `;
-
-    if (success) {
-      resultText += "Success! Skill increased.";
-      await increaseSkillLevel(skillName);
-      const newLevel = getSkillLevelFromStore(skillName);
-      resultText += ` New Level: ${newLevel}.`;
-      if (newLevel === 18 && targetValue < 18) {
-        resultText += " Reached level 18!";
-      }
-    } else {
-      resultText += "Failed to increase skill this time.";
-    }
-    setStudyRollResult(resultText);
-    toggleDiceRoller();
-  }, [storeCharacter, increaseSkillLevel, toggleDiceRoller]);
-  
-  const handleLearnSchoolRollComplete = useCallback(async (resultEntry: RollCompletionData) => {
-    if (!storeCharacter || !resultEntry.results?.length || !selectedMagicSchool) {
-        setStudyRollResult("Error: Roll failed due to missing data.");
-        toggleDiceRoller();
-        return;
-    }
-    const { value: rollValue } = resultEntry.results[0];
-    const targetInt = resultEntry.targetValue;
-
-    if (targetInt === undefined) {
-        setStudyRollResult("Error: Character INT value not found for roll.");
-        toggleDiceRoller();
-        return;
-    }
-
-    const success = rollValue > targetInt;
-    let resultText = `Attempting to learn ${selectedMagicSchool.name}. Rolled ${rollValue} vs INT > ${targetInt}. `;
-
-    if (success) {
-        resultText += `Success! You have learned the basics of ${selectedMagicSchool.name}. The skill is added at your base chance of ${targetInt}.`;
-        await addMagicSchool(selectedMagicSchool, targetInt);
-    } else {
-        resultText += "Failure. You must study for another week to try again.";
-    }
-    setStudyRollResult(resultText);
-    toggleDiceRoller();
-  }, [storeCharacter, selectedMagicSchool, addMagicSchool, toggleDiceRoller]);
-
-  const performLearnSchoolRoll = () => {
-      if (!storeCharacter || !selectedMagicSchool) return;
-      const targetInt = storeCharacter.attributes.INT;
-      setStudyRollResult(null);
-      toggleDiceRoller({
-          rollMode: 'advancementRoll',
-          targetValue: targetInt,
-          skillName: `Learn ${selectedMagicSchool.name}`,
-          description: `Learn Magic School: ${selectedMagicSchool.name} (d20 vs > ${targetInt})`,
-          onRollComplete: handleLearnSchoolRollComplete,
-      });
-  };
-
-  const handleManualLearnSchool = async () => {
-      if (!storeCharacter || !selectedMagicSchool) return;
-      const targetInt = storeCharacter.attributes.INT;
-      setStudyRollResult(null);
-      let resultText = `Manually learned ${selectedMagicSchool.name}. Success! The skill is added at your base chance of ${targetInt}.`;
-      await addMagicSchool(selectedMagicSchool, targetInt);
-      setStudyRollResult(resultText);
-  };
-
-  const handleSelectSpell = (spell: Spell) => {
-    setSelectedSpell(spell);
-  };
-
-  const handleConfirmLearnSpell = async () => {
-    if (!selectedSpell) {
-      setError("Please select a spell to learn.");
-      return;
-    }
-    setError(null);
-    try {
-      await learnSpell(selectedSpell); 
-      onClose(); 
-    } catch (err) {
-      console.error("Error learning spell:", err);
-      setError(err instanceof Error ? err.message : "Failed to learn the spell.");
-    }
-  };
-
-  const handleFinishStudy = () => {
-    setStudySkillSelected(null);
-    setStudyRollResult(null);
-    setSelectedSpell(null);
-    setSelectedMagicSchool(null);
-    setLearnableSpells([]);
-    onClose();
+    setManualAdvanceContext({ skillName, context });
+    setShowManualAdvanceModal(true);
   };
   
+  const processManualAdvance = async (success: boolean) => {
+    if (!manualAdvanceContext) return;
+    const { skillName, context } = manualAdvanceContext;
+    setShowManualAdvanceModal(false);
+    await handleAdvancementOutcome(skillName, success, context);
+    setManualAdvanceContext(null);
+  };
+
+  const handleNextSkill = () => { setRollResult(null); if (skillJustReached18) { fetchAndFilterAbilities(); setStep('selectAbility'); } else if (currentSkillIndex < skillsToRoll.length - 1) { setCurrentSkillIndex(prev => prev + 1); } else { handleFinishSession(); } };
+  const fetchAndFilterAbilities = async () => { setLoadingAbilities(true); setError(null); try { const allAbilities = await fetchHeroicAbilities(); const currentCharacterState = useCharacterSheetStore.getState().character; if (!currentCharacterState) { throw new Error("Character data not available for ability filtering."); } const currentKnownAbilities = new Set((currentCharacterState.heroic_abilities || []).map(a => a.toUpperCase())); const multiTakeAbilities = new Set(['ROBUST', 'FOCUSED', 'MAGIC TALENT']); const filtered = allAbilities.filter(ability => { const abilityNameUpper = ability.name.toUpperCase(); const isMultiTake = multiTakeAbilities.has(abilityNameUpper); const meetsOtherRequirements = (!ability.kin || ability.kin.toLowerCase() === currentCharacterState.kin?.toLowerCase()) && (!ability.profession || ability.profession.toLowerCase() === currentCharacterState.profession?.toLowerCase()) && checkAbilityRequirements(ability, currentCharacterState); if (!meetsOtherRequirements) { return false; } return isMultiTake || !currentKnownAbilities.has(abilityNameUpper); }); setAvailableAbilities(filtered); } catch (err) { console.error("Error fetching abilities:", err); setError(err instanceof Error ? err.message : "Failed to load heroic abilities."); } finally { setLoadingAbilities(false); } };
+  const handleSelectAbility = (ability: Ability) => { setSelectedAbility(ability); };
+  const handleConfirmAbilitySelection = async () => { if (!selectedAbility) { setError("Please select a heroic ability."); return; } setError(null); await addHeroicAbility(selectedAbility.name); const abilityNameUpper = selectedAbility.name.toUpperCase(); if (abilityNameUpper === 'ROBUST') { await increaseMaxStat('max_hp', 2); } else if (abilityNameUpper === 'FOCUSED') { await increaseMaxStat('max_wp', 2); } setSkillJustReached18(null); setSelectedAbility(null); if (currentSkillIndex < skillsToRoll.length - 1) { setCurrentSkillIndex(prev => prev + 1); setStep('rollSkills'); } else { handleFinishSession(); } };
+  const handleFinishSession = () => { clearMarkedSkillsThisSession(); setStep('finished'); };
+  const handleStudySkillSelection = (skillName: string) => { setStudySkillSelected(skillName); };
+  const handleConfirmStudySkill = async () => { if (!studySkillSelected) { setError("Please select a skill to study."); return; } setError(null); setStudyRollResult(null); await setSkillUnderStudy(studySkillSelected); setStep('studyTeacherRollSkill'); };
+  const handleStudyRollComplete = useCallback(async (resultEntry: RollCompletionData) => { if (!storeCharacter || !resultEntry.results || !resultEntry.results.length) { setStudyRollResult("Error: Roll failed due to missing data."); toggleDiceRoller(); return; } const { value: rollValue } = resultEntry.results[0]; const { skillName, targetValue } = resultEntry; if (!skillName || targetValue === undefined) { setStudyRollResult("Error: Roll context missing skill information."); toggleDiceRoller(); return; } const success = rollValue > targetValue; let resultText = `Studied ${skillName}. Rolled ${rollValue} vs Target > ${targetValue}. `; await handleAdvancementOutcome(skillName, success, 'study'); setStudyRollResult(prev => resultText + (prev || '')); toggleDiceRoller(); }, [storeCharacter, handleAdvancementOutcome, toggleDiceRoller]);
+  const handleLearnSchoolRollComplete = useCallback(async (resultEntry: RollCompletionData) => { if (!storeCharacter || !resultEntry.results?.length || !selectedMagicSchool) { setStudyRollResult("Error: Roll failed due to missing data."); toggleDiceRoller(); return; } const { value: rollValue } = resultEntry.results[0]; const targetInt = resultEntry.targetValue; if (targetInt === undefined) { setStudyRollResult("Error: Character INT value not found for roll."); toggleDiceRoller(); return; } const success = rollValue > targetInt; let resultText = `Attempting to learn ${selectedMagicSchool.name}. Rolled ${rollValue} vs INT > ${targetInt}. `; if (success) { resultText += `Success! You have learned the basics of ${selectedMagicSchool.name}. The skill is added at your base chance of ${targetInt}.`; await addMagicSchool(selectedMagicSchool, targetInt); } else { resultText += "Failure. You must study for another week to try again."; } setStudyRollResult(resultText); toggleDiceRoller(); }, [storeCharacter, selectedMagicSchool, addMagicSchool, toggleDiceRoller]);
+  const performLearnSchoolRoll = () => { if (!storeCharacter || !selectedMagicSchool) return; const targetInt = storeCharacter.attributes.INT; setStudyRollResult(null); toggleDiceRoller({ rollMode: 'advancementRoll', targetValue: targetInt, skillName: `Learn ${selectedMagicSchool.name}`, description: `Learn Magic School: ${selectedMagicSchool.name} (D20 vs > ${targetInt})`, onRollComplete: handleLearnSchoolRollComplete, }); };
+  const handleManualLearnSchool = async () => { if (!storeCharacter || !selectedMagicSchool) return; const targetInt = storeCharacter.attributes.INT; setStudyRollResult(null); let resultText = `Manually learned ${selectedMagicSchool.name}. Success! The skill is added at your base chance of ${targetInt}.`; await addMagicSchool(selectedMagicSchool, targetInt); setStudyRollResult(resultText); };
+  const handleSelectSpell = (spell: Spell) => { setSelectedSpell(spell); };
+  const handleConfirmLearnSpell = async () => { if (!selectedSpell) { setError("Please select a spell to learn."); return; } setError(null); try { await learnSpell(selectedSpell); onClose(); } catch (err) { console.error("Error learning spell:", err); setError(err instanceof Error ? err.message : "Failed to learn the spell."); } };
+  const handleFinishStudy = () => { setStudySkillSelected(null); setStudyRollResult(null); setSelectedSpell(null); setSelectedMagicSchool(null); setLearnableSpells([]); onClose(); };
+
+  // --- THIS IS THE FIX ---
+  // The missing `switch (step) {` and its closing `}` have been added back.
   const renderStepContent = () => {
     if (!characterForInfo && step !== 'initial') { 
         return <LoadingSpinner text="Loading character data..." />;
@@ -741,7 +351,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </div>
           </div>
         );
-
       case 'enterMarks':
         return (
           <form onSubmit={handleMarksEntered} className="space-y-4">
@@ -770,7 +379,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </div>
           </form>
         );
-
       case 'selectSkills':
         if (!characterForInfo) return <LoadingSpinner />;
         return (
@@ -822,14 +430,12 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </div>
           </div>
         );
-
       case 'rollSkills':
         if (skillsToRoll.length === 0 || !characterForInfo) return <LoadingSpinner text="Preparing skill roll..." />;
         const currentSkill = skillsToRoll[currentSkillIndex];
         const currentLevel = getSkillLevelFromStore(currentSkill);
         const isMaxLevel = currentLevel >= 18;
         const hasBeenProcessed = !!rollResult;
-
         return (
           <div className="space-y-4">
             <h4 className="font-medium text-gray-800">
@@ -840,24 +446,21 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               <p className="text-gray-600">Current Level: {currentLevel}</p>
               {isMaxLevel && !hasBeenProcessed && <p className="text-yellow-600 font-medium mt-1">Max Level Reached. Skipped.</p>}
             </div>
-
             {rollResult && (
-              <div className={`p-3 rounded border text-center ${rollResult.includes('Success') || rollResult.includes('Manually advanced') ? 'bg-green-50 border-green-200 text-green-800' : rollResult.includes('Failed') ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+              <div className={`p-3 rounded border text-center ${rollResult.includes('Success') ? 'bg-green-50 border-green-200 text-green-800' : rollResult.includes('Failed') ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
                 {rollResult}
               </div>
             )}
-
             {saveError && <ErrorMessage message={saveError} />}
             {error && <ErrorMessage message={error} />}
-
             <div className="flex justify-center gap-4 pt-2">
               {!hasBeenProcessed && !isMaxLevel && (
                 <>
                   <Button onClick={() => performSkillRoll(currentSkill, 'endSession')} disabled={isSaving} loading={isSaving}>
-                    <Dices className="w-4 h-4 mr-1" /> Roll (d20 vs {'>'} {currentLevel})
+                    <Dices className="w-4 h-4 mr-1" /> Roll (D20 vs {'>'} {currentLevel})
                   </Button>
                   <Button variant="outline" onClick={() => handleManualAdvance(currentSkill, 'endSession')} disabled={isSaving} loading={isSaving}>
-                     <Zap className="w-4 h-4 mr-1" /> Advance Manually
+                     <Zap className="w-4 h-4 mr-1" /> Enter Manual Result
                   </Button>
                 </>
               )}
@@ -870,7 +473,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
              {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
           </div>
         );
-
       case 'selectAbility':
         return (
           <div className="space-y-4">
@@ -878,14 +480,11 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               <Award className="w-5 h-5" /> Skill <span className="font-bold">{skillJustReached18}</span> reached level 18!
             </h4>
             <p className="text-gray-700">Select a new Heroic Ability:</p>
-
             {loadingAbilities && <LoadingSpinner text="Loading available abilities..." />}
             {error && <ErrorMessage message={error} />}
-
             {!loadingAbilities && availableAbilities.length === 0 && !error && (
               <p className="text-center text-gray-500 italic py-4">No eligible heroic abilities found for this character.</p>
             )}
-
             {!loadingAbilities && availableAbilities.length > 0 && (
               <div className="max-h-60 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50">
                 {availableAbilities.map(ability => (
@@ -910,7 +509,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               </div>
             )}
             {saveError && <ErrorMessage message={saveError} />}
-
             <div className="flex justify-end pt-2">
               <Button 
                 onClick={handleConfirmAbilitySelection} 
@@ -923,7 +521,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
              {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
           </div>
         );
-
       case 'selectStudyType':
         const canStudyMagicSpells = !!storeCharacter?.magicSchool;
         const magicTalentCount = storeCharacter?.heroic_abilities?.filter(a => a.toUpperCase() === 'MAGIC TALENT').length ?? 0;
@@ -974,7 +571,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </div>
           </div>
         );
-
       case 'studyTeacherSelectSkill':
         if (!characterForInfo) return <LoadingSpinner />;
         return (
@@ -992,26 +588,9 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
                 const currentLevel = getSkillLevelFromStore(skill.name);
                 const isMaxLevel = currentLevel >= 18;
                 const isDisabled = isMaxLevel || (!!skillCurrentlyUnderStudy && skillCurrentlyUnderStudy !== skill.name);
-
                 return (
-                  <label
-                    key={skill.name}
-                    className={`flex items-center space-x-3 p-2 rounded ${
-                      isDisabled
-                        ? 'opacity-60 cursor-not-allowed'
-                        : studySkillSelected === skill.name
-                        ? 'bg-blue-100 border border-blue-300'
-                        : 'hover:bg-gray-100 cursor-pointer'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="studySkill"
-                      checked={studySkillSelected === skill.name}
-                      onChange={() => handleStudySkillSelection(skill.name)}
-                      disabled={isDisabled}
-                      className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    />
+                  <label key={skill.name} className={`flex items-center space-x-3 p-2 rounded ${ isDisabled ? 'opacity-60 cursor-not-allowed' : studySkillSelected === skill.name ? 'bg-blue-100 border border-blue-300' : 'hover:bg-gray-100 cursor-pointer' }`}>
+                    <input type="radio" name="studySkill" checked={studySkillSelected === skill.name} onChange={() => handleStudySkillSelection(skill.name)} disabled={isDisabled} className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"/>
                     <span className={`flex-grow ${skill.isTrained ? 'font-semibold' : ''}`}>{skill.name}</span>
                     <span className="text-xs text-gray-500">({skill.attribute})</span>
                     <span className="text-sm text-gray-600 font-medium">Lvl {currentLevel}</span>
@@ -1032,7 +611,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
              {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
           </div>
         );
-
       case 'studyTeacherRollSkill':
         const skillToStudy = skillCurrentlyUnderStudy || studySkillSelected; 
         if (!skillToStudy || !characterForInfo) {
@@ -1041,7 +619,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
         const studySkillLevel = getSkillLevelFromStore(skillToStudy);
         const studySkillIsMax = studySkillLevel >= 18;
         const studyProcessed = !!studyRollResult;
-
         return (
           <div className="space-y-4">
             <h4 className="font-medium text-gray-800">Study Session: {skillToStudy}</h4>
@@ -1050,24 +627,21 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               <p className="text-gray-600">Current Level: {studySkillLevel}</p>
               {studySkillIsMax && !studyProcessed && <p className="text-yellow-600 font-medium mt-1">Max Level Reached. Study complete.</p>}
             </div>
-
             {studyRollResult && (
-              <div className={`p-3 rounded border text-center ${studyRollResult.includes('Success') || studyRollResult.includes('Manually advanced') ? 'bg-green-50 border-green-200 text-green-800' : studyRollResult.includes('Failed') ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+              <div className={`p-3 rounded border text-center ${studyRollResult.includes('Success') ? 'bg-green-50 border-green-200 text-green-800' : studyRollResult.includes('Failed') ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
                 {studyRollResult}
               </div>
             )}
-
             {saveError && <ErrorMessage message={saveError} />}
             {error && <ErrorMessage message={error} />}
-
             <div className="flex justify-center gap-4 pt-2">
               {!studyProcessed && !studySkillIsMax && (
                 <>
                   <Button onClick={() => performSkillRoll(skillToStudy, 'study')} disabled={isSaving} loading={isSaving}>
-                    <Dices className="w-4 h-4 mr-1" /> Roll (d20 vs {'>'} {studySkillLevel})
+                    <Dices className="w-4 h-4 mr-1" /> Roll (D20 vs {'>'} {studySkillLevel})
                   </Button>
                   <Button variant="outline" onClick={() => handleManualAdvance(skillToStudy, 'study')} disabled={isSaving} loading={isSaving}>
-                     <Zap className="w-4 h-4 mr-1" /> Advance Manually
+                     <Zap className="w-4 h-4 mr-1" /> Enter Manual Result
                   </Button>
                 </>
               )}
@@ -1080,7 +654,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
              {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
           </div>
         );
-
       case 'studyMagicSelectSpell':
         return (
           <div className="space-y-4">
@@ -1091,28 +664,16 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
                 <p className="text-gray-600">School: <span className="font-semibold">{magicSchoolName}</span></p>
             )}
             <p className="text-gray-600">Select a spell to learn:</p>
-
             {loadingMagicData && <LoadingSpinner text="Loading spells..." />}
             {error && <ErrorMessage message={error} />}
-
             {!loadingMagicData && learnableSpells.length === 0 && !error && (
               <p className="text-center text-gray-500 italic py-4">No new spells available to learn at this time, or prerequisites not met.</p>
             )}
-
             {!loadingMagicData && learnableSpells.length > 0 && (
               <div className="max-h-72 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50">
                 {learnableSpells.map(spell => (
-                  <label
-                    key={spell.id}
-                    className={`flex items-start space-x-3 p-3 rounded border cursor-pointer ${selectedSpell?.id === spell.id ? 'bg-blue-100 border-blue-300 ring-2 ring-blue-400' : 'bg-white hover:bg-blue-50 border-gray-200'}`}
-                  >
-                    <input
-                      type="radio"
-                      name="learnSpell"
-                      checked={selectedSpell?.id === spell.id}
-                      onChange={() => handleSelectSpell(spell)}
-                      className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 mt-1 flex-shrink-0"
-                    />
+                  <label key={spell.id} className={`flex items-start space-x-3 p-3 rounded border cursor-pointer ${selectedSpell?.id === spell.id ? 'bg-blue-100 border-blue-300 ring-2 ring-blue-400' : 'bg-white hover:bg-blue-50 border-gray-200'}`}>
+                    <input type="radio" name="learnSpell" checked={selectedSpell?.id === spell.id} onChange={() => handleSelectSpell(spell)} className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 mt-1 flex-shrink-0" />
                     <div className="flex-grow">
                         <p className="font-semibold">{spell.name} <span className="text-xs font-normal text-gray-500">(Rank {spell.rank ?? 'N/A'})</span></p>
                         <p className="text-xs text-gray-600 mt-1">{spell.description}</p>
@@ -1130,7 +691,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               </div>
             )}
             {saveError && <ErrorMessage message={saveError} />}
-
             <div className="flex justify-between pt-2">
               <Button type="button" variant="secondary" onClick={() => { setStep('selectStudyType'); setError(null); }}>
                 <ChevronLeft className="w-4 h-4 mr-1" /> Back
@@ -1142,7 +702,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
              {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
           </div>
         );
-      
       case 'studyMagicSelectSchool':
         const knownSchoolNames = Object.keys(storeCharacter?.skill_levels ?? {});
         const availableSchools = allMagicSchools.filter(school => !knownSchoolNames.includes(school.name));
@@ -1158,17 +717,8 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             )}
              <div className="max-h-72 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50">
                 {availableSchools.map(school => (
-                  <label
-                    key={school.id}
-                    className={`flex items-start space-x-3 p-3 rounded border cursor-pointer ${selectedMagicSchool?.id === school.id ? 'bg-blue-100 border-blue-300 ring-2 ring-blue-400' : 'bg-white hover:bg-blue-50 border-gray-200'}`}
-                  >
-                    <input
-                      type="radio"
-                      name="learnSchool"
-                      checked={selectedMagicSchool?.id === school.id}
-                      onChange={() => setSelectedMagicSchool(school)}
-                      className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 mt-1 flex-shrink-0"
-                    />
+                  <label key={school.id} className={`flex items-start space-x-3 p-3 rounded border cursor-pointer ${selectedMagicSchool?.id === school.id ? 'bg-blue-100 border-blue-300 ring-2 ring-blue-400' : 'bg-white hover:bg-blue-50 border-gray-200'}`}>
+                    <input type="radio" name="learnSchool" checked={selectedMagicSchool?.id === school.id} onChange={() => setSelectedMagicSchool(school)} className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 mt-1 flex-shrink-0" />
                     <div className="flex-grow">
                         <p className="font-semibold">{school.name}</p>
                         <p className="text-xs text-gray-600 mt-1">{school.description}</p>
@@ -1186,7 +736,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </div>
           </div>
         );
-
       case 'studyMagicRollSchool':
         if (!selectedMagicSchool || !storeCharacter) {
           return <ErrorMessage message="Error: No magic school selected or character data missing." />;
@@ -1198,23 +747,20 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
               <h4 className="font-medium text-gray-800">Study Session: Learn {selectedMagicSchool.name}</h4>
               <div className="p-4 border rounded bg-gray-50 text-center">
                 <p className="text-lg font-semibold">{selectedMagicSchool.name}</p>
-                <p className="text-gray-600">You must roll greater than your Intelligence ({targetInt}) on a d20 to succeed.</p>
+                <p className="text-gray-600">You must roll greater than your Intelligence ({targetInt}) on a D20 to succeed.</p>
               </div>
-
               {studyRollResult && (
                 <div className={`p-3 rounded border text-center ${studyRollResult.includes('Success') ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                   {studyRollResult}
                 </div>
               )}
-
               {saveError && <ErrorMessage message={saveError} />}
               {error && <ErrorMessage message={error} />}
-
               <div className="flex justify-center gap-4 pt-2">
                 {!learnSchoolProcessed && (
                   <>
                     <Button onClick={performLearnSchoolRoll} disabled={isSaving} loading={isSaving}>
-                      <Dices className="w-4 h-4 mr-1" /> Roll (d20 vs {'>'} {targetInt})
+                      <Dices className="w-4 h-4 mr-1" /> Roll (D20 vs {'>'} {targetInt})
                     </Button>
                     <Button variant="outline" onClick={handleManualLearnSchool} disabled={isSaving} loading={isSaving}>
                        <Zap className="w-4 h-4 mr-1" /> Succeed Manually
@@ -1230,7 +776,6 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
                {isSaving && <div className="text-center text-sm text-blue-600 flex items-center justify-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Saving...</div>}
             </div>
         );
-
       case 'finished':
         return (
           <div className="text-center space-y-4 p-6 bg-green-50 rounded border border-green-200">
@@ -1242,13 +787,38 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             </Button>
           </div>
         );
-
       default:
         const _exhaustiveCheck: never = step;
         return <p>Unknown step: {_exhaustiveCheck}</p>;
     }
   };
 
+  const renderManualAdvanceModal = () => {
+    if (!showManualAdvanceModal || !manualAdvanceContext) return null;
+    const { skillName } = manualAdvanceContext;
+    const currentLevel = getSkillLevelFromStore(skillName);
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-sm w-full p-6 shadow-xl">
+          <h4 className="text-lg font-semibold text-gray-800">Manual Advancement for <span className="text-blue-600">{skillName}</span></h4>
+          <p className="text-sm text-gray-600 mt-2 mb-4">
+            A success is counted when the D20 roll is <span className="font-bold">greater than</span> the skill's current level of <span className="font-bold">{currentLevel}</span>.
+          </p>
+          <div className="flex flex-col gap-3">
+            <Button onClick={() => processManualAdvance(true)} disabled={isSaving} loading={isSaving} className="w-full">
+              <ThumbsUp className="w-4 h-4 mr-2" /> Success
+            </Button>
+            <Button onClick={() => processManualAdvance(false)} disabled={isSaving} loading={isSaving} variant="outline" className="w-full">
+              <ThumbsDown className="w-4 h-4 mr-2" /> Failure
+            </Button>
+          </div>
+          <div className="mt-4 text-center">
+            <button onClick={() => setShowManualAdvanceModal(false)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1258,11 +828,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
             <GraduationCap className="w-6 h-6 text-blue-600" />
             Character Advancement
           </h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-            aria-label="Close advancement modal"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close advancement modal">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -1270,6 +836,7 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
           {renderStepContent()}
         </div>
       </div>
+      {renderManualAdvanceModal()}
     </div>
   );
 }

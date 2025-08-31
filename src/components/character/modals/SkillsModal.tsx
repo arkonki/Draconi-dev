@@ -136,13 +136,13 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
         <div className="p-6 border-b bg-gray-50">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-800">Skills (d20 Check)</h2>
+            <h2 className="text-2xl font-bold text-gray-800">Skills (D20 Check)</h2>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
               <X className="w-6 h-6" />
             </button>
           </div>
           <p className="text-sm text-gray-600 mt-1">
-            Click a skill to roll a d20 check. Roll ≤ Skill Level for success. 1 is Dragon (Crit Success), 20 is Demon (Crit Fail). Conditions apply Bane (roll 2d20, take highest/worst). Trained skills are bolded.
+            Click a skill to roll a D20 check. Roll ≤ Skill Level for success. 1 is Dragon (Crit Success), 20 is Demon (Crit Fail). Conditions apply Bane (roll 2d20, take highest/worst). Trained skills are bolded.
           </p>
         </div>
         {/* Simplified Grid Logic */}
