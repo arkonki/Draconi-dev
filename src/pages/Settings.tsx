@@ -42,24 +42,24 @@ const menuItems: SettingsMenuItem[] = [
     icon: User,
     description: 'Manage your personal information and account settings'
   },
-  {
-    id: 'appearance',
-    label: 'Appearance',
-    icon: Palette,
-    description: 'Customize the look and feel of the application'
-  },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: Bell,
-    description: 'Configure your notification preferences'
-  },
-  {
-    id: 'localization',
-    label: 'Localization',
-    icon: Globe,
-    description: 'Set your language, timezone and regional preferences'
-  },
+ // {
+ //   id: 'appearance',
+ //   label: 'Appearance',
+ //   icon: Palette,
+ //   description: 'Customize the look and feel of the application'
+ // },
+ // {
+ //   id: 'notifications',
+ //   label: 'Notifications',
+ //   icon: Bell,
+ //   description: 'Configure your notification preferences'
+//  },
+//  {
+//    id: 'localization',
+//    label: 'Localization',
+//    icon: Globe,
+//    description: 'Set your language, timezone and regional preferences'
+//  },
   {
     id: 'game-data',
     label: 'Game Data Editor',
