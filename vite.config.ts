@@ -13,7 +13,7 @@ export default defineConfig({
       },
       manifest: {
         name: 'Dragonbane Character Manager',
-        short_name: 'DragonbaneCM',
+        short_name: 'Dragonbane',
         description: 'A web application to manage characters, parties, and game data for the Dragonbane TTRPG.',
         theme_color: '#2c3e50',
         background_color: '#ffffff',
