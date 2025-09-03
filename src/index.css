@@ -1,4 +1,256 @@
+/* Tailwind CSS Directives */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import './styles/homebrew.css';
+
+/* 
+  --- PHB STYLESHEET CONTENT ---
+  This contains all the necessary styles for the D&D homebrew look.
+  It has been consolidated here to bypass any issues with CSS @import.
+*/
+
+/* PHB-Like CSS */
+.phb {
+    color: #000;
+    padding: 1cm 1.7cm;
+    padding-bottom: 1.5cm;
+    background-color: #EEE5CE;
+    background-image: url('https://raw.githubusercontent.com/Daxiongmao87/foundry-vtt-5e-phb-journal-styling/main/images/5e-phb-background-imitation.png');
+    font-family: BookSanity;
+    font-size: 1.0em;
+    text-rendering: optimizeLegibility;
+}
+
+.phb h1, .phb h2, .phb h3, .phb h4 {
+    margin-top: .2em !important;
+    margin-bottom: .2em !important;
+    font-family: MrJeeves !important;
+    color: rgb(93, 24, 13) !important;
+}
+
+.phb h1 {
+    font-size: .987cm;
+    -webkit-column-span: all;
+    -moz-column-span: all;
+    border-bottom: none;
+    -webkit-text-stroke-width: 1.2px;
+}
+
+.phb h2 {
+    font-size: .705cm;
+    -webkit-column-span: all;
+    -moz-column-span: all;
+    border-bottom: none;
+    -webkit-text-stroke-width: 1px;
+}
+
+.phb h3 {
+    font-size: .529cm;
+    -webkit-column-span: all;
+    -moz-column-span: all;
+    border-bottom: 2px solid #c9ad6a;
+    -webkit-text-stroke-width: 0.6px;
+}
+
+.phb h4 {
+    margin-bottom: 0 !important;
+    font-size: .458cm;
+    -webkit-column-span: all;
+    -moz-column-span: all;
+    -webkit-text-stroke-width: 0.6px;
+}
+
+.phb h5 {
+    margin-top: 0;
+    margin-bottom: .2em;
+    font-family: ScalySansSmallCaps;
+    font-size: .423cm;
+    font-weight: 900;
+}
+
+/* === CORRECTED: PARAGRAPH SPACING FIX === */
+/* This ensures consistent paragraph styling in all viewing environments. */
+.phb p {
+    margin-top: 0;
+    margin-bottom: 0.75em;
+    line-height: 1.4;
+    padding: 0;
+    text-indent: 0;
+    -webkit-text-stroke-width: 0px;
+}
+/* Creates the classic D&D paragraph indent for subsequent paragraphs. */
+.phb p + p {
+    text-indent: 1.2em;
+}
+
+.phb h1+p::first-letter {
+    float: left;
+    font-family: Solberry;
+    font-size: 5em;
+    color: #222;
+    line-height: .8em;
+}
+
+.phb blockquote, .phb .note-block {
+    font-family: ScalySans !important;
+    box-sizing: border-box;
+    margin-bottom: 1em;
+    margin-top: 9px;
+    padding: 5px 10px;
+    background-color: #e0e5c1;
+    border-style: solid;
+    border-width: 11px;
+    border-image: url('https://raw.githubusercontent.com/Daxiongmao87/foundry-vtt-5e-phb-journal-styling/main/images/note-wrap-imitation.png') 40;
+    border-image-outset: 9px 0;
+    box-shadow: 1px 4px 14px #888;
+}
+
+.phb hr {
+    background-image: url('https://raw.githubusercontent.com/Daxiongmao87/foundry-vtt-5e-phb-journal-styling/main/images/red-swoosh-imitation.png');
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    border: 0;
+    height: 15px;
+    margin-bottom: .4em;
+    margin-top: .4em;
+}
+
+.phb ul {
+    margin-bottom: .8em;
+    padding-left: 1.4em;
+    line-height: 1.3em;
+    list-style-position: outside;
+    list-style-type: disc;
+}
+
+.phb code {
+    padding: 2px 4px;
+    font-size: 90%;
+    color: #c7254e !important;
+    background-color: #f9f2f4 !important;
+    border-radius: 4px !important;
+}
+
+/* === COMPONENT-SPECIFIC STYLES === */
+
+/* Monster Block */
+.phb .monster-block {
+    background-color: #fdf1dc;
+    padding: .3em;
+    border-width: 1px;
+    border-style: solid;
+    border-image: url('https://raw.githubusercontent.com/Daxiongmao87/foundry-vtt-5e-phb-journal-styling/main/images/monster-block-wrap-imitation.png') 10;
+    box-shadow: 1px 4px 14px #888;
+}
+.phb .monster-block p { margin-bottom: .4em; line-height: 1.3em; }
+.phb .monster-block table { font-family: 'BookSanity'; font-size: 1em; }
+
+/* Spell Block */
+.phb .spell-block {
+    background: #f8f5d8;
+    border-radius: 7px;
+    padding: .3em;
+    border: 1px solid #DDD;
+    box-shadow: 1px 4px 14px #888;
+}
+.phb .spell-block h4 { border: none; font-family: ScalySans; font-size: 1.2em; -webkit-text-stroke-width: 0; }
+.phb .spell-block h4+p { font-style: italic; text-indent: 0; }
+
+
+/* === TABLE STYLES (ALL ADDITIONS) === */
+
+/* 1. GENERAL TABLE STYLES */
+/* Targets any table inside .phb that IS NOT inside a monster block */
+.phb table:not(.monster-block table) {
+    font-family: ScalySans, sans-serif;
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1em;
+    margin-bottom: 1em;
+}
+.phb table:not(.monster-block table) th,
+.phb table:not(.monster-block table) td {
+    padding: 6px 10px;
+    text-align: left;
+    border: none;
+}
+.phb table:not(.monster-block table) thead {
+    color: rgb(93, 24, 13);
+    border-bottom: 1px solid rgb(93, 24, 13);
+}
+.phb table:not(.monster-block table) th {
+    font-weight: bold;
+}
+/* "Zebra striping" for the body rows */
+.phb table:not(.monster-block table) tbody tr:nth-child(odd) {
+    background-color: #fdf1dc;
+}
+
+/* 2. NOTE BLOCK TABLE FIX */
+/* These rules are more specific and ONLY apply to tables inside a note-block */
+.phb .note-block table {
+    width: 100%;
+    background-color: transparent;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin-top: 1em;
+}
+.phb .note-block table thead {
+    display: none;
+}
+.phb .note-block table td {
+    padding: 5px;
+    vertical-align: top;
+    background-color: transparent !important;
+    border: none;
+}
+/* Add a subtle vertical line ONLY between the two columns */
+.phb .note-block table td:first-child {
+    border-right: 1px solid #c9ad6a;
+}
+
+
+/* === FONT DEFINITIONS === */
+
+@font-face {
+    font-family: BookSanity;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal
+}
+@font-face {
+    font-family: BookSanity;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity%20Bold.otf') format('opentype');
+    font-weight: bold;
+    font-style: normal
+}
+@font-face {
+    font-family: BookSanity;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity%20Italic.otf') format('opentype');
+    font-weight: normal;
+    font-style: italic
+}
+@font-face {
+    font-family: ScalySans;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Scaly%20Sans/Scaly%20Sans.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal
+}
+@font-face {
+    font-family: ScalySansSmallCaps;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Scaly%20Sans%20Caps/Scaly%20Sans%20Caps.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal
+}
+@font-face {
+    font-family: Solberry;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Solbera%20Imitation/Solbera%20Imitation.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal
+}
+@font-face {
+    font-family: MrJeeves;
+    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Mr%20Eaves/Mr%20Eaves%20Small%20Caps.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal
+}
