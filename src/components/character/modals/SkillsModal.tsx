@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react'; // Removed useState and useEffect
-import { X } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { X, Info } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
 import { useDice } from '../../dice/DiceContext';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { Button } from '../../shared/Button';
-// No longer need supabase or MagicSchool type in this file
+import { supabase } from '../../../lib/supabase';
 
 interface SkillsModalProps {
   onClose: () => void;
@@ -32,6 +32,7 @@ const weaponSkillsList = [
     'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords'
 ];
 const allMageSkillsList = ['Mentalism', 'Animism', 'Elementalism'];
+
 const getBaseChance = (value: number): number => {
   if (value <= 5) return 3;
   if (value <= 8) return 4;
@@ -39,6 +40,7 @@ const getBaseChance = (value: number): number => {
   if (value <= 15) return 6;
   return 7;
 };
+
 const calculateFallbackLevel = (character: Character, skillName: string, attribute: AttributeName): number => {
     console.warn(`[SkillsModal] Calculating fallback level for ${skillName}.`);
     const isTrained = character.trainedSkills?.includes(skillName) ?? false;
@@ -47,12 +49,36 @@ const calculateFallbackLevel = (character: Character, skillName: string, attribu
     return isTrained ? baseChance * 2 : baseChance;
 };
 
+// --- Component ---
 export function SkillsModal({ onClose }: SkillsModalProps) {
   const { toggleDiceRoller } = useDice();
   const { character } = useCharacterSheetStore();
 
-  // --- REFACTORED LOGIC ---
-  // No more fetching! We check if character.magicSchool is an object with a name.
+  const [skillInfo, setSkillInfo] = useState<Record<string, { description: string }>>({});
+  const [isLoadingInfo, setIsLoadingInfo] = useState(true);
+
+  // --- NEW: State for managing a "portaled" tooltip ---
+  const [tooltipContent, setTooltipContent] = useState<string | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    const fetchSkillInfo = async () => {
+      setIsLoadingInfo(true);
+      const { data, error } = await supabase.from('game_skills').select('name, description');
+      if (error) {
+        console.error("Error fetching skill descriptions:", error);
+      } else if (data) {
+        const infoMap = data.reduce((acc, skill) => {
+          acc[skill.name] = { description: skill.description };
+          return acc;
+        }, {} as Record<string, { description: string }>);
+        setSkillInfo(infoMap);
+      }
+      setIsLoadingInfo(false);
+    };
+    fetchSkillInfo();
+  }, []);
+
   const isMage = !!(character?.magicSchool && typeof character.magicSchool === 'object');
   const characterSchoolName = isMage ? (character.magicSchool as { name: string }).name : null;
 
@@ -64,15 +90,12 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     );
   }
 
-  // Use the school name directly from the character object to find the magic skill.
   const mageSkills = useMemo(() => {
     if (!characterSchoolName) return [];
-    
     return allMageSkillsList
       .filter(name => name === characterSchoolName)
       .map(name => ({ name, attr: skillAttributeMap[name] }));
   }, [characterSchoolName]);
-
 
   const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => {
     const conditionMap: Record<AttributeName, keyof Character['conditions']> = {
@@ -94,19 +117,31 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     onClose();
   };
 
-  const generalSkills = baseSkills
-    .map(name => ({ name, attr: skillAttributeMap[name] }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // --- NEW: Event handlers for the tooltip ---
+  const handleMouseEnter = (e: React.MouseEvent, description: string) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltipContent(description);
+    // Position tooltip above and centered relative to the icon
+    setTooltipPosition({
+      top: rect.top,
+      left: rect.left + rect.width / 2,
+    });
+  };
 
-  const weaponSkills = weaponSkillsList
-    .map(name => ({ name, attr: skillAttributeMap[name] }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const handleMouseLeave = () => {
+    setTooltipContent(null);
+    setTooltipPosition(null);
+  };
+
+  const generalSkills = baseSkills.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name));
+  const weaponSkills = weaponSkillsList.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name));
 
   const renderSkillRow = (skill: { name: string; attr: AttributeName }) => {
     const isTrained = character.trainedSkills?.includes(skill.name) ?? false;
     const skillValue = character.skill_levels?.[skill.name] ?? calculateFallbackLevel(character, skill.name, skill.attr);
     const condition = getConditionForAttribute(skill.attr);
     const isAffected = character.conditions?.[condition] ?? false;
+    const description = skillInfo[skill.name]?.description;
 
     return (
       <div
@@ -117,10 +152,19 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         onClick={() => handleSkillClick(skill.name, skillValue, isAffected)}
         title={`Click to roll ${skill.name} (Target ≤ ${skillValue}${isAffected ? ', Bane' : ''})`}
       >
-        <div>
+        <div className="flex items-center">
           <span className={`${isTrained ? 'font-bold' : ''} ${isAffected ? 'text-red-700' : 'text-gray-800'}`}>
             {skill.name}
           </span>
+          {description && (
+            <div
+              className="flex items-center ml-2"
+              onMouseEnter={(e) => handleMouseEnter(e, description)}
+              onMouseLeave={handleMouseLeave}
+            >
+              <Info className="w-4 h-4 text-blue-500" />
+            </div>
+          )}
           <span className="text-sm text-gray-500 ml-2">({skill.attr})</span>
           {isAffected && <span className="text-xs text-red-600 font-semibold ml-2">(Bane)</span>}
         </div>
@@ -132,7 +176,9 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   };
 
   return (
+    // This is the root container that handles the backdrop
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      {/* The Modal itself */}
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
         <div className="p-6 border-b bg-gray-50">
           <div className="flex justify-between items-center">
@@ -142,41 +188,57 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
             </button>
           </div>
           <p className="text-sm text-gray-600 mt-1">
-            Click a skill to roll a D20 check. Roll ≤ Skill Level for success. 1 is Dragon (Crit Success), 20 is Demon (Crit Fail). Conditions apply Bane (roll 2d20, take highest/worst). Trained skills are bolded.
+            Click a skill to roll a D20 check. Roll ≤ Skill Level for success. Conditions apply Bane. Trained skills are bolded.
           </p>
         </div>
-        {/* Simplified Grid Logic */}
-        <div className={`grid grid-cols-1 ${isMage ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 p-6 overflow-y-auto flex-grow`}>
-          <div>
-            <h3 className="font-bold mb-4 text-gray-700">General Skills</h3>
-            <div className="space-y-1">
-              {generalSkills.map(renderSkillRow)}
-            </div>
+        
+        {isLoadingInfo ? (
+          <div className="flex-grow flex items-center justify-center">
+            <LoadingSpinner />
           </div>
-          <div>
-            <h3 className="font-bold mb-4 text-gray-700">Weapon Skills</h3>
-            <div className="space-y-1">
-              {weaponSkills.map(renderSkillRow)}
-            </div>
-          </div>
-          {/* Simplified and robust magic section */}
-          {isMage && characterSchoolName && (
+        ) : (
+          <div className={`grid grid-cols-1 ${isMage ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 p-6 overflow-y-auto flex-grow`}>
             <div>
-              <h3 className="font-bold mb-4 text-gray-700">Magic Skill ({characterSchoolName})</h3>
-              <div className="space-y-1">
-                {mageSkills.length > 0 ? (
-                  mageSkills.map(renderSkillRow)
-                ) : (
-                  <p className="text-sm text-gray-500 italic px-2 py-1">No matching magic skill found for "{characterSchoolName}".</p>
-                )}
-              </div>
+              <h3 className="font-bold mb-4 text-gray-700">General Skills</h3>
+              <div className="space-y-1">{generalSkills.map(renderSkillRow)}</div>
             </div>
-          )}
-        </div>
+            <div>
+              <h3 className="font-bold mb-4 text-gray-700">Weapon Skills</h3>
+              <div className="space-y-1">{weaponSkills.map(renderSkillRow)}</div>
+            </div>
+            {isMage && characterSchoolName && (
+              <div>
+                <h3 className="font-bold mb-4 text-gray-700">Magic Skill ({characterSchoolName})</h3>
+                <div className="space-y-1">
+                  {mageSkills.length > 0 ? (
+                    mageSkills.map(renderSkillRow)
+                  ) : (
+                    <p className="text-sm text-gray-500 italic px-2 py-1">No matching magic skill found for "{characterSchoolName}".</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="p-4 border-t bg-gray-50 flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
+
+      {/* --- NEW: The "Portaled" Tooltip --- */}
+      {/* It's rendered here, outside the modal's overflow container, but positioned globally */}
+      {tooltipContent && tooltipPosition && (
+        <div
+          style={{
+            top: `${tooltipPosition.top}px`,
+            left: `${tooltipPosition.left}px`,
+          }}
+          className="fixed -translate-x-1/2 -translate-y-full mb-2 w-72 p-3 bg-gray-800 text-white text-sm rounded-lg shadow-lg z-[60] pointer-events-none"
+        >
+          <p>{tooltipContent}</p>
+        </div>
+      )}
     </div>
   );
 }
