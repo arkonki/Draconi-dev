@@ -5,6 +5,12 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # NEW - Force a stable npm version to fix the optional dependency bug
+  NPM_VERSION = "10.9.0"
+  
+  # NEW - Add your Supabase variables so the build process can access them
+  VITE_SUPABASE_URL = "https://tkenxulvmzhhkuhfvcpt.supabase.co"
+  VITE_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE"
 
 [[redirects]]
   from = "/*"
