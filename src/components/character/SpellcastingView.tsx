@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Spell as DetailedSpell } from '../../types/magic';
-import { Character, AttributeName } from '../../types/character';
+import { Character, AttributeName, DiceType } from '../../types/character';
 import { Sparkles, Dices, BookOpen, Wand2, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, Calendar, AlertCircle, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useSpells } from '../../hooks/useSpells';
@@ -24,13 +24,33 @@ const durationExplanations: Record<string, string> = {
   'Concentration': 'The effect ceases if you perform another action, take damage, or fail a WIL roll for resisting fear. If you are interrupted by a sudden disturbance, such as a sound, you must make a WIL roll (not an action) to maintain your concentration.'
 };
 
-// --- UPDATED: SpellDetailPane now correctly REPLACES requirements ---
+const isValidDiceType = (s: string): s is DiceType => {
+    return ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(s.toLowerCase());
+}
+
+// --- NEW: Helper to parse and scale dice based on power level ---
+const getScaledDice = (diceString: string | null | undefined, level: number): { display: string; roller: DiceType[] } => {
+  if (!diceString) return { display: '', roller: [] };
+  
+  const match = diceString.trim().match(/(\d+)?d(\d+)/i);
+  if (!match) return { display: diceString, roller: [] };
+
+  const baseNumDice = match[1] ? parseInt(match[1], 10) : 1;
+  const dieSize = `d${match[2]}`;
+
+  if (!isValidDiceType(dieSize)) return { display: diceString, roller: [] };
+
+  const scaledNumDice = baseNumDice + (level - 1);
+  const display = `${scaledNumDice}D${match[2]}`;
+  const roller = Array(scaledNumDice).fill(dieSize);
+  
+  return { display, roller };
+};
+
+
 const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onClose: () => void; }) => {
   if (!spell) return null;
-
-  const foundRequirements = Object.keys(requirementExplanations)
-    .filter(key => spell.requirement?.includes(key));
-
+  const foundRequirements = Object.keys(requirementExplanations).filter(key => spell.requirement?.includes(key));
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-25 z-50" onClick={onClose} aria-hidden="true" />
@@ -41,48 +61,18 @@ const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onCl
             <button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X className="w-6 h-6" /></button>
           </div>
           <div className="overflow-y-auto mt-4 flex-grow space-y-6 text-gray-700">
-            <div>
-              <h4 className="font-semibold text-gray-800 mb-1">Description</h4>
-              <p className="text-sm italic border-l-4 border-gray-200 pl-4 py-1">{spell.description}</p>
-            </div>
-
-            {/* --- THIS IS THE FIX --- */}
-            {spell.requirement && (
-              <div>
-                <h4 className="font-semibold text-gray-800 mb-2">Requirements</h4>
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 space-y-2">
-                  {foundRequirements.length > 0 ? (
-                    // If we found keywords, display their full explanations.
-                    foundRequirements.map(key => (
-                      <p key={key}><strong>{key}:</strong> {requirementExplanations[key]}</p>
-                    ))
-                  ) : (
-                    // Otherwise, display the requirement as custom text.
-                    <p>{spell.requirement}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            
+            <div><h4 className="font-semibold text-gray-800 mb-1">Description</h4><p className="text-sm italic border-l-4 border-gray-200 pl-4 py-1">{spell.description}</p></div>
+            {spell.requirement && (<div><h4 className="font-semibold text-gray-800 mb-2">Requirements</h4><div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 space-y-2">{foundRequirements.length > 0 ? (foundRequirements.map(key => (<p key={key}><strong>{key}:</strong> {requirementExplanations[key]}</p>))) : (<p>{spell.requirement}</p>)}</div></div>)}
             <div>
               <h4 className="font-semibold text-gray-800 mb-2">Properties</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between border-b py-2"><span className="font-medium">Rank</span><span>{spell.rank === 0 ? 'Trick' : spell.rank}</span></div>
                 <div className="flex justify-between border-b py-2"><span className="font-medium">WP Cost</span><span>{spell.willpowerCost}</span></div>
-                <div className="border-b py-2">
-                  <div className="flex justify-between"><span className="font-medium">Casting Time</span><span>{spell.castingTime}</span></div>
-                </div>
-                <div className="border-b py-2">
-                  <div className="flex justify-between"><span className="font-medium">Range</span><span>{spell.range}</span></div>
-                </div>
-                <div className="border-b py-2">
-                  <div className="flex justify-between"><span className="font-medium">Duration</span><span>{spell.duration}</span></div>
-                  {durationExplanations[spell.duration] && (
-                    <blockquote className="mt-2 text-xs italic text-gray-500 border-l-4 pl-3">
-                      {durationExplanations[spell.duration]}
-                    </blockquote>
-                  )}
-                </div>
+                {/* --- UPDATED: Show base dice in details --- */}
+                {spell.dice && <div className="flex justify-between border-b py-2"><span className="font-medium">Dice</span><span>{spell.dice}</span></div>}
+                <div className="border-b py-2"><div className="flex justify-between"><span className="font-medium">Casting Time</span><span>{spell.castingTime}</span></div></div>
+                <div className="border-b py-2"><div className="flex justify-between"><span className="font-medium">Range</span><span>{spell.range}</span></div></div>
+                <div className="border-b py-2"><div className="flex justify-between"><span className="font-medium">Duration</span><span>{spell.duration}</span></div>{durationExplanations[spell.duration] && (<blockquote className="mt-2 text-xs italic text-gray-500 border-l-4 pl-3">{durationExplanations[spell.duration]}</blockquote>)}</div>
               </div>
             </div>
           </div>
@@ -133,20 +123,13 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     if (!character) return;
     const currentPrepared = character.prepared_spells ?? [];
     let updatedPrepared: string[];
-    if (currentIsPrepared) {
-      updatedPrepared = currentPrepared.filter(id => id !== spellId);
+    if (currentIsPrepared) { updatedPrepared = currentPrepared.filter(id => id !== spellId);
     } else {
-      if (!canPrepareMore) {
-        setPrepError(`Preparation limit reached (${preparationLimit} based on INT ${intValue}).`);
-        return;
-      }
+      if (!canPrepareMore) { setPrepError(`Preparation limit reached (${preparationLimit} based on INT ${intValue}).`); return; }
       updatedPrepared = [...currentPrepared, spellId];
     }
-    try {
-      await updateCharacterData({ prepared_spells: updatedPrepared });
-    } catch (err) {
-      setPrepError(err instanceof Error ? err.message : 'Failed to update preparation');
-    }
+    try { await updateCharacterData({ prepared_spells: updatedPrepared });
+    } catch (err) { setPrepError(err instanceof Error ? err.message : 'Failed to update preparation'); }
   };
   
   const { preparedSpellsList, grimoireSpellsList } = useMemo(() => {
@@ -194,11 +177,8 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
       const actualWpCost = isPowerLevelSpell ? baseWpCost + (selectedLevel - 1) * 2 : baseWpCost;
       if (currentWP < actualWpCost) throw new Error(`Insufficient WP (Need ${actualWpCost}, Have ${currentWP})`);
       await updateCharacterData({ current_wp: currentWP - actualWpCost });
-      
       let statusMessage = `Casted ${spell.name}${isPowerLevelSpell ? ` (Lvl ${selectedLevel})` : ''} for ${actualWpCost} WP.`;
-      if (fromGrimoire) {
-        statusMessage += ' (Casting time is doubled.)';
-      }
+      if (fromGrimoire) { statusMessage += ' (Casting time is doubled.)'; }
       setActiveStatusMessage(statusMessage);
     } catch (err) { setCastError(err instanceof Error ? err.message : 'Failed to cast spell');
     } finally { setCastingSpellId(null); }
@@ -218,9 +198,21 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     const actualWpCost = isPowerLevelSpell ? baseWpCost + (level - 1) * 2 : baseWpCost;
     const insufficientWp = (character.current_wp ?? character.attributes.WIL) < actualWpCost;
     const isReactionSpell = spell.castingTime === 'Reaction';
+    
+    // --- NEW: Calculate scaled dice for display and rolling ---
+    const scaledDice = getScaledDice(spell.dice, level);
 
     const handleLevelChange = (delta: number) => {
       setLevel(current => Math.max(1, Math.min(3, current + delta)));
+    };
+
+    const handleDiceRoll = () => {
+      if (scaledDice.roller.length === 0) return;
+      toggleDiceRoller({
+        initialDice: scaledDice.roller,
+        description: `Roll for ${spell.name} (${scaledDice.display})`,
+        rollMode: 'generic'
+      });
     };
     
     return (
@@ -235,6 +227,13 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             <div className="flex items-center gap-1.5" title="Range"><Target size={12} /> {spell.range}</div>
             <div className="flex items-center gap-1.5" title="Duration"><Calendar size={12} /> {spell.duration}</div>
             <div className="flex items-center gap-1.5 font-medium text-gray-600" title="Willpower Point Cost"><Zap size={12} /> {actualWpCost} WP {isPowerLevelSpell && level > 1 && `(L${level})`}</div>
+            
+            {/* --- NEW: Clickable dice display --- */}
+            {spell.dice && (
+              <button onClick={handleDiceRoll} className="flex items-center gap-1.5 font-medium text-purple-600 hover:text-purple-800 transition-colors" title={`Roll ${scaledDice.display}`}>
+                <Dices size={12} /> {scaledDice.display}
+              </button>
+            )}
           </div>
           {spell.requirement && (<div className="mt-2 text-xs flex items-center gap-1.5 text-amber-800"><AlertCircle size={12} className="flex-shrink-0"/><span>Requirement: {spell.requirement}</span></div>)}
         </div>
@@ -286,11 +285,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                 <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800 mb-1"><Sparkles className="w-6 h-6 text-purple-600" />Spellcasting</h2>
                 <div className="flex items-center gap-4 text-sm text-gray-600">
                    <span>WP: <strong className="font-semibold">{character.current_wp ?? character.attributes.WIL}</strong> / {character.attributes.WIL}</span>
-                   {actualMagicSkillName && magicSkillValue !== null && (
-                     <div className={`flex items-center gap-1 cursor-pointer px-2 py-0.5 rounded transition-colors ${isMagicSkillAffected ? 'text-red-700 bg-red-50 hover:bg-red-100' : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'}`} onClick={handleMagicSkillClick} title={`Click to roll ${actualMagicSkillName} (Target ≤ ${magicSkillValue})`}>
-                       <Dices className="w-3.5 h-3.5" /> <span className="font-medium">{actualMagicSkillName}:</span> <span>{magicSkillValue}</span> {isMagicSkillAffected && <span className="text-xs font-semibold">(Bane)</span>}
-                     </div>
-                   )}
+                   {actualMagicSkillName && magicSkillValue !== null && ( <div className={`flex items-center gap-1 cursor-pointer px-2 py-0.5 rounded transition-colors ${isMagicSkillAffected ? 'text-red-700 bg-red-50 hover:bg-red-100' : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'}`} onClick={handleMagicSkillClick} title={`Click to roll ${actualMagicSkillName} (Target ≤ ${magicSkillValue})`}><Dices className="w-3.5 h-3.5" /> <span className="font-medium">{actualMagicSkillName}:</span> <span>{magicSkillValue}</span> {isMagicSkillAffected && <span className="text-xs font-semibold">(Bane)</span>}</div> )}
                 </div>
               </div>
               <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl leading-none focus:outline-none mt-[-4px]">&times;</button>
@@ -310,11 +305,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
           
           <div className="overflow-y-auto flex-grow bg-gray-100">
             <div className="border-t">
-              {spellsToDisplay.length > 0 ? (
-                spellsToDisplay.map((spell) => (<SpellRow key={spell.id} spell={spell} />))
-              ) : (
-                <div className="text-center py-10 text-gray-500"><p>No spells match the current filter.</p></div>
-              )}
+              {spellsToDisplay.length > 0 ? ( spellsToDisplay.map((spell) => (<SpellRow key={spell.id} spell={spell} />)) ) : ( <div className="text-center py-10 text-gray-500"><p>No spells match the current filter.</p></div> )}
             </div>
           </div>
 

@@ -84,15 +84,20 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
     onChange(name, processedValue);
   };
 
+  // --- NEW: Handler for the power_level checkbox ---
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, checked } = e.target;
+    // We store 'yes' or 'none' in the database for the power_level column.
+    const value = checked ? 'yes' : 'none';
+    onChange(name, value);
+  };
+
   return (
     <div className="space-y-4">
       <div>
         <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name</label>
         <input
-          type="text"
-          name="name"
-          id="name"
-          value={entry.name || ''}
+          type="text" name="name" id="name" value={entry.name || ''}
           onChange={handleInputChange}
           className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           required
@@ -102,10 +107,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
       <div>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
         <textarea
-          name="description"
-          id="description"
-          rows={3}
-          value={entry.description || ''}
+          name="description" id="description" rows={3} value={entry.description || ''}
           onChange={handleInputChange}
           className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
         />
@@ -115,47 +117,29 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
         <div>
           <label htmlFor="school_id" className="block text-sm font-medium text-gray-700">Magic School</label>
           <select
-            name="school_id"
-            id="school_id"
-            // --- FIX: Use nullish coalescing for clarity and strictness ---
-            // This ensures we are only ever reading from the correct 'school_id' field.
-            value={entry.school_id ?? ''}
+            name="school_id" id="school_id" value={entry.school_id ?? ''}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white"
           >
             <option value="">General</option>
-            {magicSchools.map(school => (
-              <option key={school.id} value={school.id}>
-                {school.name}
-              </option>
-            ))}
+            {magicSchools.map(school => ( <option key={school.id} value={school.id}>{school.name}</option> ))}
           </select>
         </div>
         <div>
           <label htmlFor="rank" className="block text-sm font-medium text-gray-700">Rank (0 for Trick)</label>
           <input
-            type="number"
-            name="rank"
-            id="rank"
-            min="0"
-            max="5"
-            value={entry.rank ?? 0}
+            type="number" name="rank" id="rank" min="0" max="5" value={entry.rank ?? 0}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           />
         </div>
       </div>
-      
-      {/* ... (rest of the form is unchanged) ... */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label htmlFor="casting_time" className="block text-sm font-medium text-gray-700">Casting Time</label>
           <input
-            type="text"
-            name="casting_time"
-            id="casting_time"
-            value={entry.casting_time || ''}
+            type="text" name="casting_time" id="casting_time" value={entry.casting_time || ''}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           />
@@ -163,10 +147,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
         <div>
           <label htmlFor="range" className="block text-sm font-medium text-gray-700">Range</label>
           <input
-            type="text"
-            name="range"
-            id="range"
-            value={entry.range || ''}
+            type="text" name="range" id="range" value={entry.range || ''}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           />
@@ -174,28 +155,40 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
         <div>
           <label htmlFor="duration" className="block text-sm font-medium text-gray-700">Duration</label>
           <input
-            type="text"
-            name="duration"
-            id="duration"
-            value={entry.duration || ''}
+            type="text" name="duration" id="duration" value={entry.duration || ''}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           />
         </div>
       </div>
-
-       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      
+      {/* --- UPDATED: New grid for cost, dice, and power level --- */}
+       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
          <div>
            <label htmlFor="willpower_cost" className="block text-sm font-medium text-gray-700">Willpower Cost</label>
            <input
-             type="number"
-             name="willpower_cost"
-             id="willpower_cost"
-             min="0"
-             value={entry.willpower_cost ?? 0}
+             type="number" name="willpower_cost" id="willpower_cost" min="0" value={entry.willpower_cost ?? 0}
              onChange={handleInputChange}
              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
            />
+         </div>
+         <div>
+           <label htmlFor="dice" className="block text-sm font-medium text-gray-700">Dice</label>
+           <input
+             type="text" name="dice" id="dice" value={entry.dice || ''}
+             onChange={handleInputChange}
+             placeholder="e.g., D6, 2D8"
+             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+           />
+         </div>
+         <div className="flex items-center h-11">
+           <input
+             type="checkbox" name="power_level" id="power_level"
+             checked={entry.power_level === 'yes'}
+             onChange={handleCheckboxChange}
+             className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+           />
+           <label htmlFor="power_level" className="ml-2 block text-sm font-medium text-gray-700">Has Power Levels?</label>
          </div>
       </div>
 
@@ -204,10 +197,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
           Learning Prerequisite (JSON or leave empty)
         </label>
         <textarea
-          name="prerequisite"
-          id="prerequisite"
-          rows={6}
-          value={prerequisiteInput}
+          name="prerequisite" id="prerequisite" rows={6} value={prerequisiteInput}
           onChange={handlePrerequisiteChange}
           placeholder='JSON for learning, e.g., {"type": "spell", "name": "Light"}. Leave empty for no prerequisite.'
           className={`mt-1 block w-full border rounded-md shadow-sm py-2 px-3 focus:outline-none sm:text-sm ${prerequisiteError ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}`}
@@ -226,10 +216,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
           Casting Requirement (Text or leave empty)
         </label>
         <textarea
-          name="requirement"
-          id="requirement"
-          rows={3}
-          value={entry.requirement || ''}
+          name="requirement" id="requirement" rows={3} value={entry.requirement || ''}
           onChange={handleInputChange}
           placeholder="e.g., Requires a free hand, or Verbal component only. Leave empty if none."
           className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"

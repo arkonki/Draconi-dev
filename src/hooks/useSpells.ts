@@ -69,6 +69,7 @@ export function useSpells(characterId?: string) {
           .select(`
             *,
             power_level,
+						dice,
             magic_schools ( name )
           `)
           .in('name', learnedSpellNames)
@@ -106,7 +107,8 @@ export function useSpells(characterId?: string) {
       description: dbSpell.description,
       willpowerCost: dbSpell.willpower_cost,
       createdAt: dbSpell.created_at,
-      powerLevel: dbSpell.power_level, // Map power_level
+      powerLevel: dbSpell.power_level,
+			dice: dbSpell.dice,// Map power_level
     }));
   }, [dbSpells]);
 
