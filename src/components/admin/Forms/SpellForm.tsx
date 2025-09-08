@@ -29,17 +29,15 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
   const [prerequisiteError, setPrerequisiteError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Initialize prerequisite textarea from entry.prerequisite
     if (entry.prerequisite) {
       try {
         if (typeof entry.prerequisite === 'object' && entry.prerequisite !== null) {
           setPrerequisiteInput(JSON.stringify(entry.prerequisite, null, 2));
         } else if (typeof entry.prerequisite === 'string') {
-          JSON.parse(entry.prerequisite); // Validate and pretty print
           setPrerequisiteInput(JSON.stringify(JSON.parse(entry.prerequisite), null, 2));
         }
       } catch (e) {
-        setPrerequisiteInput(entry.prerequisite as string); // Not valid JSON, display as is
+        setPrerequisiteInput(entry.prerequisite as string);
       }
     } else {
       setPrerequisiteInput('');
@@ -59,7 +57,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
     try {
       const parsed = JSON.parse(val);
       if (isValidPrerequisiteJSON(parsed)) {
-        onChange('prerequisite', JSON.stringify(parsed)); // Store as stringified JSON
+        onChange('prerequisite', JSON.stringify(parsed));
         setPrerequisiteError(null);
       } else {
         setPrerequisiteError('Invalid prerequisite JSON structure. Please check the format.');
@@ -119,7 +117,9 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
           <select
             name="school_id"
             id="school_id"
-            value={entry.school_id || ''}
+            // --- FIX: Use nullish coalescing for clarity and strictness ---
+            // This ensures we are only ever reading from the correct 'school_id' field.
+            value={entry.school_id ?? ''}
             onChange={handleInputChange}
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white"
           >
@@ -145,6 +145,8 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
           />
         </div>
       </div>
+      
+      {/* ... (rest of the form is unchanged) ... */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>

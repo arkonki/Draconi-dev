@@ -110,9 +110,23 @@ export function GameDataManager() {
     if (activeCategory === 'monsters') fetchMonsterCategories();
   }, [activeCategory, fetchItemCategories, fetchMonsterCategories]);
 
+  // --- THIS IS THE FIX ---
   const handleSave = useCallback(async () => {
     if (!editingEntry) return;
-    await saveData(activeCategory, editingEntry, handleSaveSuccess, setSaveError);
+
+    // By default, the data to save is the current entry from state.
+    let dataToSave = editingEntry;
+
+    // If we are saving a spell, we must first clean the object.
+    if (activeCategory === 'spells') {
+      // Create a new object that includes all properties from editingEntry
+      // EXCEPT for 'magic_schools'.
+      const { magic_schools, ...cleanEntry } = editingEntry;
+      dataToSave = cleanEntry; // Use the cleaned object for the save operation.
+    }
+
+    // Now, call the save function with the correctly structured data.
+    await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
   }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
 
   const handleDelete = useCallback(async (id: string) => {

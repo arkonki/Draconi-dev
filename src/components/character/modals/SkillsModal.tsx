@@ -57,7 +57,6 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const [skillInfo, setSkillInfo] = useState<Record<string, { description: string }>>({});
   const [isLoadingInfo, setIsLoadingInfo] = useState(true);
 
-  // --- NEW: State for managing a "portaled" tooltip ---
   const [tooltipContent, setTooltipContent] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
 
@@ -117,11 +116,9 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     onClose();
   };
 
-  // --- NEW: Event handlers for the tooltip ---
   const handleMouseEnter = (e: React.MouseEvent, description: string) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setTooltipContent(description);
-    // Position tooltip above and centered relative to the icon
     setTooltipPosition({
       top: rect.top,
       left: rect.left + rect.width / 2,
@@ -131,6 +128,18 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const handleMouseLeave = () => {
     setTooltipContent(null);
     setTooltipPosition(null);
+  };
+
+  // --- NEW: Click handler for touch devices ---
+  const handleInfoClick = (e: React.MouseEvent, description: string) => {
+    e.stopPropagation(); // Prevents the dice roller from opening
+    
+    // If this tooltip is already open, close it. Otherwise, open it.
+    if (tooltipContent === description) {
+      handleMouseLeave();
+    } else {
+      handleMouseEnter(e, description);
+    }
   };
 
   const generalSkills = baseSkills.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name));
@@ -158,7 +167,8 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
           </span>
           {description && (
             <div
-              className="flex items-center ml-2"
+              className="flex items-center ml-2 p-1" // Added padding to make the touch target larger
+              onClick={(e) => handleInfoClick(e, description)} // Added onClick for touch
               onMouseEnter={(e) => handleMouseEnter(e, description)}
               onMouseLeave={handleMouseLeave}
             >
@@ -176,10 +186,14 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   };
 
   return (
-    // This is the root container that handles the backdrop
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      {/* The Modal itself */}
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+      onClick={handleMouseLeave} // NEW: Hide tooltip when clicking the backdrop
+    >
+      <div
+        className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-xl"
+        onClick={(e) => e.stopPropagation()} // NEW: Prevent clicks inside modal from closing tooltip
+      >
         <div className="p-6 border-b bg-gray-50">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-800">Skills (D20 Check)</h2>
@@ -188,7 +202,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
             </button>
           </div>
           <p className="text-sm text-gray-600 mt-1">
-            Click a skill to roll a D20 check. Roll ≤ Skill Level for success. Conditions apply Bane. Trained skills are bolded.
+            Tap a skill to roll. Tap the info icon for details. Conditions apply Bane. Trained skills are bolded.
           </p>
         </div>
         
@@ -226,8 +240,6 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         </div>
       </div>
 
-      {/* --- NEW: The "Portaled" Tooltip --- */}
-      {/* It's rendered here, outside the modal's overflow container, but positioned globally */}
       {tooltipContent && tooltipPosition && (
         <div
           style={{
