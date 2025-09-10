@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen, Swords, Heart, Map, X } from 'lucide-react';
 
-// --- DATA STRUCTURE ---
-// All requested sections are organized under new, logical tabs.
+// --- (Data structure is unchanged) ---
 const aidData = {
   actions: {
     title: "Actions",
@@ -59,8 +58,8 @@ const aidData = {
       {
         title: "Sneak Attack & Ambush",
         items: [
-            { title: 'Sneak Attack', description: 'Make a SNEAKING roll to attack an unaware target. On success, you get a boon and the target cannot parry or dodge.' },
-            { title: 'Ambush', description: 'When lying in wait, victims must make an AWARENESS roll to spot you. Those who fail are surprised.' },
+            { title: 'Sneak Attack', description: 'If you approach undetected, roll Sneaking (with a bane if moving within 2 meters). On failure, you’re noticed and initiative is drawn. On success, the attack is surprising: you pick initiative, gain a boon on the attack, and the target cannot dodge or parry. With a Subtle weapon, damage increases by one die. Sneak attacks are always made by a single attacker against a single target.' },
+            { title: 'Ambush', description: 'A sneak attack made from hiding. Each victim rolls Awareness (with a bane if attackers are well prepared). Those who fail draw initiative cards from the bottom of the deck (#10 and up) at random.' },
         ]
       },
       {
@@ -107,6 +106,7 @@ const aidData = {
             title: "Wilderness Travel",
             items: [
                 { title: 'Pathfinder', description: 'In pathless terrain, one character must be the pathfinder.' },
+							  { title: 'Hunger', description: 'You must eat at least one ration of food per day. After one day without food you become famished and cannot heal HP, WP, or conditions except through magic.' },
                 { title: 'Bushcraft Roll', description: 'The pathfinder must make a BUSHCRAFT roll every shift to find the way. Failure results in a mishap.' },
                 { title: 'Rolling a Dragon', description: 'The pathfinder finds a shortcut, doubling the distance covered in the shift.' },
                 { title: 'Difficult Terrain', description: 'If the terrain is difficult (swamp, dense jungle), the BUSHCRAFT roll gets a bane.' },
@@ -126,6 +126,9 @@ const aidData = {
   }
 };
 
+interface PlayerAidModalProps {
+  onClose: () => void;
+}
 type TabKey = keyof typeof aidData;
 
 export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
@@ -140,11 +143,17 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
           <div key={section.title}>
             <h4 className="font-bold text-lg mb-3 text-gray-800 border-b pb-2">{section.title}</h4>
             {section.description && <p className="text-sm text-gray-600 mb-4 italic">{section.description}</p>}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-              {section.items.map(item => (
-                <div key={item.title}>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+              {section.items.map((item, index) => (
+                <div 
+                  key={item.title} 
+                  // --- THIS IS THE FIX ---
+                  // It now checks if the ROW index is even, not the item index.
+                  className={`p-3 rounded-md ${Math.floor(index / 2) % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}
+                >
                   <p className="text-gray-700">
-                    <span className="font-bold text-gray-900">✦ {item.title}:</span> {item.description}
+                    <span className="font-bold text-gray-900">{item.title}:</span> {item.description}
                   </p>
                 </div>
               ))}
