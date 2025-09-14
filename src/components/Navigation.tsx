@@ -2,26 +2,30 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDice } from './dice/DiceContext';
-import { 
-  Users, 
-  Book, 
-  Sword, 
-  StickyNote, 
+import {
+  Users,
+  Book,
+  Sword,
+  StickyNote,
   Settings,
   LogOut,
   Shield,
   Crown,
   Dices,
   Menu, // Hamburger icon
-  X // Close icon
+  X, // Close icon
+  ChevronDown, // Dropdown icon
 } from 'lucide-react';
 
 export function Navigation() {
   const location = useLocation();
-  const { signOut, isAdmin, isDM, role } = useAuth();
+  // Updated to use 'user' object which contains a 'username' property
+  const { signOut, isAdmin, isDM, role, user } = useAuth();
   const { toggleDiceRoller } = useDice();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -30,7 +34,7 @@ export function Navigation() {
     { path: '/compendium', label: 'Compendium', icon: Book, roles: ['player', 'dm', 'admin'] },
     { path: '/adventure-party', label: 'Adventure Party', icon: Sword, roles: ['player', 'dm', 'admin'] },
     { path: '/notes', label: 'Notes', icon: StickyNote, roles: ['player', 'dm', 'admin'] },
-    { path: '/settings', label: 'Settings', icon: Settings, roles: ['player', 'dm', 'admin'] },
+    // Settings has been moved to the user dropdown
   ];
 
   const handleLinkClick = () => {
@@ -39,24 +43,25 @@ export function Navigation() {
     }
   };
 
-  // Close mobile menu if clicked outside
+  // Close mobile menu or user dropdown if clicked outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Close mobile nav
       if (navRef.current && !navRef.current.contains(event.target as Node)) {
         setIsMobileMenuOpen(false);
       }
+      // Close user dropdown
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
     };
 
-    if (isMobileMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    } else {
-      document.removeEventListener('mousedown', handleClickOutside);
-    }
-
+    document.addEventListener('mousedown', handleClickOutside);
+    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isMobileMenuOpen]);
+  }, []);
 
 
   return (
@@ -91,7 +96,7 @@ export function Navigation() {
                 ))}
             </div>
 
-            {/* Right side items (Dice, Role, Logout) - Desktop */}
+            {/* Right side items (Dice, Role, User Dropdown) - Desktop */}
             <div className="flex items-center space-x-4">
               <button
                 onClick={toggleDiceRoller}
@@ -114,17 +119,43 @@ export function Navigation() {
                   {isAdmin() ? 'Admin' : isDM() ? 'DM' : 'Player'}
                 </span>
               </div>
-              <button
-                onClick={() => {
-                  signOut();
-                  handleLinkClick(); // Close menu if open
-                }}
-                className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
-                title="Log Out"
-              >
-                <LogOut className="w-5 h-5" />
-                <span className="hidden lg:inline">Log Out</span>
-              </button>
+
+              {/* User Dropdown Menu */}
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
+                >
+                  {/* CHANGED HERE */}
+                  <span>{user?.username || 'Account'}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg z-50 ring-1 ring-black ring-opacity-5">
+                    <div className="py-1">
+                      <Link
+                        to="/settings"
+                        onClick={() => setIsUserMenuOpen(false)}
+                        className="flex items-center w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                      >
+                        <Settings className="w-5 h-5 mr-3" />
+                        <span>Settings</span>
+                      </Link>
+                      <button
+                        onClick={() => {
+                          signOut();
+                          setIsUserMenuOpen(false);
+                        }}
+                        className="flex items-center w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                      >
+                        <LogOut className="w-5 h-5 mr-3" />
+                        <span>Log Out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -172,40 +203,57 @@ export function Navigation() {
                   <span>{label}</span>
                 </Link>
               ))}
-            
-            {/* Role indicator in Mobile Menu */}
-            <div className="px-3 py-2">
-              <div className="flex items-center space-x-2 px-3 py-2 rounded-md bg-gray-700 w-full">
-                {isAdmin() ? (
-                  <>
-                    <Crown className="w-5 h-5 text-yellow-400" />
-                    <span className="text-sm font-medium">Admin</span>
-                  </>
-                ) : isDM() ? (
-                  <>
-                    <Shield className="w-5 h-5 text-blue-400" />
-                    <span className="text-sm font-medium">DM</span>
-                  </>
-                ) : (
-                  <>
-                    <Users className="w-5 h-5 text-green-400" />
-                    <span className="text-sm font-medium">Player</span>
-                  </>
-                )}
-              </div>
-            </div>
 
-            {/* Logout Button in Mobile Menu */}
+            {/* Separator */}
+            <hr className="border-gray-700 my-2" />
+
+            {/* Settings and Logout in Mobile Menu */}
+            <Link
+              to="/settings"
+              onClick={handleLinkClick}
+              className={`flex items-center space-x-3 px-3 py-2 rounded-md text-base font-medium ${
+                isActive('/settings')
+                  ? 'bg-gray-900 text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              <Settings className="w-6 h-6" />
+              <span>Settings</span>
+            </Link>
+            
             <button
               onClick={() => {
                 signOut();
-                handleLinkClick(); // Close menu
+                handleLinkClick();
               }}
               className="w-full flex items-center space-x-3 px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
             >
               <LogOut className="w-6 h-6" />
               <span>Log Out</span>
             </button>
+
+            {/* Role indicator in Mobile Menu */}
+            <div className="px-3 pt-4">
+              <div className="flex items-center space-x-2 px-3 py-2 rounded-md bg-gray-700 w-full">
+                {/* CHANGED HERE */}
+                {isAdmin() ? (
+                  <>
+                    <Crown className="w-5 h-5 text-yellow-400" />
+                    <span className="text-sm font-medium">Admin: {user?.username || ''}</span>
+                  </>
+                ) : isDM() ? (
+                  <>
+                    <Shield className="w-5 h-5 text-blue-400" />
+                    <span className="text-sm font-medium">DM: {user?.username || ''}</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="w-5 h-5 text-green-400" />
+                    <span className="text-sm font-medium">Player: {user?.username || ''}</span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
