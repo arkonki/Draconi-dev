@@ -63,7 +63,7 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
             <Hammer className="w-6 h-6 text-indigo-500 flex-shrink-0 mt-0.5" />
             <div>
               <h4 className="font-semibold">Enhancement Opportunity</h4>
-              <p className="mt-1">With the help of a <strong>MASTER BLACKSMITH</strong>, this item can be enhanced. Armor can gain a bonus to its rating (e.g., +1), while weapons can gain a damage bonus (e.g., +D4). This requires GM approval.</p>
+              <p className="mt-1">With the help of a <strong>MASTER BLACKSMITH</strong> or <strong>MASTER TANNER</strong>, this item can be enhanced. Armor can gain a bonus to its rating (e.g., +1), while weapons can gain a damage bonus (e.g., +D4). This requires GM approval.</p>
             </div>
           </div>
           <div className="space-y-4">
