@@ -8,11 +8,17 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useDice } from '../dice/DiceContext';
 
-// --- (Explanation Dictionaries are unchanged) ---
-const requirementExplanations: Record<string, string> = { 'Word': 'The spell is activated with a chant or power word...', 'Gesture': 'The spell is activated by making specific hand movements.', 'Focus': 'The spell is activated with an item held in your hand...', 'Ingredient': 'The spell is activated using a certain ingredient...' };
+// --- UPDATED: Explanation Dictionary ---
+// The 'Ingredient' explanation is updated to be a better fallback.
+const requirementExplanations: Record<string, string> = {
+    'Word': 'The spell is activated with a chant or power word.',
+    'Gesture': 'The spell is activated by making specific hand movements.',
+    'Focus': 'The spell is activated with an item held in your hand.',
+    'Ingredient': 'The spell is activated using a certain ingredient.' // Updated text.
+};
 const durationExplanations: Record<string, string> = { 'Instant': 'The effect occurs instantly and has no lasting effect.', 'Round': 'The effect lasts until your turn in the next round.', 'Stretch': 'The effect lasts for one stretch of time.', 'Shift': 'The effect lasts until the end of the current shift.', 'Concentration': 'The effect ceases if you perform another action, take damage, or fail a WIL roll...' };
 
-// --- NEW: Helper functions for dice calculations are restored ---
+// --- Helper functions for dice calculations ---
 const isValidDiceType = (s: string): s is DiceType => {
     return ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(s.toLowerCase());
 }
@@ -30,13 +36,17 @@ const getScaledDice = (diceString: string | null | undefined, level: number): { 
   const scaledNumDice = baseNumDice + (level - 1);
   const display = `${scaledNumDice}D${match[2]}`;
   const roller = Array(scaledNumDice).fill(dieSize);
-  
+
   return { display, roller };
 };
 
+// --- UPDATED: SpellDetailPane Component ---
+// This component now contains the logic to parse and display the specific ingredient.
 const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onClose: () => void; }) => {
   if (!spell) return null;
+
   const foundRequirements = Object.keys(requirementExplanations).filter(key => spell.requirement?.includes(key));
+
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-25 z-50" onClick={onClose} aria-hidden="true" />
@@ -45,7 +55,34 @@ const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onCl
           <div className="flex justify-between items-center border-b pb-4"><h3 className="text-2xl font-bold text-gray-800">{spell.name}</h3><button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X className="w-6 h-6" /></button></div>
           <div className="overflow-y-auto mt-4 flex-grow space-y-6 text-gray-700">
             <div><h4 className="font-semibold text-gray-800 mb-1">Description</h4><p className="text-sm italic border-l-4 border-gray-200 pl-4 py-1">{spell.description}</p></div>
-            {spell.requirement && (<div><h4 className="font-semibold text-gray-800 mb-2">Requirements</h4><div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 space-y-2">{foundRequirements.length > 0 ? (foundRequirements.map(key => (<p key={key}><strong>{key}:</strong> {requirementExplanations[key]}</p>))) : (<p>{spell.requirement}</p>)}</div></div>)}
+            {spell.requirement && (
+              <div>
+                <h4 className="font-semibold text-gray-800 mb-2">Requirements</h4>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 space-y-2">
+                  {foundRequirements.length > 0 ? (
+                    foundRequirements.map(key => {
+                      let explanation = requirementExplanations[key];
+
+                      // --- NEW LOGIC START ---
+                      // If the requirement is 'Ingredient', try to find the specific item.
+                      if (key === 'Ingredient' && spell.requirement) {
+                        const ingredientMatch = spell.requirement.match(/Ingredient\s*\(([^)]+)\)/i);
+
+                        // If a match is found, create a new, more specific explanation.
+                        if (ingredientMatch && ingredientMatch[1]) {
+                          explanation = `The spell is activated using a certain ingredient: ${ingredientMatch[1]}.`;
+                        }
+                      }
+                      // --- NEW LOGIC END ---
+
+                      return (<p key={key}><strong>{key}:</strong> {explanation}</p>);
+                    })
+                  ) : (
+                    <p>{spell.requirement}</p>
+                  )}
+                </div>
+              </div>
+            )}
             <div>
               <h4 className="font-semibold text-gray-800 mb-2">Properties</h4>
               <div className="space-y-2 text-sm">
@@ -100,7 +137,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 
   const handleCastSpell = async (spell: DetailedSpell, selectedLevel: number, fromGrimoire: boolean) => { setCastingSpellId(spell.id); setCastError(null); try { const currentWP = character.current_wp ?? character.attributes.WIL; const baseWpCost = Number(spell.willpowerCost ?? 0); const isPowerLevelSpell = spell.powerLevel === 'yes'; const actualWpCost = isPowerLevelSpell ? baseWpCost + (selectedLevel - 1) * 2 : baseWpCost; if (currentWP < actualWpCost) throw new Error(`Insufficient WP (Need ${actualWpCost}, Have ${currentWP})`); await updateCharacterData({ current_wp: currentWP - actualWpCost }); let statusMessage = `Casted ${spell.name}${isPowerLevelSpell ? ` (Lvl ${selectedLevel})` : ''} for ${actualWpCost} WP.`; if (fromGrimoire) { statusMessage += ' (Casting time is doubled.)'; } setActiveStatusMessage(statusMessage); } catch (err) { setCastError(err instanceof Error ? err.message : 'Failed to cast spell'); } finally { setCastingSpellId(null); } };
   const handleMagicSkillClick = () => { if (!actualMagicSkillName || magicSkillValue === null) return; toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: magicSkillValue, description: `${actualMagicSkillName} Check`, requiresBane: isMagicSkillAffected, skillName: actualMagicSkillName }); };
-  
+
   const SpellRow = ({ spell }: { spell: DetailedSpell }) => {
     const isPrepared = preparedSpellIds.has(spell.id);
     const isTrick = spell.rank === 0;
@@ -114,7 +151,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 
     const handleLevelChange = (delta: number) => { setLevel(current => Math.max(1, Math.min(3, current + delta))); };
     const handleDiceRoll = () => { if (scaledDice.roller.length === 0) return; toggleDiceRoller({ initialDice: scaledDice.roller, description: `Roll for ${spell.name} (${scaledDice.display})`, rollMode: 'generic' }); };
-    
+
     return (
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border-b bg-white hover:bg-gray-50/50 last:border-b-0">
         <div className="flex-grow">

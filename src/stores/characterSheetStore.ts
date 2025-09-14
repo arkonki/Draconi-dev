@@ -80,8 +80,64 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   increaseSkillLevel: async (skillName) => { const character = get().character; if (!character) return; const currentSkillLevels = character.skill_levels || {}; const currentLevel = currentSkillLevels[skillName] ?? 0; if (currentLevel >= 18) return; const newLevel = Math.min(currentLevel + 1, 18); const updates: Partial<Character> = { skill_levels: { ...currentSkillLevels, [skillName]: newLevel } }; if (character.teacher?.skillUnderStudy === skillName) { updates.teacher = null; } await get()._saveCharacter(updates); },
   addHeroicAbility: async (abilityName) => { const character = get().character; if (!character) return; const currentAbilities = character.heroic_abilities || []; await get()._saveCharacter({ heroic_abilities: [...currentAbilities, abilityName] }); },
   increaseMaxStat: async (stat, amount) => { const character = get().character; if (!character?.id) { throw new Error("Character ID not found for RPC call."); } set({ isSaving: true, saveError: null }); try { const { error } = await supabase.rpc('increase_character_max_stat', { character_id_input: character.id, stat_name: stat, amount_increase: amount }); if (error) { throw new Error(`PostgreSQL Function Error: ${error.message}`); } set({ isSaving: false }); } catch (err) { const errorMessage = err instanceof Error ? err.message : 'A failure occurred in increaseMaxStat'; set({ saveError: errorMessage, isSaving: false }); throw err; } },
-  learnSpell: async (spell) => { const character = get().character; if (!character) return; const currentSpells = character.spells ?? { school: { name: null, spells: [] }, general: [] }; if (!currentSpells.school) { const { data: schoolData } = await supabase .from('magic_schools') .select('name') .eq('id', character.magic_school) .single(); currentSpells.school = { name: schoolData?.name ?? null, spells: [] }; } let updatedSpells; if (spell.school_id) { const schoolSpells = currentSpells.school.spells || []; if (!schoolSpells.includes(spell.name)) { updatedSpells = { ...currentSpells, school: { ...currentSpells.school, spells: [...schoolSpells, spell.name] } }; } } else { const generalSpells = currentSpells.general || []; if (!generalSpells.includes(spell.name)) { updatedSpells = { ...currentSpells, general: [...generalSpells, spell.name] }; } } if (updatedSpells) { await get()._saveCharacter({ spells: updatedSpells }); } },
-  addMagicSchool: async (school, level) => { const character = get().character; if (!character) return; const newSkillLevels = { ...character.skill_levels, [school.name]: level, }; const updates: Partial<Character> = { skill_levels: newSkillLevels, }; if (!character.magic_school) { updates.magic_school = school.id; } await get()._saveCharacter(updates); },
+  // In characterSheetStore.ts
+
+// ... (keep all other functions as they are) ...
+
+  learnSpell: async (spellToLearn: Spell) => {
+    const { character, _saveCharacter } = get();
+    if (!character) {
+        throw new Error("Cannot learn spell: No active character.");
+    }
+    // Add a guard clause to ensure we received a valid spell object
+    if (!spellToLearn || typeof spellToLearn.name !== 'string') {
+        console.error("learnSpell was called with an invalid object:", spellToLearn);
+        throw new Error("Invalid spell data provided.");
+    }
+
+    // 1. Safely parse and initialize the entire spells structure
+    const currentSpells: CharacterSpells = JSON.parse(JSON.stringify(character.spells ?? {}));
+    if (!currentSpells.school) {
+        currentSpells.school = { name: null, spells: [] };
+    }
+    if (!currentSpells.school.spells) {
+        currentSpells.school.spells = [];
+    }
+    if (!currentSpells.general) {
+        currentSpells.general = [];
+    }
+    
+    let wasUpdated = false;
+
+    // 2. Decide where to add the spell based on the presence of a school_id
+    if (spellToLearn.school_id) {
+        // This is a school-specific spell
+        const schoolSpells = currentSpells.school.spells;
+        if (!schoolSpells.includes(spellToLearn.name)) {
+            schoolSpells.push(spellToLearn.name);
+            wasUpdated = true;
+        }
+    } else {
+        // This is a general spell
+        const generalSpells = currentSpells.general;
+        if (!generalSpells.includes(spellToLearn.name)) {
+            generalSpells.push(spellToLearn.name);
+            wasUpdated = true;
+        }
+    }
+
+    // 3. Only save if a new spell was actually added
+    if (wasUpdated) {
+        await _saveCharacter({ spells: currentSpells });
+        // Also update the local state immediately for UI responsiveness
+        set(state => ({
+            character: state.character ? { ...state.character, spells: currentSpells } : null
+        }));
+    }
+  },
+
+// ... (the rest of your store file) ...
+	addMagicSchool: async (school, level) => { const character = get().character; if (!character) return; const newSkillLevels = { ...character.skill_levels, [school.name]: level, }; const updates: Partial<Character> = { skill_levels: newSkillLevels, }; if (!character.magic_school) { updates.magic_school = school.id; } await get()._saveCharacter(updates); },
   setSkillUnderStudy: async (skillName) => { await get()._saveCharacter({ teacher: skillName ? { skillUnderStudy: skillName } : null }); },
   markSkillThisSession: (skillName) => { set(state => ({ markedSkillsThisSession: new Set(state.markedSkillsThisSession).add(skillName) })); },
   clearMarkedSkillsThisSession: () => set({ markedSkillsThisSession: new Set() }),

@@ -237,8 +237,25 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
   const performLearnSchoolRoll = () => { if (!storeCharacter || !selectedMagicSchool) return; const attributes = parseJSONSafely(storeCharacter.attributes); const targetInt = attributes.INT; setStudyRollResult(null); toggleDiceRoller({ rollMode: 'advancementRoll', targetValue: targetInt, skillName: `Learn ${selectedMagicSchool.name}`, description: `Learn Magic School: ${selectedMagicSchool.name} (D20 vs > ${targetInt})`, onRollComplete: handleLearnSchoolRollComplete, }); };
   const handleManualLearnSchool = async () => { if (!storeCharacter || !selectedMagicSchool) return; const attributes = parseJSONSafely(storeCharacter.attributes); const targetInt = attributes.INT; setStudyRollResult(null); let resultText = `Manually learned ${selectedMagicSchool.name}. Success! The skill is added at your base chance of ${targetInt}.`; await addMagicSchool(selectedMagicSchool, targetInt); setStudyRollResult(resultText); };
   const handleSelectSpell = (spell: Spell) => { setSelectedSpell(spell); };
-  const handleConfirmLearnSpell = async () => { if (!selectedSpell) { setError("Please select a spell to learn."); return; } setError(null); try { await learnSpell(selectedSpell.name); onClose(); } catch (err) { console.error("Error learning spell:", err); setError(err instanceof Error ? err.message : "Failed to learn the spell."); } };
-  const handleFinishStudy = () => { setStudySkillSelected(null); setStudyRollResult(null); setSelectedSpell(null); setSelectedMagicSchool(null); setLearnableSpells([]); onClose(); };
+	
+  const handleConfirmLearnSpell = async () => {
+    if (!selectedSpell) {
+        setError("Please select a spell to learn.");
+        return;
+    }
+    setError(null);
+    try {
+        // --- THIS IS THE KEY CHANGE ---
+        // Instead of just the name, pass the whole object.
+        await learnSpell(selectedSpell); 
+        onClose();
+    } catch (err) {
+        console.error("Error learning spell:", err);
+        setError(err instanceof Error ? err.message : "Failed to learn the spell.");
+    }
+};
+	
+	const handleFinishStudy = () => { setStudySkillSelected(null); setStudyRollResult(null); setSelectedSpell(null); setSelectedMagicSchool(null); setLearnableSpells([]); onClose(); };
 
   const renderStepContent = () => {
     if (!characterForInfo && step !== 'initial') { 
