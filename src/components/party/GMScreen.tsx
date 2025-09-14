@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-// --- THIS IS THE FIX: Added 'Dices' to the import list ---
 import { Shield, Swords, Heart, Map, BookOpen, AlertCircle, Skull, Dices } from 'lucide-react';
 
 // --- (The large gmScreenData object is correct and unchanged) ---
@@ -45,7 +44,6 @@ const gmScreenData = {
           ["8", "Wild Panic. In a fit of utter panic, you flee the scene as fast as you can. On your next turn you must dash away from the source of your fear. Make another WIL roll on each subsequent turn (not an action) to stop running and act normally again."]
         ]
       },
-      // --- THIS IS THE UPDATED SECTION ---
       {
         title: "Severe Injuries",
         type: 'table',
@@ -67,7 +65,6 @@ const gmScreenData = {
           ["20", "Amnesia", "You cannot remember who you or the other player characters are. The effect must be roleplayed. Healing time: D6 days."]
         ]
       },
-      // --- END OF UPDATED SECTION ---
       {
         title: "Damage Types & Armor",
         type: 'definitions',
@@ -92,6 +89,7 @@ const gmScreenData = {
       { title: "Wilderness Mishaps (d12)", type: 'table', headers: ["D12", "Mishap"], rows: [ ["1", "Fog. Distance covered this shift is halved."], ["2", "Blocking Terrain. ACROBATICS roll to proceed."], ["3", "Torn Clothes. A random PC's clothes become rags."], ["4", "Lost. No progress this shift. Pathfinder must re-roll BUSHCRAFT."], ["5", "Dropped Item. A random PC drops or breaks an item."], ["6", "Mosquito Swarm. All PCs without a cloak become Angry."], ["7", "Sprained Ankle. Random PC takes D6 damage."], ["8", "Downpour. All PCs without a cloak must roll to withstand cold."], ["9", "Wasps. All PCs must EVADE or take D6 damage and a condition."], ["10", "Landslide. All PCs must EVADE or take D10 damage."], ["11", "Savage Animal. A wild animal attacks the party."], ["12", "Quicksand. All PCs must make a BUSHCRAFT roll or get stuck."] ] }
     ]
   },
+  
 };
 
 type TabKey = keyof typeof gmScreenData;
@@ -112,6 +110,147 @@ const SimpleTable = ({ headers, rows }: { headers: string[], rows: string[][] })
   </div>
 );
 
+// --- UPDATED: Story Helper component with more context fields ---
+const StoryHelper = () => {
+  const [prompt, setPrompt] = useState('');
+  const [partyData, setPartyData] = useState('');
+  const [locationData, setLocationData] = useState('');
+  const [npcData, setNpcData] = useState('');
+  const [response, setResponse] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const generateStory = async () => {
+    if (!prompt.trim()) {
+      setError('Please enter a primary prompt.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setResponse('');
+
+    try {
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      if (!apiKey) {
+        throw new Error('Openrouter API key not found. Please add VITE_OPENROUTER_API_KEY to your .env file.');
+      }
+
+      // --- Construct a more detailed prompt for the AI ---
+      let fullPrompt = `You are a helpful GM assistant for the Dragonbane RPG. Generate creative, engaging content based on the following information. Keep responses concise and focused on storytelling elements like plot ideas, NPC descriptions, or adventure hooks.\n\n--- Main Prompt ---\n${prompt}`;
+
+      if (partyData.trim()) {
+        fullPrompt += `\n\n--- Party Members ---\n${partyData}`;
+      }
+      if (locationData.trim()) {
+        fullPrompt += `\n\n--- Current Location ---\n${locationData}`;
+      }
+      if (npcData.trim()) {
+        fullPrompt += `\n\n--- Key NPCs ---\n${npcData}`;
+      }
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Dragonbane GM Screen'
+        },
+        body: JSON.stringify({
+          model: 'deepseek/deepseek-r1-0528:free',
+          messages: [
+            {
+              role: 'user',
+              content: fullPrompt
+            }
+          ],
+          max_tokens: 500,
+          temperature: 0.7
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status} ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setResponse(data.choices[0]?.message?.content || 'No response generated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const commonTextAreaClass = "w-full p-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y";
+
+  return (
+    <SectionCard title="AI Story Generator">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Main Prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="e.g., 'Generate a plot twist for a dungeon crawl' or 'Describe a mysterious NPC encounter'..."
+            className={commonTextAreaClass}
+            rows={3}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Party Members (Optional)</label>
+            <textarea
+              value={partyData}
+              onChange={(e) => setPartyData(e.target.value)}
+              placeholder="e.g., 'Kael, a hot-headed knight. Elara, a curious elven scholar...'"
+              className={commonTextAreaClass}
+              rows={4}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Location Details (Optional)</label>
+            <textarea
+              value={locationData}
+              onChange={(e) => setLocationData(e.target.value)}
+              placeholder="e.g., 'The Whispering Crypt, a damp and ancient tomb known for its echoing halls...'"
+              className={commonTextAreaClass}
+              rows={4}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Key NPCs (Optional)</label>
+            <textarea
+              value={npcData}
+              onChange={(e) => setNpcData(e.target.value)}
+              placeholder="e.g., 'Lord Valerius, the quest giver, seems trustworthy but has a secret agenda...'"
+              className={commonTextAreaClass}
+              rows={4}
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={generateStory}
+          disabled={loading}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Generating...' : 'Generate Story Idea'}
+        </button>
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+        {response && (
+          <div className="p-3 bg-gray-50 rounded-md">
+            <h4 className="font-semibold text-gray-800 mb-2">AI Response:</h4>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">{response}</p>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+};
+
 export function GMScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('npcs');
   
@@ -122,9 +261,12 @@ export function GMScreen() {
   }));
 
   const renderContent = () => {
+    if (activeTab === 'storyHelper') {
+      return <StoryHelper />;
+    }
+
     const tabData = gmScreenData[activeTab];
     return (
-      // --- UPDATED: Using a more robust grid layout instead of CSS columns ---
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start">
         {tabData.sections.map(section => (
           <SectionCard key={section.title} title={section.title}>

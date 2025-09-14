@@ -14,12 +14,11 @@ import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
 import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
+import { StoryHelperApp } from '../components/party/StoryHelper';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
-// --- NEW: Import the GMScreen component ---
 import { GMScreen } from '../components/party/GMScreen';
 
-// --- UPDATED: Add 'gmScreen' to the Tab type ---
-type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'sessionEnd' | 'gmScreen';
+type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'sessionEnd' | 'gmScreen' | 'storyhelper';
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -59,23 +58,30 @@ export function PartyView() {
   if (error) return <div className="p-8"><ErrorMessage message={error.message} /></div>;
   if (!party) return <div className="p-8"><ErrorMessage message="Party not found." /></div>;
 
-  // --- UPDATED: Add the new tab to the array ---
+  // --- UPDATED: Add the new tab to the array with distinct icons ---
   const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Members', icon: Users },
-    { id: 'notes', label: 'Notes', icon: Notebook },
+    { id: 'notes', label: 'Notes', icon: FileText }, // Changed Icon
     { id: 'tasks', label: 'Tasks', icon: ClipboardList },
     { id: 'inventory', label: 'Inventory', icon: Backpack },
-    { id: 'encounter', label: 'Encounter', icon: Swords },
+    { id: 'encounter', label: 'Encounter', icon: Swords, dmOnly: true },
     { id: 'sessionEnd', label: 'Session End', icon: Award, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
+	{ id: 'storyhelper', label: 'Story Helper', icon: Notebook, dmOnly: true },
   ];
 
   const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isPartyOwner);
+  
+  // --- NEW: Format party member data into a string for the Story Helper ---
+  const partyMembersString = party.members
+    .map(member => `- ${member.name}, the ${member.kin} ${member.profession}.`)
+    .join('\n');
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6">
       <div className="bg-white shadow-lg rounded-xl">
         <div className="p-6 border-b border-gray-200">
+            {/* Party Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
               <div><h1 className="text-3xl font-bold text-gray-900">{party.name}</h1><p className="text-gray-500 mt-1">A band of brave adventurers.</p></div>
               {isPartyOwner && (
@@ -91,6 +97,7 @@ export function PartyView() {
                 </div>
               )}
             </div>
+            {/* Invite Link Section */}
             {isInviteVisible && isPartyOwner && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
                 <h3 className="font-semibold text-blue-800">Share this link to invite players:</h3>
@@ -99,6 +106,7 @@ export function PartyView() {
             )}
         </div>
 
+        {/* Tab Navigation */}
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-6 px-6 overflow-x-auto" aria-label="Tabs">
             {visibleTabs.map((tab) => (
@@ -110,9 +118,10 @@ export function PartyView() {
           </nav>
         </div>
 
+        {/* Tab Content */}
         <div className="p-6 bg-gray-50/50">
           {activeTab === 'members' && (
-            <div className="space-y-4">
+             <div className="space-y-4">
               {party.members.length > 0 ? (
                 party.members.map((member) => (
                   <div key={member.id} className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -138,11 +147,18 @@ export function PartyView() {
           {activeTab === 'inventory' && <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />}
           {activeTab === 'encounter' && <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />}
           {activeTab === 'sessionEnd' && <SessionEndCheatsheet members={party.members} partyId={partyId!} />}
-          {/* --- NEW: Render the GMScreen when its tab is active --- */}
           {activeTab === 'gmScreen' && <GMScreen />}
+          {/* --- UPDATED: Pass partyId and initialPartyData to the Story Helper --- */}
+          {activeTab === 'storyhelper' && (
+            <StoryHelperApp 
+              partyId={partyId!} 
+              initialPartyData={partyMembersString} 
+            />
+          )}
         </div>
       </div>
 
+      {/* Dialogs */}
       <ConfirmationDialog isOpen={dialogOpen === 'removeMember'} onClose={() => setDialogOpen(null)} onConfirm={confirmRemoveMember} title="Remove Member" description={`Are you sure you want to remove this character from the party?`} confirmText="Remove" isDestructive={true} isLoading={removeMemberMutation.isPending} icon={<UserX className="w-6 h-6 text-red-500" />}/>
       <ConfirmationDialog isOpen={dialogOpen === 'deleteParty'} onClose={() => setDialogOpen(null)} onConfirm={confirmDeleteParty} title="Delete Party" description="Are you sure you want to permanently delete this party? This action cannot be undone." confirmText="Delete" isDestructive={true} isLoading={deletePartyMutation.isPending} icon={<ShieldAlert className="w-6 h-6 text-red-500" />}/>
     </div>
