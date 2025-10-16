@@ -186,7 +186,7 @@ export function Compendium() {
               <div className="text-center pt-16">
                 <Book className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <h2 className="text-xl font-semibold text-gray-700 mb-2">Welcome to the Compendium</h2>
-                <p className="text-gray-500 max-w-md mx-auto">Use the sidebar to search and browse entries, or add new ones if you're an admin.</p>
+                <p className="text-gray-500 max-w-md mx-auto">Use the sidebar to search and browse entries.</p>
               </div>
             )}
           </div>
