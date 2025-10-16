@@ -43,6 +43,7 @@ const aidData = {
           { title: 'Ranged Attack', description: 'Use a ranged weapon against targets within its range.' },
           { title: 'Parry', description: 'A reaction to negate a melee or ranged attack (requires a shield for ranged). Replaces your next action.' },
           { title: 'Dodge', description: 'A reaction to avoid a melee or ranged attack. Replaces your next action.' },
+					{ title: 'Durability', description: 'If your parry succeeds, the enemys attack hits your weapon or shield, and you suffer no damage. How-ever, if the damage exceeds your weapons durability, the weapon is damaged and cannot be used until it is repaired with a CRAFTING roll.' },
         ]
       },
       {

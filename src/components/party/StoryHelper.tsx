@@ -114,7 +114,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }) {
   const { data: savedIdeas, isLoading: isLoadingIdeas } = useQuery({ 
     queryKey: ['storyIdeas', partyId], 
     queryFn: () => getStoryIdeasForParty(partyId),
-    enabled: isKeySubmitted, // Only fetch ideas if the user has submitted a key
+    enabled: isKeySubmitted,
   });
   
   const saveMutation = useMutation({
@@ -184,7 +184,40 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }) {
     if (!apiKey.trim()) { setError('API Key is missing. Please add it via the edit icon.'); return; }
     setLoading(true); setError(''); setResponse('');
     try {
-      let fullPrompt = `You are a helpful GM assistant for a Dragonbane TTRPG game. Generate creative content based on the following information. CRITICALLY: Format your entire response using D&D 5e-style markdown blocks (like \`\`\`monster or \`\`\`note or \`\`\`spell), suitable for a tool like Homebrewery.\n\n--- Main Prompt ---\n${prompt}`;
+      let fullPrompt = `You are a helpful GM assistant for a Dragonbane TTRPG game. Generate creative content based on the following information. CRITICALLY: Format your entire response using markdown suitable for a tool like Homebrewery, but do not include the backticks or labels for the content blocks (like \`\`\`monster or \`\`\`note).\n\n--- Main Prompt ---\n${prompt}`;
+      
+      // --- NEW: Add specific instructions if the user asks for a monster ---
+      if (prompt.toLowerCase().includes('monster')) {
+        fullPrompt += `
+\n--- DRAGONBANE MONSTER GENERATION RULES ---
+When the main prompt asks you to create a monster, you MUST format it for the Dragonbane TTRPG using the following markdown structure as a strict template.
+
+### MONSTER NAME
+**Ferocity:** X | **Size:** Y | **Movement:** Z | **Armor:** A | **HP:** B
+
+*A brief, flavorful description of the monster's appearance and nature goes here.*
+
+**Traits**
+* **Trait Name:** Description of a special, non-attack ability. For example: "Wings: The monster can fly." or "Resistance: Takes half damage from fire."
+
+**Monster Attacks**
+| d6 | Attack |
+|:---|:---|
+| 1 | **Attack Name:** Description of the attack, including damage and any conditions inflicted. |
+| 2 | **Attack Name:** Description... |
+| 3 | **Attack Name:** Description... |
+| 4 | **Attack Name:** Description... |
+| 5 | **Attack Name:** Description... |
+| 6 | **Attack Name:** Description... |
+
+**IMPORTANT RULES TO FOLLOW WHEN CREATING:**
+- **Ferocity:** Determines how many times it acts per round (usually 1-3).
+- **Attacks:** They automatically hit. Players can usually dodge but not parry.
+- **Attack Table:** The d6 table is mandatory. Do not create a monster without it. A monster never makes the same attack twice in a row.
+- **Skills:** Do not list skills. Monsters attack using their Monster Attacks table only.
+- **Immunity:** Monsters are immune to fear and the PERSUASION skill unless a trait specifically says otherwise.`;
+      }
+
       if (partyData.trim()) fullPrompt += `\n\n--- Party Members ---\n${partyData}`;
       if (locationData.trim()) fullPrompt += `\n\n--- Current Location ---\n${locationData}`;
       if (npcData.trim()) fullPrompt += `\n\n--- Key NPCs ---\n${npcData}`;
@@ -243,7 +276,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }) {
                   <h3 className="font-bold text-lg text-gray-800">1. Provide Context</h3>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Main Prompt</label>
-                    <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'A mysterious one-eyed sailor with a quest...'" className={commonTextAreaClass} rows={3} />
+                    <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'A mysterious one-eyed sailor with a quest...' or 'Create a terrifying cave monster that guards a treasure.'" className={commonTextAreaClass} rows={3} />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
