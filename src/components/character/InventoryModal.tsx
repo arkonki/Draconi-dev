@@ -96,35 +96,22 @@ export const mergeIntoInventory = (inventory: InventoryItem[], itemToMerge: Inve
   return newInventory;
 };
 
-// --- HELPER COMPONENT: ShopItemDetail ---
+// --- HELPER COMPONENT: ShopItemDetail & ShopItemCard ---
 const ShopItemDetail = ({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>, label: string, value: string | number | null | undefined }) => {
   if (value === null || value === undefined || value === '') return null;
-  return (
-    <div className="flex items-center gap-2 text-xs text-gray-600">
-      <Icon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
-      <span className="font-medium">{label}:</span>
-      <span className="text-gray-800 font-mono">{String(value)}</span>
-    </div>
-  );
+  return (<div className="flex items-center gap-2 text-xs text-gray-600"><Icon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" /><span className="font-medium">{label}:</span><span className="text-gray-800 font-mono">{String(value)}</span></div>);
 };
-
-// --- COMPONENT: ShopItemCard ---
 const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem) => void }) => (
   <div className="flex flex-col p-4 border rounded-lg shadow-sm hover:shadow-lg transition-shadow bg-white">
-    <div className="flex-1 mb-4">
-      <h4 className="font-bold text-gray-800">{item.name}</h4><p className="text-xs text-gray-500 mb-2">{item.category}</p>
-      {item.effect && (<p className="text-sm text-blue-800 bg-blue-50 p-2 rounded-md mt-2 italic">"{item.effect}"</p>)}
-    </div>
-    <div className="space-y-1.5 mb-4 text-sm">
-      <ShopItemDetail icon={Scale} label="Weight" value={item.weight} /><ShopItemDetail icon={Shield} label="Armor" value={item.armor_rating} /><ShopItemDetail icon={Sword} label="Damage" value={item.damage} /><ShopItemDetail icon={Target} label="Range" value={item.range} /><ShopItemDetail icon={Heart} label="Durability" value={item.durability} /><ShopItemDetail icon={Star} label="Features" value={item.features} /><ShopItemDetail icon={Zap} label="Skill" value={item.skill} />
-    </div>
+    <div className="flex-1 mb-4"><h4 className="font-bold text-gray-800">{item.name}</h4><p className="text-xs text-gray-500 mb-2">{item.category}</p>{item.effect && (<p className="text-sm text-blue-800 bg-blue-50 p-2 rounded-md mt-2 italic">"{item.effect}"</p>)}</div>
+    <div className="space-y-1.5 mb-4 text-sm"><ShopItemDetail icon={Scale} label="Weight" value={item.weight} /><ShopItemDetail icon={Shield} label="Armor" value={item.armor_rating} /><ShopItemDetail icon={Sword} label="Damage" value={item.damage} /><ShopItemDetail icon={Target} label="Range" value={item.range} /><ShopItemDetail icon={Heart} label="Durability" value={item.durability} /><ShopItemDetail icon={Star} label="Features" value={item.features} /><ShopItemDetail icon={Zap} label="Skill" value={item.skill} /></div>
     <div className="flex justify-between items-center mt-auto pt-3 border-t"><span className="text-sm font-semibold text-green-800 bg-green-100 px-2.5 py-1 rounded-full">{item.cost || 'N/A'}</span><Button variant="primary" size="sm" onClick={() => onBuy(item)} disabled={!item.cost}>Buy</Button></div>
   </div>
 );
 
 
 // --- MAIN COMPONENT START ---
-const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS"];
+const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
 const shopGroups = [{ name: 'Armor & Weapons', categories: ['ARMOR & HELMETS', 'MELEE WEAPONS', 'RANGED WEAPONS'], Icon: Shield }, { name: 'Clothing & Accessories', categories: ['CLOTHES'], Icon: Package }, { name: 'Musical & Trade Goods', categories: ['MUSICAL INSTRUMENTS', 'TRADE GOODS'], Icon: ShoppingBag }, { name: 'Magic & Studies', categories: ['STUDIES & MAGIC'], Icon: Scale }, { name: 'Light & Tools', categories: ['LIGHT SOURCES', 'TOOLS'], Icon: Wrench }, { name: 'Containers & Medicine', categories: ['CONTAINERS', 'MEDICINE'], Icon: Package }, { name: 'Services', categories: ['SERVICES'], Icon: ShoppingBag }, { name: 'Hunting & Travel', categories: ['HUNTING & FISHING', 'MEANS OF TRAVEL'], Icon: ArrowRight }, { name: 'Animals', categories: ['ANIMALS'], Icon: Edit2 }];
 
 export function InventoryModal({ onClose }: any) {
@@ -167,66 +154,93 @@ export function InventoryModal({ onClose }: any) {
     const invItemIndex = inventory.findIndex((i: InventoryItem) => i.id === itemToEquip.id);
     if (invItemIndex === -1) return;
 
+    const itemToMove = { ...inventory[invItemIndex], quantity: 1 };
     if (inventory[invItemIndex].quantity > 1) inventory[invItemIndex].quantity -= 1;
     else inventory.splice(invItemIndex, 1);
     
-    const { category, name, grip, damage } = itemDetails;
+    const { category, name } = itemDetails;
 
     if (category === 'CLOTHES') {
-        if ((newEquipment.equipped.wornClothes || []).includes(name)) { setError("You are already wearing one of those."); return; }
+        if (newEquipment.equipped.wornClothes.includes(name)) { setError("Already wearing one."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
         newEquipment.equipped.wornClothes.push(name);
     } else if (DEFAULT_EQUIPPABLE_CATEGORIES.includes(category!)) {
         const isWeaponOrShield = category !== 'ARMOR & HELMETS' || name.toLowerCase().includes('shield');
         const isArmor = category === 'ARMOR & HELMETS' && !isWeaponOrShield;
         
         if (isWeaponOrShield) {
-            if ((newEquipment.equipped.weapons?.length || 0) >= 3) { setError("Max 3 at hand."); return; }
-            newEquipment.equipped.weapons.push({ name, grip, damage });
+            if (newEquipment.equipped.weapons.length >= 3) { setError("Max 3 at hand."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
+            const newWeapon: EquippedWeapon = {
+                name: itemDetails.name,
+                grip: itemDetails.grip,
+                range: itemDetails.range,
+                damage: itemDetails.damage,
+                durability: itemDetails.durability,
+                features: itemDetails.features,
+            };
+            newEquipment.equipped.weapons.push(newWeapon);
         } else if (isArmor) {
-            if (newEquipment.equipped.armor) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.armor, quantity: 1 });
+            if (newEquipment.equipped.armor) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.armor, quantity: 1, id: `item-${Date.now()}` });
             newEquipment.equipped.armor = name;
         } else {
-            if (newEquipment.equipped.helmet) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.helmet, quantity: 1 });
+            if (newEquipment.equipped.helmet) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.helmet, quantity: 1, id: `item-${Date.now()}` });
             newEquipment.equipped.helmet = name;
         }
     } else if (category === 'ANIMALS') {
-        newEquipment.equipped.animals.push(itemToEquip);
+        newEquipment.equipped.animals.push(itemToMove);
     } else if (category === 'CONTAINERS') {
         if(name.toLowerCase().includes('backpack')){
-             if(newEquipment.equipped.containers.some((c:InventoryItem) => c.name.toLowerCase().includes('backpack'))) { setError("Only one backpack can be equipped."); return; }
+             if(newEquipment.equipped.containers.some((c:InventoryItem) => c.name.toLowerCase().includes('backpack'))) { setError("Only one backpack equipped."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
         }
         if(name.toLowerCase().includes('saddle bag')){
             const animalWithSpace = newEquipment.equipped.animals.find((a:InventoryItem) => newEquipment.equipped.containers.filter((c:InventoryItem) => c.equippedOn === a.id).length < 2);
-            if(!animalWithSpace) { setError("No animal has space for a saddlebag."); return; }
-            itemToEquip.equippedOn = animalWithSpace.id;
+            if(!animalWithSpace) { setError("No animal has space."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
+            itemToMove.equippedOn = animalWithSpace.id;
         }
-        newEquipment.equipped.containers.push(itemToEquip);
+        newEquipment.equipped.containers.push(itemToMove);
     }
     
     newEquipment.inventory = inventory;
     handleUpdateEquipment(newEquipment);
   };
   
-  const handleUnequipItem = (itemName: string, type: 'armor' | 'helmet' | 'weapon' | 'clothing' | 'animal' | 'container', itemId?: string) => {
+  const handleUnequipItem = (itemName: string, type: 'armor' | 'helmet' | 'weapon' | 'clothing' | 'animal' | 'container', itemId?: string, itemIndex?: number) => {
     let newEquipment = structuredClone(character.equipment!);
     let itemToReturn: InventoryItem | null = { id: itemId || `unequipped-${Date.now()}`, name: itemName, quantity: 1 };
     
-    if(type === 'armor' || type === 'helmet') newEquipment.equipped[type] = undefined;
-    else {
-        const arrKey = type === 'clothing' ? 'wornClothes' : type + 's';
+    if (type === 'armor' || type === 'helmet') {
+        newEquipment.equipped[type] = undefined;
+    } else {
+        const arrKey = type === 'clothing' ? 'wornClothes' : (type + 's' as 'weapons' | 'animals' | 'containers');
         const arr = newEquipment.equipped[arrKey];
-        const findIndex = (itemId) ? arr.findIndex((i: any) => i.id === itemId) : arr.findIndex((i: any) => (i.name || i) === itemName);
+        
+        let findIndex = -1;
+        if (itemIndex !== undefined && (type === 'weapon' || type === 'clothing')) {
+             findIndex = itemIndex;
+        } else if(itemId) {
+            findIndex = arr.findIndex((i: any) => i.id === itemId);
+        } else {
+            findIndex = arr.findIndex((i: any) => (i.name || i) === itemName);
+        }
+
         if (findIndex > -1) { 
             const [removed] = arr.splice(findIndex, 1);
-            itemToReturn = (typeof removed === 'string') ? itemToReturn : removed;
-            if(type === 'animal' && itemId){ newEquipment.equipped.containers = newEquipment.equipped.containers.filter((c:InventoryItem) => { if(c.equippedOn === itemId){ newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, c); return false; } return true; });}
+            itemToReturn = (typeof removed === 'string') ? itemToReturn : { ...removed, quantity: 1, equippedOn: undefined };
+            if (type === 'animal' && itemId) {
+                newEquipment.equipped.containers = newEquipment.equipped.containers.filter((c: InventoryItem) => {
+                    if (c.equippedOn === itemId) {
+                        newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, c);
+                        return false;
+                    }
+                    return true;
+                });
+            }
         }
     }
     
     newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, itemToReturn!);
     handleUpdateEquipment(newEquipment);
-  };
-
+};
+  
   const handleUseItem = (itemToUse: InventoryItem) => {
     let newEquipment = structuredClone(character.equipment!);
     const invItemIndex = newEquipment.inventory.findIndex((i: InventoryItem) => i.id === itemToUse.id);
@@ -269,8 +283,8 @@ export function InventoryModal({ onClose }: any) {
     const items = [
         ...(eq.armor ? [{ id: 'armor', name: eq.armor, type: 'armor' }] : []),
         ...(eq.helmet ? [{ id: 'helmet', name: eq.helmet, type: 'helmet' }] : []),
-        ...(eq.weapons?.map((w, i) => ({ id: `w-${i}`, name: w.name, type: 'weapon' })) || []),
-        ...(eq.wornClothes?.map((c, i) => ({ id: `c-${i}`, name: c, type: 'clothing' })) || []),
+        ...(eq.weapons?.map((w, i) => ({ id: `w-${i}-${w.name}`, name: w.name, type: 'weapon', index: i })) || []),
+        ...(eq.wornClothes?.map((c, i) => ({ id: `c-${i}-${c}`, name: c, type: 'clothing', index: i })) || []),
         ...(eq.containers?.map(c => ({ ...c, type: 'container' })) || []),
         ...(eq.animals?.map(a => ({ ...a, type: 'animal' })) || []),
     ];
@@ -289,12 +303,15 @@ export function InventoryModal({ onClose }: any) {
                     <div key={item.id} className="p-2 bg-gray-100 rounded">
                         <div className="flex items-center justify-between">
                             <span className="text-sm font-medium">{item.name} <span className="text-xs text-gray-500">({item.type})</span></span>
-                            <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem(item.name, item.type as any, item.id)} disabled={isSaving}>Unequip</Button>
+                            <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem(item.name, item.type as any, item.id, (item as any).index)} disabled={isSaving}>Unequip</Button>
                         </div>
                         {item.type === 'animal' && (
                             <div className="mt-2 pl-4 border-l-2 border-gray-300 space-y-1">
                                 {eq.containers.filter(c => c.equippedOn === item.id).map(bag => (
-                                    <div key={bag.id} className="text-xs text-gray-600">- {bag.name}</div>
+                                    <div key={bag.id} className="text-xs text-gray-600 flex items-center justify-between">
+                                        <span>- {bag.name}</span>
+                                        <Button variant="outline" size="xs" onClick={() => handleUnequipItem(bag.name, 'container', bag.id)}>Remove</Button>
+                                    </div>
                                 ))}
                             </div>
                         )}
@@ -316,19 +333,71 @@ export function InventoryModal({ onClose }: any) {
                       <div className="flex items-center gap-3"><h2 className="text-xl md:text-2xl font-bold text-gray-800">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h2><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium hover:bg-yellow-200 transition-colors"><Coins className="w-4 h-4" />{formatCost(character.equipment?.money || {})}</button></div>
                       <div className="flex gap-2"><Button size="sm" variant={activeTab === 'inventory' ? 'primary' : 'secondary'} onClick={() => setActiveTab('inventory')}>Inventory</Button><Button size="sm" variant={activeTab === 'shop' ? 'primary' : 'secondary'} onClick={() => setActiveTab('shop')}>Shop</Button><button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-800 rounded-full hover:bg-gray-200"><X className="w-5 h-5" /></button></div>
                   </div>
-                  {activeTab === 'inventory' && (<div className="flex items-center gap-3 mt-3"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Search carried items..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"/></div></div>)}
-                  {activeTab === 'shop' && (<div className="flex flex-wrap items-center gap-3 mt-3">
-                      {!selectedShopGroup ? <div className="flex-1"></div> : <Button variant="secondary" size="sm" icon={ArrowLeft} onClick={() => setSelectedShopGroup(null)}>Back</Button>}
-                      <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder={selectedShopGroup ? `Search in ${selectedShopGroup.name}...` : "Search shop..."} value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"/></div>
-                      {selectedShopGroup && <div className="relative"><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="appearance-none w-full bg-white border rounded-lg text-sm px-4 py-2 pr-8"><option value="name-asc">Name (A-Z)</option><option value="name-desc">Name (Z-A)</option><option value="cost-asc">Cost (Low-High)</option><option value="cost-desc">Cost (High-Low)</option></select></div>}
-                  </div>)}
+                  {activeTab === 'inventory' && (
+                    <div className="flex items-center gap-3 mt-3">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <input 
+                          type="text" 
+                          placeholder="Search carried items..." 
+                          value={filters.search} 
+                          onChange={(e) => setFilters({ search: e.target.value })} 
+                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {activeTab === 'shop' && (
+                    <div className="flex flex-wrap items-center gap-3 mt-3">
+                      {!selectedShopGroup ? (
+                        <div className="flex-1"></div>
+                      ) : (
+                        <Button variant="secondary" size="sm" icon={ArrowLeft} onClick={() => setSelectedShopGroup(null)}>
+                          Back
+                        </Button>
+                      )}
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <input 
+                          type="text" 
+                          placeholder={selectedShopGroup ? `Search in ${selectedShopGroup.name}...` : "Search shop..."} 
+                          value={filters.search} 
+                          onChange={(e) => setFilters({ ...filters, search: e.target.value })} 
+                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
+                        />
+                      </div>
+                      {selectedShopGroup && (
+                        <div className="relative">
+                          <select 
+                            value={sortOrder} 
+                            onChange={(e) => setSortOrder(e.target.value)} 
+                            className="appearance-none w-full bg-white border rounded-lg text-sm px-4 py-2 pr-8"
+                          >
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="cost-asc">Cost (Low-High)</option>
+                            <option value="cost-desc">Cost (High-Low)</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
               <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-gray-50">
                   {isSaving && <div className="flex justify-center py-10"><LoadingSpinner /></div>}
                   {activeTab === 'shop' && !isSaving ? (
                       selectedShopGroup ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                              {allGameItems.filter(item => selectedShopGroup.categories.includes(item.category || '') && item.name.toLowerCase().includes(filters.search.toLowerCase())).map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)}
+                              {allGameItems.filter(item => selectedShopGroup.categories.includes(item.category || '') && item.name.toLowerCase().includes(filters.search.toLowerCase())).sort((a,b) => {
+                                const costA = parseCost(a.cost)?.totalCopper || 0;
+                                const costB = parseCost(b.cost)?.totalCopper || 0;
+                                switch (sortOrder) {
+                                  case 'cost-asc': return costA - costB;
+                                  case 'cost-desc': return costB - costA;
+                                  case 'name-desc': return b.name.localeCompare(a.name);
+                                  case 'name-asc': default: return a.name.localeCompare(b.name);
+                                }
+                              }).map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)}
                           </div>
                       ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
