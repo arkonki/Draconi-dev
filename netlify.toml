@@ -1,50 +1,51 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  # Only keep this if you actually have a /functions folder
   functions = "functions"
 
 [build.environment]
   NODE_VERSION = "20"
-  # NEW - Force a stable npm version to fix the optional dependency bug
   NPM_VERSION = "10.9.0"
-  
-  # NEW - Add your Supabase variables so the build process can access them
-  VITE_SUPABASE_URL = "https://tkenxulvmzhhkuhfvcpt.supabase.co"
-  VITE_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE"
+  # REMOVED: VITE_ variables. 
+  # Set these in Netlify Dashboard > Site Settings > Environment Variables
+  # to keep them secure and to prevent overriding them with placeholders.
 
 [[redirects]]
+  # Essential for React Router (Single Page App)
   from = "/*"
   to = "/index.html"
   status = 200
 
 [[headers]]
-  # Apply these headers to all paths
   for = "/*"
   [headers.values]
-    # Prevent clickjacking
-    X-Frame-Options = "DENY"
-    # Enable XSS filtering in browsers that support it
+    # PREVIOUSLY "DENY" - Changed to ALLOW-FROM for Owlbear compatibility (Legacy browsers)
+    # Ideally, we rely on CSP frame-ancestors below, but removing DENY is safer here.
+    # If you aren't doing an Owlbear extension, change this back to DENY.
+    X-Frame-Options = "SAMEORIGIN"
+    
     X-XSS-Protection = "1; mode=block"
-    # Prevent MIME-sniffing
     X-Content-Type-Options = "nosniff"
-    # Control referrer information sent
     Referrer-Policy = "strict-origin-when-cross-origin"
-    # Content Security Policy (CSP) - Define allowed sources
-    # Adjust this policy based on your specific needs and external resources
+    
+    # Permissions Policy
+    Permissions-Policy = "interest-cohort=()"
+
+    # Content Security Policy
+    # 1. Added owlbear.rodeo and owlbear.app to frame-ancestors
+    # 2. Added connect-src for Supabase Realtime (WSS)
     Content-Security-Policy = """
       default-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co; \
       script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-      img-src 'self' data: https:; \
+      img-src 'self' data: https: blob:; \
       font-src 'self' https://fonts.gstatic.com; \
       connect-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co wss://tkenxulvmzhhkuhfvcpt.supabase.co; \
       frame-src 'self'; \
       object-src 'none'; \
       base-uri 'self'; \
       form-action 'self'; \
-      frame-ancestors 'none'; \
+      frame-ancestors 'self' https://owlbear.rodeo https://www.owlbear.rodeo https://owlbear.app https://www.owlbear.app; \
       upgrade-insecure-requests;
     """
-    # Permissions Policy (Optional but recommended)
-    # Disable features not explicitly needed, e.g., interest-cohort
-    Permissions-Policy = "interest-cohort=()"
