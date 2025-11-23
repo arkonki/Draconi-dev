@@ -75,7 +75,6 @@ export function Login() {
       setLoading(true);
       const { email: validatedEmail, password: validatedPassword } = validationResult.data;
       await signIn(validatedEmail, validatedPassword);
-      // Navigate on success is handled by AuthContext listener in App.tsx
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
@@ -143,14 +142,21 @@ export function Login() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          {/* Logo Image */}
-          <img 
-            src={dragonBaneIcon} 
-            alt="DragonBane Logo" 
-            className="mx-auto h-32 w-auto mb-4 drop-shadow-md hover:scale-105 transition-transform duration-300" 
-          />
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            {isLoginView ? 'Log in to DragonBane' : 'Create your DragonBane Account'}
+          {/* Logo Container with Green Flame Effect */}
+          <div className="relative mx-auto w-fit mb-6">
+            {/* The Green Flame/Glow - Positioned absolutely behind the image */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4/5 h-4/5 bg-green-500/60 blur-[50px] rounded-full animate-pulse pointer-events-none"></div>
+            
+            {/* The Image */}
+            <img 
+              src={dragonBaneIcon} 
+              alt="DragonBane Logo" 
+              className="relative z-10 h-64 w-auto drop-shadow-xl" 
+            />
+          </div>
+
+          <h2 className="text-3xl font-bold text-gray-900">
+            {isLoginView ? 'Sign In' : 'Create Account'}
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             {isLoginView ? 'Enter your details to access your account' : 'Fill in the details to register'}
@@ -295,7 +301,7 @@ export function Login() {
             icon={isLoginView ? LogIn : UserPlus}
             iconPosition="left"
           >
-            {isLoginView ? 'Log in' : 'Sign up'}
+            {isLoginView ? 'Sign in' : 'Create account'}
           </Button>
         </form>
 
@@ -306,7 +312,7 @@ export function Login() {
             className="font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
             disabled={loading}
           >
-            {isLoginView ? "Don't have an account? Sign up" : "Already have an account? Log in"}
+            {isLoginView ? "Don't have an account? Create one" : "Already have an account? Sign in"}
           </button>
         </div>
       </div>
