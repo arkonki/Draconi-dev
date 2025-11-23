@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
-  Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare, StickyNote, Plus, Save, Trash2, Minus
+  Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare, StickyNote, Plus, Save, Trash2, Minus,
+  Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, Table as TableIcon, Eye, EyeOff, Quote, Code
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
@@ -21,31 +22,222 @@ import { supabase } from '../../lib/supabase';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
+import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 
-// --- (CharacterNotesSection component is unchanged) ---
+// --- Helper for Toolbar Buttons ---
+function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) {
+  return (
+    <button 
+      type="button"
+      onClick={onClick} 
+      title={label}
+      className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-gray-100 rounded transition-all"
+    >
+      <Icon size={16} />
+    </button>
+  );
+}
+
+// --- UPDATED CHARACTER NOTES SECTION ---
 interface CharacterNote { id: string; title: string; content: string; created_at: string; updated_at?: string; }
+
 const CharacterNotesSection = ({ character }: { character: Character }) => {
   const [notes, setNotes] = useState<CharacterNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<Partial<CharacterNote> | null>(null);
-  const loadNotes = useCallback(async () => { setLoading(true); setError(null); try { const { data, error: fetchError } = await supabase.from('notes').select('id, title, content, created_at, updated_at').eq('character_id', character.id).order('created_at', { ascending: false }); if (fetchError) throw fetchError; setNotes(data || []); } catch (err) { setError(err instanceof Error ? err.message : "Failed to load notes."); } finally { setLoading(false); } }, [character.id]);
+  
+  // Editor State
+  const [showPreview, setShowPreview] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const loadNotes = useCallback(async () => { 
+    setLoading(true); 
+    setError(null); 
+    try { 
+      const { data, error: fetchError } = await supabase.from('notes').select('id, title, content, created_at, updated_at').eq('character_id', character.id).order('created_at', { ascending: false }); 
+      if (fetchError) throw fetchError; 
+      setNotes(data || []); 
+    } catch (err) { 
+      setError(err instanceof Error ? err.message : "Failed to load notes."); 
+    } finally { 
+      setLoading(false); 
+    } 
+  }, [character.id]);
+
   useEffect(() => { loadNotes(); }, [loadNotes]);
-  const handleSaveNote = async (noteToSave: Partial<CharacterNote>) => { if (!noteToSave.title?.trim()) { alert("Title is required."); return; } const noteData = { ...noteToSave, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString(), }; try { const { id, created_at, ...upsertData } = noteData; const { error: saveError } = await supabase.from('notes').upsert(upsertData, { onConflict: 'id' }); if (saveError) throw saveError; setEditingNote(null); await loadNotes(); } catch (err) { console.error("Error saving note:", err); alert(err instanceof Error ? `Failed to save note: ${err.message}` : 'An unknown error occurred.'); } };
-  const handleDeleteNote = async (noteId: string) => { if (!window.confirm("Are you sure you want to delete this note?")) return; try { const { error: deleteError } = await supabase.from('notes').delete().eq('id', noteId); if (deleteError) throw deleteError; await loadNotes(); } catch (err) { alert(err instanceof Error ? `Failed to delete note: ${err.message}` : 'An unknown error occurred.'); } };
-  const openNewNoteForm = () => { setEditingNote({ title: '', content: '' }); };
+
+  // Editor Helpers
+  const insertMarkdown = (prefix: string, suffix: string = '') => {
+    const textarea = textareaRef.current;
+    if (!textarea || !editingNote) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const before = text.substring(0, start);
+    const selection = text.substring(start, end);
+    const after = text.substring(end);
+
+    const newText = before + prefix + selection + suffix + after;
+    
+    setEditingNote(prev => prev ? ({ ...prev, content: newText }) : null);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + prefix.length + selection.length + suffix.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  const handleInsertTable = () => {
+    const tableTemplate = `\n| Header 1 | Header 2 |\n| -------- | -------- |\n| Cell 1   | Cell 2   |\n`;
+    insertMarkdown(tableTemplate);
+  };
+
+  const handleSaveNote = async (noteToSave: Partial<CharacterNote>) => { 
+    if (!noteToSave.title?.trim()) { alert("Title is required."); return; } 
+    const noteData = { ...noteToSave, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString(), }; 
+    try { 
+      const { id, created_at, ...upsertData } = noteData; 
+      const { error: saveError } = await supabase.from('notes').upsert(upsertData, { onConflict: 'id' }); 
+      if (saveError) throw saveError; 
+      setEditingNote(null); 
+      setShowPreview(false);
+      await loadNotes(); 
+    } catch (err) { 
+      console.error("Error saving note:", err); 
+      alert(err instanceof Error ? `Failed to save note: ${err.message}` : 'An unknown error occurred.'); 
+    } 
+  };
+
+  const handleDeleteNote = async (noteId: string) => { 
+    if (!window.confirm("Are you sure you want to delete this note?")) return; 
+    try { 
+      const { error: deleteError } = await supabase.from('notes').delete().eq('id', noteId); 
+      if (deleteError) throw deleteError; 
+      await loadNotes(); 
+    } catch (err) { 
+      alert(err instanceof Error ? `Failed to delete note: ${err.message}` : 'An unknown error occurred.'); 
+    } 
+  };
+
+  const openNewNoteForm = () => { 
+    setEditingNote({ title: '', content: '' }); 
+    setShowPreview(false);
+  };
+
   if (loading) return <div className="p-4"><LoadingSpinner size="sm" /></div>;
   if (error) return <div className="p-4"><ErrorMessage message={error} /></div>;
+
   return (
     <div className="bg-white p-4 rounded-lg border">
-      <div className="flex justify-between items-center mb-3"><h3 className="font-semibold flex items-center gap-2 text-gray-700"><StickyNote className="w-5 h-5 text-yellow-600" /> Character Notes</h3><Button size="xs" icon={Plus} onClick={openNewNoteForm}>New Note</Button></div>
-      <div className="space-y-2">{notes.length === 0 ? (<p className="text-sm text-gray-500 italic text-center py-4">No notes for this character yet.</p>) : (notes.map(note => (<div key={note.id} className="p-2 rounded-md hover:bg-gray-50 flex justify-between items-center"><button onClick={() => setEditingNote(note)} className="text-sm font-medium text-gray-800 hover:text-blue-600">{note.title}</button><Button variant="danger_outline" size="xs" icon={Trash2} onClick={() => handleDeleteNote(note.id)} /></div>)))}</div>
-      {editingNote && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-xl flex flex-col max-h-[90vh]"><div className="flex justify-between items-center mb-4 border-b pb-2"><h4 className="text-lg font-semibold">{editingNote.id ? 'Edit Note' : 'New Note'}</h4><button onClick={() => setEditingNote(null)}><X className="w-6 h-6 text-gray-500 hover:text-gray-800" /></button></div><div className="overflow-y-auto space-y-4 flex-grow"><input type="text" placeholder="Note Title" value={editingNote.title || ''} onChange={e => setEditingNote(prev => ({ ...prev, title: e.target.value }))} className="w-full font-bold text-lg p-2 border rounded" /><textarea placeholder="Note Content (Markdown supported)..." value={editingNote.content || ''} onChange={e => setEditingNote(prev => ({...prev, content: e.target.value}))} rows={15} className="w-full p-2 border rounded font-mono text-sm" /></div><div className="flex justify-end gap-2 mt-6 border-t pt-4"><Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button><Button variant="primary" icon={Save} onClick={() => handleSaveNote(editingNote)}>Save Note</Button></div></div></div>)}
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="font-semibold flex items-center gap-2 text-gray-700"><StickyNote className="w-5 h-5 text-yellow-600" /> Character Notes</h3>
+        <Button size="xs" icon={Plus} onClick={openNewNoteForm}>New Note</Button>
+      </div>
+      
+      <div className="space-y-2">
+        {notes.length === 0 ? (
+          <p className="text-sm text-gray-500 italic text-center py-4">No notes for this character yet.</p>
+        ) : (
+          notes.map(note => (
+            <div key={note.id} className="p-3 rounded-md border border-gray-100 hover:bg-gray-50 flex justify-between items-center transition-colors">
+              <div>
+                <button onClick={() => setEditingNote(note)} className="text-sm font-bold text-gray-800 hover:text-blue-600 text-left block">
+                  {note.title}
+                </button>
+                <span className="text-xs text-gray-400">
+                  {new Date(note.created_at).toLocaleDateString()}
+                </span>
+              </div>
+              <Button variant="danger_outline" size="xs" icon={Trash2} onClick={() => handleDeleteNote(note.id)} />
+            </div>
+          ))
+        )}
+      </div>
+
+      {editingNote && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-3xl w-full p-6 shadow-xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h4 className="text-lg font-semibold">{editingNote.id ? 'Edit Note' : 'New Note'}</h4>
+              <button onClick={() => setEditingNote(null)}><X className="w-6 h-6 text-gray-500 hover:text-gray-800" /></button>
+            </div>
+            
+            <div className="overflow-y-auto flex-grow space-y-4 pr-1">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Title</label>
+                <input 
+                  type="text" 
+                  placeholder="Note Title" 
+                  value={editingNote.title || ''} 
+                  onChange={e => setEditingNote(prev => prev ? ({ ...prev, title: e.target.value }) : null)} 
+                  className="w-full font-bold text-lg p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" 
+                  autoFocus
+                />
+              </div>
+
+              {/* EDITOR */}
+              <div>
+                <div className="flex justify-between items-end mb-1">
+                  <label className="block text-sm font-bold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
+                  <button 
+                    type="button"
+                    onClick={() => setShowPreview(!showPreview)} 
+                    className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {showPreview ? <><EyeOff size={14}/> Edit</> : <><Eye size={14}/> Preview</>}
+                  </button>
+                </div>
+
+                <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
+                  {!showPreview && (
+                    <div className="flex items-center gap-1 p-2 bg-gray-50 border-b border-gray-200 overflow-x-auto">
+                       <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
+                       <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
+                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                       <ToolbarButton icon={Heading1} label="Heading" onClick={() => insertMarkdown('# ', '')} />
+                       <ToolbarButton icon={Quote} label="Quote" onClick={() => insertMarkdown('> ', '')} />
+                       <ToolbarButton icon={Code} label="Code Block" onClick={() => insertMarkdown('```\n', '\n```')} />
+                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                       <ToolbarButton icon={List} label="Bullet List" onClick={() => insertMarkdown('- ', '')} />
+                       <ToolbarButton icon={ListOrdered} label="Numbered List" onClick={() => insertMarkdown('1. ', '')} />
+                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                       <ToolbarButton icon={LinkIcon} label="Link" onClick={() => insertMarkdown('[', '](url)')} />
+                       <ToolbarButton icon={TableIcon} label="Table" onClick={handleInsertTable} />
+                    </div>
+                  )}
+
+                  {showPreview ? (
+                    <div className="p-4 h-[400px] overflow-y-auto prose prose-sm max-w-none bg-gray-50/50">
+                       <MarkdownRenderer content={editingNote.content || '*No content*'} />
+                    </div>
+                  ) : (
+                    <textarea 
+                      ref={textareaRef}
+                      placeholder="Write your note here..." 
+                      value={editingNote.content || ''} 
+                      onChange={e => setEditingNote(prev => prev ? ({...prev, content: e.target.value}) : null)} 
+                      className="w-full p-3 h-[400px] font-mono text-sm outline-none resize-none bg-white" 
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6 border-t pt-4">
+              <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
+              <Button variant="primary" icon={Save} onClick={() => handleSaveNote(editingNote)}>Save Note</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// --- CORRECT: StatBar helper component is defined outside the main component ---
+// --- StatBar helper component ---
 const StatBar = ({ label, icon: Icon, currentValue, maxValue, onDecrement, onIncrement, isSaving, colorClass }: {
   label: string;
   icon: React.ElementType;
@@ -146,7 +338,6 @@ export function CharacterSheet({}: CharacterSheetProps) {
           <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-white rounded-lg text-sm self-start"><span className="font-medium">Movement:</span><span className="font-bold text-lg">{calculateMovement(character.kin, character.attributes?.AGL)}m</span></div>
         </div>
         
-        {/* --- CORRECTED HP/WP Section --- */}
         <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {currentHP > 0 ? (
             <StatBar label="HP" icon={HeartPulse} currentValue={currentHP} maxValue={maxHP} onDecrement={() => adjustStat('current_hp', -1)} onIncrement={() => adjustStat('current_hp', 1)} isSaving={isSaving} colorClass="bg-red-500" />

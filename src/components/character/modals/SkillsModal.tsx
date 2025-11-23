@@ -11,65 +11,90 @@ interface SkillsModalProps {
   onClose: () => void;
 }
 
-// --- (Constants and helpers are unchanged) ---
+// --- Constants ---
 const skillAttributeMap: Record<string, AttributeName> = { 'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT', 'Bluffing': 'CHA', 'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL', 'Healing': 'INT', 'Hunting & Fishing': 'AGL', 'Languages': 'INT', 'Myths & Legends': 'INT', 'Performance': 'CHA', 'Persuasion': 'CHA', 'Riding': 'AGL', 'Seamanship': 'INT', 'Sleight of Hand': 'AGL', 'Sneaking': 'AGL', 'Spot Hidden': 'INT', 'Swimming': 'AGL', 'Axes': 'STR', 'Bows': 'AGL', 'Brawling': 'STR', 'Crossbows': 'AGL', 'Hammers': 'STR', 'Knives': 'AGL', 'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR', 'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL', };
 const baseSkills = [ 'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft', 'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 'Languages', 'Myths & Legends', 'Performance', 'Persuasion', 'Riding', 'Seamanship', 'Sleight of Hand', 'Sneaking', 'Spot Hidden', 'Swimming' ];
 const weaponSkillsList = [ 'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords' ];
-const allMageSkillsList = ['Mentalism', 'Animism', 'Elementalism'];
 const getBaseChance = (value: number): number => { if (value <= 5) return 3; if (value <= 8) return 4; if (value <= 12) return 5; if (value <= 15) return 6; return 7; };
 const calculateFallbackLevel = (character: Character, skillName: string, attribute: AttributeName): number => { const isTrained = character.trainedSkills?.includes(skillName) ?? false; const baseValue = character.attributes?.[attribute] ?? 10; const baseChance = getBaseChance(baseValue); return isTrained ? baseChance * 2 : baseChance; };
 // --- End Constants ---
 
 export function SkillsModal({ onClose }: SkillsModalProps) {
   const { toggleDiceRoller } = useDice();
-  const { character, updateCharacterData } = useCharacterSheetStore();
+  // FIX 1: Destructure the correct function name 'markSkillThisSession'
+  const { character, updateCharacterData, markSkillThisSession } = useCharacterSheetStore();
 
   const [skillInfo, setSkillInfo] = useState<Record<string, { description: string }>>({});
   const [isLoadingInfo, setIsLoadingInfo] = useState(true);
   const [tooltipContent, setTooltipContent] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
-  
-  // --- NEW: State for managing marked skills ---
   const [markedSkills, setMarkedSkills] = useState<Set<string>>(
     new Set(character?.marked_skills || [])
   );
 
   useEffect(() => {
-    // Fetches skill descriptions from Supabase
     const fetchSkillInfo = async () => { setIsLoadingInfo(true); const { data } = await supabase.from('game_skills').select('name, description'); if (data) { const infoMap = data.reduce((acc, skill) => { acc[skill.name] = { description: skill.description }; return acc; }, {} as Record<string, { description: string }>); setSkillInfo(infoMap); } setIsLoadingInfo(false); };
     fetchSkillInfo();
   }, []);
 
-  const isMage = !!(character?.magicSchool && typeof character.magicSchool === 'object');
-  const characterSchoolName = isMage ? (character.magicSchool as { name: string }).name : null;
+  // --- DERIVED SKILL LISTS ---
+  const generalSkillsForRender = useMemo(() => 
+    baseSkills.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name)),
+    []
+  );
+
+  const weaponSkillsForRender = useMemo(() => 
+    weaponSkillsList.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name)),
+    []
+  );
+
+  const secondarySkills = useMemo(() => {
+    if (!character?.skill_levels) {
+      return [];
+    }
+    const skillNames = Object.keys(character.skill_levels);
+    const secondarySkillNames = skillNames.filter(name => 
+      !baseSkills.includes(name) && !weaponSkillsList.includes(name)
+    );
+    
+    return secondarySkillNames
+      .map(name => ({ name, attr: skillAttributeMap[name] }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+  }, [character?.skill_levels]);
+
 
   if (!character) {
     return <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-lg p-6"><LoadingSpinner /></div></div>;
   }
 
-  const mageSkills = useMemo(() => { if (!characterSchoolName) return []; return allMageSkillsList.filter(name => name === characterSchoolName).map(name => ({ name, attr: skillAttributeMap[name] })); }, [characterSchoolName]);
   const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => { return { 'STR': 'exhausted', 'CON': 'sickly', 'AGL': 'dazed', 'INT': 'angry', 'WIL': 'scared', 'CHA': 'disheartened' }[attr] as keyof Character['conditions']; };
-  const handleSkillClick = (skillName: string, skillValue: number, isAffected: boolean) => { toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `${skillName} Check`, requiresBane: isAffected, skillName, }); onClose(); };
-  const handleMouseEnter = (e: React.MouseEvent, description: string) => { const rect = e.currentTarget.getBoundingClientRect(); setTooltipContent(description); setTooltipPosition({ top: rect.top, left: rect.left + rect.width / 2 }); };
-  const handleMouseLeave = () => { setTooltipContent(null); setTooltipPosition(null); };
-  const handleInfoClick = (e: React.MouseEvent, description: string) => { e.stopPropagation(); if (tooltipContent === description) { handleMouseLeave(); } else { handleMouseEnter(e, description); } };
   
-  // --- NEW: Handler to toggle a skill's marked status and save it ---
+  const handleSkillClick = (skillName: string, skillValue: number, isAffected: boolean) => { toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `${skillName} Check`, requiresBane: isAffected, skillName, }); onClose(); };
+  
+  const handleMouseEnter = (e: React.MouseEvent, description: string) => { const rect = e.currentTarget.getBoundingClientRect(); setTooltipContent(description); setTooltipPosition({ top: rect.top, left: rect.left + rect.width / 2 }); };
+  
+  const handleMouseLeave = () => { setTooltipContent(null); setTooltipPosition(null); };
+  
+  const handleInfoClick = (e: React.MouseEvent, description: string) => { e.stopPropagation(); if (tooltipContent === description) { handleMouseLeave(); } else { handleMouseEnter(e, description); } };
+
+  // FIX 2: Updated handler to use the correct store function
   const handleMarkSkill = (e: React.ChangeEvent<HTMLInputElement>, skillName: string) => {
-    e.stopPropagation(); // VERY IMPORTANT: Prevents the row's onClick from firing.
+    e.stopPropagation();
     const newMarkedSkills = new Set(markedSkills);
+    
     if (e.target.checked) {
       newMarkedSkills.add(skillName);
+      // Also update the session store so the Advancement System sees the Star icon
+      markSkillThisSession(skillName);
     } else {
       newMarkedSkills.delete(skillName);
     }
+    
     setMarkedSkills(newMarkedSkills);
-    // Persist the changes to the database.
+    // Persist to database
     updateCharacterData({ marked_skills: Array.from(newMarkedSkills) });
   };
-
-  const generalSkills = baseSkills.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name));
-  const weaponSkills = weaponSkillsList.map(name => ({ name, attr: skillAttributeMap[name] })).sort((a, b) => a.name.localeCompare(b.name));
 
   const renderSkillRow = (skill: { name: string; attr: AttributeName }) => {
     const isTrained = character.trainedSkills?.includes(skill.name) ?? false;
@@ -87,12 +112,11 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         title={`Click to roll ${skill.name} (Target ≤ ${skillValue}${isAffected ? ', Bane' : ''})`}
       >
         <div className="flex items-center gap-3">
-          {/* --- UPDATED: Added Checkbox --- */}
           <input
             type="checkbox"
             checked={isMarked}
             onChange={(e) => handleMarkSkill(e, skill.name)}
-            onClick={(e) => e.stopPropagation()} // Extra safety net
+            onClick={(e) => e.stopPropagation()}
             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             title="Mark this skill for advancement"
           />
@@ -115,12 +139,11 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={handleMouseLeave}>
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="p-6 border-b bg-gray-50">
+        <div className="p-6 border-b bg-white flex-shrink-0">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-800">Skills (D20 Check)</h2>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X className="w-6 h-6" /></button>
           </div>
-          {/* --- UPDATED: New instructional text --- */}
           <p className="text-sm text-gray-600 mt-1">Click a skill to roll a D20 check. Roll ≤ Skill Level for success. Trained skills are bolded.</p>
           <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 flex items-start gap-2">
             <CheckSquare className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -131,18 +154,35 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         {isLoadingInfo ? (
           <div className="flex-grow flex items-center justify-center"><LoadingSpinner /></div>
         ) : (
-          <div className={`grid grid-cols-1 ${isMage ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 p-6 overflow-y-auto flex-grow`}>
-            <div><h3 className="font-bold mb-4 text-gray-700">General Skills</h3><div className="space-y-1">{generalSkills.map(renderSkillRow)}</div></div>
-            <div><h3 className="font-bold mb-4 text-gray-700">Weapon Skills</h3><div className="space-y-1">{weaponSkills.map(renderSkillRow)}</div></div>
-            {isMage && characterSchoolName && (<div><h3 className="font-bold mb-4 text-gray-700">Magic Skill ({characterSchoolName})</h3><div className="space-y-1">{mageSkills.length > 0 ? mageSkills.map(renderSkillRow) : <p className="text-sm text-gray-500 italic px-2 py-1">No matching magic skill.</p>}</div></div>)}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 p-4 pt-2 overflow-y-auto flex-grow">
+            <div>
+              <h3 className="font-bold mb-0 text-gray-700 sticky top-0 bg-white">General Skills</h3>
+              <div className="space-y-0.5">{generalSkillsForRender.map(renderSkillRow)}</div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <h3 className="font-bold mb-0 text-gray-700 sticky top-0 bg-white">Weapon Skills</h3>
+                <div className="space-y-0.5">{weaponSkillsForRender.map(renderSkillRow)}</div>
+              </div>
+              
+              {secondarySkills.length > 0 && (
+                <div>
+                  <h3 className="font-bold mb-0 text-gray-700 sticky top-0 bg-white">Secondary Skills</h3>
+                  <div className="space-y-0.5">{secondarySkills.map(renderSkillRow)}</div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="p-4 border-t bg-gray-50 flex justify-end">
+        <div className="p-4 border-t bg-white flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
-      {tooltipContent && tooltipPosition && (<div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className="fixed -translate-x-1/2 -translate-y-full mb-2 w-72 p-3 bg-gray-800 text-white text-sm rounded-lg shadow-lg z-[60] pointer-events-none"><p>{tooltipContent}</p></div>)}
+      {tooltipContent && tooltipPosition && (
+          <div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className="fixed -translate-x-1/2 -translate-y-full mb-2 w-72 p-3 bg-gray-800 text-white text-sm rounded-lg shadow-lg z-[60] pointer-events-none"><p>{tooltipContent}</p></div>
+      )}
     </div>
   );
 }

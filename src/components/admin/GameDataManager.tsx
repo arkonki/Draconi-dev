@@ -1,10 +1,9 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
-  Wand2, Sword, Shield, Search, Filter, Plus, Save, X, Edit2, Trash2, Users, Briefcase, Scroll, Skull, BookUser
+    Wand2, Sword, Shield, Search, Filter, Plus, Save, X, Edit2, Trash2, Users, Briefcase, Scroll, Skull, BookUser
 } from 'lucide-react';
 import { Button } from '../shared/Button';
-// Import specific forms
 import { ItemForm } from './Forms/ItemForm';
 import { KinForm } from './Forms/KinForm';
 import { ProfessionForm } from './Forms/ProfessionForm';
@@ -13,14 +12,12 @@ import { SpellForm } from './Forms/SpellForm';
 import { SkillForm } from './Forms/SkillForm';
 import { MonsterForm } from './Forms/MonsterForm';
 import { BioForm } from './Forms/BioForm';
-
-import { useGameData, DataCategory, GameDataEntry } from '../../hooks/useGameData';
+import { useGameData } from '../../hooks/useGameData';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { isSkillNameRequirement } from '../../types/character';
-import { MonsterData, ItemData, SpellData, AbilityData, KinData, ProfessionData, SkillData, BioData } from '../../types/gameData';
 
-// CATEGORIES and formatAbilityRequirement are unchanged...
-const CATEGORIES: { id: DataCategory; label:string; icon: React.ElementType }[] = [
+// --- CONSTANTS ---
+const CATEGORIES = [
     { id: 'items', label: 'Items', icon: Sword },
     { id: 'spells', label: 'Spells', icon: Wand2 },
     { id: 'abilities', label: 'Abilities', icon: Shield },
@@ -31,350 +28,447 @@ const CATEGORIES: { id: DataCategory; label:string; icon: React.ElementType }[] 
     { id: 'bio', label: 'Bio Options', icon: BookUser },
 ];
 
-const formatAbilityRequirement = (requirement: any): string => {
-  try {
-    if (isSkillNameRequirement(requirement)) {
-      const skills = Object.entries(requirement);
-      if (skills.length === 0) return 'None';
-      return skills
-        .map(([name, level]) => `${name}${level !== null ? ` (Lvl ${level})` : ''}`)
-        .join(', ') || 'None';
+// --- HELPER FUNCTIONS ---
+const formatAbilityRequirement = (requirement: any) => {
+    try {
+        if (isSkillNameRequirement(requirement)) {
+            const skills = Object.entries(requirement);
+            if (skills.length === 0) return 'None';
+            return skills
+                .map(([name, level]) => `${name}${level !== null ? ` (Lvl ${level})` : ''}`)
+                .join(', ') || 'None';
+        }
+        if (typeof requirement === 'string' && requirement) return requirement;
+        if (typeof requirement === 'object' && requirement !== null) {
+            const keys = Object.keys(requirement);
+            if (keys.length > 0) {
+                if (/^[0-9a-fA-F]{8}-/.test(keys[0])) return `${keys.length} skill(s) (Legacy UUIDs)`;
+                if (keys.length === 1 && typeof requirement[keys[0]] === 'object') return `Requirement: ${keys[0]} (Invalid Format)`;
+                return `${keys.length} requirement(s) (Unknown format)`;
+            }
+        }
+        return 'None';
+    } catch (error) {
+        console.error("Error formatting requirement:", requirement, error);
+        return "Error: Invalid Format";
     }
-    if (typeof requirement === 'string' && requirement) return requirement;
-    if (typeof requirement === 'object' && requirement !== null) {
-       const keys = Object.keys(requirement);
-       if (keys.length > 0) {
-          if (/^[0-9a-fA-F]{8}-/.test(keys[0])) return `${keys.length} skill(s) (Legacy UUIDs)`;
-          if (keys.length === 1 && typeof requirement[keys[0]] === 'object') return `Requirement: ${keys[0]} (Invalid Format)`;
-          return `${keys.length} requirement(s) (Unknown format)`;
-       }
-    }
-    return 'None';
-  } catch (error) {
-      console.error("Error formatting requirement:", requirement, error);
-      return "Error: Invalid Format";
-  }
 };
 
-interface ColumnDef<T extends GameDataEntry> {
-  header: string;
-  accessor: (entry: T) => React.ReactNode;
-  className?: string;
-  titleAccessor?: (entry: T) => string;
-}
+// --- CUSTOM HOOK FOR LOGIC ---
+const useGameDataManagement = () => {
+    const [editingEntry, setEditingEntry] = useState<any>(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [selectedSubCategory, setSelectedSubCategory] = useState('');
+    const [itemCategories, setItemCategories] = useState<string[]>([]);
+    const [magicSchools, setMagicSchools] = useState<any[]>([]);
+    const [monsterCategories, setMonsterCategories] = useState<string[]>([]);
 
-export function GameDataManager() {
-  const [editingEntry, setEditingEntry] = useState<GameDataEntry | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('');
-  const [itemCategories, setItemCategories] = useState<string[]>([]);
-  const [magicSchools, setMagicSchools] = useState<{ id: string; name: string }[]>([]);
-  const [monsterCategories, setMonsterCategories] = useState<string[]>([]);
+    const {
+        entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData, switchCategory, activeCategory
+    } = useGameData('items');
 
-  const {
-    entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData, switchCategory, activeCategory
-  } = useGameData('items');
-  
-  // Data fetching and handlers are mostly unchanged...
-  const fetchItemCategories = useCallback(async () => {
-    const { data, error } = await supabase.from('game_items').select('category');
-    if (error) console.error("Error fetching item categories:", error);
-    else if (data) setItemCategories([...new Set(data.map(item => item.category).filter(Boolean))] as string[]);
-  }, []);
+    const fetchData = useCallback(async (category: string, setter: React.Dispatch<React.SetStateAction<any[]>>) => {
+        const { data, error } = await supabase.from(category).select('category');
+        if (error) console.error(`Error fetching ${category} categories:`, error);
+        else if (data) setter([...new Set(data.map((item: any) => item.category).filter(Boolean))]);
+    }, []);
 
-  const fetchMagicSchools = useCallback(async () => {
-    const { data, error } = await supabase.from('magic_schools').select('id, name').order('name');
-    if (error) console.error("Error fetching magic schools:", error);
-    else if (data) setMagicSchools(data);
-  }, []);
+    const fetchMagicSchools = useCallback(async () => {
+        const { data, error } = await supabase.from('magic_schools').select('id, name').order('name');
+        if (error) console.error("Error fetching magic schools:", error);
+        else if (data) setMagicSchools(data);
+    }, []);
 
-  const fetchMonsterCategories = useCallback(async () => {
-    const { data, error } = await supabase.from('monsters').select('category');
-    if (error) console.error("Error fetching monster categories:", error);
-    else if (data) setMonsterCategories([...new Set(data.map(item => item.category).filter(Boolean))] as string[]);
-  }, []);
+    useEffect(() => {
+        setSelectedSubCategory('');
+        if (activeCategory === 'items') fetchData('game_items', setItemCategories);
+        else if (activeCategory === 'spells') fetchMagicSchools();
+        else if (activeCategory === 'monsters') fetchData('monsters', setMonsterCategories);
+    }, [activeCategory, fetchData, fetchMagicSchools]);
 
+    const handleSaveSuccess = useCallback(() => {
+        setEditingEntry(null);
+        setSaveError(null);
+        if (activeCategory === 'items') fetchData('game_items', setItemCategories);
+        if (activeCategory === 'monsters') fetchData('monsters', setMonsterCategories);
+    }, [activeCategory, fetchData]);
 
-  useEffect(() => {
-    setSelectedSubCategory('');
-    if (activeCategory === 'items') fetchItemCategories();
-    else if (activeCategory === 'spells') fetchMagicSchools();
-    else if (activeCategory === 'monsters') fetchMonsterCategories();
-  }, [activeCategory, fetchItemCategories, fetchMagicSchools, fetchMonsterCategories]);
+    const handleSave = useCallback(async () => {
+        if (!editingEntry) return;
 
-  const handleSaveSuccess = useCallback((savedEntry: GameDataEntry) => {
-    setEditingEntry(null);
-    setSaveError(null);
-    if (activeCategory === 'items') fetchItemCategories();
-    if (activeCategory === 'monsters') fetchMonsterCategories();
-  }, [activeCategory, fetchItemCategories, fetchMonsterCategories]);
-
-  // --- THIS IS THE FIX ---
-  const handleSave = useCallback(async () => {
-    if (!editingEntry) return;
-
-    // By default, the data to save is the current entry from state.
-    let dataToSave = editingEntry;
-
-    // If we are saving a spell, we must first clean the object.
-    if (activeCategory === 'spells') {
-      // Create a new object that includes all properties from editingEntry
-      // EXCEPT for 'magic_schools'.
-      const { magic_schools, ...cleanEntry } = editingEntry;
-      dataToSave = cleanEntry; // Use the cleaned object for the save operation.
-    }
-
-    // Now, call the save function with the correctly structured data.
-    await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
-  }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
-
-  const handleDelete = useCallback(async (id: string) => {
-    if (!id) return;
-    await deleteData(activeCategory, id);
-    if (activeCategory === 'items') fetchItemCategories();
-    if (activeCategory === 'monsters') fetchMonsterCategories();
-  }, [activeCategory, deleteData, fetchItemCategories, fetchMonsterCategories]);
-
-  const handleFieldChange = useCallback((field: string, value: any) => {
-    setEditingEntry(prev => prev ? ({ ...prev, [field]: value }) : null);
-  }, []);
-  
-  const createNewEntry = useCallback(() => {
-    setSaveError(null);
-    let newEntry: Partial<GameDataEntry> = { name: '' };
-    switch (activeCategory) {
-      case 'spells': newEntry = { ...newEntry, description: '', rank: 1, school_id: null, casting_time: '', range: '', duration: '', willpower_cost: 0 }; break;
-      case 'items': newEntry = { ...newEntry, description: '', category: '', cost: 0, weight: 0 }; break;
-      case 'abilities': newEntry = { ...newEntry, description: '', willpower_cost: null, requirement: {}, profession: null, kin: null }; break;
-      case 'kin': newEntry = { ...newEntry, description: '', key_attribute: '', typical_profession: '', kin_abilities: [] }; break;
-      case 'profession': newEntry = { ...newEntry, description: '', key_attribute: '', skills: [] }; break;
-      case 'skills': newEntry = { ...newEntry, description: '', attribute: null }; break;
-      case 'monsters': newEntry = { name: '', description: '', category: '', stats: { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10 }, attacks: [] }; break;
-      case 'bio': newEntry = { name: '', appearance: [], mementos: [], flaws: [] }; break;
-    }
-    setEditingEntry(newEntry as GameDataEntry);
-  }, [activeCategory]);
-  
-  const renderForm = useCallback(() => {
-    if (!editingEntry) return null;
-    switch (activeCategory) {
-      case 'spells': return <SpellForm entry={editingEntry as any} onChange={handleFieldChange} magicSchools={magicSchools} />;
-      case 'items': return <ItemForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      case 'abilities': return <AbilityForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      case 'kin': return <KinForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      case 'profession': return <ProfessionForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      case 'skills': return <SkillForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      case 'monsters': return <MonsterForm entry={editingEntry as MonsterData} onChange={handleFieldChange} />;
-      case 'bio': return <BioForm entry={editingEntry as any} onChange={handleFieldChange} />;
-      default: return <p>No form available for this category.</p>;
-    }
-  }, [editingEntry, activeCategory, handleFieldChange, magicSchools]);
-
-
-  // FIX: This filtering logic now correctly looks up the school name using the school_id.
-  const filteredEntries = useMemo(() => entries.filter(entry => {
-    const nameMatch = entry.name?.toLowerCase().includes(searchTerm.toLowerCase());
-    if (!nameMatch) return false;
-
-    if (selectedSubCategory) {
-      if (activeCategory === 'items') {
-        return (entry as ItemData).category?.toLowerCase() === selectedSubCategory.toLowerCase();
-      }
-      if (activeCategory === 'spells') {
-        const spell = entry as SpellData;
-        if (selectedSubCategory === 'General') {
-          return !spell.school_id; // A spell is General if it has no school_id
+        let dataToSave = editingEntry;
+        // Remove helper properties if necessary before saving
+        if (activeCategory === 'spells') {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { magic_schools, ...cleanEntry } = editingEntry;
+            dataToSave = cleanEntry;
         }
-        // Find the school in our state and compare its name
-        const school = magicSchools.find(s => s.id === spell.school_id);
-        return school?.name?.toLowerCase() === selectedSubCategory.toLowerCase();
-      }
-      if (activeCategory === 'monsters') {
-        return (entry as MonsterData).category?.toLowerCase() === selectedSubCategory.toLowerCase();
-      }
-    }
-    return true;
-  }), [entries, searchTerm, selectedSubCategory, activeCategory, magicSchools]);
 
-  const closeModal = useCallback(() => {
-    setEditingEntry(null);
-    setSaveError(null);
-  }, []);
+        await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
+    }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
 
-  const currentSubCategories = useMemo(() => {
-    if (activeCategory === 'items') return itemCategories.sort();
-    if (activeCategory === 'spells') return ['General', ...magicSchools.map(s => s.name)].sort();
-    if (activeCategory === 'monsters') return monsterCategories.sort();
-    return [];
-  }, [activeCategory, itemCategories, magicSchools, monsterCategories]);
+    const handleDelete = useCallback(async (id: string) => {
+        if (!id) return;
+        if(!window.confirm("Are you sure you want to delete this entry?")) return;
+        await deleteData(activeCategory, id);
+        if (activeCategory === 'items') fetchData('game_items', setItemCategories);
+        if (activeCategory === 'monsters') fetchData('monsters', setMonsterCategories);
+    }, [activeCategory, deleteData, fetchData]);
 
-  // FIX: The table column definition now correctly looks up the school name from the school_id.
-  const tableColumns = useMemo((): ColumnDef<GameDataEntry>[] => {
-    const baseCols: ColumnDef<GameDataEntry>[] = [{ header: 'Name', accessor: e => e.name }];
-    const commonTruncateClass = "text-sm text-gray-600 max-w-xs truncate";
+    const handleFieldChange = useCallback((field: string, value: any) => {
+        setEditingEntry((prev: any) => prev ? ({ ...prev, [field]: value }) : null);
+    }, []);
 
-    switch (activeCategory) {
-      case 'spells':
-        return [...baseCols,
-          {
-            header: 'School',
-            accessor: (e) => {
-              const spell = e as SpellData;
-              if (!spell.school_id) return 'General';
-              // Find the school name from the magicSchools state array
-              const school = magicSchools.find(s => s.id === spell.school_id);
-              return school?.name || 'Unknown School'; // Fallback for safety
+    const createNewEntry = useCallback(() => {
+        setSaveError(null);
+        let newEntry: any = { name: '' };
+        switch (activeCategory) {
+            case 'spells': newEntry = { ...newEntry, description: '', rank: 1, school_id: null, casting_time: '', range: '', duration: '', willpower_cost: 0 }; break;
+            case 'items': newEntry = { ...newEntry, description: '', category: '', cost: 0, weight: 0 }; break;
+            case 'abilities': newEntry = { ...newEntry, description: '', willpower_cost: null, requirement: {}, profession: null, kin: null }; break;
+            case 'kin': newEntry = { ...newEntry, description: '', key_attribute: '', typical_profession: '', kin_abilities: [] }; break;
+            case 'profession': newEntry = { ...newEntry, description: '', key_attribute: '', skills: [] }; break;
+            case 'skills': newEntry = { ...newEntry, description: '', attribute: null }; break;
+            case 'monsters': newEntry = { name: '', description: '', category: '', stats: { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10 }, attacks: [] }; break;
+            case 'bio': newEntry = { name: '', appearance: [], mementos: [], flaws: [] }; break;
+            default: break;
+        }
+        setEditingEntry(newEntry);
+    }, [activeCategory]);
+
+    const filteredEntries = useMemo(() => entries.filter((entry: any) => {
+        const nameMatch = entry.name?.toLowerCase().includes(searchTerm.toLowerCase());
+        if (!nameMatch) return false;
+
+        if (selectedSubCategory) {
+            if (activeCategory === 'items') {
+                return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
             }
-          },
-          { header: 'Rank', accessor: e => (e as SpellData).rank === 0 ? 'Trick' : `Rank ${(e as SpellData).rank}` },
-          { header: 'WP Cost', accessor: e => `${(e as SpellData).willpower_cost} WP` },
-        ];
-      // Other cases are unchanged...
-      case 'items':
-        return [...baseCols,
-          { header: 'Category', accessor: e => (e as ItemData).category },
-          { header: 'Cost', accessor: e => (e as ItemData).cost },
-          { header: 'Weight', accessor: e => (e as ItemData).weight },
-        ];
-      case 'abilities':
-        return [...baseCols,
-          { header: 'WP Cost', accessor: e => (e as AbilityData).willpower_cost ?? 'N/A' },
-          { header: 'Requirement', accessor: e => formatAbilityRequirement((e as AbilityData).requirement), className: commonTruncateClass, titleAccessor: e => formatAbilityRequirement((e as AbilityData).requirement) },
-        ];
-      case 'kin':
-         return [...baseCols,
-          { header: 'Key Attribute', accessor: e => (e as KinData).key_attribute },
-          { header: 'Typical Profession', accessor: e => (e as KinData).typical_profession },
-        ];
-      case 'profession':
-        return [...baseCols,
-          { header: 'Key Attribute', accessor: e => (e as ProfessionData).key_attribute },
-          { header: 'Skills', accessor: e => Array.isArray((e as ProfessionData).skills) ? (e as ProfessionData).skills.join(', ') : '', className: commonTruncateClass },
-        ];
-      case 'skills':
-        return [...baseCols,
-          { header: 'Attribute', accessor: e => (e as SkillData).attribute || 'N/A' },
-          { header: 'Description', accessor: e => (e as SkillData).description, className: commonTruncateClass, titleAccessor: e => (e as SkillData).description || '' },
-        ];
-      case 'monsters':
-        return [...baseCols,
-          { header: 'Category', accessor: e => (e as MonsterData).category },
-          { header: 'HP', accessor: e => (e as MonsterData).stats?.HP },
-          { header: 'Armor', accessor: e => (e as MonsterData).stats?.ARMOR },
-          { header: 'Size', accessor: e => (e as MonsterData).stats?.SIZE },
-        ];
-      case 'bio':
-        return [...baseCols,
-          { header: 'Appearance', accessor: e => `${((e as BioData).appearance || []).length} options` },
-          { header: 'Mementos', accessor: e => `${((e as BioData).mementos || []).length} options` },
-          { header: 'Flaws', accessor: e => `${((e as BioData).flaws || []).length} options` },
-        ];
-      default:
-        return baseCols;
-    }
-  }, [activeCategory, magicSchools]); // <-- Add magicSchools as a dependency for the tableColumns memo
+            if (activeCategory === 'spells') {
+                if (selectedSubCategory === 'General') {
+                    return !entry.school_id;
+                }
+                const school = magicSchools.find(s => s.id === entry.school_id);
+                return school?.name?.toLowerCase() === selectedSubCategory.toLowerCase();
+            }
+            if (activeCategory === 'monsters') {
+                return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
+            }
+        }
+        return true;
+    }), [entries, searchTerm, selectedSubCategory, activeCategory, magicSchools]);
 
-  // The rest of the JSX for rendering the component is unchanged.
-  return (
-    <div className="space-y-6">
-      {/* Header and Controls */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Game Data Management</h2>
-        <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading}>Add Entry</Button>
-      </div>
+    const closeModal = useCallback(() => {
+        setEditingEntry(null);
+        setSaveError(null);
+    }, []);
 
-      {loadError && <ErrorMessage message={`Error loading data: ${loadError}`} />}
+    return {
+        editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
+        selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
+        entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
+        handleFieldChange, createNewEntry, filteredEntries, closeModal
+    };
+};
 
-      {/* Category Tabs */}
-      <div className="flex gap-4 border-b overflow-x-auto pb-2">
+// --- CHILD COMPONENTS ---
+
+const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCategory: string, switchCategory: (cat: string) => void, loading: boolean }) => (
+    <div className="flex gap-2 border-b border-gray-200 overflow-x-auto pb-1 no-scrollbar">
         {CATEGORIES.map(({ id: cat, label, icon: Icon }) => (
-          <button key={cat} onClick={() => switchCategory(cat)}
-            className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeCategory === cat ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
-            disabled={loading}>
-            <Icon className="w-5 h-5" />{label}
-          </button>
+            <button key={cat} onClick={() => switchCategory(cat)}
+                className={`
+                    px-4 py-2.5 text-sm font-medium rounded-t-lg flex items-center gap-2 whitespace-nowrap transition-colors
+                    ${activeCategory === cat 
+                        ? 'bg-white border-x border-t border-gray-200 text-indigo-600 border-b-white -mb-px relative z-10' 
+                        : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                    }
+                `}
+                disabled={loading}>
+                <Icon className="w-4 h-4" />{label}
+            </button>
         ))}
-      </div>
+    </div>
+);
 
-      {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, currentSubCategories, selectedSubCategory, setSelectedSubCategory }: any) => (
+    <div className="flex flex-col sm:flex-row gap-4 mb-6 p-1">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <input type="text" placeholder={`Search ${activeCategory}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-lg" disabled={loading} />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input 
+                type="text" 
+                placeholder={`Search ${activeCategory}...`} 
+                value={searchTerm} 
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow" 
+                disabled={loading} 
+            />
         </div>
         {currentSubCategories.length > 0 && (
-          <div className="relative flex-1 sm:flex-none sm:w-48">
-             <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <select value={selectedSubCategory} onChange={(e) => setSelectedSubCategory(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none bg-white" disabled={loading}>
-              <option value="">All {activeCategory === 'spells' ? 'Schools' : 'Categories'}</option>
-              {currentSubCategories.map(subCat => (<option key={subCat} value={subCat}>{subCat}</option>))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-              <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+            <div className="relative flex-1 sm:flex-none sm:w-56">
+                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <select 
+                    value={selectedSubCategory} 
+                    onChange={(e) => setSelectedSubCategory(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm appearance-none bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none cursor-pointer" 
+                    disabled={loading}
+                >
+                    <option value="">All {activeCategory === 'spells' ? 'Schools' : 'Categories'}</option>
+                    {currentSubCategories.map((subCat: string) => (<option key={subCat} value={subCat}>{subCat}</option>))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" /></svg>
+                </div>
             </div>
-          </div>
         )}
-      </div>
-      
-      {loading && !entries.length ? (<p className="text-center py-4">Loading {activeCategory}...</p>) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px]">
-            <thead>
-              <tr className="bg-gray-50">
-                {tableColumns.map(col => (
-                  <th key={col.header} className="px-4 py-2 text-left font-semibold text-gray-600">{col.header}</th>
-                ))}
-                <th className="px-4 py-2 text-left font-semibold text-gray-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEntries.map((entry) => (
-                <tr key={entry.id || entry.name} className="border-t hover:bg-gray-50">
-                  {tableColumns.map(col => (
-                    <td key={col.header} className={`px-4 py-2 align-top ${col.className || ''}`} title={col.titleAccessor ? col.titleAccessor(entry) : undefined}>
-                      {col.accessor(entry)}
-                    </td>
-                  ))}
-                  <td className="px-4 py-2 align-top">
-                    <div className="flex gap-2">
-                      <Button variant="secondary" size="sm" icon={Edit2} onClick={() => { setSaveError(null); setEditingEntry(entry); }} disabled={!entry.id}>Edit</Button>
-                      <Button variant="danger" size="sm" icon={Trash2} onClick={() => entry.id && handleDelete(entry.id)} disabled={!entry.id || loading}>Delete</Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filteredEntries.length === 0 && !loading && !loadError && (
-            <p className="text-center text-gray-500 py-4">
-              {searchTerm || selectedSubCategory ? `No ${activeCategory} found matching filters.` : `No entries for '${activeCategory}'.`}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Modal for Editing/Creating */}
-      {editingEntry && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg max-w-2xl w-full p-6 my-8 max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white py-2 z-10 border-b">
-              <h3 className="text-lg font-semibold">{editingEntry.id ? `Edit ${activeCategory}` : `New ${activeCategory}`}</h3>
-              <button onClick={closeModal} className="text-gray-500 hover:text-gray-700"><X className="w-6 h-6" /></button>
-            </div>
-            {saveError && <div className="mb-4"><ErrorMessage message={saveError} /></div>}
-            <div className="flex-grow overflow-y-auto pr-2">{renderForm()}</div>
-            <div className="flex justify-end gap-4 mt-6 sticky bottom-0 bg-white py-3 z-10 border-t">
-              <Button variant="secondary" onClick={closeModal} disabled={loading}>Cancel</Button>
-              <Button variant="primary" icon={Save} onClick={handleSave} disabled={loading}>
-                {loading ? 'Saving...' : (editingEntry.id ? 'Update Entry' : 'Save Entry')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
-  );
+);
+
+const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory, searchTerm, selectedSubCategory, loadError }: any) => (
+    <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
+        <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
+                <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                        {columns.map((col: any) => (
+                            <th key={col.header} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{col.header}</th>
+                        ))}
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                    {entries.map((entry: any) => (
+                        <tr key={entry.id || entry.name} className="hover:bg-gray-50 transition-colors">
+                            {columns.map((col: any) => (
+                                <td key={col.header} className={`px-4 py-3 text-sm text-gray-700 align-top ${col.className || ''}`} title={col.titleAccessor ? col.titleAccessor(entry) : undefined}>
+                                    {col.accessor(entry)}
+                                </td>
+                            ))}
+                            <td className="px-4 py-3 text-sm align-top text-right whitespace-nowrap">
+                                <div className="flex justify-end gap-2">
+                                    <Button variant="secondary" size="sm" icon={Edit2} onClick={() => onEdit(entry)} disabled={!entry.id}>Edit</Button>
+                                    <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => entry.id && onDelete(entry.id)} disabled={!entry.id || loading}>Delete</Button>
+                                </div>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+        {entries.length === 0 && !loading && !loadError && (
+            <div className="text-center py-12 bg-white">
+                <div className="text-gray-400 mb-2">
+                    {searchTerm || selectedSubCategory ? <Search className="w-8 h-8 mx-auto opacity-20"/> : <Plus className="w-8 h-8 mx-auto opacity-20"/>}
+                </div>
+                <p className="text-gray-500 text-sm">
+                    {searchTerm || selectedSubCategory ? `No ${activeCategory} found matching your filters.` : `No entries found for '${activeCategory}'.`}
+                </p>
+            </div>
+        )}
+    </div>
+);
+
+const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError, onFieldChange, magicSchools }: any) => {
+    const renderForm = useCallback(() => {
+        if (!entry) return null;
+        switch (activeCategory) {
+            case 'spells': return <SpellForm entry={entry} onChange={onFieldChange} magicSchools={magicSchools} />;
+            case 'items': return <ItemForm entry={entry} onChange={onFieldChange} />;
+            case 'abilities': return <AbilityForm entry={entry} onChange={onFieldChange} />;
+            case 'kin': return <KinForm entry={entry} onChange={onFieldChange} />;
+            case 'profession': return <ProfessionForm entry={entry} onChange={onFieldChange} />;
+            case 'skills': return <SkillForm entry={entry} onChange={onFieldChange} />;
+            case 'monsters': return <MonsterForm entry={entry} onChange={onFieldChange} />;
+            case 'bio': return <BioForm entry={entry} onChange={onFieldChange} />;
+            default: return <p className="text-gray-500 italic text-center py-8">No form available for this category.</p>;
+        }
+    }, [entry, activeCategory, onFieldChange, magicSchools]);
+
+    return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                
+                {/* Header */}
+                <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-bold text-gray-900 capitalize">{entry.id ? `Edit ${activeCategory}` : `New ${activeCategory}`}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded-full transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-grow overflow-y-auto p-6">
+                   {saveError && (
+                       <div className="mb-6">
+                           <ErrorMessage message={saveError} />
+                       </div>
+                   )}
+                   {renderForm()}
+                </div>
+
+                {/* Footer */}
+                <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+                    <Button variant="ghost" onClick={onClose} disabled={loading}>Cancel</Button>
+                    <Button variant="primary" icon={Save} onClick={onSave} disabled={loading}>
+                        {loading ? 'Saving...' : (entry.id ? 'Update' : 'Create')}
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+// --- MAIN COMPONENT ---
+export function GameDataManager() {
+    const {
+        editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
+        selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
+        entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
+        handleFieldChange, createNewEntry, filteredEntries, closeModal
+    } = useGameDataManagement();
+
+    const currentSubCategories = useMemo(() => {
+        if (activeCategory === 'items') return itemCategories.sort();
+        if (activeCategory === 'spells') return ['General', ...magicSchools.map((s: any) => s.name)].sort();
+        if (activeCategory === 'monsters') return monsterCategories.sort();
+        return [];
+    }, [activeCategory, itemCategories, magicSchools, monsterCategories]);
+
+    const tableColumns = useMemo(() => {
+        const baseCols = [{ header: 'Name', accessor: (e: any) => <span className="font-medium text-gray-900">{e.name}</span> }];
+        const commonTruncateClass = "text-sm text-gray-500 max-w-xs truncate";
+
+        switch (activeCategory) {
+            case 'spells':
+                return [...baseCols,
+                    {
+                        header: 'School',
+                        accessor: (e: any) => {
+                            if (!e.school_id) return <span className="text-gray-400 italic">General</span>;
+                            const school = magicSchools.find((s: any) => s.id === e.school_id);
+                            return <span className="text-indigo-600 font-medium">{school?.name || 'Unknown'}</span>;
+                        }
+                    },
+                    { header: 'Rank', accessor: (e: any) => e.rank === 0 ? <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">Trick</span> : `Rank ${e.rank}` },
+                    { header: 'Cost', accessor: (e: any) => `${e.willpower_cost} WP` },
+                ];
+            case 'items':
+                return [...baseCols,
+                    { header: 'Category', accessor: (e: any) => <span className="capitalize">{e.category}</span> },
+                    { header: 'Cost', accessor: (e: any) => `${e.cost}g` },
+                    { header: 'Weight', accessor: (e: any) => e.weight },
+                ];
+            case 'abilities':
+                return [...baseCols,
+                    { header: 'Cost', accessor: (e: any) => e.willpower_cost ? `${e.willpower_cost} WP` : <span className="text-gray-400">-</span> },
+                    { header: 'Requirement', accessor: (e: any) => formatAbilityRequirement(e.requirement), className: commonTruncateClass, titleAccessor: (e: any) => formatAbilityRequirement(e.requirement) },
+                ];
+            case 'kin':
+                return [...baseCols,
+                    { header: 'Key Attribute', accessor: (e: any) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
+                    { header: 'Typical Profession', accessor: (e: any) => e.typical_profession },
+                ];
+            case 'profession':
+                return [...baseCols,
+                    { header: 'Key Attribute', accessor: (e: any) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
+                    { header: 'Skills', accessor: (e: any) => Array.isArray(e.skills) ? e.skills.join(', ') : '', className: commonTruncateClass },
+                ];
+            case 'skills':
+                return [...baseCols,
+                    { header: 'Attribute', accessor: (e: any) => e.attribute ? <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.attribute}</span> : <span className="text-gray-400">-</span> },
+                    { header: 'Description', accessor: (e: any) => e.description, className: commonTruncateClass, titleAccessor: (e: any) => e.description || '' },
+                ];
+            case 'monsters':
+                return [...baseCols,
+                    { header: 'Category', accessor: (e: any) => <span className="capitalize">{e.category}</span> },
+                    { header: 'HP', accessor: (e: any) => <span className="font-bold text-red-600">{e.stats?.HP}</span> },
+                    { header: 'Armor', accessor: (e: any) => e.stats?.ARMOR },
+                    { header: 'Size', accessor: (e: any) => e.stats?.SIZE },
+                ];
+            case 'bio':
+                return [...baseCols,
+                    { header: 'Appearance', accessor: (e: any) => `${(e.appearance || []).length} options` },
+                    { header: 'Mementos', accessor: (e: any) => `${(e.mementos || []).length} options` },
+                    { header: 'Flaws', accessor: (e: any) => `${(e.flaws || []).length} options` },
+                ];
+            default:
+                return baseCols;
+        }
+    }, [activeCategory, magicSchools]);
+
+    return (
+        <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8 min-h-[calc(100vh-4rem)]">
+            
+            {/* Page Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-200 pb-6">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Game Data</h1>
+                    <p className="text-gray-500 mt-1">Manage core rules, items, and compendium data.</p>
+                </div>
+                <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading} className="shadow-sm">Add Entry</Button>
+            </div>
+
+            {/* Error Banner */}
+            {loadError && <ErrorMessage message={`Error loading data: ${loadError}`} />}
+
+            {/* Main Content */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                
+                {/* Tabs */}
+                <div className="bg-gray-50 px-4 pt-2 border-b border-gray-200">
+                    <CategoryTabs activeCategory={activeCategory} switchCategory={switchCategory} loading={loading} />
+                </div>
+
+                {/* Toolbar */}
+                <div className="p-4 bg-white border-b border-gray-100">
+                    <SearchAndFilter
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        activeCategory={activeCategory}
+                        loading={loading}
+                        currentSubCategories={currentSubCategories}
+                        selectedSubCategory={selectedSubCategory}
+                        setSelectedSubCategory={setSelectedSubCategory}
+                    />
+                </div>
+
+                {/* Data Table */}
+                <div>
+                    {loading && !entries.length ? (
+                        <div className="flex justify-center items-center h-64 text-gray-400">
+                            <p>Loading {activeCategory}...</p>
+                        </div>
+                    ) : (
+                        <DataTable
+                            columns={tableColumns}
+                            entries={filteredEntries}
+                            onEdit={(entry: any) => { setSaveError(null); setEditingEntry(entry); }}
+                            onDelete={handleDelete}
+                            loading={loading}
+                            activeCategory={activeCategory}
+                            searchTerm={searchTerm}
+                            selectedSubCategory={selectedSubCategory}
+                            loadError={loadError}
+                        />
+                    )}
+                </div>
+            </div>
+
+            {/* Edit Modal */}
+            {editingEntry && (
+                <EditModal
+                    entry={editingEntry}
+                    onClose={closeModal}
+                    onSave={handleSave}
+                    loading={loading}
+                    activeCategory={activeCategory}
+                    saveError={saveError}
+                    onFieldChange={handleFieldChange}
+                    magicSchools={magicSchools}
+                />
+            )}
+        </div>
+    );
 }

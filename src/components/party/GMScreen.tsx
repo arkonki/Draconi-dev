@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
-import { Shield, Swords, Heart, Map, BookOpen, AlertCircle, Skull, Dices } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { 
+  Shield, Swords, Heart, Map, BookOpen, AlertCircle, Skull, Dices 
+} from 'lucide-react';
+import { useDice } from '../dice/DiceContext';
 
-// --- (The large gmScreenData object is correct and unchanged) ---
+// --- DATA OBJECT ---
 const gmScreenData = {
   npcs: {
     title: "NPCs", icon: Skull, sections: [
-      { title: "Typical NPCs", type: 'table', headers: ["Type", "Skills", "Heroic Abilities", "Dmg Bonus", "HP", "WP", "Gear"], rows: [ ["Guard", "Awareness 10, Swords 12", "—", "STR +D4", "12", "—", "Broadsword, studded leather"], ["Cultist", "Evade 14, Knives 14", "—", "AGL +D4", "12", "—", "Dagger"], ["Thief", "Evade 12, Knives 12", "—", "AGL +D4", "10", "—", "Knife"], ["Villager", "Brawling 8", "—", "—", "8", "—", "Wooden club"], ["Hunter", "Awareness 12, Bows 13", "—", "AGL +D4", "13", "—", "Longbow, leather armor"], ["Bandit", "Bows 12, Evade 10, Swords 12", "—", "—", "12", "—", "Short sword, short bow"], ["Adventurer", "Awareness 10, Swords 12", "—", "STR +D4", "13", "—", "Broadsword, studded leather"], ["Scholar", "Languages 13, Myths & Legends 13", "—", "—", "7", "—", "A good book"], ["Bandit Chief", "Awareness 12, Brawling 15, Hammers 15", "Berserker, Robust x6, Veteran", "STR +D6", "30", "16", "Heavy warhammer, chainmail"], ["Knight Champion", "Brawling 14, Swords 16", "Defensive, Double Slash, Focused x6, Robust x6", "STR +D6", "28", "26", "Longsword, plate armor, horse"], ["Archmage", "Magic School 15, Staves 13", "Focused x6, Master Spellcaster, Robust x4", "—", "22", "30", "Staff, grimoire"], ] },
+      { title: "Typical NPCs", type: 'table', headers: ["Type", "Skills", "Abilities", "Dmg", "HP", "WP", "Gear"], rows: [ ["Guard", "Awareness 10, Swords 12", "—", "STR +D4", "12", "—", "Broadsword, studded leather"], ["Cultist", "Evade 14, Knives 14", "—", "AGL +D4", "12", "—", "Dagger"], ["Thief", "Evade 12, Knives 12", "—", "AGL +D4", "10", "—", "Knife"], ["Villager", "Brawling 8", "—", "—", "8", "—", "Wooden club"], ["Hunter", "Awareness 12, Bows 13", "—", "AGL +D4", "13", "—", "Longbow, leather armor"], ["Bandit", "Bows 12, Evade 10, Swords 12", "—", "—", "12", "—", "Short sword, short bow"], ["Adventurer", "Awareness 10, Swords 12", "—", "STR +D4", "13", "—", "Broadsword, studded leather"], ["Scholar", "Languages 13, Myths 13", "—", "—", "7", "—", "A good book"], ["Bandit Chief", "Awareness 12, Brawling 15", "Berserker, Robust x6", "STR +D6", "30", "16", "Heavy warhammer, chainmail"], ["Knight Champion", "Brawling 14, Swords 16", "Defensive, Double Slash", "STR +D6", "28", "26", "Longsword, plate, horse"], ["Archmage", "Magic 15, Staves 13", "Master Spellcaster", "—", "22", "30", "Staff, grimoire"], ] },
       { title: "NPCs and Skills", type: 'text', content: "NPCs use skills like PCs, but the GM only rolls for actions that directly affect a player. For other actions, the GM decides the outcome. For an unlisted skill, an NPC's default skill level is 5." },
       { title: "Attributes for NPCs", type: 'text', content: "STR & AGL: Use damage bonus (+D6 ≈ 17, +D4 ≈ 14, none ≈ 10). WIL: Use max WP if listed, otherwise 10. INT & CHA: Roll against 10." },
     ]
@@ -29,230 +32,121 @@ const gmScreenData = {
   },
   damage: {
     title: "Damage & Health", icon: Heart, sections: [
-       {
-        title: "Fear Table (d8)",
-        type: 'table',
-        headers: ["D8", "Effect"],
-        rows: [
-          ["1", "Enfeebled. The fear drains your energy and determination. You lose 2D6 WP (to a minimum of zero) and become Disheartened."],
-          ["2", "Shaken. You suffer the Scared condition."],
-          ["3", "Panting. The intense fear leaves you out of breath and makes you Exhausted."],
-          ["4", "Pale. Your face turns white as a sheet. You and all player characters within 10 meters and in sight of you become Scared."],
-          ["5", "Scream. You scream in horror, which causes all player characters who hear the sound to immediately suffer a fear attack as well. Each person only ever needs to make one WIL roll to resist the same fear attack."],
-          ["6", "Rage. Your fear turns to anger, and you are forced to attack its source on your next turn – in melee combat if possible. You also become Angry."],
-          ["7", "Paralyzed. You are petrified with terror and unable to move. You cannot perform any action or movement on your next turn. Make another WIL roll on each subsequent turn (not an action) to break the paralysis."],
-          ["8", "Wild Panic. In a fit of utter panic, you flee the scene as fast as you can. On your next turn you must dash away from the source of your fear. Make another WIL roll on each subsequent turn (not an action) to stop running and act normally again."]
-        ]
-      },
-      {
-        title: "Severe Injuries",
-        type: 'table',
-        headers: ["D20", "Injury", "Effect"],
-        rows: [
-          ["1-2", "Broken nose", "You get a bane on all AWARENESS rolls. Healing time: D6 days."],
-          ["3-4", "Scarred face", "Bane on all PERFORMANCE and PERSUASION rolls. Healing time: 2D6 days."],
-          ["5-6", "Teeth knocked out", "Your PERFORMANCE and PERSUASION skills levels are permanently reduced by 2 (to a minimum of 3)."],
-          ["7-8", "Broken ribs", "Bane on all skills based on STR or AGL. Healing time: D6 days."],
-          ["9-10", "Concussion", "Bane on all skills based on INT. Healing time: D6 days."],
-          ["11-12", "Deep wounds", "Bane on all skills based on STR or AGL, and every roll against such skill inflicts D6 points of damage. Healing time: 2D6 days."],
-          ["13", "Broken leg", "Your movement rate is halved. Healing time: 3D6 days."],
-          ["14", "Broken arm", "You cannot use two-handed weapon, nor dual wield, and get a bane on all other actions normally using both arms, such as climbing. Healing time: 3D6 days."],
-          ["15", "Severed toe", "Movement rate permanently reduced by 2 (to a minimum of 4)."],
-          ["16", "Severed finger", "Your skill levels in all weapon skills are permanently reduced by 1 (to a minimum of 3)."],
-          ["17", "Gouged eye", "Your skill level in SPOT HIDDEN is permanently reduced by 2 (to a minimum of 3)."],
-          ["18", "Nightmares", "Roll to resist fear (page 52) each shift you sleep. If you fail, the shift doesn’t count as slept. Healing time: 2D6 days."],
-          ["19", "Changed personality", "Randomly generate a new weakness (optional rule, page 26)."],
-          ["20", "Amnesia", "You cannot remember who you or the other player characters are. The effect must be roleplayed. Healing time: D6 days."]
-        ]
-      },
-      {
-        title: "Damage Types & Armor",
-        type: 'definitions',
-        items: {
-          "Context": "If the optional rule for damage types is used, the following rules apply:",
-          "Leather/Studded": "Gain a +2 bonus to their armor rating against bludgeoning damage.",
-          "Chainmail": "Gets a +2 bonus to its armor rating against slashing damage.",
-          "Normal Effect": "If the type of damage is not stated, the armor has its normal effect."
-        }
-      },
-      { title: "Healing & Resting", type: 'definitions', items: { "Round Rest": "10 sec. Recover D6 WP. Once/shift.", "Stretch Rest": "15 min. Heal D6 HP (2D6 with Healer), D6 WP, heal one condition. Once/shift.", "Shift Rest": "6 hours. Full recovery of HP/WP, all conditions healed." } }
+       { title: "Fear Table (d8)", type: 'table', headers: ["D8", "Effect"], rows: [ ["1", "Enfeebled. Lose 2D6 WP (min 0), become Disheartened."], ["2", "Shaken. You suffer the Scared condition."], ["3", "Panting. Become Exhausted."], ["4", "Pale. You and allies within 10m become Scared."], ["5", "Scream. Allies hearing this suffer fear attack."], ["6", "Rage. Must attack source. Become Angry."], ["7", "Paralyzed. No move/act. Roll WIL to break."], ["8", "Wild Panic. Dash away. Roll WIL to stop."] ] },
+      { title: "Severe Injuries", type: 'table', headers: ["D20", "Injury", "Effect"], rows: [ ["1-2", "Broken nose", "Bane on AWARENESS. Heal: D6 days."], ["3-4", "Scarred face", "Bane on PERFORMANCE/PERSUASION. Heal: 2D6 days."], ["5-6", "Teeth lost", "PERFORMANCE/PERSUASION reduced by 2."], ["7-8", "Broken ribs", "Bane on STR/AGL skills. Heal: D6 days."], ["9-10", "Concussion", "Bane on INT skills. Heal: D6 days."], ["11-12", "Deep wounds", "Bane on STR/AGL skills, roll causes D6 dmg. Heal: 2D6 days."], ["13", "Broken leg", "Movement halved. Heal: 3D6 days."], ["14", "Broken arm", "No 2H weapons/dual wield, bane on climbing. Heal: 3D6 days."], ["15", "Severed toe", "Movement reduced by 2."], ["16", "Severed finger", "Weapon skills reduced by 1."], ["17", "Gouged eye", "SPOT HIDDEN reduced by 2."], ["18", "Nightmares", "Roll vs Fear to sleep. Heal: 2D6 days."], ["19", "Changed personality", "New Random Weakness."], ["20", "Amnesia", "Forget identity. Heal: D6 days."] ] },
+      { title: "Damage Types", type: 'definitions', items: { "Leather": "+2 AR vs Bludgeoning.", "Chainmail": "+2 AR vs Slashing." } },
+      { title: "Resting", type: 'definitions', items: { "Round Rest": "10 sec. Recover D6 WP.", "Stretch Rest": "15 min. Heal D6 HP, D6 WP, 1 condition.", "Shift Rest": "6 hours. Full recovery." } }
     ]
   },
   journeys: {
     title: "Journeys", icon: Map, sections: [
         { title: "Wilderness Travel", type: 'definitions', items: { "Pathfinder": "One character must lead in pathless terrain.", "Hunger": "Must eat daily or become famished (cannot heal).", "Bushcraft Roll": "Pathfinder rolls BUSHCRAFT each shift. Failure causes a mishap.", "Dragon Roll": "Pathfinder finds a shortcut, doubling distance covered." } },
-        { title: "Leaving The Adventure Site (d6)", type: 'table', headers: ["D6", "Consequence"], rows: [ ["1", "Enemies follow and attack later."], ["2", "Enemies get reinforcements (x2)."], ["3", "Someone else loots the site before you return."], ["4-6", "Nothing happens."] ] },
+        { title: "Leaving Site (d6)", type: 'table', headers: ["D6", "Consequence"], rows: [ ["1", "Enemies follow."], ["2", "Enemies reinforce (x2)."], ["3", "Site looted."], ["4-6", "Nothing happens."] ] },
     ]
   },
   mishaps: {
     title: "Mishaps", icon: AlertCircle, sections: [
-      { title: "Wilderness Mishaps (d12)", type: 'table', headers: ["D12", "Mishap"], rows: [ ["1", "Fog. Distance covered this shift is halved."], ["2", "Blocking Terrain. ACROBATICS roll to proceed."], ["3", "Torn Clothes. A random PC's clothes become rags."], ["4", "Lost. No progress this shift. Pathfinder must re-roll BUSHCRAFT."], ["5", "Dropped Item. A random PC drops or breaks an item."], ["6", "Mosquito Swarm. All PCs without a cloak become Angry."], ["7", "Sprained Ankle. Random PC takes D6 damage."], ["8", "Downpour. All PCs without a cloak must roll to withstand cold."], ["9", "Wasps. All PCs must EVADE or take D6 damage and a condition."], ["10", "Landslide. All PCs must EVADE or take D10 damage."], ["11", "Savage Animal. A wild animal attacks the party."], ["12", "Quicksand. All PCs must make a BUSHCRAFT roll or get stuck."] ] }
+      { title: "Wilderness Mishaps (d12)", type: 'table', headers: ["D12", "Mishap"], rows: [ ["1", "Fog. Distance halved."], ["2", "Blocking Terrain. ACROBATICS to proceed."], ["3", "Torn Clothes."], ["4", "Lost. No progress."], ["5", "Dropped Item."], ["6", "Mosquitoes. Become Angry."], ["7", "Sprained Ankle. D6 dmg."], ["8", "Downpour. Roll vs Cold."], ["9", "Wasps. EVADE or D6 dmg + Cond."], ["10", "Landslide. EVADE or D10 dmg."], ["11", "Savage Animal."], ["12", "Quicksand. BUSHCRAFT or stuck."] ] }
     ]
   },
-  
 };
 
 type TabKey = keyof typeof gmScreenData;
 
+// --- HELPER: TEXT WITH CLICKABLE DICE ---
+const TextWithDice = ({ text }: { text: string }) => {
+  const { toggleDiceRoller } = useDice();
+  if (!text) return null;
+
+  // Regex to find dice (e.g. 1D6, D4, d12, D6+1)
+  const diceRegex = /(\b\d*[dD](?:4|6|8|10|12|20|66|100)(?:\s*[+\-]\s*\d+)?\b)/g;
+  
+  const parts = text.split(diceRegex);
+
+  return (
+    <span>
+      {parts.map((part, index) => {
+        if (part.match(diceRegex)) {
+          const cleanFormula = part.toLowerCase().replace(/\s/g, '');
+          return (
+            <button
+              key={index}
+              onClick={() => toggleDiceRoller?.({ dice: cleanFormula, label: `GM Screen: ${part}` })}
+              className="inline-flex items-center justify-center font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors cursor-pointer"
+              title={`Roll ${part}`}
+            >
+              <Dices size={10} className="mr-1" />
+              {part}
+            </button>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </span>
+  );
+};
+
+// --- SUB-COMPONENTS ---
 const SectionCard = ({ title, children }: { title: string, children: React.ReactNode }) => (
-  <div className="bg-white p-4 rounded-lg border shadow-sm break-inside-avoid">
-    <h3 className="font-bold text-lg mb-3 text-gray-800 border-b pb-2">{title}</h3>
-    <div className="space-y-3">{children}</div>
+  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden break-inside-avoid hover:shadow-md transition-shadow">
+    <div className="bg-gray-50 px-4 py-3 border-b border-gray-100">
+      <h3 className="font-bold text-gray-800 text-base">{title}</h3>
+    </div>
+    <div className="p-4 space-y-4">{children}</div>
   </div>
 );
 
 const SimpleTable = ({ headers, rows }: { headers: string[], rows: string[][] }) => (
-  <div className="overflow-x-auto text-sm">
-    <table className="w-full">
-      <thead><tr className="bg-gray-50">{headers.map(h => <th key={h} className="px-2 py-2 text-left font-semibold text-gray-600">{h}</th>)}</tr></thead>
-      <tbody>{rows.map((row, i) => (<tr key={i} className="border-t hover:bg-gray-50">{row.map((cell, j) => <td key={j} className="px-2 py-2 align-top">{cell}</td>)}</tr>))}</tbody>
+  <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <table className="w-full text-sm text-left">
+      <thead className="bg-gray-100 text-gray-700 uppercase text-xs font-bold">
+        <tr>{headers.map(h => <th key={h} className="px-3 py-2 whitespace-nowrap">{h}</th>)}</tr>
+      </thead>
+      <tbody className="divide-y divide-gray-100">
+        {rows.map((row, i) => (
+          <tr key={i} className="even:bg-gray-50 hover:bg-blue-50 transition-colors">
+            {row.map((cell, j) => (
+              <td key={j} className="px-3 py-2 text-gray-700">
+                <TextWithDice text={cell} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
     </table>
   </div>
 );
 
-// --- UPDATED: Story Helper component with more context fields ---
-const StoryHelper = () => {
-  const [prompt, setPrompt] = useState('');
-  const [partyData, setPartyData] = useState('');
-  const [locationData, setLocationData] = useState('');
-  const [npcData, setNpcData] = useState('');
-  const [response, setResponse] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const generateStory = async () => {
-    if (!prompt.trim()) {
-      setError('Please enter a primary prompt.');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setResponse('');
-
-    try {
-      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
-      if (!apiKey) {
-        throw new Error('Openrouter API key not found. Please add VITE_OPENROUTER_API_KEY to your .env file.');
-      }
-
-      // --- Construct a more detailed prompt for the AI ---
-      let fullPrompt = `You are a helpful GM assistant for the Dragonbane RPG. Generate creative, engaging content based on the following information. Keep responses concise and focused on storytelling elements like plot ideas, NPC descriptions, or adventure hooks.\n\n--- Main Prompt ---\n${prompt}`;
-
-      if (partyData.trim()) {
-        fullPrompt += `\n\n--- Party Members ---\n${partyData}`;
-      }
-      if (locationData.trim()) {
-        fullPrompt += `\n\n--- Current Location ---\n${locationData}`;
-      }
-      if (npcData.trim()) {
-        fullPrompt += `\n\n--- Key NPCs ---\n${npcData}`;
-      }
-
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'Dragonbane GM Screen'
-        },
-        body: JSON.stringify({
-          model: 'deepseek/deepseek-r1-0528:free',
-          messages: [
-            {
-              role: 'user',
-              content: fullPrompt
-            }
-          ],
-          max_tokens: 500,
-          temperature: 0.7
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status} ${res.statusText}`);
-      }
-
-      const data = await res.json();
-      setResponse(data.choices[0]?.message?.content || 'No response generated.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const commonTextAreaClass = "w-full p-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y";
-
-  return (
-    <SectionCard title="AI Story Generator">
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Main Prompt</label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g., 'Generate a plot twist for a dungeon crawl' or 'Describe a mysterious NPC encounter'..."
-            className={commonTextAreaClass}
-            rows={3}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Party Members (Optional)</label>
-            <textarea
-              value={partyData}
-              onChange={(e) => setPartyData(e.target.value)}
-              placeholder="e.g., 'Kael, a hot-headed knight. Elara, a curious elven scholar...'"
-              className={commonTextAreaClass}
-              rows={4}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Location Details (Optional)</label>
-            <textarea
-              value={locationData}
-              onChange={(e) => setLocationData(e.target.value)}
-              placeholder="e.g., 'The Whispering Crypt, a damp and ancient tomb known for its echoing halls...'"
-              className={commonTextAreaClass}
-              rows={4}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Key NPCs (Optional)</label>
-            <textarea
-              value={npcData}
-              onChange={(e) => setNpcData(e.target.value)}
-              placeholder="e.g., 'Lord Valerius, the quest giver, seems trustworthy but has a secret agenda...'"
-              className={commonTextAreaClass}
-              rows={4}
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={generateStory}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? 'Generating...' : 'Generate Story Idea'}
-        </button>
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        {response && (
-          <div className="p-3 bg-gray-50 rounded-md">
-            <h4 className="font-semibold text-gray-800 mb-2">AI Response:</h4>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{response}</p>
-          </div>
-        )}
+const DefinitionList = ({ items }: { items: Record<string, string> }) => (
+  <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+    {Object.entries(items).map(([term, def]) => (
+      <div key={term} className="bg-gray-50 p-2 rounded border border-gray-100">
+        <dt className="font-bold text-gray-900 text-xs uppercase tracking-wide mb-1">{term}</dt>
+        <dd className="text-sm text-gray-700 leading-relaxed">
+          <TextWithDice text={def} />
+        </dd>
       </div>
-    </SectionCard>
-  );
-};
+    ))}
+  </dl>
+);
 
+const StyledList = ({ items }: { items: string[] }) => (
+  <ul className="space-y-2">
+    {items.map((item, i) => (
+      <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+        <span className="mt-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full flex-shrink-0" />
+        <span><TextWithDice text={item} /></span>
+      </li>
+    ))}
+  </ul>
+);
+
+// --- MAIN COMPONENT ---
 export function GMScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('npcs');
+  
+  // Safety check: if state holds a deleted tab (like 'storyHelper'), default to 'npcs'
+  const safeActiveTab = gmScreenData[activeTab] ? activeTab : 'npcs';
   
   const tabs = Object.keys(gmScreenData).map(key => ({
     id: key as TabKey,
@@ -260,39 +154,47 @@ export function GMScreen() {
     icon: gmScreenData[key as TabKey].icon,
   }));
 
-  const renderContent = () => {
-    if (activeTab === 'storyHelper') {
-      return <StoryHelper />;
-    }
-
-    const tabData = gmScreenData[activeTab];
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start">
-        {tabData.sections.map(section => (
-          <SectionCard key={section.title} title={section.title}>
-            {section.type === 'table' && <SimpleTable headers={section.headers!} rows={section.rows!} />}
-            {section.type === 'text' && <p className="text-sm text-gray-600">{section.content}</p>}
-            {section.type === 'list' && <ul className="list-disc list-inside space-y-1 text-sm text-gray-600">{section.items!.map(item => <li key={item}>{item}</li>)}</ul>}
-            {section.type === 'definitions' && <div className="space-y-2 text-sm">{Object.entries(section.items!).map(([title, desc]) => (<div key={title}><strong className="font-semibold text-gray-800">{title}:</strong> {desc}</div>))}</div>}
-          </SectionCard>
-        ))}
-      </div>
-    );
-  };
-
   return (
-    <div>
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
+    <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 font-sans">
+      
+      {/* Header / Nav */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2 mb-6 sticky top-2 z-20 overflow-x-auto no-scrollbar">
+        <nav className="flex gap-1 min-w-max">
           {tabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`shrink-0 flex items-center gap-2 px-1 py-3 text-sm font-medium border-b-2 ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              <tab.icon className="w-5 h-5" /> {tab.label}
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`
+                flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all
+                ${safeActiveTab === tab.id 
+                  ? 'bg-blue-600 text-white shadow-md' 
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                }
+              `}
+            >
+              <tab.icon size={18} />
+              {tab.label}
             </button>
           ))}
         </nav>
       </div>
-      <div className="py-6">
-        {renderContent()}
+
+      {/* Content Area */}
+      <div className="animate-in fade-in duration-300">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start">
+          {gmScreenData[safeActiveTab].sections.map((section, idx) => (
+            <SectionCard key={idx} title={section.title}>
+              {section.type === 'table' && <SimpleTable headers={section.headers!} rows={section.rows!} />}
+              {section.type === 'text' && (
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  <TextWithDice text={section.content!} />
+                </p>
+              )}
+              {section.type === 'list' && <StyledList items={section.items as string[]} />}
+              {section.type === 'definitions' && <DefinitionList items={section.items as Record<string, string>} />}
+            </SectionCard>
+          ))}
+        </div>
       </div>
     </div>
   );

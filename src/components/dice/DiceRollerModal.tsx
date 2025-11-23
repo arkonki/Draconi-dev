@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useDice, DiceType, DiceRollResult, RollHistoryEntry } from './DiceContext';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useDice, DiceType, DiceRollResult } from './DiceContext';
 import { Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, ShieldQuestion, GraduationCap } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 
-// FIXED: DiceIcon component now renders the die type text for clarity.
+// Helper: Render dice type text
 const DiceIcon = ({ type }: { type: DiceType }) => (
   <span className="font-semibold text-xs uppercase">{type}</span>
 );
@@ -15,6 +15,15 @@ const DICE_VALUES: Record<DiceType, number> = {
 
 function rollDie(type: DiceType): number {
   return Math.floor(Math.random() * DICE_VALUES[type]) + 1;
+}
+
+// Helper: Loading Spinner for the Roll Button
+function Loader2({ className }: { className?: string }) {
+  return (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
 }
 
 export function DiceRollerModal() {
@@ -34,7 +43,9 @@ export function DiceRollerModal() {
     rollHistory,
     clearHistory,
   } = useDice();
-  const { markSkillInSession } = useCharacterSheetStore();
+
+  // FIX 1: Use the correct function name 'markSkillThisSession'
+  const { markSkillThisSession } = useCharacterSheetStore();
 
   const [results, setResults] = useState<DiceRollResult[]>([]);
   const [boonResults, setBoonResults] = useState<DiceRollResult[]>([]);
@@ -43,44 +54,104 @@ export function DiceRollerModal() {
   const [isSuccess, setIsSuccess] = useState<boolean | undefined>(undefined);
   const [showHistory, setShowHistory] = useState(false);
 
+  // --- NEW: MULTIPLE BOON/BANE SUPPORT ---
+  const [modifierCount, setModifierCount] = useState(1); // Default to 1 extra die (Standard Boon)
+
+  // Animation State
+  const [isRolling, setIsRolling] = useState(false);
+  const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const isSkillCheck = currentConfig?.rollMode === 'skillCheck';
   const isDeathRoll = currentConfig?.rollMode === 'deathRoll';
   const isRallyRoll = currentConfig?.rollMode === 'rallyRoll';
   const isRecoveryRoll = currentConfig?.rollMode === 'recoveryRoll';
   const isAdvancementRoll = currentConfig?.rollMode === 'advancementRoll';
 
+  // Cleanup animation
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  // Reset modifier count when modal opens or mode toggles
+  useEffect(() => {
+    if (!isBoonActive && !isBaneActive) {
+      setModifierCount(1);
+    }
+  }, [isBoonActive, isBaneActive]);
+
+  // Handlers for Boon/Bane clicking
+  const handleBoonClick = () => {
+    if (isBaneActive) {
+      setBane(false);
+      setBoon(true);
+      setModifierCount(1);
+    } else if (isBoonActive) {
+      // Cycle: 1 -> 2 -> 3 -> Off
+      if (modifierCount < 3) setModifierCount(prev => prev + 1);
+      else { setBoon(false); setModifierCount(1); }
+    } else {
+      setBoon(true);
+      setModifierCount(1);
+    }
+  };
+
+  const handleBaneClick = () => {
+    if (isBoonActive) {
+      setBoon(false);
+      setBane(true);
+      setModifierCount(1);
+    } else if (isBaneActive) {
+      // Cycle: 1 -> 2 -> 3 -> Off
+      if (modifierCount < 3) setModifierCount(prev => prev + 1);
+      else { setBane(false); setModifierCount(1); }
+    } else {
+      setBane(true);
+      setModifierCount(1);
+    }
+  };
+
   const handleRoll = useCallback(() => {
     if (dicePool.length === 0) return;
 
-    // Clear previous results when a new roll is made
+    setIsRolling(true);
     setResults([]);
     setBoonResults([]);
     setFinalOutcome(null);
     setIsCritical(false);
     setIsSuccess(undefined);
 
+    // 1. Calculate result immediately
     const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
     let currentBoonResults: DiceRollResult[] = [];
     let finalValue: number | string = currentResults.reduce((sum, r) => sum + r.value, 0);
-    // FIXED: Store the numeric result before it's potentially turned into a string.
-    let numericFinalValue: number = finalValue; 
+    let numericFinalValue: number = Number(finalValue); 
     let crit = false;
     let success: boolean | undefined = undefined;
     let skillName = currentConfig?.skillName;
 
-    if ((isBoonActive || isBaneActive) && dicePool.length === 1 && dicePool[0] === 'd20') {
-      currentBoonResults = [{ type: 'd20', value: rollDie('d20') }];
-      const firstRoll = currentResults[0].value;
-      const secondRoll = currentBoonResults[0].value;
-      // In a roll-under system, Boon is the MINIMUM value, Bane is the MAXIMUM.
-      numericFinalValue = isBoonActive ? Math.min(firstRoll, secondRoll) : Math.max(firstRoll, secondRoll);
-      finalValue = numericFinalValue;
-    } else if (dicePool.length === 1 && dicePool[0] === 'd20') {
-      numericFinalValue = currentResults[0].value;
-      finalValue = numericFinalValue;
-    }
-
+    // --- DRAGONBANE LOGIC (D20) ---
     if (dicePool.length === 1 && dicePool[0] === 'd20') {
+      
+      // Handle Multiple Boons/Banes
+      if (isBoonActive || isBaneActive) {
+        // Roll extra dice based on modifierCount
+        for (let i = 0; i < modifierCount; i++) {
+          currentBoonResults.push({ type: 'd20', value: rollDie('d20') });
+        }
+        
+        const allRolls = [currentResults[0].value, ...currentBoonResults.map(r => r.value)];
+        
+        // Boon = Lowest, Bane = Highest
+        numericFinalValue = isBoonActive ? Math.min(...allRolls) : Math.max(...allRolls);
+        finalValue = numericFinalValue;
+      } else {
+        numericFinalValue = currentResults[0].value;
+        finalValue = numericFinalValue;
+      }
+
       const rollValue = numericFinalValue;
       if (rollValue === 1) { crit = true; finalValue = "Dragon!"; success = true; }
       if (rollValue === 20) { crit = true; finalValue = "Demon!"; success = false; }
@@ -90,10 +161,12 @@ export function DiceRollerModal() {
           success = rollValue <= currentConfig.targetValue;
         }
       }
-
+      
+      // FIX 2: Call the corrected function name
       if (isSkillCheck && skillName && (rollValue === 1 || rollValue === 20)) {
-        markSkillInSession(skillName);
+        markSkillThisSession(skillName);
       }
+
     } else if (isRecoveryRoll && dicePool.length === 1 && dicePool[0] === 'd6') {
       numericFinalValue = currentResults[0].value;
       finalValue = numericFinalValue;
@@ -101,210 +174,273 @@ export function DiceRollerModal() {
       crit = false;
     }
 
-    setResults(currentResults);
-    setBoonResults(currentBoonResults);
-    setFinalOutcome(finalValue);
-    setIsCritical(crit);
-    setIsSuccess(success);
+    // 2. Animation Loop
+    let shuffleCount = 0;
+    if (intervalRef.current) clearInterval(intervalRef.current);
 
-    const historyEntryData = {
-      description: currentConfig?.description || `${dicePool.join(', ')} Roll`,
-      dicePool: [...dicePool],
-      results: currentResults,
-      boonResults: currentBoonResults.length > 0 ? currentBoonResults : undefined,
-      finalOutcome: finalValue,
-      isBoon: isBoonActive,
-      isBane: isBaneActive,
-      targetValue: currentConfig?.targetValue,
-      isSuccess: success,
-      isCritical: crit,
-      skillName: skillName,
-    };
-    addRollToHistory(historyEntryData);
+    intervalRef.current = setInterval(() => {
+      shuffleCount++;
+      setDisplayedOutcome(Math.floor(Math.random() * 20) + 1); 
+      
+      if (shuffleCount > 6) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        
+        setIsRolling(false);
+        setResults(currentResults);
+        setBoonResults(currentBoonResults);
+        setFinalOutcome(finalValue);
+        setDisplayedOutcome(finalValue);
+        setIsCritical(crit);
+        setIsSuccess(success);
 
-    // Call callbacks
-    if (currentConfig?.onRollComplete) {
-      currentConfig.onRollComplete(historyEntryData);
-    }
-    // FIXED: Always pass the numeric value to the onRoll callback.
-    if (currentConfig?.onRoll) {
-      currentConfig.onRoll({ total: numericFinalValue });
-    }
-  }, [dicePool, isBoonActive, isBaneActive, currentConfig, addRollToHistory, markSkillInSession, isRecoveryRoll, isSkillCheck, isRallyRoll, isAdvancementRoll, isDeathRoll]);
+        // Log History
+        const historyEntryData = {
+          description: currentConfig?.description || `${dicePool.join(', ')} Roll`,
+          dicePool: [...dicePool],
+          results: currentResults,
+          // Store extra info for history if needed
+          boonResults: currentBoonResults.length > 0 ? currentBoonResults : undefined,
+          finalOutcome: finalValue,
+          isBoon: isBoonActive,
+          isBane: isBaneActive,
+          targetValue: currentConfig?.targetValue,
+          isSuccess: success,
+          isCritical: crit,
+          skillName: skillName,
+        };
+        addRollToHistory(historyEntryData);
+
+        if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
+        if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
+      }
+    }, 60);
+
+  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, isRecoveryRoll, isSkillCheck, isRallyRoll, isAdvancementRoll, isDeathRoll]);
 
   useEffect(() => {
     if (!showDiceRoller) {
       setResults([]);
       setBoonResults([]);
       setFinalOutcome(null);
+      setDisplayedOutcome('...');
       setIsCritical(false);
       setIsSuccess(undefined);
       setShowHistory(false);
+      setIsRolling(false);
+      if (intervalRef.current) clearInterval(intervalRef.current);
     }
   }, [showDiceRoller]);
 
-  // FIXED: Removed the aggressive useEffect that cleared results on any dice pool change.
-  
   if (!showDiceRoller) return null;
 
   const getModalTitle = () => {
     if (currentConfig?.description) return currentConfig.description;
     if (isDeathRoll) return "Death Save (d20 vs CON)";
-    if (isRallyRoll) return "Rally Roll (d20 vs WIL, Bane)";
+    if (isRallyRoll) return "Rally Roll (d20 vs WIL)";
     if (isRecoveryRoll) return "Recovery Roll (1d6 HP)";
-    if (isAdvancementRoll) return "Advancement Roll (d20 vs Skill)";
-    if (isSkillCheck) return "Skill Check (d20 vs Skill)";
+    if (isAdvancementRoll) return "Advancement Roll";
+    if (isSkillCheck) return "Skill Check";
     return "Dice Roller";
   }
 
-  // FIXED: Populated the function with appropriate icons.
   const getIconForMode = () => {
     if (isDeathRoll) return <Skull className="w-5 h-5" />;
     if (isRallyRoll) return <ShieldQuestion className="w-5 h-5" />;
     if (isRecoveryRoll) return <HeartPulse className="w-5 h-5" />;
     if (isAdvancementRoll) return <GraduationCap className="w-5 h-5" />;
-    if (isSkillCheck) return <Dices className="w-5 h-5" />;
     return <Dices className="w-5 h-5" />;
   }
 
-  const controlsDisabled = isDeathRoll || isRallyRoll || isRecoveryRoll || isAdvancementRoll;
+  const controlsDisabled = isRolling || isDeathRoll || isRallyRoll || isRecoveryRoll || isAdvancementRoll;
 
   return (
-    // FIXED: Added the main modal wrapper, backdrop, and container.
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] border border-gray-200 overflow-hidden transform transition-all scale-100">
         
-        {/* FIXED: Added a structured header with a title and close button. */}
-        <div className="p-4 border-b flex justify-between items-center text-lg font-semibold">
-          <div className="flex items-center gap-2">
+        {/* Header */}
+        <div className="p-4 border-b bg-gray-50 flex justify-between items-center text-lg font-bold text-gray-800">
+          <div className="flex items-center gap-2 text-indigo-700">
             {getIconForMode()} {getModalTitle()}
           </div>
-          <button onClick={() => toggleDiceRoller()} className="text-gray-500 hover:text-gray-800">
+          <button onClick={() => toggleDiceRoller()} className="text-gray-400 hover:text-gray-700 transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="p-4 overflow-y-auto flex-grow">
+        <div className="p-5 overflow-y-auto flex-grow flex flex-col">
           {showHistory ? (
-            <div>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-md font-semibold">Roll History</h3>
+            <div className="animate-in slide-in-from-right-4 duration-200">
+              <div className="flex justify-between items-center mb-3 border-b pb-2">
+                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Roll History</h3>
                 <Button onClick={clearHistory} variant="danger" size="xs" disabled={rollHistory.length === 0}>
                   <Trash2 className="w-3 h-3 mr-1" /> Clear
                 </Button>
               </div>
               {rollHistory.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No rolls yet.</p>
+                <p className="text-gray-400 text-center py-8 text-sm italic">No rolls yet.</p>
               ) : (
-                <ul className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                <ul className="space-y-3 max-h-60 overflow-y-auto pr-2">
                   {rollHistory.map(entry => (
-                    <li key={entry.id} className="text-xs border-b pb-1">
-                      <p className="font-medium">{entry.description}</p>
-                      <p>Pool: {entry.dicePool.join(', ')} {entry.isBoon ? '(Boon)' : ''}{entry.isBane ? '(Bane)' : ''}</p>
-                      <p>Rolls: {entry.results.map(r => r.value).join(', ')} {entry.boonResults ? `| Boon/Bane: ${entry.boonResults.map(r => r.value).join(', ')}` : ''}</p>
-                      <p>Outcome: <span className="font-semibold">{String(entry.finalOutcome)}</span>
-                         {entry.targetValue !== undefined && ` (vs ${entry.targetValue})`}
-                         {entry.isSuccess === true && <span className="text-green-600 ml-1">(Success)</span>}
-                         {entry.isSuccess === false && <span className="text-red-600 ml-1">(Failure)</span>}
-                         {entry.isCritical && <span className="text-purple-600 ml-1">(Critical!)</span>}
-                      </p>
-                      {entry.skillName && <p className="text-gray-500">Skill: {entry.skillName}</p>}
+                    <li key={entry.id} className="text-sm p-2 rounded bg-gray-50 border border-gray-100">
+                      <div className="flex justify-between font-bold text-gray-700 mb-1">
+                         <span>{entry.description}</span>
+                         <span className={entry.isSuccess ? "text-green-600" : entry.isSuccess === false ? "text-red-600" : ""}>
+                           {String(entry.finalOutcome)}
+                         </span>
+                      </div>
+                      <div className="text-xs text-gray-500 flex justify-between">
+                         <span>{entry.dicePool.join('+')} {entry.isBoon && '(Boon)'}{entry.isBane && '(Bane)'}</span>
+                         {entry.isCritical && <span className="text-purple-600 font-bold">CRITICAL</span>}
+                      </div>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
           ) : (
-            <>
-              <div className="mb-4 p-3 border rounded bg-gray-50 min-h-[50px] flex flex-wrap gap-2 items-center">
+            <div className="flex flex-col h-full">
+              {/* Dice Pool Display */}
+              <div className="mb-6 p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 min-h-[80px] flex flex-wrap gap-2 items-center justify-center">
                 {dicePool.length === 0 ? (
-                  <span className="text-gray-500 italic">Dice pool is empty</span>
+                  <span className="text-gray-400 text-sm font-medium">Add dice to roll...</span>
                 ) : (
                   dicePool.map((die, index) => (
                     <button
                       key={index}
-                      // FIXED: The argument to removeLastDie is unnecessary and has been removed.
                       onClick={() => !controlsDisabled && removeLastDie()}
-                      className={`px-2 py-1 border rounded shadow-sm flex items-center ${controlsDisabled ? 'bg-gray-300 cursor-not-allowed' : 'bg-white hover:bg-red-50 hover:border-red-300'}`}
-                      title={controlsDisabled ? undefined : `Remove last die`}
+                      className={`
+                        w-12 h-12 rounded-lg flex items-center justify-center shadow-sm transition-all transform hover:scale-105
+                        ${controlsDisabled ? 'bg-gray-200 cursor-not-allowed opacity-50' : 'bg-white border border-gray-200 hover:border-red-300 hover:text-red-500'}
+                      `}
                       disabled={controlsDisabled}
                     >
                       <DiceIcon type={die} />
-                      {!controlsDisabled && <X className="w-3 h-3 ml-1 text-red-500" />}
                     </button>
                   ))
                 )}
               </div>
 
+              {/* Controls */}
               {!controlsDisabled && (
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
+                <div className="grid grid-cols-6 gap-2 mb-6">
                   {(['d4', 'd6', 'd8', 'd10', 'd12', 'd20'] as DiceType[]).map(die => (
-                    <Button key={die} onClick={() => addDie(die)} variant="outline" size="sm" className="flex justify-center items-center">
-                      <DiceIcon type={die} />
+                    <Button 
+                      key={die} 
+                      onClick={() => addDie(die)} 
+                      variant="outline" 
+                      size="sm" 
+                      disabled={isRolling}
+                      className="h-10 font-mono text-xs"
+                    >
+                      {die}
                     </Button>
                   ))}
                 </div>
               )}
 
+              {/* --- MULTIPLE BOON / BANE BUTTONS --- */}
               {dicePool.length === 1 && dicePool[0] === 'd20' && !controlsDisabled && (
-                <div className="flex justify-center gap-4 mb-4">
-                  <Button
-                    onClick={() => setBoon(!isBoonActive)}
-                    variant={isBoonActive ? "success" : "outline"}
-                    size="sm"
-                    className={`flex items-center ${isBoonActive ? 'ring-2 ring-green-400 ring-offset-1' : ''}`}
+                <div className="flex justify-center gap-4 mb-6">
+                  {/* BOON BUTTON */}
+                  <button
+                    onClick={handleBoonClick}
+                    className={`
+                      relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200
+                      ${isBoonActive 
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-105 ring-2 ring-emerald-200 ring-offset-1' 
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50'
+                      }
+                    `}
                   >
-                    <Star className={`w-4 h-4 mr-1 ${isBoonActive ? 'text-white' : 'text-green-500'}`} /> Boon
-                  </Button>
-                  <Button
-                    onClick={() => setBane(!isBaneActive)}
-                    variant={isBaneActive ? "danger" : "outline"}
-                    size="sm"
-                    className={`flex items-center ${isBaneActive ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
+                    <Star className={`w-4 h-4 mr-2 ${isBoonActive ? 'fill-white' : ''}`} />
+                    Boon {isBoonActive && modifierCount > 1 && <span className="ml-1 bg-white/20 px-1.5 rounded text-xs">x{modifierCount}</span>}
+                  </button>
+
+                  {/* BANE BUTTON */}
+                  <button
+                    onClick={handleBaneClick}
+                    className={`
+                      relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200
+                      ${isBaneActive 
+                        ? 'bg-rose-600 border-rose-600 text-white shadow-md scale-105 ring-2 ring-rose-200 ring-offset-1' 
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-rose-400 hover:text-rose-600 hover:bg-rose-50'
+                      }
+                    `}
                   >
-                    <ShieldOff className={`w-4 h-4 mr-1 ${isBaneActive ? 'text-white' : 'text-red-500'}`} /> Bane
-                  </Button>
+                    <ShieldOff className="w-4 h-4 mr-2" />
+                    Bane {isBaneActive && modifierCount > 1 && <span className="ml-1 bg-white/20 px-1.5 rounded text-xs">x{modifierCount}</span>}
+                  </button>
                 </div>
               )}
 
-              {results.length > 0 && (
-                <div className="mt-4 p-3 border rounded bg-blue-50 border-blue-200 text-center">
-                  <p className="text-sm text-blue-700 mb-1">
-                    Rolled: {results.map(r => r.value).join(', ')}
-                    {boonResults.length > 0 && ` | Boon/Bane: ${boonResults.map(r => r.value).join(', ')}`}
-                  </p>
-                  <p className={`text-2xl font-bold ${isCritical ? 'text-purple-600' : 'text-blue-900'}`}>
-                    {String(finalOutcome)}
-                  </p>
-                  {currentConfig?.targetValue !== undefined && !isCritical && (
-                    <p className="text-sm text-gray-600">(Target: {currentConfig.targetValue})</p>
-                  )}
-                  {isSuccess === true && !isCritical && (
-                    <p className="text-green-600 font-semibold mt-1">Success!</p>
-                  )}
-                  {isSuccess === false && !isCritical && (
-                    <p className="text-red-600 font-semibold mt-1">Failure!</p>
-                  )}
+              {/* Result Display */}
+              {(isRolling || finalOutcome !== null) && (
+                <div className={`
+                  mt-auto mb-2 p-6 rounded-xl text-center transition-all duration-300 transform
+                  ${isRolling ? 'bg-gray-100 scale-95 opacity-80' : 'bg-indigo-50 border-2 border-indigo-100 scale-100 opacity-100 shadow-inner'}
+                `}>
+                   {/* Animated Number */}
+                   <div className={`text-5xl font-black mb-2 ${
+                     isCritical ? 'text-purple-600 animate-bounce' : 
+                     isRolling ? 'text-gray-400 blur-sm' : 'text-indigo-900'
+                   }`}>
+                      {displayedOutcome}
+                   </div>
+                   
+                   {!isRolling && (
+                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {currentConfig?.targetValue !== undefined && !isCritical && (
+                          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Target: {currentConfig.targetValue}</p>
+                        )}
+                        
+                        {isSuccess === true && !isCritical && (
+                          <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-bold">
+                            <Star size={14} className="fill-current" /> Success
+                          </div>
+                        )}
+                        {isSuccess === false && !isCritical && (
+                          <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-bold">
+                            <X size={14} /> Failure
+                          </div>
+                        )}
+
+                        {/* Details of all rolled dice */}
+                        {boonResults.length > 0 && (
+                          <p className="text-xs text-indigo-400 mt-2">
+                            Rolls: [{results[0].value}, {boonResults.map(b => b.value).join(', ')}]
+                            <br/>
+                            <span className="font-semibold">{isBoonActive ? 'Took Lowest' : 'Took Highest'}</span>
+                          </p>
+                        )}
+                     </div>
+                   )}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
+        {/* Footer Actions */}
         <div className="p-4 border-t flex justify-between items-center bg-gray-50">
           <div>
-            <Button onClick={() => setShowHistory(!showHistory)} variant="secondary" size="sm">
-              <History className="w-4 h-4 mr-1" /> {showHistory ? 'Roller' : 'History'}
+            <Button onClick={() => setShowHistory(!showHistory)} variant="ghost" size="sm" className="text-gray-500 hover:text-gray-800">
+              <History className="w-4 h-4 mr-1" /> {showHistory ? 'Back to Roller' : 'History'}
             </Button>
-            {!showHistory && !controlsDisabled && (
-              <Button onClick={clearDicePool} variant="ghost" size="sm" className="ml-2 text-red-600 hover:bg-red-100" disabled={dicePool.length === 0}>
-                <Trash2 className="w-4 h-4 mr-1" /> Clear Pool
+            {!showHistory && !controlsDisabled && dicePool.length > 0 && (
+              <Button onClick={clearDicePool} variant="ghost" size="sm" className="ml-2 text-red-400 hover:text-red-600 hover:bg-red-50">
+                Clear
               </Button>
             )}
           </div>
+          
           {!showHistory && (
-            <Button onClick={handleRoll} disabled={dicePool.length === 0} size="lg">
-              <Dices className="w-5 h-5 mr-2" /> Roll
+            <Button 
+              onClick={handleRoll} 
+              disabled={dicePool.length === 0 || isRolling} 
+              size="lg" 
+              className={`w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}
+            >
+              {isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}
             </Button>
           )}
         </div>

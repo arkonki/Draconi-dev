@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Package, Search, Filter, ArrowRight, ArrowLeft, Plus, Trash2 } from 'lucide-react'; // Removed unused icons for now
+import { 
+  Package, Search, Filter, ArrowRight, ArrowLeft, Plus, Trash2, X, Users, History
+} from 'lucide-react';
 import { Button } from '../shared/Button';
-import { Character, InventoryItem as CharacterInventoryItem } from '../../types/character'; // Renamed imported InventoryItem
-// Removed the incorrect import: import { findEquipment } from '../../data/equipment';
-import { GameItem, findItemByName } from '../../lib/api/items'; // Use findItemByName from api if needed, or rely on fetched allItems
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // Import useQuery and useQueryClient
-import { fetchItems } from '../../lib/api/items'; // Import fetchItems
+import { Character, InventoryItem as CharacterInventoryItem } from '../../types/character';
+import { GameItem } from '../../lib/api/items';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
+
+// --- TYPE DEFINITIONS ---
 
 interface PartyInventoryProps {
   partyId: string;
@@ -16,16 +19,14 @@ interface PartyInventoryProps {
   isDM: boolean;
 }
 
-// This represents items specifically in the party_inventory table
 interface PartyInventoryTableItem {
   id: string;
-  name: string; // This can potentially be null from the DB
+  name: string;
   quantity: number;
   description?: string;
   category?: string;
-  party_id: string; // Ensure party_id is part of the type if needed
+  party_id: string;
 }
-
 
 interface TransactionLog {
   id: string;
@@ -36,525 +37,492 @@ interface TransactionLog {
   to_type: 'party' | 'character';
   to_id: string;
   timestamp: string;
-  party_id: string; // Added party_id based on loadTransactionLog query
+  party_id: string;
 }
 
+// --- MODAL COMPONENT: LOOT ASSIGNMENT ---
+
+interface LootAssignmentModalProps {
+  onClose: () => void;
+  allItems: GameItem[];
+  onAssignLoot: (loot: { item: GameItem; quantity: number }[]) => Promise<void>;
+}
+
+const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignmentModalProps) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [stagedLoot, setStagedLoot] = useState<Map<string, { item: GameItem; quantity: number }>>(new Map());
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const filteredItems = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    const lowercasedSearch = searchTerm.toLowerCase();
+    return allItems
+      .filter(item => item.name.toLowerCase().includes(lowercasedSearch))
+      .slice(0, 50); // Limit results for performance
+  }, [searchTerm, allItems]);
+
+  const handleStageItem = (item: GameItem, quantity: number) => {
+    if (quantity <= 0) return;
+    const newStagedLoot = new Map(stagedLoot);
+    const existing = newStagedLoot.get(item.id);
+    newStagedLoot.set(item.id, { item, quantity: (existing?.quantity || 0) + quantity });
+    setStagedLoot(newStagedLoot);
+    setSearchTerm(''); // Reset search for rapid entry
+  };
+
+  const handleRemoveStagedItem = (itemId: string) => {
+    const newStagedLoot = new Map(stagedLoot);
+    newStagedLoot.delete(itemId);
+    setStagedLoot(newStagedLoot);
+  };
+
+  const handleConfirmLoot = async () => {
+    if (stagedLoot.size === 0) return;
+    setIsProcessing(true);
+    await onAssignLoot(Array.from(stagedLoot.values()));
+    setIsProcessing(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[60] backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-200">
+        
+        {/* Modal Header */}
+        <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Assign Loot to Party</h3>
+            <p className="text-xs text-gray-500">Search items on the left, review loot on the right.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-colors"><X size={20} /></button>
+        </div>
+
+        <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
+          
+          {/* LEFT: Search & Results */}
+          <div className="w-full md:w-1/2 flex flex-col border-r border-gray-200 bg-white">
+            <div className="p-4 border-b">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search item database..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex-grow overflow-y-auto p-2 space-y-1 bg-gray-50/50">
+              {filteredItems.length > 0 ? (
+                filteredItems.map(item => (
+                  <div key={item.id} className="p-3 bg-white border border-gray-200 rounded-lg shadow-sm flex items-center gap-3 hover:border-blue-300 transition-colors group">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-gray-900 truncate">{item.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{item.category || 'Item'}</p>
+                    </div>
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const qInput = e.currentTarget.elements.namedItem('qty') as HTMLInputElement;
+                        handleStageItem(item, parseInt(qInput.value) || 1);
+                        qInput.value = '1';
+                      }}
+                    >
+                      <input type="number" name="qty" defaultValue={1} min="1" className="w-12 py-1 px-1 text-center border rounded text-sm" onClick={e=>e.currentTarget.select()}/>
+                      <Button type="submit" size="xs" variant="secondary" icon={Plus}>Add</Button>
+                    </form>
+                  </div>
+                ))
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center">
+                   <Search size={32} className="mb-2 opacity-20"/>
+                   <p className="text-sm">Type to search for items...</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT: Staged Loot */}
+          <div className="w-full md:w-1/2 flex flex-col bg-gray-50">
+            <div className="p-3 bg-blue-50 border-b border-blue-100 flex justify-between items-center">
+               <h4 className="font-bold text-blue-900 text-sm uppercase tracking-wide">Pending Loot ({stagedLoot.size})</h4>
+            </div>
+            <div className="flex-grow overflow-y-auto p-3 space-y-2">
+              {stagedLoot.size === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 rounded-lg m-4">
+                  <Package size={32} className="mb-2 opacity-20"/>
+                  <p className="text-sm">No items added yet.</p>
+                </div>
+              ) : (
+                Array.from(stagedLoot.values()).map(({ item, quantity }) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-sm animate-in slide-in-from-left-2">
+                    <div className="flex items-center gap-3">
+                       <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded flex items-center justify-center font-bold text-xs">{quantity}x</div>
+                       <div>
+                         <p className="font-medium text-sm text-gray-900">{item.name}</p>
+                         <p className="text-xs text-gray-500">{item.category}</p>
+                       </div>
+                    </div>
+                    <button onClick={() => handleRemoveStagedItem(item.id)} className="text-gray-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded transition-colors"><Trash2 size={16}/></button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t bg-white flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirmLoot} disabled={stagedLoot.size === 0 || isProcessing} icon={Plus}>
+            {isProcessing ? 'Adding...' : `Add Items to Party`}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN COMPONENT ---
+
 export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) {
-  const queryClient = useQueryClient(); // Get query client instance
+  const queryClient = useQueryClient();
+  
+  // State
   const [inventory, setInventory] = useState<PartyInventoryTableItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filters & Selection
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [selectedCharacter, setSelectedCharacter] = useState<string>('');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]); // Store party inventory item IDs for selection
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string>('');
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  
+  // History & Modals
   const [transactionLog, setTransactionLog] = useState<TransactionLog[]>([]);
-  const [showTransactionLog, setShowTransactionLog] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isLootModalOpen, setIsLootModalOpen] = useState(false);
 
-  // Fetch all game items for details lookup
-  const { data: allItems = [], isLoading: isLoadingItems, error: errorItems } = useQuery<GameItem[], Error>({
+  // Cache items for quick lookup
+  const { data: allItems = [] } = useQuery<GameItem[], Error>({
     queryKey: ['gameItems'],
     queryFn: fetchItems,
-    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+    staleTime: Infinity,
   });
 
-  // Helper to find item details from the fetched list
-  const findItemDetails = (itemName: string): GameItem | undefined => {
-    // Ensure itemName is not null/undefined before searching
-    if (!itemName) return undefined;
-    return allItems.find(item => item.name === itemName);
-  };
-
-
+  // --- LOAD DATA ---
   useEffect(() => {
-    loadInventory();
-    loadTransactionLog();
+    loadData();
   }, [partyId]);
 
-  async function loadInventory() {
+  async function loadData() {
+    setLoading(true);
     try {
-      setLoading(true);
-      setError(null); // Clear previous errors
-      const { data, error: fetchError } = await supabase
-        .from('party_inventory')
-        .select('*')
-        .eq('party_id', partyId);
-
-      if (fetchError) throw fetchError;
-      // Ensure data is an array, default to empty array if null/undefined
-      setInventory(data || []);
+      const [invRes, logRes] = await Promise.all([
+        supabase.from('party_inventory').select('*').eq('party_id', partyId),
+        supabase.from('party_inventory_log').select('*').eq('party_id', partyId).order('timestamp', { ascending: false }).limit(50)
+      ]);
+      
+      if (invRes.error) throw invRes.error;
+      setInventory(invRes.data || []);
+      setTransactionLog(logRes.data || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load inventory');
-      setInventory([]); // Set to empty array on error
+      setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadTransactionLog() {
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('party_inventory_log')
-        .select('*')
-        .eq('party_id', partyId)
-        .order('timestamp', { ascending: false })
-        .limit(50);
+  // --- HANDLERS ---
 
-      if (fetchError) throw fetchError;
-      setTransactionLog(data || []);
+  const handleAssignLoot = async (loot: { item: GameItem; quantity: number }[]) => {
+    try {
+      setError(null);
+      // Process sequentially to handle potential duplicates correctly in one batch if needed, 
+      // but parallel is usually fine for distinct items.
+      await Promise.all(loot.map(async ({ item, quantity }) => {
+        const existing = inventory.find(i => i.name === item.name);
+        if (existing) {
+          await supabase.from('party_inventory').update({ quantity: existing.quantity + quantity }).eq('id', existing.id);
+        } else {
+          await supabase.from('party_inventory').insert([{ 
+            party_id: partyId, name: item.name, quantity, category: item.category, description: item.description || item.effect 
+          }]);
+        }
+        // Log entry could be added here too
+        await supabase.from('party_inventory_log').insert([{
+           party_id: partyId, item_name: item.name, quantity, from_type: 'party', from_id: 'DM', to_type: 'party', to_id: partyId
+        }]);
+      }));
+      await loadData();
     } catch (err) {
-      console.error('Failed to load transaction log:', err);
-      setTransactionLog([]); // Set to empty array on error
-      // Optionally set an error state for the log specifically
+      setError('Failed to assign loot.');
     }
-  }
+  };
 
   const handleTransferToCharacter = async () => {
-    if (!selectedCharacter || selectedItems.length === 0) return;
+    if (!selectedCharacterId || selectedItemIds.length === 0) return;
+    const character = members.find(m => m.id === selectedCharacterId);
+    if (!character) return;
 
     try {
-      setError(null); // Clear previous errors
-      const character = members.find(m => m.id === selectedCharacter);
-      if (!character) throw new Error('Character not found');
+      for (const itemId of selectedItemIds) {
+        const item = inventory.find(i => i.id === itemId);
+        if (!item) continue;
 
-      // Use Promise.all for better error handling if one transfer fails
-      await Promise.all(selectedItems.map(async (partyItemId) => {
-        const partyItem = inventory.find(i => i.id === partyItemId);
-        // Ensure partyItem and partyItem.name exist before proceeding
-        if (!partyItem || !partyItem.name || partyItem.quantity < 1) return;
-
-        // 1. Decrease party inventory quantity or delete if quantity becomes 0
-        let partyUpdateError;
-        if (partyItem.quantity > 1) {
-          ({ error: partyUpdateError } = await supabase
-            .from('party_inventory')
-            .update({ quantity: partyItem.quantity - 1 })
-            .eq('id', partyItem.id));
+        // 1. Decrement Party
+        if (item.quantity > 1) {
+          await supabase.from('party_inventory').update({ quantity: item.quantity - 1 }).eq('id', item.id);
         } else {
-          ({ error: partyUpdateError } = await supabase
-            .from('party_inventory')
-            .delete()
-            .eq('id', partyItem.id));
-        }
-        if (partyUpdateError) throw partyUpdateError;
-
-        // 2. Update character inventory (add the item object)
-        const currentEquipment = character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } };
-        const currentInventory = currentEquipment.inventory || [];
-
-        // Find details of the item being transferred
-        const itemDetails = findItemDetails(partyItem.name);
-        if (!itemDetails) {
-            console.warn(`Details not found for item: ${partyItem.name}. Transferring with basic info.`);
-            // Add with minimal info derived from party item
-             const newItemForCharacter: CharacterInventoryItem = {
-                name: partyItem.name,
-                quantity: 1, // Transferring one unit
-                originalName: partyItem.name, // Use name as fallback
-                description: partyItem.description,
-                category: partyItem.category,
-             };
-             // Check if item already exists in character inventory to increment quantity
-             const existingCharItemIndex = currentInventory.findIndex(ci => ci.name === newItemForCharacter.name);
-             if (existingCharItemIndex > -1) {
-                 currentInventory[existingCharItemIndex].quantity += 1;
-             } else {
-                 currentInventory.push(newItemForCharacter);
-             }
-        } else {
-            // Check if item already exists in character inventory to increment quantity
-            const existingCharItemIndex = currentInventory.findIndex(ci => ci.name === itemDetails.name);
-            if (existingCharItemIndex > -1) {
-                currentInventory[existingCharItemIndex].quantity += 1;
-            } else {
-                // Create a new InventoryItem object for the character
-                const newItemForCharacter: CharacterInventoryItem = {
-                    ...itemDetails, // Spread details from game_items
-                    id: undefined, // Character inventory items might not need a DB ID from party_inventory
-                    quantity: 1, // Transferring one unit
-                    originalName: itemDetails.name, // Or construct if needed
-                };
-                currentInventory.push(newItemForCharacter);
-            }
+          await supabase.from('party_inventory').delete().eq('id', item.id);
         }
 
+        // 2. Increment Character
+        const currentInv = character.equipment?.inventory || [];
+        const existingIdx = currentInv.findIndex(i => i.name === item.name);
+        
+        const newInv = [...currentInv];
+        if (existingIdx >= 0) {
+          newInv[existingIdx] = { ...newInv[existingIdx], quantity: newInv[existingIdx].quantity + 1 };
+        } else {
+          // Attempt to find details, otherwise basic
+          const details = allItems.find(d => d.name === item.name);
+          newInv.push({
+             name: item.name, quantity: 1, category: item.category || details?.category, description: item.description || details?.description
+          });
+        }
 
-        const { error: characterError } = await supabase
-          .from('characters')
-          .update({
-            equipment: {
-              ...currentEquipment, // Spread existing equipment properties
-              inventory: currentInventory // Use the updated inventory array
-            }
-          })
-          .eq('id', character.id);
-        if (characterError) throw characterError;
+        await supabase.from('characters').update({ equipment: { ...character.equipment, inventory: newInv } }).eq('id', character.id);
+        
+        // 3. Log
+        await supabase.from('party_inventory_log').insert([{
+           party_id: partyId, item_name: item.name, quantity: 1, from_type: 'party', from_id: partyId, to_type: 'character', to_id: character.id
+        }]);
+      }
 
+      // Refresh
+      await loadData();
+      queryClient.invalidateQueries({ queryKey: ['character', character.id] });
+      setSelectedItemIds([]); // Clear selection
 
-        // 3. Log transaction
-        const { error: logError } = await supabase
-          .from('party_inventory_log')
-          .insert([{
-            party_id: partyId,
-            item_name: partyItem.name, // Use the confirmed non-null name
-            quantity: 1, // Transferring one item at a time
-            from_type: 'party',
-            from_id: partyId,
-            to_type: 'character',
-            to_id: character.id
-          }]);
-        if (logError) throw logError;
-      }));
-
-
-      // Refresh data after all transfers are attempted
-      await Promise.all([
-        loadInventory(),
-        loadTransactionLog(),
-        // Invalidate character query cache to reflect changes in other UI parts
-        queryClient.invalidateQueries({ queryKey: ['character', character.id] }),
-        queryClient.invalidateQueries({ queryKey: ['party', partyId] }) // Also refresh party data which includes members
-      ]);
-
-      setSelectedItems([]); // Clear selection
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to transfer items');
-      // Consider rolling back changes if needed, though complex
-      await loadInventory(); // Refresh inventory state on error
+      setError('Transfer failed.');
     }
   };
 
-  // Handles transferring an item FROM a character TO the party
-  const handleTransferToParty = async (characterId: string, itemToTransfer: CharacterInventoryItem) => {
-     try {
-        setError(null);
-        const character = members.find(m => m.id === characterId);
-        if (!character) throw new Error('Character not found');
-        // Ensure item name exists
-        if (!itemToTransfer.name) {
-            console.warn('Attempted to transfer an item without a name.');
-            return;
-        }
+  const handleTransferToParty = async (item: CharacterInventoryItem) => {
+    const character = members.find(m => m.id === selectedCharacterId);
+    if (!character || !item.name) return;
 
-        // 1. Remove/Decrement item from character's inventory
-        const currentEquipment = character.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } };
-        let currentInventory = currentEquipment.inventory || [];
+    try {
+      // 1. Decrement Character
+      const currentInv = [...(character.equipment?.inventory || [])];
+      const idx = currentInv.findIndex(i => i.name === item.name); // Match by name is safer for mixed sources
+      if (idx === -1) return;
 
-        const itemIndex = currentInventory.findIndex(invItem => invItem.name === itemToTransfer.name); // Match by name
+      if (currentInv[idx].quantity > 1) {
+        currentInv[idx].quantity -= 1;
+      } else {
+        currentInv.splice(idx, 1);
+      }
+      
+      await supabase.from('characters').update({ equipment: { ...character.equipment, inventory: currentInv } }).eq('id', character.id);
 
-        if (itemIndex === -1) {
-            console.warn(`Item "${itemToTransfer.name}" not found in character ${characterId}'s inventory.`);
-            return; // Item not found, cannot transfer
-        }
+      // 2. Increment Party
+      const existing = inventory.find(i => i.name === item.name);
+      if (existing) {
+        await supabase.from('party_inventory').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+      } else {
+        await supabase.from('party_inventory').insert([{
+           party_id: partyId, name: item.name, quantity: 1, category: item.category, description: item.description
+        }]);
+      }
 
-        // Decrement quantity or remove item
-        if (currentInventory[itemIndex].quantity > 1) {
-            currentInventory[itemIndex].quantity -= 1;
-        } else {
-            // Remove the item entirely
-            currentInventory = [
-                ...currentInventory.slice(0, itemIndex),
-                ...currentInventory.slice(itemIndex + 1)
-            ];
-        }
+      // 3. Log
+      await supabase.from('party_inventory_log').insert([{
+         party_id: partyId, item_name: item.name, quantity: 1, from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId
+      }]);
 
-        // Update character in DB
-        const { error: characterError } = await supabase
-          .from('characters')
-          .update({
-            equipment: {
-              ...currentEquipment,
-              inventory: currentInventory
-            }
-          })
-          .eq('id', character.id);
-        if (characterError) throw characterError;
+      await loadData();
+      queryClient.invalidateQueries({ queryKey: ['character', character.id] });
 
-
-        // 2. Add/Update party inventory
-        const existingPartyItem = inventory.find(i => i.name === itemToTransfer.name);
-        if (existingPartyItem) {
-          const { error: updateError } = await supabase
-            .from('party_inventory')
-            .update({ quantity: existingPartyItem.quantity + 1 })
-            .eq('id', existingPartyItem.id);
-          if (updateError) throw updateError;
-        } else {
-          // Use details from the item being transferred if possible
-          const { error: insertError } = await supabase
-            .from('party_inventory')
-            .insert([{
-              party_id: partyId,
-              name: itemToTransfer.name, // Use the confirmed non-null name
-              quantity: 1,
-              category: itemToTransfer.category || 'misc', // Use item's category or default
-              description: itemToTransfer.description || itemToTransfer.effect // Use description or effect
-            }])
-            .select();
-          if (insertError) throw insertError;
-        }
-
-        // 3. Log transaction
-        const { error: logError } = await supabase
-          .from('party_inventory_log')
-          .insert([{
-            party_id: partyId,
-            item_name: itemToTransfer.name, // Use the confirmed non-null name
-            quantity: 1,
-            from_type: 'character',
-            from_id: character.id,
-            to_type: 'party',
-            to_id: partyId
-          }]);
-        if (logError) throw logError;
-
-        // Refresh party inventory, log, and character data
-        await Promise.all([
-            loadInventory(),
-            loadTransactionLog(),
-            queryClient.invalidateQueries({ queryKey: ['character', character.id] }),
-            queryClient.invalidateQueries({ queryKey: ['party', partyId] }) // Refresh party data
-        ]);
-
-     } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to transfer item to party');
-     }
+    } catch (err) {
+      setError('Transfer failed.');
+    }
   };
 
-
-  // Filter out null/undefined categories and names before creating Set
-  const validCategories = inventory
-    .map(item => item.category)
-    .filter((category): category is string => typeof category === 'string' && category.trim() !== '');
-  const categories = ['all', ...new Set(validCategories)];
-
-  // FIX: Add null check for item.name before calling toLowerCase()
-  const filteredInventory = inventory.filter(item => {
-    // Treat null/undefined names as empty strings for search purposes
-    const itemName = item.name || '';
-    const matchesSearch = itemName.toLowerCase().includes(searchTerm.toLowerCase());
-    // Ensure category filter works even if item.category is null/undefined
-    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  // Find the full character object for the selected ID
-  const selectedCharacterData = members.find(m => m.id === selectedCharacter);
-  // Safely access inventory (now array of objects), defaulting to an empty array
-  const selectedCharacterInventory: CharacterInventoryItem[] = selectedCharacterData?.equipment?.inventory ?? [];
-
+  // --- DERIVED STATE ---
+  const categories = ['all', ...new Set(inventory.map(i => i.category).filter(Boolean) as string[])];
+  const filteredInventory = inventory.filter(i => 
+    i.name.toLowerCase().includes(searchTerm.toLowerCase()) && 
+    (categoryFilter === 'all' || i.category === categoryFilter)
+  );
+  const selectedCharacter = members.find(m => m.id === selectedCharacterId);
 
   return (
-    <div className="grid grid-cols-12 gap-6">
-      {/* Party Inventory */}
-      <div className="col-span-12 lg:col-span-7">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold">Party Inventory</h2>
-            <Button
-              variant="secondary"
-              onClick={() => setShowTransactionLog(!showTransactionLog)}
-            >
-              {showTransactionLog ? 'Hide History' : 'Show History'}
-            </Button>
+    <>
+      {/* LOOT MODAL */}
+      {isLootModalOpen && <LootAssignmentModal onClose={() => setIsLootModalOpen(false)} allItems={allItems} onAssignLoot={handleAssignLoot} />}
+      
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-140px)]">
+        
+        {/* LEFT: PARTY STASH (7 cols) */}
+        <div className="lg:col-span-7 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          
+          {/* Header */}
+          <div className="p-4 border-b border-gray-100 flex flex-wrap justify-between items-center gap-4 bg-white z-10">
+            <div className="flex items-center gap-2">
+               <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600"><Users size={20}/></div>
+               <div>
+                 <h2 className="text-lg font-bold text-gray-900">Party Stash</h2>
+                 <p className="text-xs text-gray-500">{inventory.length} Items total</p>
+               </div>
+            </div>
+            <div className="flex gap-2">
+              {isDM && <Button size="sm" variant="primary" icon={Plus} onClick={() => setIsLootModalOpen(true)}>Add Loot</Button>}
+              <Button size="sm" variant="ghost" icon={History} onClick={() => setShowHistory(!showHistory)} className={showHistory ? "bg-gray-100" : ""}/>
+            </div>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
+          {/* Filters */}
+          <div className="p-3 bg-gray-50 border-b border-gray-200 flex gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search items..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 outline-none" placeholder="Filter items..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
             </div>
-
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white"
-              >
-                {categories.map(category => (
-                  <option key={category} value={category}>
-                    {category === 'all' ? 'All Categories' : category}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-indigo-500" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+               {categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}
+            </select>
           </div>
-
-          {/* Inventory List */}
-          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-            {loading ? <LoadingSpinner /> : error ? <ErrorMessage message={error} /> :
-            filteredInventory.map((item) => (
-              <div
-                key={item.id} // Use the database ID from party_inventory
-                className={`p-4 border rounded-lg cursor-pointer ${
-                  selectedItems.includes(item.id)
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:bg-gray-100'
-                }`}
-                onClick={() => {
-                  // Only allow selection if item has a valid ID
-                  if (item.id) {
-                    setSelectedItems(prev =>
-                      prev.includes(item.id)
-                        ? prev.filter(id => id !== item.id)
-                        : [...prev, item.id]
-                    );
-                  } else {
-                    console.warn("Attempted to select an item without an ID:", item);
-                  }
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    {/* Display name safely */}
-                    <h3 className="font-medium">{item.name || 'Unnamed Item'}</h3>
-                    <p className="text-sm text-gray-600">
-                      Quantity: {item.quantity}
-                    </p>
-                  </div>
-                  {item.category && (
-                    <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100">
-                      {item.category}
-                    </span>
-                  )}
-                </div>
-                {item.description && (
-                  <p className="mt-2 text-sm text-gray-600">{item.description}</p>
-                )}
-              </div>
-            ))}
-
-            {!loading && filteredInventory.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-gray-600">
-                  {searchTerm || categoryFilter !== 'all'
-                    ? 'No items found matching filters.'
-                    : 'Party inventory is empty.'}
-                </p>
-              </div>
-            )}
+          
+          {/* List Content */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/30">
+             {loading ? <LoadingSpinner /> : filteredInventory.length === 0 ? (
+               <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                  <Package size={48} className="opacity-20 mb-2"/>
+                  <p>Stash is empty or no match.</p>
+               </div>
+             ) : (
+               filteredInventory.map(item => (
+                 <div 
+                    key={item.id} 
+                    onClick={() => setSelectedItemIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])}
+                    className={`
+                      p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group
+                      ${selectedItemIds.includes(item.id) 
+                         ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' 
+                         : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'
+                      }
+                    `}
+                 >
+                    <div className="flex items-center gap-3">
+                       <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIds.includes(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
+                       <div>
+                         <p className={`font-medium text-sm ${selectedItemIds.includes(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>
+                         {item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}
+                       </div>
+                    </div>
+                    {item.description && <div className="hidden group-hover:block max-w-xs text-xs text-gray-500 truncate ml-4">{item.description}</div>}
+                 </div>
+               ))
+             )}
           </div>
         </div>
-      </div>
 
-      {/* Character Inventories & Transfer Controls */}
-      <div className="col-span-12 lg:col-span-5">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-bold mb-6">Transfer Items</h2>
-
-          {/* Character Selection */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Character
-            </label>
-            <select
-              value={selectedCharacter}
-              onChange={(e) => setSelectedCharacter(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        {/* RIGHT: TRANSFER PANEL (5 cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-4 h-full">
+          
+          {/* Character Selection Card */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex-shrink-0">
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Transfer Partner</label>
+            <select 
+               className="w-full p-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"
+               value={selectedCharacterId}
+               onChange={e => setSelectedCharacterId(e.target.value)}
             >
-              <option value="">Choose a character...</option>
-              {members.map((character) => (
-                <option key={character.id} value={character.id}>
-                  {character.name} ({character.kin} {character.profession})
-                </option>
-              ))}
+              <option value="">Select Character...</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
 
-          {/* Transfer Controls */}
-          <div className="flex justify-center gap-4 mb-6">
-            <Button
-              variant="secondary"
-              icon={ArrowLeft}
-              disabled={!selectedCharacter || selectedItems.length === 0}
-              onClick={handleTransferToCharacter}
-              title="Transfer selected items from Party to Character"
-            >
-              To Character
-            </Button>
-            {/* Transfer to Party button is now handled per-item below */}
-          </div>
-
-          {/* Selected Character's Inventory */}
-          {selectedCharacter && selectedCharacterData && ( // Ensure data exists
-            <div>
-              <h3 className="font-medium mb-4">
-                {selectedCharacterData.name}'s Inventory
-              </h3>
-              <div className="space-y-2 max-h-[200px] overflow-y-auto border rounded p-2">
-                {/* Ensure item has a unique identifier for the key */}
-                {selectedCharacterInventory.map((item, index) => (
-                  <div
-                    // Use a robust key, combining name and index if id isn't present
-                    key={item.id || `${item.name || 'unknown'}-${index}`}
-                    className="p-2 border-b flex items-center justify-between text-sm"
-                  >
-                    {/* Render item name and quantity safely */}
-                    <span>{item.name || 'Unnamed Item'} (Qty: {item.quantity})</span>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={ArrowRight}
-                      // Pass the whole item object to the handler now
-                      onClick={() => handleTransferToParty(selectedCharacter, item)}
-                      // Disable button if item has no name
-                      disabled={!item.name}
-                      title={item.name ? `Transfer ${item.name} to Party` : 'Cannot transfer unnamed item'}
-                    >
-                      Give
-                    </Button>
+          {/* Transfer Area */}
+          {selectedCharacter ? (
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+               
+               {/* Give to Character */}
+               <div className={`flex-1 bg-white rounded-xl border shadow-sm flex flex-col overflow-hidden ${selectedItemIds.length > 0 ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-gray-200'}`}>
+                  <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
+                     <h4 className="font-bold text-gray-700 text-sm">Give to {selectedCharacter.name}</h4>
+                     {selectedItemIds.length > 0 && <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-bold">{selectedItemIds.length} Selected</span>}
                   </div>
-                ))}
-                 {selectedCharacterInventory.length === 0 && (
-                    <p className="text-center text-gray-500 py-4 italic">Character inventory is empty.</p>
-                 )}
-              </div>
+                  <div className="flex-1 p-4 flex flex-col items-center justify-center text-center">
+                     {selectedItemIds.length === 0 ? (
+                       <p className="text-gray-400 text-sm">Select items from the left to transfer.</p>
+                     ) : (
+                       <div className="w-full space-y-3">
+                          <p className="text-sm text-gray-600">Transferring <strong>{selectedItemIds.length}</strong> item(s)</p>
+                          <Button className="w-full" variant="primary" icon={ArrowRight} onClick={handleTransferToCharacter}>Confirm Transfer</Button>
+                       </div>
+                     )}
+                  </div>
+               </div>
+
+               {/* Take from Character */}
+               <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
+                  <div className="p-3 border-b bg-gray-50">
+                     <h4 className="font-bold text-gray-700 text-sm">{selectedCharacter.name}'s Inventory</h4>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-gray-50/30">
+                     {selectedCharacter.equipment?.inventory?.length === 0 ? (
+                       <div className="h-full flex items-center justify-center text-gray-400 text-sm">Empty Inventory</div>
+                     ) : (
+                       selectedCharacter.equipment?.inventory?.map((item, idx) => (
+                         <div key={idx} className="flex justify-between items-center p-2 bg-white border rounded hover:bg-gray-50 group">
+                            <span className="text-sm text-gray-800"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded mr-2">{item.quantity}</span>{item.name}</span>
+                            <Button size="xs" variant="secondary" icon={ArrowLeft} onClick={() => handleTransferToParty(item)}>Take</Button>
+                         </div>
+                       ))
+                     )}
+                  </div>
+               </div>
+
+            </div>
+          ) : (
+            <div className="flex-1 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 p-6 text-center">
+              <Users size={48} className="mb-3 opacity-20" />
+              <p className="font-medium">Select a character above to start transferring items.</p>
             </div>
           )}
-        </div>
 
-        {/* Transaction Log */}
-        {showTransactionLog && (
-          <div className="mt-6 bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-bold mb-4">Transaction History</h2>
-            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-              {transactionLog.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="p-3 bg-gray-50 rounded-lg text-sm border"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium">{transaction.item_name || 'Unknown Item'} (Qty: {transaction.quantity})</span>
-                    <span className="text-gray-500 text-xs">
-                      {new Date(transaction.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-gray-600 text-xs">
-                    {transaction.from_type === 'party' ? 'Party' :
-                      members.find(m => m.id === transaction.from_id)?.name || 'Unknown Char'}
-                    {' → '}
-                    {transaction.to_type === 'party' ? 'Party' :
-                      members.find(m => m.id === transaction.to_id)?.name || 'Unknown Char'}
-                  </p>
-                </div>
-              ))}
-
-              {transactionLog.length === 0 && (
-                <p className="text-center text-gray-600 py-4">
-                  No transactions recorded yet.
-                </p>
-              )}
+          {/* Transaction Log (Overlay or Expansion) */}
+          {showHistory && (
+            <div className="absolute right-0 top-16 bottom-0 w-80 bg-white shadow-2xl border-l border-gray-200 z-20 animate-in slide-in-from-right duration-300 flex flex-col">
+               <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                 <h3 className="font-bold text-gray-800">History</h3>
+                 <button onClick={() => setShowHistory(false)}><X size={18} className="text-gray-400 hover:text-gray-600"/></button>
+               </div>
+               <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                 {transactionLog.map(log => (
+                   <div key={log.id} className="text-xs p-2 bg-gray-50 rounded border border-gray-100">
+                      <p className="font-bold text-gray-700">{log.item_name} <span className="font-normal text-gray-500">x{log.quantity}</span></p>
+                      <div className="flex items-center gap-1 text-gray-500 mt-1">
+                         <span>{log.from_type === 'party' ? 'Party' : 'Char'}</span>
+                         <ArrowRight size={10}/>
+                         <span>{log.to_type === 'party' ? 'Party' : 'Char'}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">{new Date(log.timestamp).toLocaleTimeString()}</p>
+                   </div>
+                 ))}
+               </div>
             </div>
-          </div>
-        )}
+          )}
+
+        </div>
       </div>
-    </div>
+    </>
   );
 }

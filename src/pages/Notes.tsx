@@ -1,62 +1,99 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Book, Search, Filter, Edit2, Trash2, Save, X, ChevronDown, ChevronRight, StickyNote } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  Plus, Book, Search, Filter, Edit2, Trash2, Save, X, ChevronDown, 
+  StickyNote, AlertCircle, User, Users, FileText,
+  Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, 
+  Table as TableIcon, Eye, EyeOff, Quote, Code
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { MarkdownRenderer } from '../components/shared/MarkdownRenderer';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
-import { ErrorMessage } from '../components/shared/ErrorMessage';
-import { Button } from '../components/shared/Button'; // Import Button
+import { Button } from '../components/shared/Button';
 
+// --- TYPES ---
 interface Note {
   id: string;
   title: string;
   content: string;
-  category?: string;
   user_id: string;
   character_id: string | null;
   party_id: string | null;
   created_at: string;
   updated_at?: string;
-  character?: {
-    name: string;
-  };
-  party?: {
-    name: string;
-  };
+  character?: { name: string };
+  party?: { name: string };
 }
 
-interface Character {
+interface LinkTarget {
   id: string;
   name: string;
 }
 
-interface Party {
-  id: string;
-  name: string;
-}
-
+// --- MAIN COMPONENT ---
 export function Notes() {
   const { user, isDM } = useAuth();
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [parties, setParties] = useState<Party[]>([]);
   
+  // Data State
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [characters, setCharacters] = useState<LinkTarget[]>([]);
+  const [parties, setParties] = useState<LinkTarget[]>([]);
+  
+  // UI State
+  const [viewState, setViewState] = useState<'view' | 'create' | 'edit'>('view');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isEditing, setIsEditing] = useState<string | null>(null); // Stores ID of note being edited
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Form state
+  // Editor State
+  const [showPreview, setShowPreview] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Filter/Search State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'personal' | 'character' | 'party'>('all');
+
+  // Form State
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedCharacter, setSelectedCharacter] = useState<string>('');
   const [selectedParty, setSelectedParty] = useState<string>('');
+
+  // --- EDITOR HELPERS ---
   
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'character' | 'party' | 'personal'>('all');
-  
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null); // Specific error for the form
+  const insertMarkdown = (prefix: string, suffix: string = '') => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const before = text.substring(0, start);
+    const selection = text.substring(start, end);
+    const after = text.substring(end);
+
+    const newText = before + prefix + selection + suffix + after;
+    setContent(newText);
+
+    // Restore focus and set cursor position
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + prefix.length + selection.length + suffix.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  const handleInsertTable = () => {
+    const tableTemplate = `
+| Header 1 | Header 2 |
+| -------- | -------- |
+| Cell 1   | Cell 2   |
+`;
+    insertMarkdown(tableTemplate);
+  };
+
+  // --- GENERAL HELPERS ---
 
   const resetForm = useCallback(() => {
     setTitle('');
@@ -64,513 +101,379 @@ export function Notes() {
     setSelectedCharacter('');
     setSelectedParty('');
     setFormError(null);
+    setShowPreview(false);
   }, []);
 
-  const openCreateForm = () => {
+  const handleOpenCreate = () => {
     resetForm();
-    setIsCreating(true);
-    setIsEditing(null);
-    setSelectedNote(null); // Clear selected note when creating a new one
+    setViewState('create');
+    setSelectedNote(null);
   };
 
-  const openEditForm = (note: Note) => {
-    setSelectedNote(note); // Keep selected note for context if needed, or clear
-    setIsEditing(note.id);
-    setIsCreating(false); // Ensure not in "create" mode
+  const handleOpenEdit = (note: Note) => {
+    setSelectedNote(note);
     setTitle(note.title);
     setContent(note.content);
     setSelectedCharacter(note.character_id || '');
     setSelectedParty(note.party_id || '');
+    setViewState('edit');
     setFormError(null);
+    setShowPreview(false);
   };
 
-  const closeForm = () => {
-    setIsCreating(false);
-    setIsEditing(null);
+  const handleCloseForm = () => {
+    setViewState('view');
     resetForm();
-    // If a note was selected before editing, re-select it.
-    // This might need adjustment based on desired UX.
-    // For now, if we were editing, we clear the selection.
-    if (isEditing) setSelectedNote(null);
+    if (viewState === 'create') setSelectedNote(null);
   };
 
-  const loadNotes = useCallback(async () => {
-    if (!user) return;
+  // --- DATA LOADING ---
 
+  const loadData = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     setError(null);
+    
     try {
-      const noteMap = new Map<string, Note>();
-
-      const { data: userNotes, error: userNotesError } = await supabase
-        .from('notes')
-        .select(`*, character:characters(name), party:parties(name)`)
-        .eq('user_id', user.id);
-      if (userNotesError) throw userNotesError;
-      (userNotes || []).forEach(note => noteMap.set(note.id, note));
+      const { data: chars } = await supabase.from('characters').select('id, name').eq('user_id', user.id);
+      setCharacters(chars || []);
 
       if (isDM()) {
-        const { data: dmPartiesData, error: dmPartiesError } = await supabase
-          .from('parties')
-          .select('id')
-          .eq('created_by', user.id);
-        if (dmPartiesError) throw dmPartiesError;
-        const partyIds = (dmPartiesData || []).map(p => p.id);
-
-        if (partyIds.length > 0) {
-          const { data: partyNotesData, error: partyNotesError } = await supabase
-            .from('notes')
-            .select(`*, character:characters(name), party:parties(name)`)
-            .in('party_id', partyIds);
-          if (partyNotesError) throw partyNotesError;
-          (partyNotesData || []).forEach(note => noteMap.set(note.id, note));
-        }
+        const { data: prts } = await supabase.from('parties').select('id, name').eq('created_by', user.id);
+        setParties(prts || []);
       }
+
+      let query = supabase.from('notes').select(`
+        *,
+        character:characters(name),
+        party:parties(name)
+      `).eq('user_id', user.id);
       
-      const combinedNotes = Array.from(noteMap.values())
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setNotes(combinedNotes);
+      const { data: notesData, error: notesError } = await query.order('created_at', { ascending: false });
+      if (notesError) throw notesError;
+      setNotes(notesData || []);
 
     } catch (err) {
-      console.error("Error loading notes:", err);
-      setError(err instanceof Error ? err.message : 'Failed to load notes');
-      setNotes([]);
+      console.error("Load error:", err);
+      setError("Failed to load notes.");
     } finally {
       setLoading(false);
     }
   }, [user, isDM]);
 
-  const loadCharacters = useCallback(async () => {
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // --- ACTIONS ---
+
+  const handleSubmit = async () => {
     if (!user) return;
-    try {
-      const { data, error: charError } = await supabase
-        .from('characters')
-        .select('id, name')
-        .eq('user_id', user.id);
-      if (charError) throw charError;
-      setCharacters(data || []);
-    } catch (err) {
-      console.error("Error loading characters:", err);
-      setError(prev => prev || (err instanceof Error ? err.message : 'Failed to load characters'));
-    }
-  }, [user]);
-
-  const loadParties = useCallback(async () => {
-    if (!user || !isDM()) return;
-    try {
-      const { data, error: partyError } = await supabase
-        .from('parties')
-        .select('id, name')
-        .eq('created_by', user.id);
-      if (partyError) throw partyError;
-      setParties(data || []);
-    } catch (err) {
-      console.error("Error loading parties:", err);
-      setError(prev => prev || (err instanceof Error ? err.message : 'Failed to load parties'));
-    }
-  }, [user, isDM]);
-
-  useEffect(() => {
-    if (user) {
-      loadNotes();
-      loadCharacters();
-      if (isDM()) {
-        loadParties();
-      }
-    } else {
-      setLoading(false);
-      setNotes([]);
-      setCharacters([]);
-      setParties([]);
-      setSelectedNote(null);
-      closeForm();
-    }
-  }, [user, isDM, loadNotes, loadCharacters, loadParties]);
-
-
-  async function handleSubmit() {
-    if (!user) {
-      setFormError("User not authenticated.");
-      return;
-    }
-    if (!title.trim()) {
-      setFormError('Title is required.');
+    if (!title.trim()) { setFormError('Title is required.'); return; }
+    
+    if (selectedCharacter && selectedParty) {
+      setFormError('Please link to either a Character OR a Party, not both.');
       return;
     }
 
-    setFormError(null); // Clear previous form errors
-
-    const characterId = selectedCharacter || null;
-    const partyId = selectedParty || null;
-
-    if (characterId && partyId) {
-      setFormError('A note can be linked to either a character OR a party, not both.');
-      return;
-    }
-
-    const noteData = {
+    const payload = {
       title: title.trim(),
       content,
       user_id: user.id,
-      character_id: characterId,
-      party_id: partyId,
+      character_id: selectedCharacter || null,
+      party_id: selectedParty || null,
       updated_at: new Date().toISOString(),
     };
 
     try {
-      let newSelectedNote: Note | null = null;
-      if (isEditing) {
-        const { data: updatedData, error: updateError } = await supabase
+      let result: Note | null = null;
+
+      if (viewState === 'edit' && selectedNote) {
+        const { data, error } = await supabase
           .from('notes')
-          .update(noteData)
-          .eq('id', isEditing)
+          .update(payload)
+          .eq('id', selectedNote.id)
           .select(`*, character:characters(name), party:parties(name)`)
           .single();
-        if (updateError) throw updateError;
-        newSelectedNote = updatedData;
+        if (error) throw error;
+        result = data;
       } else {
-        const { updated_at, ...insertData } = noteData; // created_at is default
-        const { data: insertedData, error: insertError } = await supabase
+        const { data, error } = await supabase
           .from('notes')
-          .insert([insertData])
+          .insert([payload])
           .select(`*, character:characters(name), party:parties(name)`)
           .single();
-        if (insertError) throw insertError;
-        newSelectedNote = insertedData;
+        if (error) throw error;
+        result = data;
       }
-      
-      closeForm();
-      await loadNotes(); // Reload all notes
-      if (newSelectedNote) {
-        setSelectedNote(newSelectedNote); // Select the newly created/updated note
-      }
+
+      await loadData();
+      handleCloseForm();
+      if (result) setSelectedNote(result);
 
     } catch (err) {
-      console.error("Error saving note:", err);
-      setFormError(err instanceof Error ? `Failed to save note: ${err.message}` : 'An unknown error occurred.');
+      setFormError('Failed to save note.');
     }
-  }
+  };
 
-  async function deleteNote(id: string) {
-    if (!window.confirm("Are you sure you want to delete this note?")) {
-      return;
-    }
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this note?")) return;
     try {
-      setError(null);
-      const { error: deleteError } = await supabase.from('notes').delete().eq('id', id);
-      if (deleteError) throw deleteError;
-      
-      await loadNotes();
-      if (selectedNote?.id === id) {
-        setSelectedNote(null); // Clear selection if deleted note was selected
-      }
-      if (isEditing === id) { // If deleted note was being edited
-        closeForm();
-      }
+      await supabase.from('notes').delete().eq('id', id);
+      await loadData();
+      if (selectedNote?.id === id) setSelectedNote(null);
+      if (viewState === 'edit') handleCloseForm();
     } catch (err) {
-      console.error("Error deleting note:", err);
-      setError(err instanceof Error ? `Failed to delete note: ${err.message}` : 'An unknown error occurred.');
+      setError("Failed to delete note.");
     }
-  }
+  };
 
-  const filteredNotes = notes.filter((note) => {
-    const matchesSearch =
-      note.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      note.content.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesFilter =
+  // --- FILTERING ---
+  const filteredNotes = notes.filter(note => {
+    const matchesSearch = (note.title + note.content).toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = 
       filterType === 'all' ||
       (filterType === 'personal' && !note.character_id && !note.party_id) ||
       (filterType === 'character' && !!note.character_id) ||
       (filterType === 'party' && !!note.party_id);
-
     return matchesSearch && matchesFilter;
   });
 
-  if (loading && notes.length === 0) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <LoadingSpinner size="lg" />
-        <p className="text-lg text-gray-600 ml-3">Loading notes...</p>
-      </div>
-    );
-  }
-  
-  const showForm = isCreating || isEditing;
+  // --- RENDER ---
+
+  if (loading && notes.length === 0) return <div className="h-96 flex justify-center items-center"><LoadingSpinner/></div>;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
-      {/* Sidebar */}
-      <div className="w-1/4 bg-white border-r flex flex-col">
-        <div className="p-4 border-b">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-semibold flex items-center gap-2">
-              <Book className="w-6 h-6 text-blue-600" />
-              Notes
-            </h1>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={openCreateForm}
-            >
-              New Note
-            </Button>
+    <div className="flex h-[calc(100vh-100px)] bg-white border rounded-xl overflow-hidden shadow-sm">
+      
+      {/* LEFT SIDEBAR */}
+      <div className="w-full md:w-1/3 lg:w-1/4 border-r border-gray-200 flex flex-col bg-gray-50">
+        
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 bg-white">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+              <Book className="w-5 h-5 text-blue-600" /> My Notes
+            </h2>
+            <Button size="sm" onClick={handleOpenCreate} icon={Plus}>New</Button>
           </div>
-          <div className="relative mb-2">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search notes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 pointer-events-none" />
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value as 'all' | 'personal' | 'character' | 'party')}
-              className="w-full pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white"
-              aria-label="Filter notes"
-            >
-              <option value="all">All Notes</option>
-              <option value="personal">My Personal Notes</option>
-              <option value="character">Character Notes</option>
-              <option value="party">Party Notes</option>
-            </select>
-            <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-              <ChevronDown className="w-4 h-4 fill-current text-gray-500" />
+          
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"/>
+              <input 
+                type="text" 
+                placeholder="Search..." 
+                className="w-full pl-9 pr-3 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="relative">
+               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"/>
+               <select 
+                 className="w-full pl-9 pr-8 py-1.5 text-sm border rounded-md appearance-none bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                 value={filterType}
+                 onChange={e => setFilterType(e.target.value as any)}
+               >
+                 <option value="all">All Notes</option>
+                 <option value="personal">Personal</option>
+                 <option value="character">Character Links</option>
+                 <option value="party">Party Links</option>
+               </select>
+               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3 pointer-events-none"/>
             </div>
           </div>
         </div>
 
-        {/* Notes List */}
-        <div className="flex-1 overflow-y-auto">
-          {error && !showForm && ( // Show general error in sidebar if not in form view
-            <div className="p-4">
-              <ErrorMessage message={error} onClose={() => setError(null)} />
-            </div>
-          )}
-          {filteredNotes.length > 0 ? (
-            filteredNotes.map((note) => (
-              <div
-                key={note.id}
-                onClick={() => {
-                  if (!isEditing || isEditing !== note.id) { // Don't change selection if editing current note
-                     setSelectedNote(note);
-                     setIsCreating(false); // Ensure create form is closed
-                     setIsEditing(null); // Ensure edit form is closed for other notes
-                  }
-                }}
-                className={`p-3 border-b cursor-pointer hover:bg-gray-50 ${
-                  selectedNote?.id === note.id && !showForm ? 'bg-blue-50 border-l-4 border-blue-500' : ''
-                } ${isEditing === note.id ? 'bg-yellow-50 border-l-4 border-yellow-500' : ''}`}
-              >
-                <h3 className="font-semibold text-sm truncate">{note.title}</h3>
-                <p className="text-xs text-gray-500 truncate">
-                  {note.content.substring(0, 50) + (note.content.length > 50 ? '...' : '')}
-                </p>
-                <div className="text-xs text-gray-400 mt-1">
-                  {note.character ? (
-                    <span className="inline-block bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs">Char: {note.character.name}</span>
-                  ) : note.party ? (
-                    <span className="inline-block bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs">Party: {note.party.name}</span>
-                  ) : (
-                    <span className="inline-block bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">Personal</span>
-                  )}
-                </div>
-              </div>
-            ))
-          ) : !loading && (
-            <div className="p-4 text-center text-gray-500">
-              <StickyNote className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-              {searchTerm || filterType !== 'all' ? 'No notes match.' : 'No notes yet.'}
-            </div>
-          )}
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+           {filteredNotes.length === 0 ? (
+             <div className="text-center py-8 text-gray-400">
+               <StickyNote className="w-8 h-8 mx-auto mb-2 opacity-50"/>
+               <p className="text-sm">No notes found.</p>
+             </div>
+           ) : (
+             filteredNotes.map(note => (
+               <div 
+                 key={note.id}
+                 onClick={() => { setSelectedNote(note); setViewState('view'); }}
+                 className={`
+                   p-3 rounded-lg cursor-pointer border transition-all group
+                   ${selectedNote?.id === note.id 
+                     ? 'bg-white border-blue-500 shadow-sm ring-1 ring-blue-100 z-10' 
+                     : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                   }
+                 `}
+               >
+                 <h4 className={`font-semibold text-sm mb-1 ${selectedNote?.id === note.id ? 'text-blue-700' : 'text-gray-800'}`}>{note.title}</h4>
+                 <div className="flex items-center gap-2">
+                    {note.character && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium border border-purple-100"><User size={10}/> {note.character.name}</span>}
+                    {note.party && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-50 text-green-700 text-[10px] font-medium border border-green-100"><Users size={10}/> {note.party.name}</span>}
+                    {!note.character && !note.party && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium border border-gray-200"><FileText size={10}/> Personal</span>}
+                 </div>
+               </div>
+             ))
+           )}
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        {showForm ? (
-          // Create/Edit Form
-          <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200 max-w-3xl mx-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
-                {isEditing ? 'Edit Note' : 'Create New Note'}
-              </h2>
-              <button
-                onClick={closeForm}
-                className="text-gray-500 hover:text-gray-700"
-                aria-label="Close form"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="mb-4">
-                <ErrorMessage message={formError} onClose={() => setFormError(null)} />
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-                  Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter note title"
-                  required
-                />
+      {/* RIGHT MAIN CONTENT */}
+      <div className="flex-1 bg-white p-6 overflow-y-auto">
+        
+        {(viewState === 'create' || viewState === 'edit') ? (
+           // FORM VIEW
+           <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex justify-between items-center mb-6 pb-2 border-b">
+                 <h2 className="text-xl font-bold">{viewState === 'edit' ? 'Edit Note' : 'New Note'}</h2>
+                 <button onClick={handleCloseForm} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="character" className="block text-sm font-medium text-gray-700 mb-1">
-                    Link to Character (Optional)
-                  </label>
-                  <select
-                    id="character"
-                    value={selectedCharacter}
-                    onChange={(e) => {
-                      setSelectedCharacter(e.target.value);
-                      if (e.target.value) setSelectedParty('');
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                    disabled={!!selectedParty}
-                  >
-                    <option value="">None</option>
-                    {characters.map((char) => (
-                      <option key={char.id} value={char.id}>
-                        {char.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {formError && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded flex items-center gap-2"><AlertCircle size={16}/>{formError}</div>}
 
-                {isDM() && (
-                  <div>
-                    <label htmlFor="party" className="block text-sm font-medium text-gray-700 mb-1">
-                      Link to Party (Optional, DM Only)
-                    </label>
-                    <select
-                      id="party"
-                      value={selectedParty}
-                      onChange={(e) => {
-                        setSelectedParty(e.target.value);
-                        if (e.target.value) setSelectedCharacter('');
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                      disabled={!!selectedCharacter}
-                    >
-                      <option value="">None</option>
-                      {parties.map((party) => (
-                        <option key={party.id} value={party.id}>
-                          {party.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
+              <div className="space-y-4">
+                 <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Title</label>
+                    <input className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={title} onChange={e => setTitle(e.target.value)} placeholder="Note Title" autoFocus />
+                 </div>
 
-              <div>
-                <label htmlFor="content" className="block text-sm font-medium text-gray-700 mb-1">
-                  Content (Markdown supported)
-                </label>
-                <textarea
-                  id="content"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={12}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                  placeholder="Enter note content..."
-                />
-                <p className="text-xs text-gray-500 mt-1">Use Markdown for formatting.</p>
-              </div>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                       <label className="block text-sm font-bold text-gray-700 mb-1">Character Link (Opt)</label>
+                       <select 
+                         className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                         value={selectedCharacter}
+                         onChange={e => { setSelectedCharacter(e.target.value); if(e.target.value) setSelectedParty(''); }}
+                         disabled={!!selectedParty}
+                       >
+                         <option value="">None</option>
+                         {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                       </select>
+                    </div>
+                    {isDM() && (
+                      <div>
+                         <label className="block text-sm font-bold text-gray-700 mb-1">Party Link (Opt)</label>
+                         <select 
+                           className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                           value={selectedParty}
+                           onChange={e => { setSelectedParty(e.target.value); if(e.target.value) setSelectedCharacter(''); }}
+                           disabled={!!selectedCharacter}
+                         >
+                           <option value="">None</option>
+                           {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                         </select>
+                      </div>
+                    )}
+                 </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <Button variant="secondary" onClick={closeForm}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  icon={Save}
-                  onClick={handleSubmit}
-                  disabled={!title.trim()}
-                >
-                  {isEditing ? 'Update Note' : 'Save Note'}
-                </Button>
+                 {/* MARKDOWN EDITOR WITH TOOLBAR */}
+                 <div>
+                    <div className="flex justify-between items-end mb-1">
+                      <label className="block text-sm font-bold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
+                      <button 
+                        type="button"
+                        onClick={() => setShowPreview(!showPreview)} 
+                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        {showPreview ? <><EyeOff size={14}/> Edit</> : <><Eye size={14}/> Preview</>}
+                      </button>
+                    </div>
+                    
+                    <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
+                      {/* TOOLBAR */}
+                      {!showPreview && (
+                        <div className="flex items-center gap-1 p-2 bg-gray-50 border-b border-gray-200 overflow-x-auto">
+                           <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
+                           <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={Heading1} label="Heading" onClick={() => insertMarkdown('# ', '')} />
+                           <ToolbarButton icon={Quote} label="Quote" onClick={() => insertMarkdown('> ', '')} />
+                           <ToolbarButton icon={Code} label="Code Block" onClick={() => insertMarkdown('```\n', '\n```')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={List} label="Bullet List" onClick={() => insertMarkdown('- ', '')} />
+                           <ToolbarButton icon={ListOrdered} label="Numbered List" onClick={() => insertMarkdown('1. ', '')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={LinkIcon} label="Link" onClick={() => insertMarkdown('[', '](url)')} />
+                           <ToolbarButton icon={TableIcon} label="Table" onClick={handleInsertTable} />
+                        </div>
+                      )}
+
+                      {/* TEXTAREA OR PREVIEW */}
+                      {showPreview ? (
+                        <div className="p-4 h-96 overflow-y-auto prose prose-sm max-w-none bg-gray-50/50">
+                           <MarkdownRenderer content={content || '*No content*'} />
+                        </div>
+                      ) : (
+                        <textarea 
+                          ref={textareaRef}
+                          className="w-full p-3 h-96 font-mono text-sm outline-none resize-none bg-white" 
+                          value={content} 
+                          onChange={e => setContent(e.target.value)} 
+                          placeholder="Write your notes here..."
+                        />
+                      )}
+                    </div>
+                 </div>
+
+                 <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="ghost" onClick={handleCloseForm}>Cancel</Button>
+                    <Button variant="primary" icon={Save} onClick={handleSubmit}>Save Note</Button>
+                 </div>
               </div>
-            </div>
-          </div>
+           </div>
+
         ) : selectedNote ? (
-          // Selected Note View
-          <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200 max-w-4xl mx-auto">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">{selectedNote.title}</h1>
-                <div className="text-xs text-gray-500 mt-1">
-                  {selectedNote.character ? (
-                    <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Character: {selectedNote.character.name}</span>
-                  ) : selectedNote.party ? (
-                    <span className="inline-block bg-green-100 text-green-700 px-2 py-0.5 rounded">Party: {selectedNote.party.name}</span>
-                  ) : (
-                    <span className="inline-block bg-gray-100 text-gray-600 px-2 py-0.5 rounded">Personal</span>
-                  )}
-                </div>
+           // DETAIL VIEW
+           <div className="max-w-3xl mx-auto animate-in fade-in duration-200">
+              <div className="flex justify-between items-start mb-6 border-b pb-4">
+                 <div>
+                    <h1 className="text-3xl font-bold text-gray-900 mb-2">{selectedNote.title}</h1>
+                    <div className="flex gap-2 text-sm">
+                       {selectedNote.character && <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-medium">Character: {selectedNote.character.name}</span>}
+                       {selectedNote.party && <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-medium">Party: {selectedNote.party.name}</span>}
+                       {!selectedNote.character && !selectedNote.party && <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">Personal Note</span>}
+                    </div>
+                 </div>
+                 <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" icon={Edit2} onClick={() => handleOpenEdit(selectedNote)}>Edit</Button>
+                    <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => handleDelete(selectedNote.id)}>Delete</Button>
+                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={Edit2}
-                  onClick={() => openEditForm(selectedNote)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="danger_outline"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => deleteNote(selectedNote.id)}
-                >
-                  Delete
-                </Button>
+
+              <div className="prose prose-blue max-w-none text-gray-700 min-h-[200px]">
+                 <MarkdownRenderer content={selectedNote.content} />
               </div>
-            </div>
-            <div className="prose prose-sm max-w-none text-gray-700">
-              <MarkdownRenderer content={selectedNote.content} />
-            </div>
-            <div className="text-xs text-gray-400 mt-6 pt-3 border-t border-gray-200">
-              Created: {new Date(selectedNote.created_at).toLocaleDateString()}
-              {selectedNote.updated_at && new Date(selectedNote.updated_at).getTime() !== new Date(selectedNote.created_at).getTime() && (
-                <span> | Updated: {new Date(selectedNote.updated_at).toLocaleDateString()}</span>
-              )}
-            </div>
-          </div>
+              
+              <div className="mt-12 pt-4 border-t text-xs text-gray-400 text-center">
+                 Created {new Date(selectedNote.created_at).toLocaleDateString()}
+              </div>
+           </div>
+
         ) : (
-          // Placeholder when no note is selected and not creating/editing
-          <div className="text-center py-20">
-            <StickyNote className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <p className="text-xl font-medium text-gray-500">Select a note to view its details</p>
-            <p className="text-sm text-gray-400">Or, create a new note using the button in the sidebar.</p>
-            {error && ( // Show general error here if no note selected and not in form
-                <div className="mt-6 max-w-md mx-auto">
-                    <ErrorMessage message={error} onClose={() => setError(null)} />
-                </div>
-            )}
-          </div>
+           // EMPTY STATE
+           <div className="h-full flex flex-col items-center justify-center text-gray-400">
+              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                 <StickyNote className="w-8 h-8 text-gray-300"/>
+              </div>
+              <h3 className="text-lg font-medium text-gray-600">Select a note to read</h3>
+              <p className="text-sm mb-6">Or create a new one to get started.</p>
+              <Button variant="primary" icon={Plus} onClick={handleOpenCreate}>Create Note</Button>
+           </div>
         )}
+
       </div>
     </div>
+  );
+}
+
+// Small helper component for the toolbar buttons
+function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) {
+  return (
+    <button 
+      type="button"
+      onClick={onClick} 
+      title={label}
+      className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-white hover:shadow-sm rounded transition-all"
+    >
+      <Icon size={16} />
+    </button>
   );
 }
