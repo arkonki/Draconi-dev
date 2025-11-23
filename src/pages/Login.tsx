@@ -142,16 +142,24 @@ export function Login() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          {/* Logo Container with Green Flame Effect */}
-          <div className="relative mx-auto w-fit mb-6">
-            {/* The Green Flame/Glow - Positioned absolutely behind the image */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4/5 h-4/5 bg-green-500/60 blur-[50px] rounded-full animate-pulse pointer-events-none"></div>
+          
+          {/* Logo Container with Advanced Green Flame Effect */}
+          <div className="relative mx-auto w-fit mb-8 group">
             
-            {/* The Image */}
+            {/* 1. Outer Glow (The Aura) */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[130%] h-[130%] bg-green-900/20 blur-[60px] rounded-full pointer-events-none"></div>
+            
+            {/* 2. Base Flame (Dark Green, Pulsing) */}
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[110%] h-[90%] bg-gradient-to-t from-green-800 via-green-600 to-transparent blur-[40px] rounded-full animate-pulse duration-1000 pointer-events-none"></div>
+            
+            {/* 3. Core Flame (Bright Emerald, Slightly Smaller) */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[90%] h-[80%] bg-gradient-to-t from-emerald-600 via-emerald-400 to-transparent blur-[30px] rounded-[40%] animate-pulse delay-150 pointer-events-none opacity-80"></div>
+            
+            {/* The Image (Larger now: h-72) */}
             <img 
               src={dragonBaneIcon} 
               alt="DragonBane Logo" 
-              className="relative z-10 h-64 w-auto drop-shadow-xl" 
+              className="relative z-10 h-72 w-auto drop-shadow-2xl transform transition-transform duration-700 group-hover:scale-[1.02]" 
             />
           </div>
 
