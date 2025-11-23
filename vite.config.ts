@@ -70,9 +70,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // --- FIX 1: Increase the cache limit to 5MB (Default is 2MB) ---
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
@@ -135,27 +133,21 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    // Increase warning limit to avoid console noise
     chunkSizeWarningLimit: 1600,
     
-    // --- FIX 2: Code Splitting (Manual Chunks) ---
-    // This breaks the large file into smaller pieces
+    // --- UPDATED CODE SPLITTING ---
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            // Keep Supabase separate
+            // Keep Supabase separate (it's safe and large)
             if (id.includes('@supabase')) {
               return 'supabase';
             }
-            // Keep Markdown libraries separate (they are large)
-            if (id.includes('react-markdown') || id.includes('rehype') || id.includes('remark') || id.includes('micromark')) {
-              return 'markdown';
-            }
-            // Keep Editor libraries separate
-            if (id.includes('@uiw')) {
-              return 'editor';
-            }
+            
+            // REMOVED: Separate 'editor' and 'markdown' chunks.
+            // Putting them all into 'vendor' solves the initialization crash.
+            
             // Everything else goes into vendor
             return 'vendor';
           }
