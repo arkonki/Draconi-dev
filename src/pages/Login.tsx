@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Shield, AlertCircle, Mail, Lock, User as UserIcon, LogIn, UserPlus } from 'lucide-react';
+import { AlertCircle, Mail, Lock, User as UserIcon, LogIn, UserPlus } from 'lucide-react';
 import { loginSchema, signupSchema } from '../lib/auth/validation';
 import { Button } from '../components/shared/Button';
 
@@ -21,6 +21,9 @@ export function Login() {
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Reference to the image in the public folder
+  const dragonBaneIcon = "/dragonbane-icon.png";
 
   useEffect(() => {
     if (location.state?.message) {
@@ -72,7 +75,7 @@ export function Login() {
       setLoading(true);
       const { email: validatedEmail, password: validatedPassword } = validationResult.data;
       await signIn(validatedEmail, validatedPassword);
-      // Navigate on success is handled by AuthContext listener in App.tsx or similar
+      // Navigate on success is handled by AuthContext listener in App.tsx
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
@@ -106,9 +109,9 @@ export function Login() {
       const { email: validatedEmail, password: validatedPassword, username: validatedUsername, role: validatedRole } = validationResult.data;
       await signUp(validatedEmail, validatedPassword, validatedUsername, validatedRole);
       setSuccessMessage('Registration successful! Please check your email to verify your account before logging in.');
-      setIsLoginView(true); // Switch to login view after successful signup
-      clearForm(); // Clear form fields
-      setEmail(validatedEmail); // Pre-fill email for convenience
+      setIsLoginView(true); 
+      clearForm(); 
+      setEmail(validatedEmail); 
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed. Please try again.');
@@ -118,11 +121,10 @@ export function Login() {
     }
   };
 
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccessMessage(null); // Clear previous success messages on new submit
+    setSuccessMessage(null); 
     setValidationErrors({});
 
     if (!isOnline) {
@@ -141,7 +143,12 @@ export function Login() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          <Shield className="mx-auto h-12 w-12 text-blue-600" />
+          {/* Logo Image */}
+          <img 
+            src={dragonBaneIcon} 
+            alt="DragonBane Logo" 
+            className="mx-auto h-32 w-auto mb-4 drop-shadow-md hover:scale-105 transition-transform duration-300" 
+          />
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
             {isLoginView ? 'Log in to DragonBane' : 'Create your DragonBane Account'}
           </h2>
@@ -177,7 +184,7 @@ export function Login() {
         {successMessage && (
           <div className="rounded-md bg-green-50 p-4">
             <div className="flex items-center">
-              <AlertCircle className="h-5 w-5 text-green-400 mr-2" /> {/* Use green icon */}
+              <AlertCircle className="h-5 w-5 text-green-400 mr-2" />
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-green-800">Success</h3>
                 <p className="mt-2 text-sm text-green-700">{successMessage}</p>
@@ -200,7 +207,7 @@ export function Login() {
                     value={username} onChange={(e) => setUsername(e.target.value)}
                     className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.username ? 'border-red-500' : 'border-gray-300'}`}
                     placeholder="Choose a username"
-                    disabled={loading} // Disable input when loading
+                    disabled={loading}
                   />
                 </div>
                 {validationErrors.username && <p className="mt-1 text-xs text-red-600">{validationErrors.username}</p>}
@@ -218,7 +225,7 @@ export function Login() {
                   value={email} onChange={(e) => setEmail(e.target.value)}
                   className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.email ? 'border-red-500' : 'border-gray-300'}`}
                   placeholder="Enter email address"
-                  disabled={loading} // Disable input when loading
+                  disabled={loading}
                 />
               </div>
               {validationErrors.email && <p className="mt-1 text-xs text-red-600">{validationErrors.email}</p>}
@@ -236,7 +243,7 @@ export function Login() {
                   value={password} onChange={(e) => setPassword(e.target.value)}
                   className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.password ? 'border-red-500' : 'border-gray-300'}`}
                   placeholder="Enter password"
-                  disabled={loading} // Disable input when loading
+                  disabled={loading}
                 />
               </div>
               {validationErrors.password && <p className="mt-1 text-xs text-red-600">{validationErrors.password}</p>}
@@ -255,7 +262,7 @@ export function Login() {
                       value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
                       className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.confirmPassword ? 'border-red-500' : 'border-gray-300'}`}
                       placeholder="Confirm password"
-                      disabled={loading} // Disable input when loading
+                      disabled={loading}
                     />
                   </div>
                   {validationErrors.confirmPassword && <p className="mt-1 text-xs text-red-600">{validationErrors.confirmPassword}</p>}
@@ -281,10 +288,10 @@ export function Login() {
 
           <Button
             type="submit"
-            variant="primary" // Changed from default to primary
+            variant="primary"
             fullWidth
             loading={loading}
-            disabled={!isOnline || loading} // Disable if offline OR loading
+            disabled={!isOnline || loading}
             icon={isLoginView ? LogIn : UserPlus}
             iconPosition="left"
           >
@@ -297,7 +304,7 @@ export function Login() {
             type="button"
             onClick={toggleView}
             className="font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
-            disabled={loading} // Disable toggle button when loading
+            disabled={loading}
           >
             {isLoginView ? "Don't have an account? Sign up" : "Already have an account? Log in"}
           </button>
