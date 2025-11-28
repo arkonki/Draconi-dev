@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { useCharacterSheetStore } from '../../stores/characterSheetStore';
+import { useCharacterSheetStore } from '../../stores/characterSheetStore'; // Ensure path is correct
 import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 
-// --- SUB-COMPONENT: PLAYER COMBATANT CARD ---
+// --- 1. SUB-COMPONENT: PLAYER COMBATANT CARD ---
+// This was missing in your snippet but is required for the view to render
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
 
-  // SYNC LOCAL STATE
+  // Sync local state when server data changes
   useEffect(() => {
     setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
   }, [combatant.initiative_roll]);
@@ -18,33 +19,29 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const handleSetInitiative = () => {
     const initiative = parseInt(initiativeValue, 10);
     if (!isNaN(initiative) && initiative >= 1 && initiative <= 10) {
+      // Ensure this action exists in your store
       setInitiativeForCombatant(combatant.id, initiative);
     }
   };
 
   const handleFlipCard = () => {
-    // Toggle the 'has_acted' status for reactions (Parry/Dodge) or end of turn
+    // Ensure this action exists in your store
     updateCombatant(combatant.id, { has_acted: !combatant.has_acted });
   };
 
-  // STATUS CHECKS
   const isMyCharacter = combatant.character_id === character?.id;
   const isPlayer = !!combatant.character_id;
   const hasActed = combatant.has_acted || false;
-  
-  // Dragonbane Death: Monsters get "Defeated" status, Players get "Dying"
   const isMonster = !isPlayer;
   const isDefeated = isMonster && combatant.current_hp === 0;
   const isDying = isPlayer && combatant.current_hp === 0;
 
-  // STYLES
   let borderClass = isPlayer ? 'border-teal-600 bg-teal-50' : 'border-orange-700 bg-orange-50';
   if (isDefeated) borderClass = 'border-stone-400 bg-stone-200 opacity-70';
   else if (hasActed) borderClass = 'border-stone-300 bg-stone-100 opacity-70 grayscale';
   
   return (
     <div className={`relative p-3 rounded-lg border-l-4 shadow-sm transition-all ${borderClass}`}>
-      {/* DEFEATED OVERLAY */}
       {isDefeated && (
         <div className="absolute inset-0 flex items-center justify-center z-0 opacity-20">
           <span className="text-3xl font-black uppercase -rotate-12 text-black">Defeated</span>
@@ -59,16 +56,13 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
           {isDying && <span className="text-xs font-bold text-red-600 flex items-center gap-1"><Skull size={12}/> DYING</span>}
         </div>
         
-        {/* HP Display */}
         <div className="flex items-center gap-1 text-sm font-mono bg-white/50 px-2 py-1 rounded">
            <Heart className={`w-3 h-3 ${combatant.current_hp === 0 ? 'text-stone-400' : 'text-red-600'}`} />
            <span>{combatant.current_hp} / {combatant.max_hp}</span>
         </div>
       </div>
 
-      {/* ACTIONS ROW */}
       <div className="relative z-10 mt-3 flex items-center justify-between">
-        {/* Initiative Input (Only editable if not set or by owner) */}
         <div className="flex items-center gap-2">
           {(!combatant.initiative_roll || isMyCharacter) && !isDefeated ? (
              <>
@@ -92,7 +86,6 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
           )}
         </div>
 
-        {/* Flip Card Button (Only for my character or if I'm GM) */}
         {(isMyCharacter || !isPlayer) && !isDefeated && (
           <Button 
             onClick={handleFlipCard} 
@@ -109,7 +102,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   );
 };
 
-// --- MAIN COMPONENT ---
+// --- 2. MAIN COMPONENT ---
 export function EncounterChatView() {
   const {
     character,
@@ -121,34 +114,64 @@ export function EncounterChatView() {
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // REAL-TIME LISTENER
+  // 1. LISTEN FOR ENCOUNTER STATUS CHANGES (Start/Stop)
   useEffect(() => {
-    if (!character?.party_id || !character?.id) return;
+    if (!character?.party_id) return;
+    
+    // Initial fetch
+    fetchActiveEncounter(character.party_id, character.id);
 
-    const partyId = character.party_id;
-    const characterId = character.id;
-    const channel = supabase.channel(`party-encounter-updates-${partyId}`);
-
-    // Listen for ANY change in the encounter tables
-    const refresh = () => {
-       console.log('Syncing encounter data...');
-       fetchActiveEncounter(partyId, characterId);
-    };
-
-    channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'encounters', filter: `party_id=eq.${partyId}` }, refresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'encounter_combatants' }, refresh)
+    const channel = supabase.channel(`party-monitor-${character.party_id}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'encounters', 
+          filter: `party_id=eq.${character.party_id}` 
+        },
+        () => {
+          // Safety check inside callback
+          if (character?.party_id && character?.id) {
+             fetchActiveEncounter(character.party_id, character.id);
+          }
+        }
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [character, fetchActiveEncounter]);
+  }, [character?.party_id, character?.id, fetchActiveEncounter]);
+
+  // 2. LISTEN FOR COMBATANT CHANGES
+  useEffect(() => {
+    if (!activeEncounter?.id) return;
+
+    const channel = supabase.channel(`combat-monitor-${activeEncounter.id}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'encounter_combatants', 
+          filter: `encounter_id=eq.${activeEncounter.id}` 
+        },
+        () => {
+           // Safety check inside callback
+           if (character?.party_id && character?.id) {
+             fetchActiveEncounter(character.party_id, character.id);
+           }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeEncounter?.id, character?.party_id, character?.id, fetchActiveEncounter]);
 
   if (!character) return null;
 
   const isInActiveEncounter = activeEncounter?.status === 'active';
   
-  // DRAGONBANE SORTING: Ascending (1 -> 10), Nulls last
-  const sortedCombatants = [...encounterCombatants].sort((a, b) => {
+  const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => {
     const ia = a.initiative_roll ?? 1000;
     const ib = b.initiative_roll ?? 1000;
     if (ia !== ib) return ia - ib;
@@ -168,7 +191,6 @@ export function EncounterChatView() {
         <div className="fixed inset-0 bg-black/60 flex justify-end z-30 backdrop-blur-sm" onClick={() => setIsOpen(false)}>
           <div className="bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300" onClick={(e) => e.stopPropagation()}>
             
-            {/* HEADER */}
             <div className="flex justify-between items-center p-4 bg-stone-800 text-white shadow-md">
               <div>
                 <h2 className="text-lg font-bold font-serif tracking-wide">{isInActiveEncounter ? 'Combat' : 'Party Chat'}</h2>
@@ -177,7 +199,6 @@ export function EncounterChatView() {
               <button onClick={() => setIsOpen(false)} className="text-stone-400 hover:text-white"><X size={24} /></button>
             </div>
 
-            {/* CONTENT */}
             <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/parchment-bg.png')] bg-repeat">
               {isLoadingEncounter && !activeEncounter ? (
                 <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-stone-500" /></div>
@@ -185,7 +206,7 @@ export function EncounterChatView() {
                 <div className="space-y-4">
                   <div className="bg-white p-3 rounded shadow-sm border border-stone-200">
                      <h3 className="font-bold text-lg text-stone-800">{activeEncounter.name}</h3>
-                     <p className="text-xs text-stone-500">{activeEncounter.description || "No description"}</p>
+                     <p className="text-xs text-stone-500">{activeEncounter.description}</p>
                   </div>
                   
                   <div className="space-y-2">

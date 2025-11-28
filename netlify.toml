@@ -7,12 +7,8 @@
 [build.environment]
   NODE_VERSION = "20"
   NPM_VERSION = "10.9.0"
-  # REMOVED: VITE_ variables. 
-  # Set these in Netlify Dashboard > Site Settings > Environment Variables
-  # to keep them secure and to prevent overriding them with placeholders.
 
 [[redirects]]
-  # Essential for React Router (Single Page App)
   from = "/*"
   to = "/index.html"
   status = 200
@@ -20,29 +16,24 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    # PREVIOUSLY "DENY" - Changed to ALLOW-FROM for Owlbear compatibility (Legacy browsers)
-    # Ideally, we rely on CSP frame-ancestors below, but removing DENY is safer here.
-    # If you aren't doing an Owlbear extension, change this back to DENY.
     X-Frame-Options = "SAMEORIGIN"
-    
     X-XSS-Protection = "1; mode=block"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    
-    # Permissions Policy
     Permissions-Policy = "interest-cohort=()"
 
-    # Content Security Policy
-    # 1. Added owlbear.rodeo and owlbear.app to frame-ancestors
-    # 2. Added connect-src for Supabase Realtime (WSS)
+    # Content Security Policy Updates:
+    # 1. script-src: Added https://www.youtube.com https://s.ytimg.com (for player API/scripts)
+    # 2. img-src: Added https://i.ytimg.com (for video thumbnails)
+    # 3. frame-src: Added https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com (to allow the embed)
     Content-Security-Policy = """
       default-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co; \
-      script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://s.ytimg.com; \
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-      img-src 'self' data: https: blob:; \
+      img-src 'self' data: https: blob: https://i.ytimg.com; \
       font-src 'self' https://fonts.gstatic.com https://raw.githubusercontent.com; \
       connect-src 'self' https://tkenxulvmzhhkuhfvcpt.supabase.co wss://tkenxulvmzhhkuhfvcpt.supabase.co; \
-      frame-src 'self'; \
+      frame-src 'self' https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com; \
       object-src 'none'; \
       base-uri 'self'; \
       form-action 'self'; \

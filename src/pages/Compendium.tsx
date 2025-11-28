@@ -48,8 +48,9 @@ export function Compendium() {
 
   // Actions
   const toggleBookmark = (entry: CompendiumEntry) => {
-    // Create a plain text preview (strip heavy markdown) for the card
-    const preview = entry.content.replace(/[#*`]/g, '').slice(0, 120) + '...';
+    // UPDATED: We keep the markdown formatting and take a larger slice
+    // so the HomebrewRenderer has enough context to render styles correctly.
+    const preview = entry.content.slice(0, 400); 
     
     setBookmarkedEntries(prev => {
       const isBookmarked = prev.some(b => b.id === entry.id);
@@ -170,7 +171,6 @@ export function Compendium() {
           ) : (
             <div className="space-y-1">
               {categorizedDisplay.map(([category, categoryEntries]) => {
-                // If searching, always expand. If not, use state.
                 const isExpanded = searchTerm ? true : expandedCategories.has(category);
                 
                 return (
@@ -277,16 +277,25 @@ export function Compendium() {
                   <div 
                     key={bookmark.id} 
                     onClick={() => setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark)}
-                    className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative"
+                    className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden"
                   >
-                    <div className="flex justify-between items-start mb-2">
-                       <h3 className="font-bold text-gray-800 group-hover:text-indigo-700">{bookmark.title}</h3>
-                       <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">{bookmark.category}</span>
+                    <div className="flex justify-between items-start mb-2 relative z-10 bg-white">
+                       <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2">{bookmark.title}</h3>
+                       <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded shrink-0">{bookmark.category}</span>
                     </div>
-                    <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed">
-                      {bookmark.preview}
-                    </p>
-                    <div className="mt-3 flex items-center text-xs text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                    
+                    {/* UPDATED: Renderer Display */}
+                    <div className="relative h-24 overflow-hidden text-xs text-gray-500">
+                      {/* We use a transform scale to fit more content visually if needed, or just let it render naturally */}
+                      <div className="origin-top-left transform scale-90 w-[110%]">
+                        <HomebrewRenderer content={bookmark.preview} />
+                      </div>
+                      
+                      {/* Gradient Fade to indicate there is more content */}
+                      <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
+                    </div>
+
+                    <div className="mt-2 flex items-center text-xs text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-4 z-20 bg-white pl-2">
                        Read Entry <ChevronRight size={14} className="ml-1"/>
                     </div>
                   </div>
