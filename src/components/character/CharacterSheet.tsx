@@ -4,7 +4,7 @@ import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
   Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Moon, Sun, Clock, Skull, Package, Book, GraduationCap, Star, Sparkles, X, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, UserSquare, StickyNote, Plus, Save, Trash2, Minus,
-  Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, Table as TableIcon, Eye, EyeOff, Quote, Code
+  Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, Table as TableIcon, Eye, EyeOff, Quote, Code, Pencil, Calendar
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
@@ -45,7 +45,10 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   const [notes, setNotes] = useState<CharacterNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editingNote, setEditingNote] = useState<Partial<CharacterNote> | null>(null);
+  
+  // Interaction State
+  const [activeNote, setActiveNote] = useState<Partial<CharacterNote> | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   
   // Editor State
   const [showPreview, setShowPreview] = useState(false);
@@ -70,18 +73,18 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   // Editor Helpers
   const insertMarkdown = (prefix: string, suffix: string = '') => {
     const textarea = textareaRef.current;
-    if (!textarea || !editingNote) return;
+    if (!textarea || !activeNote) return;
 
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const text = textarea.value;
+    const text = textarea.value; // Use textarea value directly
     const before = text.substring(0, start);
     const selection = text.substring(start, end);
     const after = text.substring(end);
 
     const newText = before + prefix + selection + suffix + after;
     
-    setEditingNote(prev => prev ? ({ ...prev, content: newText }) : null);
+    setActiveNote(prev => prev ? ({ ...prev, content: newText }) : null);
 
     setTimeout(() => {
       textarea.focus();
@@ -95,14 +98,18 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
     insertMarkdown(tableTemplate);
   };
 
-  const handleSaveNote = async (noteToSave: Partial<CharacterNote>) => { 
-    if (!noteToSave.title?.trim()) { alert("Title is required."); return; } 
-    const noteData = { ...noteToSave, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString(), }; 
+  const handleSaveNote = async () => { 
+    if (!activeNote?.title?.trim()) { alert("Title is required."); return; } 
+    
+    const noteData = { ...activeNote, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString(), }; 
     try { 
       const { id, created_at, ...upsertData } = noteData; 
-      const { error: saveError } = await supabase.from('notes').upsert(upsertData, { onConflict: 'id' }); 
+      const { data, error: saveError } = await supabase.from('notes').upsert(upsertData, { onConflict: 'id' }).select().single(); 
       if (saveError) throw saveError; 
-      setEditingNote(null); 
+      
+      // Update local state to reflect saved data
+      setActiveNote(data);
+      setIsEditing(false); 
       setShowPreview(false);
       await loadNotes(); 
     } catch (err) { 
@@ -116,14 +123,25 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
     try { 
       const { error: deleteError } = await supabase.from('notes').delete().eq('id', noteId); 
       if (deleteError) throw deleteError; 
+      
+      if (activeNote?.id === noteId) {
+        setActiveNote(null);
+        setIsEditing(false);
+      }
       await loadNotes(); 
     } catch (err) { 
       alert(err instanceof Error ? `Failed to delete note: ${err.message}` : 'An unknown error occurred.'); 
     } 
   };
 
+  const handleNoteClick = (note: CharacterNote) => {
+    setActiveNote(note);
+    setIsEditing(false); // Open in view mode
+  };
+
   const openNewNoteForm = () => { 
-    setEditingNote({ title: '', content: '' }); 
+    setActiveNote({ title: '', content: '' }); 
+    setIsEditing(true); // Open directly in edit mode
     setShowPreview(false);
   };
 
@@ -142,94 +160,145 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
           <p className="text-sm text-gray-500 italic text-center py-4">No notes for this character yet.</p>
         ) : (
           notes.map(note => (
-            <div key={note.id} className="p-3 rounded-md border border-gray-100 hover:bg-gray-50 flex justify-between items-center transition-colors">
-              <div>
-                <button onClick={() => setEditingNote(note)} className="text-sm font-bold text-gray-800 hover:text-blue-600 text-left block">
+            <div key={note.id} className="p-3 rounded-md border border-gray-100 hover:bg-gray-50 flex justify-between items-center transition-colors group">
+              <div 
+                className="flex-grow cursor-pointer"
+                onClick={() => handleNoteClick(note)}
+              >
+                <div className="text-sm font-bold text-gray-800 group-hover:text-blue-600">
                   {note.title}
-                </button>
-                <span className="text-xs text-gray-400">
+                </div>
+                <div className="text-xs text-gray-400 flex items-center gap-1">
+                  <Calendar size={10} />
                   {new Date(note.created_at).toLocaleDateString()}
-                </span>
+                </div>
               </div>
-              <Button variant="danger_outline" size="xs" icon={Trash2} onClick={() => handleDeleteNote(note.id)} />
+              <div className="flex items-center gap-1">
+                 <Button variant="ghost" size="xs" icon={Eye} onClick={() => handleNoteClick(note)} className="opacity-0 group-hover:opacity-100 transition-opacity" title="View Note"/>
+                 <Button variant="danger_outline" size="xs" icon={Trash2} onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} />
+              </div>
             </div>
           ))
         )}
       </div>
 
-      {editingNote && (
+      {activeNote && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-3xl w-full p-6 shadow-xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4 border-b pb-2">
-              <h4 className="text-lg font-semibold">{editingNote.id ? 'Edit Note' : 'New Note'}</h4>
-              <button onClick={() => setEditingNote(null)}><X className="w-6 h-6 text-gray-500 hover:text-gray-800" /></button>
+          <div className="bg-white rounded-xl max-w-3xl w-full p-0 shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b bg-gray-50">
+              <h4 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <StickyNote className="w-5 h-5 text-yellow-600" />
+                {isEditing ? (activeNote.id ? 'Edit Note' : 'New Note') : 'View Note'}
+              </h4>
+              <div className="flex items-center gap-2">
+                {!isEditing && (
+                  <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setIsEditing(true)}>Edit</Button>
+                )}
+                <button onClick={() => setActiveNote(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors">
+                  <X className="w-6 h-6 text-gray-500 hover:text-gray-800" />
+                </button>
+              </div>
             </div>
             
-            <div className="overflow-y-auto flex-grow space-y-4 pr-1">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Title</label>
-                <input 
-                  type="text" 
-                  placeholder="Note Title" 
-                  value={editingNote.title || ''} 
-                  onChange={e => setEditingNote(prev => prev ? ({ ...prev, title: e.target.value }) : null)} 
-                  className="w-full font-bold text-lg p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-                  autoFocus
-                />
-              </div>
-
-              {/* EDITOR */}
-              <div>
-                <div className="flex justify-between items-end mb-1">
-                  <label className="block text-sm font-bold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
-                  <button 
-                    type="button"
-                    onClick={() => setShowPreview(!showPreview)} 
-                    className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    {showPreview ? <><EyeOff size={14}/> Edit</> : <><Eye size={14}/> Preview</>}
-                  </button>
-                </div>
-
-                <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
-                  {!showPreview && (
-                    <div className="flex items-center gap-1 p-2 bg-gray-50 border-b border-gray-200 overflow-x-auto">
-                       <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
-                       <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
-                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                       <ToolbarButton icon={Heading1} label="Heading" onClick={() => insertMarkdown('# ', '')} />
-                       <ToolbarButton icon={Quote} label="Quote" onClick={() => insertMarkdown('> ', '')} />
-                       <ToolbarButton icon={Code} label="Code Block" onClick={() => insertMarkdown('```\n', '\n```')} />
-                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                       <ToolbarButton icon={List} label="Bullet List" onClick={() => insertMarkdown('- ', '')} />
-                       <ToolbarButton icon={ListOrdered} label="Numbered List" onClick={() => insertMarkdown('1. ', '')} />
-                       <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                       <ToolbarButton icon={LinkIcon} label="Link" onClick={() => insertMarkdown('[', '](url)')} />
-                       <ToolbarButton icon={TableIcon} label="Table" onClick={handleInsertTable} />
+            {/* Modal Body */}
+            <div className="overflow-y-auto flex-grow p-6">
+              
+              {/* VIEW MODE */}
+              {!isEditing && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 border-b pb-2 mb-4">{activeNote.title}</h2>
+                    <div className="prose prose-sm max-w-none prose-blue">
+                      <MarkdownRenderer content={activeNote.content || '*No content provided.*'} />
+                    </div>
+                  </div>
+                  {activeNote.updated_at && (
+                    <div className="text-xs text-gray-400 pt-8 border-t mt-4 text-right">
+                      Last updated: {new Date(activeNote.updated_at).toLocaleString()}
                     </div>
                   )}
+                </div>
+              )}
 
-                  {showPreview ? (
-                    <div className="p-4 h-[400px] overflow-y-auto prose prose-sm max-w-none bg-gray-50/50">
-                       <MarkdownRenderer content={editingNote.content || '*No content*'} />
-                    </div>
-                  ) : (
-                    <textarea 
-                      ref={textareaRef}
-                      placeholder="Write your note here..." 
-                      value={editingNote.content || ''} 
-                      onChange={e => setEditingNote(prev => prev ? ({...prev, content: e.target.value}) : null)} 
-                      className="w-full p-3 h-[400px] font-mono text-sm outline-none resize-none bg-white" 
+              {/* EDIT MODE */}
+              {isEditing && (
+                <div className="space-y-4 h-full flex flex-col">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Title</label>
+                    <input 
+                      type="text" 
+                      placeholder="Note Title" 
+                      value={activeNote.title || ''} 
+                      onChange={e => setActiveNote(prev => prev ? ({ ...prev, title: e.target.value }) : null)} 
+                      className="w-full font-bold text-lg p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" 
+                      autoFocus={!activeNote.id}
                     />
-                  )}
+                  </div>
+
+                  <div className="flex-grow flex flex-col">
+                    <div className="flex justify-between items-end mb-1">
+                      <label className="block text-xs font-bold text-gray-500 uppercase">Content</label>
+                      <button 
+                        type="button"
+                        onClick={() => setShowPreview(!showPreview)} 
+                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        {showPreview ? <><EyeOff size={14}/> Continue Editing</> : <><Eye size={14}/> Preview Markdown</>}
+                      </button>
+                    </div>
+
+                    <div className="flex-grow flex flex-col border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all min-h-[300px]">
+                      {!showPreview && (
+                        <div className="flex items-center gap-1 p-2 bg-gray-50 border-b border-gray-200 overflow-x-auto shrink-0">
+                           <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
+                           <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={Heading1} label="Heading" onClick={() => insertMarkdown('# ', '')} />
+                           <ToolbarButton icon={Quote} label="Quote" onClick={() => insertMarkdown('> ', '')} />
+                           <ToolbarButton icon={Code} label="Code Block" onClick={() => insertMarkdown('```\n', '\n```')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={List} label="Bullet List" onClick={() => insertMarkdown('- ', '')} />
+                           <ToolbarButton icon={ListOrdered} label="Numbered List" onClick={() => insertMarkdown('1. ', '')} />
+                           <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                           <ToolbarButton icon={LinkIcon} label="Link" onClick={() => insertMarkdown('[', '](url)')} />
+                           <ToolbarButton icon={TableIcon} label="Table" onClick={handleInsertTable} />
+                        </div>
+                      )}
+
+                      {showPreview ? (
+                        <div className="p-4 flex-grow overflow-y-auto prose prose-sm max-w-none bg-gray-50/50">
+                           <MarkdownRenderer content={activeNote.content || '*No content*'} />
+                        </div>
+                      ) : (
+                        <textarea 
+                          ref={textareaRef}
+                          placeholder="Write your note here using Markdown..." 
+                          value={activeNote.content || ''} 
+                          onChange={e => setActiveNote(prev => prev ? ({...prev, content: e.target.value}) : null)} 
+                          className="w-full p-4 flex-grow font-mono text-sm outline-none resize-none bg-white" 
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            <div className="flex justify-end gap-2 mt-6 border-t pt-4">
-              <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
-              <Button variant="primary" icon={Save} onClick={() => handleSaveNote(editingNote)}>Save Note</Button>
-            </div>
+            {/* Modal Footer (Edit Mode Only) */}
+            {isEditing && (
+              <div className="flex justify-end gap-2 p-4 border-t bg-gray-50">
+                <Button variant="ghost" onClick={() => {
+                  if (!activeNote.id) {
+                    setActiveNote(null); // Close if new
+                  } else {
+                    setIsEditing(false); // Go back to view if existing
+                  }
+                }}>Cancel</Button>
+                <Button variant="primary" icon={Save} onClick={handleSaveNote}>Save Note</Button>
+              </div>
+            )}
           </div>
         </div>
       )}

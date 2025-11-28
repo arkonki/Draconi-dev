@@ -1,22 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
-import { X, User, BookOpen, Save, Edit3, Image as ImageIcon, AlertTriangle, FileText, Star, HeartCrack, Camera } from 'lucide-react';
+import { 
+  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader 
+} from 'lucide-react';
 import { Button } from '../../shared/Button';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
-import { Character } from '../../../types/character';
+import { supabase } from '../../../lib/supabase'; // Ensure this path is correct
 
 interface BioModalProps {
   onClose: () => void;
 }
 
 // --- HELPER COMPONENTS ---
-const DetailItem = ({ label, value }: { label: string, value: React.ReactNode }) => (
-  <div className="p-3 bg-gray-50 rounded border border-gray-100">
-    <dt className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{label}</dt>
-    <dd className="text-sm font-medium text-gray-800 truncate">{value || <span className="text-gray-400 italic">N/A</span>}</dd>
-  </div>
-);
-
 const EditableDetailItem = ({ label, children, icon: Icon }: { label: string, children: React.ReactNode, icon: React.ElementType }) => (
     <div className="space-y-1">
         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-1">
@@ -43,6 +38,10 @@ export function BioModal({ onClose }: BioModalProps) {
   const [flaw, setFlaw] = useState('');
   const [backstory, setBackstory] = useState('');
 
+  // Upload State
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Sync state
   const syncStateFromCharacter = () => {
     if (character) {
@@ -56,7 +55,8 @@ export function BioModal({ onClose }: BioModalProps) {
 
   useEffect(() => { syncStateFromCharacter(); }, [character]);
 
-  // Save Handlers
+  // --- ACTIONS ---
+
   const handleSaveBio = async () => {
     if (!character) return;
     await updateCharacterData({ appearance, memento, flaw });
@@ -80,6 +80,53 @@ export function BioModal({ onClose }: BioModalProps) {
     setIsEditingBio(false);
     setIsEditingPortrait(false);
     setIsEditingBackstory(false);
+  };
+
+  // --- IMAGE UPLOAD LOGIC ---
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0] || !character) return;
+
+    const file = e.target.files[0];
+    setIsUploading(true);
+
+    try {
+      // 1. Sanitize character name for filename
+      // "Conan the Barbarian" -> "conan-the-barbarian"
+      const safeName = character.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      const fileExt = file.name.split('.').pop();
+      // Add timestamp to prevent caching issues and collisions
+      const fileName = `${safeName}-${Date.now()}.${fileExt}`;
+      const filePath = `portraits/${fileName}`;
+
+      // 2. Upload to Supabase
+      const { error: uploadError } = await supabase.storage
+        .from('images') // Bucket name
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 3. Get Public URL
+      const { data: urlData } = supabase.storage
+        .from('images')
+        .getPublicUrl(filePath);
+
+      // 4. Update Local State
+      setPortraitUrl(urlData.publicUrl);
+
+    } catch (error: any) {
+      console.error("Upload failed:", error);
+      alert("Failed to upload image: " + error.message);
+    } finally {
+      setIsUploading(false);
+      // Reset input so same file can be selected again if needed
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   // --- RENDER CONTENT ---
@@ -118,7 +165,7 @@ export function BioModal({ onClose }: BioModalProps) {
                     </div>
                 )}
                 
-                {/* Hover Edit Button */}
+                {/* Hover Edit Button (Only visible if not editing) */}
                 {!isEditingPortrait && (
                     <button 
                         onClick={() => setIsEditingPortrait(true)}
@@ -130,19 +177,52 @@ export function BioModal({ onClose }: BioModalProps) {
             </div>
 
             {isEditingPortrait && (
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-in slide-in-from-top-2">
-                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
-                    <div className="flex gap-2">
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-in slide-in-from-top-2 space-y-3">
+                    {/* URL Input */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
                         <input 
                             type="text" 
                             value={portraitUrl} 
                             onChange={(e) => setPortraitUrl(e.target.value)} 
-                            className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
                             placeholder="https://..."
-                            autoFocus
                         />
-                        <Button size="xs" onClick={handleSavePortrait} disabled={isSaving}>Save</Button>
-                        <Button size="xs" variant="ghost" onClick={handleCancel}>Cancel</Button>
+                    </div>
+
+                    {/* Upload Divider */}
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t border-gray-300" />
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-gray-50 px-2 text-gray-400">Or upload</span>
+                        </div>
+                    </div>
+
+                    {/* Upload Button */}
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleImageUpload} 
+                        className="hidden" 
+                        accept="image/*" 
+                    />
+                    <Button 
+                        variant="secondary" 
+                        size="sm" 
+                        className="w-full" 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        icon={isUploading ? Loader : Upload}
+                    >
+                        {isUploading ? 'Uploading...' : 'Upload File'}
+                    </Button>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-1">
+                        <Button size="xs" onClick={handleSavePortrait} disabled={isSaving || isUploading} className="flex-1">Save</Button>
+                        <Button size="xs" variant="ghost" onClick={handleCancel} disabled={isUploading} className="flex-1">Cancel</Button>
                     </div>
                 </div>
             )}
