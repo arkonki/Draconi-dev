@@ -26,6 +26,9 @@ const steps = [
   { title: 'Appearance', component: AppearanceSelection },
 ];
 
+// --- UTILS ---
+const generateId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}-${Math.random()}`;
+
 const getBaseChance = (value: number): number => {
   if (value <= 5) return 3;
   if (value <= 8) return 4;
@@ -47,7 +50,6 @@ const skillAttributeMap: Record<string, AttributeName> = {
 
 const magicSkillNames = ['Mentalism', 'Animism', 'Elementalism'];
 
-
 export function CharacterCreationWizard() {
   const { user } = useAuth();
   const { step, setStep, character, resetCharacter } = useCharacterCreation();
@@ -56,13 +58,14 @@ export function CharacterCreationWizard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const CurrentStep = steps[step].component;
+  
+  // Local state for Magic School lookup to map ID -> Name on save
   const [allMagicSchools, setAllMagicSchools] = useState<{id: string, name: string}[]>([]);
   
   useEffect(() => {
     supabase.from('magic_schools').select('id, name')
       .then(({ data, error }) => {
-        if (error) console.error("Failed to fetch magic schools in wizard:", error);
-        else setAllMagicSchools(data || []);
+        if (!error && data) setAllMagicSchools(data);
       });
   }, []);
 
@@ -74,11 +77,15 @@ export function CharacterCreationWizard() {
         return !!character.profession && (isMage || character.professionHeroicAbilityName !== undefined);
       case 2: return !!character.name && character.name.trim().length > 0 && !!character.age;
       case 3: return character.attributes && Object.values(character.attributes).every(value => value > 0);
-      case 4:
-        if (character.magicSchool) return character.spells?.general && character.spells.general.length >= 3;
+      case 4: 
+        if (character.magicSchool) {
+           const generalCount = character.spells?.general?.length || 0;
+           const schoolCount = character.spells?.school?.spells?.length || 0;
+           return (generalCount + schoolCount) === 6;
+        }
         return true;
       case 5: return character.trainedSkills && character.trainedSkills.length >= 6 && !!character.attributes;
-      case 6: return character.startingEquipment && character.startingEquipment.items.length >= 0;
+      case 6: return !!character.startingEquipment; 
       case 7:
         return !!character.appearance && character.appearance.trim().length > 0 &&
                !!character.mementos && character.mementos.length > 0 &&
@@ -104,9 +111,10 @@ export function CharacterCreationWizard() {
       setSaving(true);
       setError(null);
 
+      // --- 1. Prepare Skills ---
       const initialSkillLevels: Record<string, number> = {};
       const trainedSkillsSet = new Set(finalCharacterState.trainedSkills || []);
-      const isMage = finalCharacterState.profession?.toLowerCase().includes('mage');
+      const isMage = !!finalCharacterState.magicSchool;
       const magicSchoolName = isMage && typeof finalCharacterState.magicSchool === 'string'
         ? allMagicSchools.find(s => s.id === finalCharacterState.magicSchool)?.name
         : null;
@@ -124,13 +132,63 @@ export function CharacterCreationWizard() {
         }
       }
 
+      // --- 2. Prepare Abilities ---
       const combinedHeroicAbilities = [
         ...(finalCharacterState.kinAbilityNames || []),
         ...(finalCharacterState.professionHeroicAbilityName ? [finalCharacterState.professionHeroicAbilityName] : [])
       ].filter(Boolean);
 
-      // --- [THE FIX] ---
-      // Build the final data object, ensuring all derived stats are included.
+      // --- 3. HYDRATE/CLEAN EQUIPMENT DATA ---
+      // This matches the logic expected by the InventoryModal (parseItemString)
+      // to ensure the DB gets clean Objects with IDs, preventing crashes.
+      
+      const startingItemsRaw = finalCharacterState.startingEquipment?.items || [];
+      const startingMoney = finalCharacterState.startingEquipment?.money || { gold: 0, silver: 0, copper: 0 };
+
+      const initialInventory = startingItemsRaw.map(item => {
+        let name = '';
+        let quantity = 1;
+
+        if (typeof item === 'string') {
+            // Regex to handle "3x Torch" or "Torch (x3)" or "Torch"
+            const quantityRegex = /(?:(\d+)\s*x\s+)|(?:x\s*(\d+))|(?:[(\[]x?(\d+)[)\]])|^(\d+)\s+/;
+            const match = item.match(quantityRegex);
+            
+            if (match) {
+                const qStr = match[1] || match[2] || match[3] || match[4];
+                if (qStr) quantity = parseInt(qStr, 10);
+                name = item.replace(match[0], '').trim();
+            } else {
+                name = item.trim();
+            }
+        } else if (typeof item === 'object' && item !== null) {
+            name = item.name || '';
+            quantity = item.quantity || 1;
+        }
+
+        if (!name) return null; // Filter out invalid/empty names
+
+        return {
+          id: generateId(),
+          name: name,
+          quantity: quantity,
+        };
+      }).filter((i): i is NonNullable<typeof i> => i !== null);
+
+      const validEquipment = {
+        inventory: initialInventory,
+        equipped: {
+          armor: undefined,
+          helmet: undefined,
+          weapons: [],
+          wornClothes: [],
+          containers: [],
+          animals: []
+        },
+        money: startingMoney
+      };
+
+      // --- 4. Build Payload ---
       const characterData = {
         user_id: user.id,
         name: finalCharacterState.name?.trim(),
@@ -141,26 +199,32 @@ export function CharacterCreationWizard() {
         attributes: finalCharacterState.attributes,
         trained_skills: finalCharacterState.trainedSkills || [],
         skill_levels: initialSkillLevels,
-        equipment: finalCharacterState.equipment || { inventory: [], equipped: { weapons: [] }, money: { gold: 0, silver: 0, copper: 0 } },
+        
+        equipment: validEquipment, // Validated structure
+        
+        starting_equipment: finalCharacterState.startingEquipment || { items: [], money: { gold: 0, silver: 0, copper: 0 } },
+        
         appearance: finalCharacterState.appearance?.trim(),
         conditions: { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
         spells: finalCharacterState.spells || null,
-        starting_equipment: finalCharacterState.startingEquipment || { items: [], money: { gold: 0, silver: 0, copper: 0 } },
         experience: { marked_skills: [] },
         
-        // --- DERIVED STATS ---
         max_hp: finalCharacterState.attributes.CON,
         current_hp: finalCharacterState.attributes.CON,
         max_wp: finalCharacterState.attributes.WIL,
         current_wp: finalCharacterState.attributes.WIL,
         
-        // --- OTHER FIELDS ---
         heroic_ability: combinedHeroicAbilities,
         memento: finalCharacterState.mementos?.[0] || null,
         weak_spot: finalCharacterState.weak_spot || null,
       };
 
-      const { data: savedCharacter, error: saveError } = await supabase.from('characters').insert(characterData).select().single();
+      const { data: savedCharacter, error: saveError } = await supabase
+        .from('characters')
+        .insert(characterData)
+        .select()
+        .single();
+
       if (saveError) throw saveError;
 
       await queryClient.invalidateQueries({ queryKey: ['characters', user.id] });
@@ -169,12 +233,12 @@ export function CharacterCreationWizard() {
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save character';
+      console.error('Save Error:', err);
       setError(`Failed to save character: ${message}`);
     } finally {
       setSaving(false);
     }
   };
-
 
   return (
     <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-6 md:p-8 my-8">
@@ -186,7 +250,7 @@ export function CharacterCreationWizard() {
         <div className="flex space-x-1">
           {steps.map((s, i) => (
             <div key={s.title} className="flex-1 h-2 rounded-full overflow-hidden bg-gray-200">
-               <div className={`h-full rounded-full transition-all duration-300 ${i < step ? 'bg-blue-500' : i === step ? 'bg-blue-300' : 'bg-gray-200'}`} style={{ width: i === step ? '50%' : '100%' }}/>
+               <div className={`h-full rounded-full transition-all duration-300 ${i < step ? 'bg-blue-500' : i === step ? 'bg-blue-300' : 'bg-gray-200'}`} style={{ width: i === step ? '50%' : i < step ? '100%' : '0%' }}/>
             </div>
           ))}
         </div>
