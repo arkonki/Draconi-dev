@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { Dices, RefreshCw, AlertCircle } from 'lucide-react';
-import { Button } from '../../shared/Button'; // Assuming a shared Button component exists
+import { Dices, RefreshCw, AlertCircle, HelpCircle, Heart, Zap, Footprints, Swords } from 'lucide-react';
+import { Button } from '../../shared/Button';
 
 interface AttributeScore {
   value: number;
   baseChance: number;
 }
+
+// --- RULES LOGIC (Page 25) ---
 
 const calculateBaseChance = (value: number): number => {
   if (value <= 5) return 3;
@@ -17,14 +19,34 @@ const calculateBaseChance = (value: number): number => {
 };
 
 const calculateDamageBonus = (value: number): string => {
-  if (value <= 12) return 'None';
-  if (value <= 15) return '+D4';
+  if (value <= 12) return '-';
+  if (value <= 16) return '+D4';
   return '+D6';
+};
+
+const getKinMovementBase = (kin: string): number => {
+  switch (kin) {
+    case 'Wolfkin': return 12;
+    case 'Human':
+    case 'Elf': return 10;
+    case 'Halfling':
+    case 'Dwarf':
+    case 'Mallard': return 8;
+    default: return 10;
+  }
+};
+
+const getAgilityMovementMod = (agl: number): number => {
+  if (agl <= 6) return -4;
+  if (agl <= 9) return -2;
+  if (agl <= 12) return 0;
+  if (agl <= 15) return 2;
+  return 4;
 };
 
 const rollAttribute = (): number => {
   const rolls = Array.from({ length: 4 }, () => Math.floor(Math.random() * 6) + 1);
-  rolls.sort((a, b) => b - a); // descending order
+  rolls.sort((a, b) => b - a);
   return rolls.slice(0, 3).reduce((sum, roll) => sum + roll, 0);
 };
 
@@ -41,6 +63,20 @@ const ageModifiers = {
   Old: { STR: -2, CON: -2, AGL: -2, INT: +1, WIL: +1, CHA: 0 },
 };
 
+// --- TOOLTIP CONTENT (Page 25 & 26) ---
+const tooltips: Record<string, string> = {
+  STR: "Raw muscle power. Used for melee combat and heavy lifting.",
+  CON: "Physical fitness and resilience. Determines your Hit Points (HP).",
+  AGL: "Body control, speed, and fine motor skills. Affects Movement and ranged attacks.",
+  INT: "Mental acuity, intellect, and reasoning skills. Used for Magic.",
+  WIL: "Self-discipline and focus. Determines your Willpower Points (WP).",
+  CHA: "Force of personality and empathy. Used for persuasion and bartering.",
+  HP: "Hit Points. Determines how much damage you can take. Max HP equals your Constitution (CON).",
+  WP: "Willpower Points. Used for magic and heroic abilities. Max WP equals your Willpower (WIL).",
+  Movement: "How many meters you can run in a combat round. Based on Kin, modified by Agility (AGL).",
+  DmgBonus: "Increases damage on attacks. STR for melee, AGL for ranged. (13-16: +D4, 17+: +D6).",
+};
+
 export function AttributesSelection() {
   const { character, updateCharacter } = useCharacterCreation();
   const [attributes, setAttributes] = useState<Record<string, AttributeScore>>({
@@ -53,8 +89,6 @@ export function AttributesSelection() {
   });
 
   const [isRolling, setIsRolling] = useState(false);
-  
-  // --- NEW: State for the input modal ---
   const [editingAttribute, setEditingAttribute] = useState<string | null>(null);
   const [modalValue, setModalValue] = useState<string>('');
 
@@ -67,29 +101,50 @@ export function AttributesSelection() {
     return baseValue + getAgeModifier(attr);
   };
   
+  // Updates global state after local changes
+  const syncCharacter = (newAttrs: Record<string, { value: number }>) => {
+    // Calculate finals for storage
+    const finalSTR = getFinalValue('STR', newAttrs.STR.value);
+    const finalCON = getFinalValue('CON', newAttrs.CON.value);
+    const finalAGL = getFinalValue('AGL', newAttrs.AGL.value);
+    const finalINT = getFinalValue('INT', newAttrs.INT.value);
+    const finalWIL = getFinalValue('WIL', newAttrs.WIL.value);
+    const finalCHA = getFinalValue('CHA', newAttrs.CHA.value);
+
+    updateCharacter({
+      attributes: {
+        STR: finalSTR, CON: finalCON, AGL: finalAGL,
+        INT: finalINT, WIL: finalWIL, CHA: finalCHA
+      },
+      // Page 25: Max HP = CON, Max WP = WIL
+      current_hp: finalCON,
+      max_hp: finalCON,
+      current_wp: finalWIL,
+      max_wp: finalWIL,
+      magic_school: character.magicSchool ?? null,
+    });
+  };
+
   const handleRollAll = () => {
     setIsRolling(true);
-    const newAttributes = rollAllAttributes();
-    const finalAttributes = Object.entries(newAttributes).reduce(
-      (acc, [attr, value]) => ({ ...acc, [attr]: getFinalValue(attr, value) }), {}
-    );
-    const newAttributesWithChances = Object.entries(newAttributes).reduce(
+    const rolled = rollAllAttributes();
+    
+    // Update local state with chances
+    const newAttributesWithChances = Object.entries(rolled).reduce(
       (acc, [key, value]) => ({
         ...acc,
         [key]: { value, baseChance: calculateBaseChance(getFinalValue(key, value)) },
       }), {}
     );
     setAttributes(newAttributesWithChances);
-    updateCharacter({
-      attributes: finalAttributes,
-      current_hp: finalAttributes.CON,
-      current_wp: finalAttributes.WIL,
-      magic_school: character.magicSchool ?? null,
-    });
+    
+    // Update Global Store
+    const simpleRolledObj = Object.entries(rolled).reduce((acc, [k, v]) => ({...acc, [k]: {value: v}}), {});
+    syncCharacter(simpleRolledObj as any);
+
     setIsRolling(false);
   };
 
-  // --- REFACTORED: Now accepts a validated number ---
   const handleManualEntry = (attr: string, numValue: number) => {
     const finalValue = getFinalValue(attr, numValue);
     const newAttributes = {
@@ -97,28 +152,15 @@ export function AttributesSelection() {
       [attr]: { value: numValue, baseChance: calculateBaseChance(finalValue) },
     };
     setAttributes(newAttributes);
-    const finalAttributes = Object.entries(newAttributes).reduce(
-      (acc, [key, { value }]) => ({ ...acc, [key]: getFinalValue(key, value) }), {}
-    );
-    updateCharacter({
-      attributes: finalAttributes,
-      current_hp: finalAttributes.CON,
-      current_wp: finalAttributes.WIL,
-      magic_school: character.magicSchool ?? null,
-    });
+    syncCharacter(newAttributes);
   };
 
-  // --- NEW: Modal control functions ---
+  // Modal handlers
   const handleOpenModal = (attr: string, currentValue: number) => {
     setEditingAttribute(attr);
     setModalValue(currentValue > 0 ? currentValue.toString() : '');
   };
-
-  const handleCloseModal = () => {
-    setEditingAttribute(null);
-    setModalValue('');
-  };
-
+  const handleCloseModal = () => { setEditingAttribute(null); setModalValue(''); };
   const handleModalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAttribute) return;
@@ -127,131 +169,178 @@ export function AttributesSelection() {
     handleCloseModal();
   };
 
-  const calculateMovement = () => {
-    if (!character.kin || !attributes.AGL.value) return 0;
-    const baseMovement = { Human: 10, Halfling: 8, Dwarf: 8, Elf: 10, Mallard: 8, Wolfkin: 12 }[character.kin];
-    const finalAGL = getFinalValue('AGL', attributes.AGL.value);
-    let modifier = 0;
-    if (finalAGL <= 6) modifier = -4; else if (finalAGL <= 9) modifier = -2;
-    else if (finalAGL <= 12) modifier = 0; else if (finalAGL <= 15) modifier = 2;
-    else modifier = 4;
-    return baseMovement + modifier;
-  };
+  // Derived Calculations for Display
+  const finalSTR = getFinalValue('STR', attributes.STR.value);
+  const finalCON = getFinalValue('CON', attributes.CON.value);
+  const finalAGL = getFinalValue('AGL', attributes.AGL.value);
+  const finalWIL = getFinalValue('WIL', attributes.WIL.value);
   
-  const keyAttribute = character.key_attribute;
+  const moveBase = getKinMovementBase(character.kin || 'Human');
+  const moveMod = getAgilityMovementMod(finalAGL);
+  const totalMovement = moveBase + moveMod;
+
+  // Helper for rendering tooltips
+  const RenderTooltip = ({ text }: { text: string }) => (
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 text-center">
+      {text}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Header and Roll Button (Unchanged) */}
-      <div className="prose">
-        <h3 className="text-xl font-bold mb-4">Assign Attributes</h3>
-        <p className="text-gray-600">
-          Roll or manually enter your character's attributes. Scores range from 3 to 18.
-          {character.age && " Age modifiers will be automatically applied."}
-        </p>
-        {character.profession && (
-          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-blue-800">
-              Selected Profession: <strong>{character.profession}</strong>
-              {keyAttribute && <> (Key Attribute: <strong>{keyAttribute}</strong>)</>}
-            </p>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-between items-center">
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="prose">
+          <h3 className="text-xl font-bold text-gray-800">Assign Attributes</h3>
+          <p className="text-sm text-gray-500">
+            Scores range from 3 to 18. Age modifiers are applied automatically.
+          </p>
+        </div>
         <button
           onClick={handleRollAll} disabled={isRolling}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm font-bold shadow-sm"
         >
-          {isRolling ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Dices className="w-5 h-5" />}
-          Roll All Attributes
+          {isRolling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Dices className="w-4 h-4" />}
+          Roll Attributes
         </button>
       </div>
 
-      {/* Attribute Cards with updated input handling */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Main Attributes Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {Object.entries(attributes).map(([attr, { value }]) => {
           const modifier = getAgeModifier(attr);
           const finalValue = getFinalValue(attr, value);
-          const isKey = keyAttribute === attr;
+          const isKey = character.key_attribute === attr;
+
           return (
-            <div key={attr} className={`p-4 border rounded-lg shadow-sm bg-white ${isKey ? 'bg-yellow-100 border-yellow-500' : ''}`}>
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-lg font-medium">{attr}</label>
-                <span className="text-sm text-gray-500">Base Chance: {calculateBaseChance(finalValue)}</span>
+            <div key={attr} className={`p-4 border rounded-lg shadow-sm bg-white relative ${isKey ? 'ring-2 ring-yellow-400 border-yellow-400 bg-yellow-50' : ''}`}>
+              {isKey && <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">KEY</div>}
+              
+              <div className="flex justify-between items-center mb-3">
+                <div className="flex items-center gap-1.5 group relative">
+                  <label className="text-lg font-bold text-gray-800">{attr}</label>
+                  <HelpCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                  <RenderTooltip text={tooltips[attr]} />
+                </div>
+                <div className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                  Base Chance: <strong>{calculateBaseChance(finalValue)}</strong>
+                </div>
               </div>
-              <div className="space-y-2">
-                {/* --- UPDATED INPUT --- */}
-                <input
-                  type="text"
-                  readOnly
-                  value={value > 0 ? value : ''}
-                  onClick={() => handleOpenModal(attr, value)}
-                  placeholder="Click to set value"
-                  className="w-full px-3 py-2 border rounded-md cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+
+              <input
+                type="text"
+                readOnly
+                value={value > 0 ? value : ''}
+                onClick={() => handleOpenModal(attr, value)}
+                placeholder="-"
+                className="w-full py-2 border rounded cursor-pointer text-center font-mono text-2xl font-bold focus:ring-2 focus:ring-blue-500 hover:bg-gray-50 text-blue-600 bg-white"
+              />
+              
+              <div className="mt-2 flex justify-between text-xs text-gray-500 h-4">
                 {modifier !== 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Age Modifier:</span>
-                    <span className={modifier > 0 ? 'text-green-600' : 'text-red-600'}>{modifier > 0 ? `+${modifier}` : modifier}</span>
-                  </div>
+                  <>
+                    <span>Age Mod:</span>
+                    <span className={modifier > 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                      {modifier > 0 ? `+${modifier}` : modifier}
+                    </span>
+                  </>
                 )}
-                {value > 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Final Value:</span>
-                    <span className="font-medium text-blue-600">{finalValue}</span>
-                  </div>
-                )}
+                {modifier !== 0 && <span>= <strong>{finalValue}</strong></span>}
               </div>
-              {(attr === 'STR' || attr === 'AGL') && finalValue > 12 && (
-                <p className="mt-2 text-sm text-blue-600">Damage Bonus: {calculateDamageBonus(finalValue)}</p>
-              )}
             </div>
           );
         })}
       </div>
 
-      {/* Summary and Notices (Unchanged) */}
-      {character.kin && Object.values(attributes).every((attr) => attr.value > 0) && (
-        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div><h4 className="font-medium text-gray-700">Movement</h4><p className="text-2xl font-bold text-green-700">{calculateMovement()}</p></div>
-            <div><h4 className="font-medium text-gray-700">STR Damage Bonus</h4><p className="text-2xl font-bold text-blue-700">{calculateDamageBonus(getFinalValue('STR', attributes.STR.value))}</p></div>
-            <div><h4 className="font-medium text-gray-700">AGL Damage Bonus</h4><p className="text-2xl font-bold text-blue-700">{calculateDamageBonus(getFinalValue('AGL', attributes.AGL.value))}</p></div>
-          </div>
-        </div>
-      )}
-      {character.age && (
-        <div className="flex items-start gap-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <h4 className="font-medium text-amber-800">Age Modifiers Applied</h4>
-            <p className="text-sm text-amber-700">
-              {character.age === 'Young' && "Young: +1 CON, +1 AGL"}
-              {character.age === 'Adult' && "Adult: No attribute modifiers"}
-              {character.age === 'Old' && "Old: -2 STR, -2 CON, -2 AGL, +1 INT, +1 WIL"}
-            </p>
+      {/* DERIVED RATINGS SECTION (Page 25) */}
+      {character.kin && Object.values(attributes).every(a => a.value > 0) && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+          <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+            Derived Ratings <span className="text-[10px] font-normal normal-case bg-slate-200 px-1.5 py-0.5 rounded text-slate-600">Page 25</span>
+          </h4>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            
+            {/* Hit Points */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col items-center group relative">
+              <div className="text-xs font-bold text-gray-400 mb-1 flex items-center gap-1">
+                HP <HelpCircle size={10} className="cursor-help"/>
+              </div>
+              <div className="text-2xl font-bold text-red-600 flex items-center gap-2">
+                <Heart size={20} className="fill-current"/> {finalCON}
+              </div>
+              <div className="text-[10px] text-gray-400 mt-1">Based on CON</div>
+              <RenderTooltip text={tooltips.HP} />
+            </div>
+
+            {/* Willpower Points */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col items-center group relative">
+              <div className="text-xs font-bold text-gray-400 mb-1 flex items-center gap-1">
+                WP <HelpCircle size={10} className="cursor-help"/>
+              </div>
+              <div className="text-2xl font-bold text-blue-600 flex items-center gap-2">
+                <Zap size={20} className="fill-current"/> {finalWIL}
+              </div>
+              <div className="text-[10px] text-gray-400 mt-1">Based on WIL</div>
+              <RenderTooltip text={tooltips.WP} />
+            </div>
+
+            {/* Movement */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col items-center group relative">
+              <div className="text-xs font-bold text-gray-400 mb-1 flex items-center gap-1">
+                Movement <HelpCircle size={10} className="cursor-help"/>
+              </div>
+              <div className="text-2xl font-bold text-green-700 flex items-center gap-2">
+                <Footprints size={20}/> {totalMovement}
+              </div>
+              <div className="text-[10px] text-gray-400 mt-1 text-center">
+                {character.kin} ({moveBase}) {moveMod !== 0 ? `${moveMod > 0 ? '+' : ''}${moveMod} AGL` : ''}
+              </div>
+              <RenderTooltip text={tooltips.Movement} />
+            </div>
+
+            {/* Damage Bonuses */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col items-center group relative">
+              <div className="text-xs font-bold text-gray-400 mb-1 flex items-center gap-1">
+                Dmg Bonus <HelpCircle size={10} className="cursor-help"/>
+              </div>
+              <div className="flex flex-col w-full px-2 gap-1 mt-1">
+                <div className="flex justify-between text-sm">
+                  <span className="font-bold text-gray-600">STR</span>
+                  <span className="font-bold text-indigo-600">{calculateDamageBonus(finalSTR)}</span>
+                </div>
+                <div className="w-full h-px bg-gray-100"></div>
+                <div className="flex justify-between text-sm">
+                  <span className="font-bold text-gray-600">AGL</span>
+                  <span className="font-bold text-indigo-600">{calculateDamageBonus(finalAGL)}</span>
+                </div>
+              </div>
+              <RenderTooltip text={tooltips.DmgBonus} />
+            </div>
+
           </div>
         </div>
       )}
 
-      {/* --- NEW: Attribute Entry Modal --- */}
+      {/* Modals */}
       {editingAttribute && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCloseModal}>
-          <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-4">Set {editingAttribute} Score (3-18)</h3>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm" onClick={handleCloseModal}>
+          <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-xs animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-4 text-center">Set {editingAttribute} Score</h3>
             <form onSubmit={handleModalSubmit}>
               <input
                 type="number"
+                min="3"
+                max="18"
                 value={modalValue}
                 onChange={(e) => setModalValue(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleModalSubmit(e)}
-                className="w-full px-3 py-2 border rounded-md text-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-3 border border-gray-300 rounded-md text-2xl font-bold text-center focus:ring-2 focus:ring-blue-500 outline-none"
                 autoFocus
               />
-              <div className="mt-6 flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={handleCloseModal}>Cancel</Button>
-                <Button type="submit">OK</Button>
+              <div className="mt-6 flex gap-2">
+                <Button type="button" variant="ghost" onClick={handleCloseModal} className="flex-1">Cancel</Button>
+                <Button type="submit" variant="primary" className="flex-1">Save</Button>
               </div>
             </form>
           </div>
