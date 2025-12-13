@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { 
-  Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown, FileText, Library 
+  Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown, Library, ArrowLeft, Menu
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { CompendiumEntry } from '../types/compendium';
@@ -48,8 +48,6 @@ export function Compendium() {
 
   // Actions
   const toggleBookmark = (entry: CompendiumEntry) => {
-    // UPDATED: We keep the markdown formatting and take a larger slice
-    // so the HomebrewRenderer has enough context to render styles correctly.
     const preview = entry.content.slice(0, 400); 
     
     setBookmarkedEntries(prev => {
@@ -101,7 +99,6 @@ export function Compendium() {
   }, [entries, searchTerm]);
 
   const categorizedDisplay = useMemo(() => {
-    // Group by category
     const grouped = filteredEntries.reduce((acc, entry) => {
       const cat = entry.category || 'Uncategorized';
       if (!acc[cat]) acc[cat] = [];
@@ -109,7 +106,6 @@ export function Compendium() {
       return acc;
     }, {} as Record<string, CompendiumEntry[]>);
 
-    // Sort categories alphabetical
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredEntries]);
 
@@ -130,13 +126,18 @@ export function Compendium() {
   const isBookmarked = (id?: string) => bookmarkedEntries.some(b => b.id === id);
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    // Layout Container: Changes direction on mobile vs desktop
+    <div className="flex flex-col md:flex-row h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       
-      {/* --- LEFT SIDEBAR: NAVIGATION --- */}
-      <div className="w-80 bg-gray-50 border-r border-gray-200 flex flex-col flex-shrink-0">
+      {/* --- SIDEBAR: NAVIGATION --- */}
+      {/* Logic: Hidden on mobile if an entry is selected. Visible on desktop always. */}
+      <div className={`
+        ${selectedEntry ? 'hidden md:flex' : 'flex'} 
+        w-full md:w-80 bg-gray-50 border-r border-gray-200 flex-col flex-shrink-0 h-full
+      `}>
         
-        {/* Header */}
-        <div className="p-4 border-b border-gray-200 bg-white">
+        {/* Sidebar Header */}
+        <div className="p-4 border-b border-gray-200 bg-white sticky top-0 z-10">
           <div className="flex items-center justify-between mb-4">
             <div 
               className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer hover:text-indigo-600 transition-colors"
@@ -158,18 +159,34 @@ export function Compendium() {
               type="text" 
               placeholder="Search..." 
               value={searchTerm} 
-              onChange={(e) => { setSearchTerm(e.target.value); if(e.target.value) { /* Optional: Auto expand all on search? */ } }} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
         </div>
 
-        {/* List */}
+        {/* List Content */}
         <div className="flex-1 overflow-y-auto p-2">
+          
+          {/* Mobile-Only Bookmarks Quick Access (Since Dashboard is hidden on mobile) */}
+          <div className="md:hidden mb-4 border-b border-gray-200 pb-2">
+             <div className="px-3 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Saved Bookmarks</div>
+             {bookmarkedEntries.length === 0 ? (
+               <div className="px-3 py-1 text-sm text-gray-400 italic">No bookmarks yet.</div>
+             ) : (
+               bookmarkedEntries.map(b => (
+                 <button key={b.id} onClick={() => setSelectedEntry(entries.find(e => e.id === b.id) || b)} className="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-2">
+                    <Bookmark size={12} className="fill-indigo-600" />
+                    <span className="truncate">{b.title}</span>
+                 </button>
+               ))
+             )}
+          </div>
+
           {categorizedDisplay.length === 0 ? (
             <p className="text-center text-gray-400 text-sm py-8">No entries found.</p>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-1 pb-10">
               {categorizedDisplay.map(([category, categoryEntries]) => {
                 const isExpanded = searchTerm ? true : expandedCategories.has(category);
                 
@@ -177,13 +194,13 @@ export function Compendium() {
                   <div key={category} className="select-none">
                     <button
                       onClick={() => toggleCategory(category)}
-                      className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      className="w-full flex items-center justify-between px-3 py-3 md:py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronDown size={14} className="text-gray-400"/> : <ChevronRight size={14} className="text-gray-400"/>}
+                        {isExpanded ? <ChevronDown size={16} className="text-gray-400"/> : <ChevronRight size={16} className="text-gray-400"/>}
                         {category}
                       </div>
-                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{categoryEntries.length}</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{categoryEntries.length}</span>
                     </button>
                     
                     {isExpanded && (
@@ -193,7 +210,7 @@ export function Compendium() {
                             key={entry.id}
                             onClick={() => setSelectedEntry(entry)}
                             className={`
-                              w-full text-left px-3 py-2 text-sm rounded-md transition-all flex items-center justify-between group
+                              w-full text-left px-3 py-3 md:py-2 text-sm rounded-md transition-all flex items-center justify-between group
                               ${selectedEntry?.id === entry.id 
                                 ? 'bg-white text-indigo-700 font-medium shadow-sm ring-1 ring-indigo-100' 
                                 : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
@@ -215,19 +232,34 @@ export function Compendium() {
       </div>
 
       {/* --- RIGHT MAIN: CONTENT --- */}
-      <div className="flex-1 overflow-y-auto bg-white relative">
+      {/* Logic: Hidden on mobile if NO entry is selected. Visible on desktop always. */}
+      <div className={`
+        ${!selectedEntry ? 'hidden md:flex' : 'flex'} 
+        flex-1 overflow-y-auto bg-white relative flex-col h-full w-full
+      `}>
         
         {selectedEntry ? (
           // VIEW: Selected Entry
-          <div className="max-w-4xl mx-auto min-h-full flex flex-col">
+          <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col">
             
             {/* Sticky Header */}
-            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-8 py-4 flex justify-between items-center">
-              <div>
-                <div className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-1">{selectedEntry.category}</div>
-                <h1 className="text-2xl font-extrabold text-gray-900">{selectedEntry.title}</h1>
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-4 md:px-8 py-3 md:py-4 flex justify-between items-center shadow-sm md:shadow-none">
+              <div className="flex items-center gap-3 overflow-hidden">
+                {/* Mobile Back Button */}
+                <button 
+                  onClick={() => setSelectedEntry(null)}
+                  className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-0.5 truncate">{selectedEntry.category}</div>
+                  <h1 className="text-lg md:text-2xl font-extrabold text-gray-900 truncate">{selectedEntry.title}</h1>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 ml-2">
                 <Button 
                   variant="ghost" 
                   size="sm" 
@@ -239,40 +271,40 @@ export function Compendium() {
                 </Button>
                 {isAdmin() && (
                   <Button variant="secondary" size="sm" icon={Edit2} onClick={() => setFullPageEntry(selectedEntry)}>
-                    Edit
+                    <span className="hidden md:inline">Edit</span>
                   </Button>
                 )}
               </div>
             </div>
 
             {/* Content */}
-            <div className="p-8">
+            <div className="p-4 md:p-8 w-full max-w-full overflow-x-hidden">
               <HomebrewRenderer content={selectedEntry.content} />
             </div>
             
             {/* Footer */}
-            <div className="mt-auto p-8 border-t border-gray-50 text-center text-gray-400 text-xs">
+            <div className="mt-auto p-4 md:p-8 border-t border-gray-50 text-center text-gray-400 text-xs pb-8 md:pb-8">
                Entry Title: {selectedEntry.title}
             </div>
           </div>
         ) : (
-          // VIEW: Dashboard / Bookmarks
-          <div className="p-8 max-w-5xl mx-auto">
-            <div className="text-center mb-10 pt-10">
-              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Book size={40} />
+          // VIEW: Dashboard / Bookmarks (Desktop Only mostly, as mobile shows sidebar)
+          <div className="p-4 md:p-8 max-w-5xl mx-auto w-full">
+            <div className="text-center mb-8 md:mb-10 pt-4 md:pt-10">
+              <div className="w-16 h-16 md:w-20 md:h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Book size={32} className="md:w-10 md:h-10" />
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Compendium</h1>
-              <p className="text-gray-500">Select a topic from the sidebar or browse your bookmarks below.</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Compendium</h1>
+              <p className="text-sm md:text-base text-gray-500">Select a topic from the sidebar or browse your bookmarks below.</p>
             </div>
 
-            <div className="mb-6 flex items-center gap-2 pb-2 border-b border-gray-200">
+            <div className="mb-4 md:mb-6 flex items-center gap-2 pb-2 border-b border-gray-200">
               <Bookmark size={18} className="text-indigo-600" />
               <h2 className="font-bold text-gray-800">Quick Access</h2>
             </div>
 
             {bookmarkedEntries.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
                 {bookmarkedEntries.map(bookmark => (
                   <div 
                     key={bookmark.id} 
@@ -280,18 +312,14 @@ export function Compendium() {
                     className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden"
                   >
                     <div className="flex justify-between items-start mb-2 relative z-10 bg-white">
-                       <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2">{bookmark.title}</h3>
+                       <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2 text-sm md:text-base">{bookmark.title}</h3>
                        <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded shrink-0">{bookmark.category}</span>
                     </div>
                     
-                    {/* UPDATED: Renderer Display */}
-                    <div className="relative h-24 overflow-hidden text-xs text-gray-500">
-                      {/* We use a transform scale to fit more content visually if needed, or just let it render naturally */}
+                    <div className="relative h-20 md:h-24 overflow-hidden text-xs text-gray-500">
                       <div className="origin-top-left transform scale-90 w-[110%]">
                         <HomebrewRenderer content={bookmark.preview} />
                       </div>
-                      
-                      {/* Gradient Fade to indicate there is more content */}
                       <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
                     </div>
 

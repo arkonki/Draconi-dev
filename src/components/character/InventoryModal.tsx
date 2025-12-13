@@ -93,10 +93,6 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
         load += weightPerUnit * (item.quantity || 1); 
     });
     
-    // Round to 1 decimal place to handle ration math nicely, or Math.ceil if system is strict integer
-    // Using Math.ceil ensures partial weights (like 1 ration = 0.25) usually count towards next integer threshold in typical RPGs,
-    // OR just keep raw float if you want exact tracking. Let's use 2 decimal precision for display.
-    // However, usually Load is strictly Integers. Let's return raw load and format in component.
     return { capacity, load, isEncumbered: load > capacity };
 };
 
@@ -384,7 +380,6 @@ export function InventoryModal({ onClose }: any) {
     );
   };
   
-  // --- ITEM RENDERING LOGIC ---
   const renderItemRow = (item: InventoryItem, itemDetails: GameItem | undefined) => {
         const isEquippable = itemDetails?.equippable || (itemDetails?.category && DEFAULT_EQUIPPABLE_CATEGORIES.includes(itemDetails.category));
         const canBeUsed = !isEquippable;
@@ -438,8 +433,44 @@ export function InventoryModal({ onClose }: any) {
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col shadow-xl">
               <div className="p-4 md:p-6 border-b flex-shrink-0 bg-gray-50 rounded-t-lg">
                   <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-                      <div className="flex items-center gap-3"><h2 className="text-xl md:text-2xl font-bold text-gray-800">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h2><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium hover:bg-yellow-200 transition-colors"><Coins className="w-4 h-4" />{formatCost(character.equipment?.money || {})}</button></div>
-                      <div className="flex gap-2"><Button size="sm" variant={activeTab === 'inventory' ? 'primary' : 'secondary'} onClick={() => setActiveTab('inventory')}>Inventory</Button><Button size="sm" variant={activeTab === 'shop' ? 'primary' : 'secondary'} onClick={() => setActiveTab('shop')}>Shop</Button><button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-800 rounded-full hover:bg-gray-200"><X className="w-5 h-5" /></button></div>
+                      {/* HEADER TITLE & MONEY BADGE */}
+                      <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+                          <h2 className="text-xl md:text-2xl font-bold text-gray-800">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h2>
+                          <button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium hover:bg-yellow-200 transition-colors">
+                              <Coins className="w-4 h-4" />{formatCost(character.equipment?.money || {})}
+                          </button>
+                      </div>
+                      
+                      {/* MOBILE-FRIENDLY TABS (Segmented Control Style) */}
+                      <div className="flex items-center gap-2 w-full md:w-auto">
+                          <div className="flex p-1 bg-gray-100 rounded-lg flex-1 md:flex-none">
+                              <button
+                                  onClick={() => setActiveTab('inventory')}
+                                  className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-3 py-1.5 text-xs md:text-sm font-medium rounded-md transition-all ${
+                                      activeTab === 'inventory' 
+                                      ? 'bg-white text-blue-700 shadow-sm' 
+                                      : 'text-gray-500 hover:text-gray-700'
+                                  }`}
+                              >
+                                  <Package size={14} />
+                                  <span>Inventory</span>
+                              </button>
+                              <button
+                                  onClick={() => setActiveTab('shop')}
+                                  className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-3 py-1.5 text-xs md:text-sm font-medium rounded-md transition-all ${
+                                      activeTab === 'shop' 
+                                      ? 'bg-white text-blue-700 shadow-sm' 
+                                      : 'text-gray-500 hover:text-gray-700'
+                                  }`}
+                              >
+                                  <ShoppingBag size={14} />
+                                  <span>Shop</span>
+                              </button>
+                          </div>
+                          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+                              <X size={20} />
+                          </button>
+                      </div>
                   </div>
                   {activeTab === 'inventory' && (
                     <div className="flex items-center gap-3 mt-3">
@@ -526,8 +557,6 @@ export function InventoryModal({ onClose }: any) {
                               
                               allItems.forEach(item => {
                                   const details = findItemDetails(item.name);
-                                  // Rations are technically not "tiny" (weight 0), they have weight 0.25, so they go to Carried.
-                                  // Tiny Items have explicit weight 0 in DB.
                                   if (details?.weight === 0) {
                                       tinyItems.push(item);
                                   } else {

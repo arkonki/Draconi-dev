@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Users, Shield, X } from 'lucide-react';
+import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Shield, X, MoreHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Character } from '../types/character';
@@ -56,10 +56,10 @@ export function Characters() {
   };
 
   const handleCardClick = (event: React.MouseEvent, characterId: string) => {
-    // Enter selection logic if:
-    // 1. We are explicitly in selection mode
-    // 2. The user is holding Shift
-    // 3. We aren't in selection mode, but the user clicked an item while others are already selected (optional intuitive flow)
+    // Mobile-friendly selection logic:
+    // 1. Explicit selection mode (toggled via button)
+    // 2. Shift key (desktop power user)
+    // 3. If items are already selected, clicking another just adds to selection
     if (isSelectionMode || event.shiftKey || selectedIds.length > 0) {
       event.preventDefault();
       if (!isSelectionMode) setIsSelectionMode(true);
@@ -80,28 +80,37 @@ export function Characters() {
   if (!user) return <div className="p-8"><EmptyState icon={AlertCircle} title="Authentication Required" description="Please sign in." /></div>;
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 min-h-[calc(100vh-4rem)] relative pb-24">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8 min-h-[calc(100vh-4rem)] relative pb-28 md:pb-12">
       
       {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">My Characters</h1>
-          <p className="text-gray-500 mt-1">Manage your roster or create a new hero.</p>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight">My Characters</h1>
+          <p className="text-sm md:text-base text-gray-500 mt-1">Manage your roster or create a new hero.</p>
         </div>
 
         {!isCreating && characters.length > 0 && (
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full md:w-auto">
             {!isSelectionMode ? (
               <>
-                <Button variant="ghost" onClick={() => setIsSelectionMode(true)} className="text-gray-500 hover:text-gray-900">
+                <Button variant="ghost" onClick={() => setIsSelectionMode(true)} className="text-gray-500 hover:text-gray-900 hidden md:flex">
                   Select...
                 </Button>
+                {/* Mobile Selection Toggle Icon */}
+                <button 
+                  onClick={() => setIsSelectionMode(true)} 
+                  className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+                  aria-label="Select Characters"
+                >
+                  <MoreHorizontal size={20} />
+                </button>
+
                 <div className="h-6 w-px bg-gray-300 mx-1 hidden md:block"></div>
-                <Button variant="secondary" icon={LogIn} onClick={() => setIsJoining(true)}>Join Party</Button>
-                <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>Create New</Button>
+                <Button variant="secondary" icon={LogIn} onClick={() => setIsJoining(true)} className="flex-1 md:flex-none justify-center">Join Party</Button>
+                <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)} className="flex-1 md:flex-none justify-center">Create New</Button>
               </>
             ) : (
-              <Button variant="ghost" onClick={handleCancelSelection}>Cancel Selection</Button>
+              <Button variant="ghost" onClick={handleCancelSelection} className="ml-auto">Cancel</Button>
             )}
           </div>
         )}
@@ -116,40 +125,43 @@ export function Characters() {
           }} />
         </div>
       ) : characters.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
           {characters.map((character) => {
             const isSelected = selectedIds.includes(character.id!);
             return (
               <div
                 key={character.id}
                 className={`
-                  group relative cursor-pointer rounded-xl transition-all duration-200
+                  group relative cursor-pointer rounded-xl transition-all duration-200 select-none
                   ${isSelected 
-                    ? 'ring-4 ring-indigo-500 ring-offset-2 transform scale-[0.98]' 
+                    ? 'ring-2 ring-indigo-500 ring-offset-2 transform scale-[0.98]' 
                     : isSelectionMode 
-                      ? 'hover:ring-4 hover:ring-gray-200 hover:ring-offset-2' 
+                      ? 'ring-1 ring-gray-200 hover:ring-2 hover:ring-gray-300' 
                       : 'hover:-translate-y-1 hover:shadow-lg'
                   }
                 `}
                 onClick={(e) => handleCardClick(e, character.id!)}
               >
-                {/* Selection Overlay / Checkbox */}
-                {isSelectionMode && (
-                  <div className={`absolute top-3 right-3 z-10 rounded-full p-1 transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-400 group-hover:bg-gray-300'}`}>
-                    <Check size={16} className={isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'} />
+                {/* Selection Checkbox (Visible in mode or when selected) */}
+                {(isSelectionMode || isSelected) && (
+                  <div className={`
+                    absolute top-3 right-3 z-20 rounded-full p-1 transition-all duration-200 shadow-sm
+                    ${isSelected ? 'bg-indigo-600 text-white scale-100' : 'bg-white border border-gray-200 text-transparent scale-90'}
+                  `}>
+                    <Check size={14} strokeWidth={3} />
                   </div>
                 )}
                 
                 <CharacterCard character={character} />
                 
-                {/* Click Overlay for Selection Mode (ensures distinct click area) */}
-                {isSelectionMode && <div className="absolute inset-0 z-0 rounded-xl bg-white/0" />}
+                {/* Click Overlay for touch devices to ensure easy selection */}
+                {isSelectionMode && <div className="absolute inset-0 z-10 rounded-xl bg-white/0" />}
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="mt-12">
+        <div className="mt-12 md:mt-20 px-4">
           <EmptyState
             icon={Shield}
             title="The Tavern is Empty"
@@ -163,12 +175,13 @@ export function Characters() {
         </div>
       )}
 
-      {/* --- FLOATING ACTION BAR (Selection Mode) --- */}
+      {/* --- FLOATING ACTION BAR (Mobile & Desktop) --- */}
+      {/* Shows up at bottom of screen when items are selected */}
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4 animate-in slide-in-from-bottom-6 fade-in">
-          <div className="bg-white border border-gray-200 shadow-2xl rounded-2xl p-3 flex items-center justify-between ring-1 ring-black/5">
-            <div className="flex items-center gap-3 pl-2">
-              <div className="bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+        <div className="fixed bottom-6 left-0 right-0 z-50 px-4 flex justify-center animate-in slide-in-from-bottom-10 fade-in duration-300">
+          <div className="bg-white border border-gray-200 shadow-2xl rounded-2xl p-2 pl-4 pr-2 flex items-center justify-between ring-1 ring-black/5 w-full max-w-sm md:max-w-md backdrop-blur-xl bg-white/95">
+            <div className="flex items-center gap-3">
+              <div className="bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full min-w-[1.5rem] text-center">
                 {selectedIds.length}
               </div>
               <span className="text-sm font-medium text-gray-700">Selected</span>

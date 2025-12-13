@@ -9,7 +9,8 @@ import {
   Sword,
   Palette,
   Bell,
-  Globe
+  Globe,
+  ArrowLeft
 } from 'lucide-react';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { AppearanceSettings } from '../components/settings/AppearanceSettings';
@@ -43,28 +44,8 @@ const menuItems: SettingsMenuItem[] = [
     description: 'Manage your personal information',
     category: 'account'
   },
-  // Commented out sections retained for future implementation
-  // {
-  //   id: 'appearance',
-  //   label: 'Appearance',
-  //   icon: Palette,
-  //   description: 'Customize look and feel',
-  //   category: 'system'
-  // },
-  // {
-  //   id: 'notifications',
-  //   label: 'Notifications',
-  //   icon: Bell,
-  //   description: 'Configure alerts',
-  //   category: 'system'
-  // },
-  // {
-  //   id: 'localization',
-  //   label: 'Language & Region',
-  //   icon: Globe,
-  //   description: 'Timezone and language',
-  //   category: 'system'
-  // },
+  // Future implementations...
+  // { id: 'appearance', label: 'Appearance', icon: Palette, description: 'Customize look and feel', category: 'system' },
   {
     id: 'game-data',
     label: 'Game Data',
@@ -86,8 +67,11 @@ const menuItems: SettingsMenuItem[] = [
 export function Settings() {
   const { isAdmin } = useAuth();
   
-  // Initialize state
+  // State
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
+  
+  // New State for Mobile Navigation (Default to true = show menu list first on mobile)
+  const [showMobileMenu, setShowMobileMenu] = useState(true);
 
   // Security check effect
   useEffect(() => {
@@ -102,12 +86,16 @@ export function Settings() {
     const selectedItem = menuItems.find(item => item.id === sectionId);
     if (selectedItem && (!selectedItem.adminOnly || isAdmin())) {
       setActiveSection(sectionId);
+      setShowMobileMenu(false); // Hide menu on mobile after selection
     }
+  };
+
+  const handleBackToMenu = () => {
+    setShowMobileMenu(true);
   };
 
   // Render Content Switcher
   const renderSettingsContent = () => {
-    // Double check permissions at render time for safety
     if (['admin', 'game-data'].includes(activeSection) && !isAdmin()) {
       return <Navigate to="/settings" replace />;
     }
@@ -126,22 +114,26 @@ export function Settings() {
   const activeItem = menuItems.find(i => i.id === activeSection);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 min-h-[calc(100vh-4rem)]">
+    <div className="max-w-7xl mx-auto px-4 py-4 md:py-8 min-h-[calc(100vh-4rem)]">
       
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-          <SettingsIcon className="w-8 h-8 text-indigo-600" />
+      {/* Header - Hidden on mobile if viewing content to save space */}
+      <div className={`mb-6 md:mb-8 ${!showMobileMenu ? 'hidden lg:block' : 'block'}`}>
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3">
+          <SettingsIcon className="w-6 h-6 md:w-8 md:h-8 text-indigo-600" />
           Settings
         </h1>
-        <p className="text-gray-500 mt-2">Manage your account preferences and system configurations.</p>
+        <p className="text-sm md:text-base text-gray-500 mt-2">Manage your account preferences and system configurations.</p>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
         
-        {/* Left Sidebar Navigation */}
-        <div className="w-full lg:w-72 flex-shrink-0 space-y-8">
-          <nav className="space-y-1">
+        {/* --- LEFT SIDEBAR NAVIGATION --- */}
+        {/* Logic: Hidden on mobile if content is active (`!showMobileMenu`). Always visible on Desktop (`lg:block`) */}
+        <div className={`
+          w-full lg:w-72 flex-shrink-0 space-y-6 md:space-y-8
+          ${!showMobileMenu ? 'hidden lg:block' : 'block'}
+        `}>
+          <nav className="space-y-2">
             {menuItems
               .filter(item => !item.adminOnly || isAdmin())
               .map(item => {
@@ -151,26 +143,32 @@ export function Settings() {
                     key={item.id}
                     onClick={() => handleSectionChange(item.id)}
                     className={`
-                      w-full flex items-center justify-between px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200
+                      w-full flex items-center justify-between px-4 py-4 md:py-3 text-sm font-medium rounded-xl transition-all duration-200 border md:border-transparent
                       ${isActive 
-                        ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-indigo-100' 
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                        ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-indigo-100 border-indigo-100' 
+                        : 'text-gray-600 bg-white md:bg-transparent border-gray-100 hover:bg-gray-50 hover:text-gray-900'
                       }
                     `}
                   >
                     <div className="flex items-center gap-3">
-                      <item.icon size={20} className={isActive ? 'text-indigo-600' : 'text-gray-400'} />
-                      <span>{item.label}</span>
+                      <div className={`p-2 rounded-lg ${isActive ? 'bg-indigo-50' : 'bg-gray-50 md:bg-transparent'}`}>
+                        <item.icon size={20} className={isActive ? 'text-indigo-600' : 'text-gray-400'} />
+                      </div>
+                      <div className="text-left">
+                        <span className="block font-semibold md:font-medium">{item.label}</span>
+                        {/* Show description on mobile list for better context */}
+                        <span className="block lg:hidden text-xs text-gray-400 font-normal mt-0.5">{item.description}</span>
+                      </div>
                     </div>
-                    {isActive && <ChevronRight size={16} className="text-indigo-400" />}
+                    <ChevronRight size={16} className={`text-gray-300 ${isActive ? 'text-indigo-400' : ''}`} />
                   </button>
                 );
               })}
           </nav>
 
-          {/* Admin Badge (Visual indicator) */}
+          {/* Admin Badge */}
           {isAdmin() && (
-            <div className="px-4 py-3 bg-indigo-50 rounded-xl border border-indigo-100">
+            <div className="px-4 py-3 bg-indigo-50 rounded-xl border border-indigo-100 mx-1 md:mx-0">
               <div className="flex items-center gap-2 text-indigo-800 font-bold text-xs uppercase tracking-wide mb-1">
                 <Shield size={12} /> Admin Access
               </div>
@@ -179,17 +177,38 @@ export function Settings() {
           )}
         </div>
 
-        {/* Right Content Panel */}
-        <div className="flex-1 min-w-0">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            {/* Mobile/Tablet Header for Content */}
-            <div className="border-b border-gray-100 px-6 py-5 bg-gray-50/50">
-              <h2 className="text-xl font-bold text-gray-800">{activeItem?.label}</h2>
-              <p className="text-sm text-gray-500 mt-1">{activeItem?.description}</p>
+        {/* --- RIGHT CONTENT PANEL --- */}
+        {/* Logic: Hidden on mobile if Menu is active (`showMobileMenu`). Always visible on Desktop (`lg:block`) */}
+        <div className={`
+          flex-1 min-w-0
+          ${showMobileMenu ? 'hidden lg:block' : 'block'}
+        `}>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden min-h-[500px]">
+            
+            {/* Content Header with Mobile Back Button */}
+            <div className="border-b border-gray-100 px-4 md:px-6 py-4 md:py-5 bg-gray-50/50 flex items-center gap-3">
+              {/* Mobile Back Button */}
+              <button 
+                onClick={handleBackToMenu}
+                className="lg:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 hover:bg-gray-200 rounded-full transition-colors"
+              >
+                <ArrowLeft size={20} />
+              </button>
+
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
+                  {/* Mobile Icon in Header */}
+                  <span className="lg:hidden">
+                    {activeItem && <activeItem.icon size={18} className="text-indigo-600"/>}
+                  </span>
+                  {activeItem?.label}
+                </h2>
+                <p className="text-xs md:text-sm text-gray-500 mt-0.5">{activeItem?.description}</p>
+              </div>
             </div>
             
             {/* Actual Content Form */}
-            <div className="p-6">
+            <div className="p-4 md:p-6">
               {renderSettingsContent()}
             </div>
           </div>
