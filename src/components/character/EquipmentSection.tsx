@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, Sword, Dices, Star, X, Save, Hammer, Info } from 'lucide-react';
+import { Shield, Sword, Dices, Star, X, Save, Hammer, Info, Crosshair } from 'lucide-react';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -23,7 +23,7 @@ const formatItemFeatures = (features: string | string[] | undefined): string => 
 interface ItemNote { enhanced?: boolean; bonus?: string; }
 type ItemCategory = 'armor' | 'weapon';
 
-// --- STYLED MODAL COMPONENT ---
+// --- STYLED MODAL COMPONENT (Unchanged) ---
 const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: any) => void; }) => {
   const [isEnhanced, setIsEnhanced] = useState(false);
   const [bonusText, setBonusText] = useState('');
@@ -101,7 +101,7 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
   const getNoteForItem = (item: GameItem | undefined, category: ItemCategory): ItemNote | null => { if (!item) return null; return character.item_notes?.[category]?.[item.id] || null; };
   const isItemEnhanced = (item: GameItem | undefined, category: ItemCategory): boolean => getNoteForItem(item, category)?.enhanced || false;
 
-  // --- Logic Functions (Unchanged) ---
+  // --- Logic Functions ---
   const calculateTotalArmor = () => {
     let totalArmor = 0;
     const armor = findItemDetails(character.equipment?.equipped?.armor || '');
@@ -144,11 +144,19 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
         if (isValidDiceType(size)) { dicePool.push(size); formulaParts.push(size.toUpperCase()); }
       }
     }
-    toggleDiceRoller({ rollMode: 'attackDamage', initialDice: dicePool, description: `Damage for ${weaponName} (${formulaParts.join(' + ')})` });
+    toggleDiceRoller({ rollMode: 'attackDamage', initialDice: dicePool, description: `Damage: ${weaponName} (${formulaParts.join(' + ')})` });
   };
 
-  const handleSkillRoll = (skillName: string, skillValue: number, isAffected: boolean) => {
-    toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `${skillName} Check`, requiresBane: isAffected, skillName });
+  // Specific Handler for Attacks
+  const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean) => {
+    toggleDiceRoller({ 
+      initialDice: ['d20'], 
+      rollMode: 'skillCheck', 
+      targetValue: skillValue, 
+      description: `Attack: ${weaponName} (${skillName})`, 
+      requiresBane: isAffected, 
+      skillName 
+    });
   };
   
   const handleSaveNotes = async (notes: any) => {
@@ -219,7 +227,7 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                   <th className="px-3 py-2 border-b border-[#1a472a]/20">Damage</th>
                   <th className="px-3 py-2 border-b border-[#1a472a]/20">Durability</th>
                   <th className="px-3 py-2 border-b border-[#1a472a]/20">Features</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20 text-right">Roll</th>
+                  <th className="px-3 py-2 border-b border-[#1a472a]/20 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
@@ -246,22 +254,33 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                       <td className="px-3 py-2 text-stone-600 text-xs text-center">{weaponDetails?.durability || '-'}</td>
                       <td className="px-3 py-2 text-[10px] text-stone-500 max-w-[150px]">{formatItemFeatures(weapon.features)}</td>
                       <td className="px-3 py-2 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          
+                          {/* DAMAGE BUTTON (Touch Friendly) */}
                           {weapon.damage && (
-                            <button onClick={() => handleDamageRoll(weapon.name, weapon.damage!)} className="p-1 text-[#8b2e2e] hover:bg-red-50 rounded" title="Roll Damage">
+                            <button 
+                              onClick={() => handleDamageRoll(weapon.name, weapon.damage!)} 
+                              className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation" 
+                              title="Roll for damage"
+                            >
                               <Dices className="w-4 h-4" />
+                              <span className="text-xs font-bold uppercase tracking-wide">Roll Damage</span>
                             </button>
                           )}
+
+                          {/* ATTACK BUTTON (Touch Friendly & Explicit) */}
                           {skillName && skillValue !== null && (
-                            <div className="flex items-center gap-1 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
-                               <span className="text-[10px] uppercase font-bold text-stone-500">{skillName}</span>
-                               <button 
-                                 onClick={() => handleSkillRoll(skillName, skillValue!, isAffected)} 
-                                 className={`font-bold text-sm hover:underline ${isAffected ? 'text-red-600' : 'text-[#1a472a]'}`}
-                               >
-                                 {skillValue}
-                               </button>
-                            </div>
+                            <button 
+                              onClick={() => handleAttackRoll(weapon.name, skillName, skillValue!, isAffected)} 
+                              title={`Attack with ${weapon.name}`}
+                              className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}
+                            >
+                              <Crosshair className="w-4 h-4" />
+                              <div className="flex flex-col items-start leading-none -mt-0.5">
+                                <span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{skillName}</span>
+                                <span className="text-sm font-bold">Roll {skillValue}</span>
+                              </div>
+                            </button>
                           )}
                         </div>
                       </td>
