@@ -7,32 +7,36 @@ import { calculateMovement } from '../../lib/movement';
 // --- CONFIGURATION ---
 const SHEET_IMAGE_URL = '/assets/dragonbane-sheet-bg.jpg';
 
-// SET THIS TO TRUE TO SEE RED BOXES & GRID FOR ALIGNMENT
+// Toggle this to see the red grid again if needed
 const DEBUG_MODE = true; 
 
-// Coordinate Definitions (X, Y in mm)
-// Tweak these values while DEBUG_MODE is true to align perfectly.
+// Coordinate Definitions (X, Y in mm) based on the grid screenshot
 const SHEET_LAYOUT = {
   header: {
-    name: { x: 105, y: 36, size: 20, align: 'center', maxWidth: 80 },
+    // Name is roughly at Y=38 based on grid
+    name: { x: 105, y: 39, size: 20, align: 'center', maxWidth: 80 },
+    // Kin/Prof/Age row is around Y=19-25
     kin: { x: 42, y: 19, size: 10 },
     age: { x: 80, y: 19, size: 10 },
     profession: { x: 42, y: 25, size: 10 },
     weakness: { x: 42, y: 31, size: 9, maxWidth: 60 },
-    appearance: { x: 145, y: 19, size: 9, maxWidth: 55, lineHeight: 4 },
+    // Appearance box starts X=135, Y=18
+    appearance: { x: 135, y: 18, size: 9, maxWidth: 65, lineHeight: 4 },
   },
   attributes: {
-    y: 49.5, // Vertical center for all attribute circles
+    // Grid shows center of circles is at Y=52
+    y: 52, 
     str: 36.5,
     con: 61.5,
     agl: 86.5,
     int: 111.5,
     wil: 136.5,
     cha: 161.5,
-    size: 14, // Font size
+    size: 14,
   },
   conditions: {
-    y: 57, // Vertical center for checkboxes
+    // Checkboxes are at Y=60
+    y: 60, 
     exhausted: 40.5,
     sickly: 65.5,
     dazed: 90.5,
@@ -41,35 +45,59 @@ const SHEET_LAYOUT = {
     disheartened: 165.5,
   },
   derived: {
-    y: 72,
+    y: 75, // Grid shows banners at Y=75
     strBonus: 50,
     aglBonus: 110,
     movement: 170,
   },
   lists: {
-    skillsStart: { x: 65, y: 92 }, // Start of left column checkboxes
-    skillsLevelX: 82,              // X position for skill level number
-    skillsLineHeight: 5.85,        // Distance between lines
+    // Skills Start at Y=115 (Acrobatics)
+    skillsStart: { x: 65, y: 115 }, 
+    skillsLevelX: 82,              
+    // 20 skills fit between 115 and 220 -> ~5.5mm spacing
+    skillsLineHeight: 5.5,        
     
-    weaponSkillsStart: { x: 123, y: 92 }, // Start of right column
+    weaponSkillsStart: { x: 123, y: 115 }, 
     weaponLevelX: 140,
     
-    secondarySkillsStart: { x: 125, y: 161 },
-    secondaryLineHeight: 5.9,
+    // Secondary Skills start at Y=177 (below the label)
+    secondarySkillsStart: { x: 125, y: 177 },
+    secondaryLineHeight: 6,
 
-    inventoryStart: { x: 160, y: 92 },
-    inventoryLineHeight: 5.9,
+    // Inventory Line 1 is at Y=113
+    inventoryStart: { x: 160, y: 113 },
+    inventoryLineHeight: 6, // 10 lines fit in ~60mm
     
-    weaponsStart: { x: 15, y: 247.5 },
-    weaponsLineHeight: 8.2,
+    // Weapons Table Row 1 is at Y=268
+    weaponsStart: { x: 15, y: 268 },
+    weaponsLineHeight: 8,
+  },
+  abilities: {
+    // Blank area starts around Y=110
+    x: 15,
+    y: 110,
+    maxWidth: 55,
   },
   vitals: {
+    // HP/WP are in the shapes at bottom right
     hp_x: 185, hp_y: 228,
     wp_x: 185, wp_y: 209,
-    money_y: 178,
-    money_gold_x: 35,
-    money_silver_y: 187,
-    money_copper_y: 196,
+    // Money boxes
+    money_y: 195, // Center of copper? No, let's look at grid
+    // Gold Y=193, Silver Y=202, Copper Y=211 ? 
+    // Actually in screenshot: Gold ~193, Silver ~202, Copper ~211
+    money_gold_y: 193,
+    money_silver_y: 202,
+    money_copper_y: 211,
+    money_x: 35,
+  },
+  armor: {
+      name_x: 45, name_y: 235,
+      rating_x: 27, rating_y: 240
+  },
+  helmet: {
+      name_x: 105, name_y: 235,
+      rating_x: 88, rating_y: 240
   }
 };
 
@@ -90,7 +118,6 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
         format: 'a4'
       });
 
-      // 1. Load Background Image
       const img = new Image();
       img.src = SHEET_IMAGE_URL;
       await new Promise((resolve, reject) => {
@@ -102,29 +129,17 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
       const height = 297;
       doc.addImage(img, 'JPEG', 0, 0, width, height);
 
-      // --- DEBUG GRID HELPER ---
       if (DEBUG_MODE) {
-        doc.setDrawColor(255, 0, 0); // Red
+        doc.setDrawColor(255, 0, 0);
         doc.setLineWidth(0.1);
         doc.setFontSize(8);
-        // Vertical Lines every 10mm
-        for (let i = 0; i < width; i += 10) {
-          doc.line(i, 0, i, height);
-          doc.text(i.toString(), i, 5);
-        }
-        // Horizontal Lines every 10mm
-        for (let i = 0; i < height; i += 10) {
-          doc.line(0, i, width, i);
-          doc.text(i.toString(), 2, i);
-        }
+        for (let i = 0; i < width; i += 10) { doc.line(i, 0, i, height); doc.text(i.toString(), i, 5); }
+        for (let i = 0; i < height; i += 10) { doc.line(0, i, width, i); doc.text(i.toString(), 2, i); }
       }
 
-      // 2. Set Default Font
       doc.setFont('times', 'bold');
       doc.setTextColor(40, 40, 40);
 
-      // --- TEXT RENDERER HELPER ---
-      // This helper draws the text AND a debug box if enabled
       const drawText = (
         val: string | number | undefined | null, 
         x: number, 
@@ -139,26 +154,16 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
         
         if (DEBUG_MODE) {
            doc.setDrawColor(255, 0, 0);
-           // Draw a small crosshair at the anchor point
            doc.line(x - 2, y, x + 2, y);
            doc.line(x, y - 2, x, y + 2);
         }
 
         if (maxWidth && str.length > 0) {
-           // Handle text wrapping if maxWidth is provided
-           // We use splitTextToSize to wrap, then loop to draw lines
            const lines = doc.splitTextToSize(str, maxWidth);
            const lineHeight = SHEET_LAYOUT.header.appearance.lineHeight || 4;
            lines.forEach((line: string, i: number) => {
               doc.text(line, x, y + (i * lineHeight), { align });
            });
-           
-           if(DEBUG_MODE) {
-             // Draw box around expected text area
-             const h = lines.length * 4;
-             doc.rect(x, y - fontSize/3, maxWidth, h); 
-           }
-
         } else {
            doc.text(str, x, y, { align });
         }
@@ -166,7 +171,7 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
 
       // --- FILLING THE SHEET ---
 
-      // 1. Header Details
+      // 1. Header
       const h = SHEET_LAYOUT.header;
       drawText(character.name, h.name.x, h.name.y, h.name.size, 'center' as 'center');
       drawText(character.kin, h.kin.x, h.kin.y, h.kin.size);
@@ -177,23 +182,21 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
 
       // 2. Attributes
       const att = SHEET_LAYOUT.attributes;
-      const attY = att.y;
-      drawText(character.attributes?.STR, att.str, attY, att.size, 'center');
-      drawText(character.attributes?.CON, att.con, attY, att.size, 'center');
-      drawText(character.attributes?.AGL, att.agl, attY, att.size, 'center');
-      drawText(character.attributes?.INT, att.int, attY, att.size, 'center');
-      drawText(character.attributes?.WIL, att.wil, attY, att.size, 'center');
-      drawText(character.attributes?.CHA, att.cha, attY, att.size, 'center');
+      drawText(character.attributes?.STR, att.str, att.y, att.size, 'center');
+      drawText(character.attributes?.CON, att.con, att.y, att.size, 'center');
+      drawText(character.attributes?.AGL, att.agl, att.y, att.size, 'center');
+      drawText(character.attributes?.INT, att.int, att.y, att.size, 'center');
+      drawText(character.attributes?.WIL, att.wil, att.y, att.size, 'center');
+      drawText(character.attributes?.CHA, att.cha, att.y, att.size, 'center');
 
       // 3. Conditions
       const cond = SHEET_LAYOUT.conditions;
-      const condY = cond.y;
-      if (character.conditions?.exhausted) drawText('X', cond.exhausted, condY, 14, 'center');
-      if (character.conditions?.sickly) drawText('X', cond.sickly, condY, 14, 'center');
-      if (character.conditions?.dazed) drawText('X', cond.dazed, condY, 14, 'center');
-      if (character.conditions?.angry) drawText('X', cond.angry, condY, 14, 'center');
-      if (character.conditions?.scared) drawText('X', cond.scared, condY, 14, 'center');
-      if (character.conditions?.disheartened) drawText('X', cond.disheartened, condY, 14, 'center');
+      if (character.conditions?.exhausted) drawText('X', cond.exhausted, cond.y, 14, 'center');
+      if (character.conditions?.sickly) drawText('X', cond.sickly, cond.y, 14, 'center');
+      if (character.conditions?.dazed) drawText('X', cond.dazed, cond.y, 14, 'center');
+      if (character.conditions?.angry) drawText('X', cond.angry, cond.y, 14, 'center');
+      if (character.conditions?.scared) drawText('X', cond.scared, cond.y, 14, 'center');
+      if (character.conditions?.disheartened) drawText('X', cond.disheartened, cond.y, 14, 'center');
 
       // 4. Derived Ratings
       const der = SHEET_LAYOUT.derived;
@@ -204,9 +207,7 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
       drawText(aglBonus, der.aglBonus, der.y, 12, 'center');
       drawText(calculateMovement(character.kin, character.attributes?.AGL), der.movement, der.y, 12, 'center');
 
-      // 5. Skills Logic
-      // Hardcoded mapping of "Sheet Slot" to "Skill Name"
-      // This ensures we print on the correct line even if the character DB object has missing skills
+      // 5. Skills
       const coreSkillsList = [
         'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 
         'Bushcraft', 'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 
@@ -223,23 +224,18 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
       const lists = SHEET_LAYOUT.lists;
       const charSkills = character.skill_levels || {};
 
-      // General Skills
       coreSkillsList.forEach((skillName, index) => {
         const yPos = lists.skillsStart.y + (index * lists.skillsLineHeight);
-        // Find skill case-insensitive
         const key = Object.keys(charSkills).find(k => k.toLowerCase() === skillName.toLowerCase());
         
         if (key) {
-           // Trained Check
            if (character.trained_skills?.includes(key)) {
              drawText('X', lists.skillsStart.x, yPos, 12, 'center');
            }
-           // Level
            drawText(charSkills[key], lists.skillsLevelX, yPos, 11, 'center');
         }
       });
 
-      // Weapon Skills
       weaponSkillsList.forEach((skillName, index) => {
         const yPos = lists.weaponSkillsStart.y + (index * lists.skillsLineHeight);
         const key = Object.keys(charSkills).find(k => k.toLowerCase() === skillName.toLowerCase());
@@ -251,11 +247,10 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
         }
       });
 
-      // Secondary Skills (Magic schools, etc)
       const usedSkills = [...coreSkillsList, ...weaponSkillsList].map(s => s.toLowerCase());
       const secondarySkills = Object.entries(charSkills)
         .filter(([k]) => !usedSkills.includes(k.toLowerCase()))
-        .slice(0, 5); // Max 5 lines on sheet
+        .slice(0, 5);
 
       secondarySkills.forEach(([name, level], index) => {
         const yPos = lists.secondarySkillsStart.y + (index * lists.secondaryLineHeight);
@@ -265,46 +260,64 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
 
       // 6. Abilities & Spells
       const abilities = (character.heroic_abilities || []).join(', ');
-      // Spells mapping if needed...
-      const spellText = abilities; // Placeholder, you can append spells here
+      // Get spells if Mage
+      let spellText = abilities;
+      if (character.spells) {
+         // Add Tricks
+         if(character.spells.general && character.spells.general.length > 0) {
+             spellText += `\nTricks: ${character.spells.general.join(', ')}`;
+         }
+         // Add School Spells
+         if(character.spells.school && character.spells.school.spells.length > 0) {
+             spellText += `\n${character.spells.school.name}: ${character.spells.school.spells.join(', ')}`;
+         }
+      }
+
+      const ab = SHEET_LAYOUT.abilities;
       doc.setFontSize(9);
-      // This is a large text area, split text
-      const abilityLines = doc.splitTextToSize(spellText, 55);
-      doc.text(abilityLines, 15, 90);
+      const abilityLines = doc.splitTextToSize(spellText, ab.maxWidth);
+      doc.text(abilityLines, ab.x, ab.y);
 
       // 7. Inventory
       const items = character.equipment?.inventory || [];
-      // Combine stackable items into strings
       const inventoryLines = items.map(i => i.quantity > 1 ? `${i.name} (x${i.quantity})` : i.name);
       
       inventoryLines.slice(0, 10).forEach((line, index) => {
         const yPos = lists.inventoryStart.y + (index * lists.inventoryLineHeight);
         drawText(line, lists.inventoryStart.x, yPos, 9);
       });
+      
+      // Memento
+      if (character.memento) {
+          drawText(character.memento, lists.inventoryStart.x, 175, 8);
+      }
 
       // 8. Money
       const v = SHEET_LAYOUT.vitals;
-      drawText(character.equipment?.money?.gold || 0, v.money_gold_x, v.money_y, 11, 'center');
-      drawText(character.equipment?.money?.silver || 0, v.money_gold_x, v.money_silver_y, 11, 'center');
-      drawText(character.equipment?.money?.copper || 0, v.money_gold_x, v.money_copper_y, 11, 'center');
+      drawText(character.equipment?.money?.gold || 0, v.money_x, v.money_gold_y, 11, 'center');
+      drawText(character.equipment?.money?.silver || 0, v.money_x, v.money_silver_y, 11, 'center');
+      drawText(character.equipment?.money?.copper || 0, v.money_x, v.money_copper_y, 11, 'center');
 
-      // 9. Vitals (HP/WP)
+      // 9. Vitals
       drawText(character.max_hp, v.hp_x, v.hp_y, 14, 'center');
       drawText(character.max_wp, v.wp_x, v.wp_y, 14, 'center');
 
       // 10. Armor & Helmet
+      const ar = SHEET_LAYOUT.armor;
+      const hl = SHEET_LAYOUT.helmet;
+      
       const armorName = character.equipment?.equipped?.armor 
         ? items.find(i => i.name === character.equipment!.equipped!.armor)?.name 
         : character.equipment?.equipped?.armor || "";
       
-      // Get Rating (You might need to fetch this from your gameItems query or pass it in)
-      // For now, placeholder or name
-      drawText(armorName, 45, 215, 9);
+      drawText(armorName, ar.name_x, ar.name_y, 9);
+      // Ideally get rating from DB, for now manual or empty if not in object
+      // drawText(rating, ar.rating_x, ar.rating_y, 12, 'center');
       
       const helmetName = character.equipment?.equipped?.helmet || "";
-      drawText(helmetName, 105, 215, 9);
+      drawText(helmetName, hl.name_x, hl.name_y, 9);
 
-      // 11. Weapons Table
+      // 11. Weapons
       const weapons = character.equipment?.equipped?.weapons || [];
       weapons.slice(0, 4).forEach((w, index) => {
          const yPos = lists.weaponsStart.y + (index * lists.weaponsLineHeight);
@@ -315,12 +328,10 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
          drawText(w.damage, 95, yPos, 9, 'center');
          drawText(w.durability, 110, yPos, 9, 'center');
          
-         // Features string
          const feats = Array.isArray(w.features) ? w.features.join(', ') : w.features;
          drawText(feats, 125, yPos, 8);
       });
 
-      // --- SAVE ---
       doc.save(`${character.name.replace(/\s+/g, '_')}_Dragonbane.pdf`);
 
     } catch (err) {
