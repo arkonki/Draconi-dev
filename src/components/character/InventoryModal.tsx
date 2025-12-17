@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Package, Search, ShoppingBag, Coins, Shield, Sword,
-  ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, CheckSquare, MinusCircle,
+  ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, 
+  CheckSquare, MinusCircle, MinusSquare, // <--- Added MinusSquare here
   Info, Target, Star, Heart, Zap, AlertTriangle, Weight, ChevronDown, ChevronUp,
   Feather, Dices, Utensils, MoreVertical, Flame, Anchor
 } from 'lucide-react';

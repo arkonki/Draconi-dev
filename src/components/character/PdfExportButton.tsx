@@ -8,24 +8,25 @@ import { calculateMovement } from '../../lib/movement';
 const SHEET_IMAGE_URL = '/assets/dragonbane-sheet-bg.jpg';
 
 // Toggle this to see the red grid again if needed
-const DEBUG_MODE = true; 
+const DEBUG_MODE = false; 
 
 // Coordinate Definitions (X, Y in mm) based on the grid screenshot
 const SHEET_LAYOUT = {
   header: {
-    // Name is roughly at Y=38 based on grid
-    name: { x: 105, y: 39, size: 20, align: 'center', maxWidth: 80 },
-    // Kin/Prof/Age row is around Y=19-25
-    kin: { x: 42, y: 19, size: 10 },
-    age: { x: 80, y: 19, size: 10 },
-    profession: { x: 42, y: 25, size: 10 },
-    weakness: { x: 42, y: 31, size: 9, maxWidth: 60 },
-    // Appearance box starts X=135, Y=18
+    // Name centered on the scroll
+    name: { x: 105, y: 42, size: 20, align: 'center', maxWidth: 80 },
+    
+    // Top Left Info Block (aligned to baselines)
+    kin: { x: 42, y: 21, size: 10 },
+    age: { x: 80, y: 21, size: 10 },
+    profession: { x: 42, y: 28, size: 10 },
+    weakness: { x: 42, y: 36, size: 9, maxWidth: 60 },
+    
+    // Appearance (Top Right)
     appearance: { x: 135, y: 18, size: 9, maxWidth: 65, lineHeight: 4 },
   },
   attributes: {
-    // Grid shows center of circles is at Y=52
-    y: 52, 
+    y: 52, // Vertical center for all attribute circles
     str: 36.5,
     con: 61.5,
     agl: 86.5,
@@ -35,8 +36,7 @@ const SHEET_LAYOUT = {
     size: 14,
   },
   conditions: {
-    // Checkboxes are at Y=60
-    y: 60, 
+    y: 60, // Vertical center for checkboxes
     exhausted: 40.5,
     sickly: 65.5,
     dazed: 90.5,
@@ -45,58 +45,57 @@ const SHEET_LAYOUT = {
     disheartened: 165.5,
   },
   derived: {
-    y: 75, // Grid shows banners at Y=75
+    y: 75, // Centered in the green banners
     strBonus: 50,
     aglBonus: 110,
     movement: 170,
   },
   lists: {
-    // Skills Start at Y=115 (Acrobatics)
+    // Skills (Left Column)
     skillsStart: { x: 65, y: 115 }, 
-    skillsLevelX: 82,              
-    // 20 skills fit between 115 and 220 -> ~5.5mm spacing
+    skillsLevelX: 84, // Centered in the level box
     skillsLineHeight: 5.5,        
     
+    // Weapon Skills (Right Column)
     weaponSkillsStart: { x: 123, y: 115 }, 
-    weaponLevelX: 140,
+    weaponLevelX: 143, // Centered in the level box
     
-    // Secondary Skills start at Y=177 (below the label)
-    secondarySkillsStart: { x: 125, y: 177 },
+    // Secondary Skills (Below Weapon Skills)
+    secondarySkillsStart: { x: 125, y: 182 }, // Moved down to clear label
     secondaryLineHeight: 6,
 
-    // Inventory Line 1 is at Y=113
+    // Inventory (Far Right Column)
     inventoryStart: { x: 160, y: 113 },
-    inventoryLineHeight: 6, // 10 lines fit in ~60mm
+    inventoryLineHeight: 6,
+    mementoY: 182, // Moved down to clear label
     
-    // Weapons Table Row 1 is at Y=268
+    // Weapons Table (Bottom)
     weaponsStart: { x: 15, y: 268 },
     weaponsLineHeight: 8,
   },
   abilities: {
-    // Blank area starts around Y=110
+    // Abilities & Spells (Far Left Column)
     x: 15,
-    y: 110,
+    y: 116, // Moved down to clear header
     maxWidth: 55,
   },
   vitals: {
-    // HP/WP are in the shapes at bottom right
+    // HP/WP shapes
     hp_x: 185, hp_y: 228,
     wp_x: 185, wp_y: 209,
-    // Money boxes
-    money_y: 195, // Center of copper? No, let's look at grid
-    // Gold Y=193, Silver Y=202, Copper Y=211 ? 
-    // Actually in screenshot: Gold ~193, Silver ~202, Copper ~211
+    // Money
+    money_y: 195, 
     money_gold_y: 193,
     money_silver_y: 202,
     money_copper_y: 211,
     money_x: 35,
   },
   armor: {
-      name_x: 45, name_y: 235,
+      name_x: 45, name_y: 242, // Moved down to sit on line
       rating_x: 27, rating_y: 240
   },
   helmet: {
-      name_x: 105, name_y: 235,
+      name_x: 105, name_y: 242, // Moved down to sit on line
       rating_x: 88, rating_y: 240
   }
 };
@@ -260,14 +259,11 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
 
       // 6. Abilities & Spells
       const abilities = (character.heroic_abilities || []).join(', ');
-      // Get spells if Mage
       let spellText = abilities;
       if (character.spells) {
-         // Add Tricks
          if(character.spells.general && character.spells.general.length > 0) {
              spellText += `\nTricks: ${character.spells.general.join(', ')}`;
          }
-         // Add School Spells
          if(character.spells.school && character.spells.school.spells.length > 0) {
              spellText += `\n${character.spells.school.name}: ${character.spells.school.spells.join(', ')}`;
          }
@@ -289,7 +285,7 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
       
       // Memento
       if (character.memento) {
-          drawText(character.memento, lists.inventoryStart.x, 175, 8);
+          drawText(character.memento, lists.inventoryStart.x, lists.mementoY, 8);
       }
 
       // 8. Money
@@ -303,18 +299,17 @@ export const PdfExportButton: React.FC<PdfExportButtonProps> = ({ character, var
       drawText(character.max_wp, v.wp_x, v.wp_y, 14, 'center');
 
       // 10. Armor & Helmet
-      const ar = SHEET_LAYOUT.armor;
-      const hl = SHEET_LAYOUT.helmet;
-      
       const armorName = character.equipment?.equipped?.armor 
         ? items.find(i => i.name === character.equipment!.equipped!.armor)?.name 
         : character.equipment?.equipped?.armor || "";
       
+      const ar = SHEET_LAYOUT.armor;
       drawText(armorName, ar.name_x, ar.name_y, 9);
-      // Ideally get rating from DB, for now manual or empty if not in object
+      // Rating placeholder
       // drawText(rating, ar.rating_x, ar.rating_y, 12, 'center');
       
       const helmetName = character.equipment?.equipped?.helmet || "";
+      const hl = SHEET_LAYOUT.helmet;
       drawText(helmetName, hl.name_x, hl.name_y, 9);
 
       // 11. Weapons
