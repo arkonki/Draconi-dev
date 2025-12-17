@@ -12,28 +12,18 @@ export function MagicSelection() {
   const [magicSchools, setMagicSchools] = useState<{ id: string; name: string }[]>([]);
   const [schoolsLoading, setSchoolsLoading] = useState(true);
 
-  // --- 2. Initialize Selection from Store (Fixes "Back" button issue) ---
-  // We need to parse the stored structure back into simple arrays of names
-  const initialTricks = useMemo(() => {
-    // Logic: Grab tricks from general array (tricks have rank 0, usually implies type 'trick')
-    // Since we don't have the full spell objects yet, we might have to rely on what was saved.
-    // Simpler approach: relying on the fact that we saved them. 
-    // Ideally, we filter character.spells.general for tricks, but for now let's assume 
-    // if the user comes back, we might need to rely on the hook data to separate them.
-    // For this implementation, we will perform the separation once spell data loads.
-    return []; 
-  }, []);
-
+  // --- 2. Initialize Selection from Store ---
   const [selectedTricks, setSelectedTricks] = useState<string[]>([]);
   const [selectedSpells, setSelectedSpells] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'general' | 'school'>('all');
-  const [tooltipContent, setTooltipContent] = useState<string | null>(null);
+  
+  // Tooltip State (Mobile Friendly)
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null); // Store spell ID/Name
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
 
   // --- 3. Robust Mage Detection ---
-  // Don't rely on the name containing "Mage". Rely on the ID existing.
   const magicSchoolParam = character.magicSchool || null;
   const isMage = !!magicSchoolParam;
   
@@ -48,6 +38,13 @@ export function MagicSelection() {
     });
   }, []);
 
+  // Close tooltip on scroll
+  useEffect(() => {
+    const handleScroll = () => setActiveTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
   const schoolNameMap = useMemo(() => {
     return magicSchools.reduce((acc, school) => {
       acc[school.id] = school.name;
@@ -58,7 +55,6 @@ export function MagicSelection() {
   // --- 4. Initialize State from Global Store when Data is Ready ---
   useEffect(() => {
     if (!spellsLoading && tricks && spells && !isInitialized && character.spells) {
-      // Re-hydrate local state from global store
       const allSavedSpells = [
         ...(character.spells.general || []),
         ...(character.spells.school?.spells || [])
@@ -74,17 +70,11 @@ export function MagicSelection() {
   }, [spellsLoading, tricks, spells, isInitialized, character.spells]);
 
 
-  // --- 5. Auto-Sync to Store (Replaces manual Save button) ---
+  // --- 5. Auto-Sync to Store ---
   useEffect(() => {
-    // Only update if we have actually interacted or initialized
     if (spellsLoading || schoolsLoading) return;
 
     const schoolName = magicSchoolParam ? schoolNameMap[magicSchoolParam] : "Unknown School";
-    
-    // Separate selected items back into the structure the Wizard expects
-    // Note: The structure used in handleSave previously was:
-    // general: [tricks + general rank 1s]
-    // school: { name, spells: [school rank 1s] }
     
     const generalSpellsAndTricks = [
       ...selectedTricks,
@@ -151,13 +141,27 @@ export function MagicSelection() {
     }
   };
 
-  // Tooltip handlers
-  const handleMouseEnter = (e: React.MouseEvent, description: string) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setTooltipContent(description); 
-    setTooltipPosition({ top: rect.top, left: rect.left + rect.width / 2 });
+  // Mobile Friendly Tooltip Handler
+  const handleInfoClick = (e: React.MouseEvent, spellId: string) => {
+    e.stopPropagation(); // Stop row click
+    
+    if (activeTooltip === spellId) {
+      setActiveTooltip(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      // Ensure tooltip stays within bounds
+      let leftPos = rect.left + rect.width / 2;
+      if (leftPos < 140) leftPos = 140; 
+      if (leftPos > window.innerWidth - 140) leftPos = window.innerWidth - 140;
+
+      setTooltipPosition({ top: rect.top, left: leftPos });
+      setActiveTooltip(spellId);
+    }
   };
-  const handleMouseLeave = () => { setTooltipContent(null); setTooltipPosition(null); };
+
+  const handleBackgroundClick = () => {
+    setActiveTooltip(null);
+  };
   
   const renderSpellRow = (spell: DBSpell, type: 'trick' | 'spell') => {
     const isSelected = (type === 'trick' ? selectedTricks : selectedSpells).includes(spell.name);
@@ -165,7 +169,6 @@ export function MagicSelection() {
     const isDisabled = selectionCount >= 3 && !isSelected;
     const highlightColor = type === 'trick' ? 'purple' : 'blue';
     
-    // Resolve school name safely
     const schoolName = spell.magic_schools?.name || (spell.school_id ? schoolNameMap[spell.school_id] : null) || "General";
 
     return (
@@ -181,11 +184,16 @@ export function MagicSelection() {
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <h5 className="font-medium text-gray-800 text-sm">{spell.name}</h5>
-              <Info 
-                className="w-3.5 h-3.5 text-gray-400 hover:text-blue-500 cursor-help" 
-                onMouseEnter={(e) => handleMouseEnter(e, spell.description)}
-                onMouseLeave={handleMouseLeave}
-              />
+              
+              {/* Info Button */}
+              <button
+                type="button"
+                onClick={(e) => handleInfoClick(e, spell.id)}
+                className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === spell.id ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`}
+              >
+                <Info size={14} />
+              </button>
+
             </div>
           </div>
         </div>
@@ -199,8 +207,15 @@ export function MagicSelection() {
 
   const currentSchoolName = magicSchoolParam ? schoolNameMap[magicSchoolParam] : "General";
 
+  // Helper to find description
+  const getActiveDescription = () => {
+    if (!activeTooltip) return null;
+    const spell = [...(tricks || []), ...(spells || [])].find(s => s.id === activeTooltip);
+    return spell?.description;
+  };
+
   return (
-    <div className="space-y-6" onClick={handleMouseLeave}>
+    <div className="space-y-6" onClick={handleBackgroundClick}>
       <div className="prose">
         <h3 className="text-xl font-bold mb-2">Select Magic</h3>
         <p className="text-gray-600 text-sm">
@@ -218,7 +233,7 @@ export function MagicSelection() {
                {selectedTricks.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto">
+          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick}>
             {filteredTricks.map((trick) => renderSpellRow(trick, 'trick'))}
           </div>
         </div>
@@ -233,6 +248,7 @@ export function MagicSelection() {
                     value={filter} 
                     onChange={(e) => setFilter(e.target.value as any)} 
                     className="text-xs py-1 pl-2 pr-6 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                    onClick={(e) => e.stopPropagation()} // Prevent closing tooltip when changing filter
                   >
                     <option value="all">All</option>
                     <option value="general">General</option>
@@ -244,7 +260,7 @@ export function MagicSelection() {
                {selectedSpells.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto">
+          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick}>
             {filteredSpells.length > 0 ? (
               filteredSpells.map((spell) => renderSpellRow(spell, 'spell'))
             ) : (
@@ -254,7 +270,7 @@ export function MagicSelection() {
         </div>
       </div>
 
-      {/* Completion Status Indicator (No Save Button needed) */}
+      {/* Completion Status Indicator */}
       <div className={`p-3 rounded-lg flex items-center gap-2 transition-colors ${
         selectedTricks.length === 3 && selectedSpells.length === 3 
           ? 'bg-green-50 border border-green-200 text-green-800' 
@@ -273,9 +289,15 @@ export function MagicSelection() {
         )}
       </div>
 
-      {tooltipContent && tooltipPosition && (
-        <div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className="fixed -translate-x-1/2 -translate-y-full mb-2 w-64 p-3 bg-gray-900 text-white text-xs rounded shadow-xl z-[100] pointer-events-none">
-          {tooltipContent}
+      {/* Tooltip Overlay */}
+      {activeTooltip && tooltipPosition && (
+        <div 
+          style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
+          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[100] animate-in fade-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()} // Prevent clicking the tooltip itself from closing it
+        >
+          <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          {getActiveDescription() || "No description available."}
         </div>
       )}
     </div>

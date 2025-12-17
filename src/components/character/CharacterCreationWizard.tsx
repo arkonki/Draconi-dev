@@ -139,11 +139,11 @@ export function CharacterCreationWizard() {
       ].filter(Boolean);
 
       // --- 3. HYDRATE/CLEAN EQUIPMENT DATA ---
-      // This matches the logic expected by the InventoryModal (parseItemString)
-      // to ensure the DB gets clean Objects with IDs, preventing crashes.
-      
       const startingItemsRaw = finalCharacterState.startingEquipment?.items || [];
-      const startingMoney = finalCharacterState.startingEquipment?.money || { gold: 0, silver: 0, copper: 0 };
+      
+      // FIX: Retrieve money from the correct location in the store (equipment.money)
+      // GearSelection updates 'equipment', not 'startingEquipment' for the money calculation.
+      const startingMoney = finalCharacterState.equipment?.money || { gold: 0, silver: 0, copper: 0 };
 
       const initialInventory = startingItemsRaw.map(item => {
         let name = '';
@@ -166,7 +166,7 @@ export function CharacterCreationWizard() {
             quantity = item.quantity || 1;
         }
 
-        if (!name) return null; // Filter out invalid/empty names
+        if (!name) return null;
 
         return {
           id: generateId(),
@@ -175,8 +175,13 @@ export function CharacterCreationWizard() {
         };
       }).filter((i): i is NonNullable<typeof i> => i !== null);
 
+      // Construct the final object matching the JSON structure you provided
       const validEquipment = {
-        inventory: initialInventory,
+        money: {
+            gold: startingMoney.gold || 0,
+            silver: startingMoney.silver || 0,
+            copper: startingMoney.copper || 0
+        },
         equipped: {
           armor: undefined,
           helmet: undefined,
@@ -185,7 +190,7 @@ export function CharacterCreationWizard() {
           containers: [],
           animals: []
         },
-        money: startingMoney
+        inventory: initialInventory
       };
 
       // --- 4. Build Payload ---
@@ -200,8 +205,9 @@ export function CharacterCreationWizard() {
         trained_skills: finalCharacterState.trainedSkills || [],
         skill_levels: initialSkillLevels,
         
-        equipment: validEquipment, // Validated structure
+        equipment: validEquipment, 
         
+        // Keep record of what was selected in text form
         starting_equipment: finalCharacterState.startingEquipment || { items: [], money: { gold: 0, silver: 0, copper: 0 } },
         
         appearance: finalCharacterState.appearance?.trim(),

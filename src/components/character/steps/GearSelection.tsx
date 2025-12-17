@@ -30,6 +30,10 @@ export function GearSelection() {
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [errorOptions, setErrorOptions] = useState('');
 
+  // Tooltip State (Mobile Friendly)
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null); // Store item name
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+
   const { data: allItems = [], isLoading: isLoadingItems, error: errorItems } = useQuery<GameItem[], Error>({
     queryKey: ['gameItems'],
     queryFn: fetchItems,
@@ -73,6 +77,13 @@ export function GearSelection() {
     fetchEquipmentOptions();
   }, [character.profession]);
 
+  // Close tooltip on scroll
+  useEffect(() => {
+    const handleScroll = () => setActiveTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
   const findItemDetails = (itemName: string): GameItem | undefined => {
     const baseItemName = itemName.split(' or ')[0].trim();
     const nameWithoutCount = baseItemName.replace(/^\d+\s+/, '');
@@ -101,6 +112,32 @@ export function GearSelection() {
   const handleOptionSelect = (option: number) => {
     setSelectedOption(option);
     setEquipmentConfirmed(false);
+  };
+
+  // Mobile Friendly Tooltip Handler
+  const handleInfoClick = (e: React.MouseEvent, itemName: string) => {
+    e.stopPropagation();
+    if (activeTooltip === itemName) {
+      setActiveTooltip(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      let leftPos = rect.left + rect.width / 2;
+      
+      if (leftPos < 140) leftPos = 140; 
+      if (leftPos > window.innerWidth - 140) leftPos = window.innerWidth - 140;
+
+      setTooltipPosition({ top: rect.top, left: leftPos });
+      setActiveTooltip(itemName);
+    }
+  };
+
+  const handleBackgroundClick = () => {
+    setActiveTooltip(null);
+  };
+
+  const getActiveItemDetails = () => {
+    if (!activeTooltip) return null;
+    return findItemDetails(activeTooltip);
   };
 
   const handleConfirmEquipment = () => {
@@ -188,7 +225,7 @@ export function GearSelection() {
   if (!character.profession) return <div className="p-6 text-center"><p className="text-gray-600">Please select a profession first.</p></div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" onClick={handleBackgroundClick}>
       <div className="prose">
         <h3 className="text-xl font-bold mb-4">Choose Starting Equipment</h3>
         <p className="text-gray-600">Select one of the equipment packages for your {character.profession}.</p>
@@ -204,7 +241,7 @@ export function GearSelection() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {availableOptions.map((option) => (
-          <div key={option.option} onClick={() => handleOptionSelect(option.option)} className={`p-6 border rounded-lg cursor-pointer transition-all ${selectedOption === option.option ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}>
+          <div key={option.option} onClick={(e) => { e.stopPropagation(); handleOptionSelect(option.option); }} className={`p-6 border rounded-lg cursor-pointer transition-all ${selectedOption === option.option ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}>
             <div className="flex items-center gap-3 mb-4">
               <Package className="w-6 h-6 text-gray-500" />
               <div>
@@ -226,18 +263,16 @@ export function GearSelection() {
                        : (<CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />)}
                       <span>{item}</span>
 
-                      {/* --- FIX: Individual info icon and tooltip for each item --- */}
+                      {/* --- Tooltip Toggle Button --- */}
                       {itemDetails?.effect && (
-                        <span className="relative group flex items-center">
-                          <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help" />
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs bg-gray-800 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-normal z-20 pointer-events-none">
-                            <p className="font-bold">{itemDetails.name}</p>
-                            <p>{itemDetails.effect}</p>
-                            <p className="mt-1 text-gray-300">Weight: {itemDetails.weight}, Cost: {itemDetails.cost}</p>
-                          </div>
-                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleInfoClick(e, item)}
+                          className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === item ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`}
+                        >
+                          <Info size={14} />
+                        </button>
                       )}
-                      {/* --- END OF FIX --- */}
                     </li>
                   );
                 })}
@@ -259,6 +294,28 @@ export function GearSelection() {
          <Backpack className="w-5 h-5" />
          {equipmentConfirmed ? 'Equipment Confirmed' : 'Confirm Equipment Selection'}
        </button>
+
+      {/* Tooltip Overlay */}
+      {activeTooltip && tooltipPosition && (
+        <div 
+          style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
+          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[100] animate-in fade-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          {(() => {
+            const details = getActiveItemDetails();
+            if (!details) return "No details available.";
+            return (
+              <>
+                <p className="font-bold border-b border-gray-700 pb-1 mb-1">{details.name}</p>
+                <p>{details.effect}</p>
+                <p className="mt-1 text-gray-300">Weight: {details.weight}, Cost: {details.cost}</p>
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {showDiceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">

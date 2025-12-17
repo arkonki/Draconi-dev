@@ -151,14 +151,31 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
         </select>
       </div>
 
-      {/* Weight */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
-        <input type="number" value={itemData.weight || ''} onChange={(e) => onChange('weight', parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.1"/>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Weight */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
+          <input type="number" value={itemData.weight || ''} onChange={(e) => onChange('weight', parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.1"/>
+        </div>
+
+        {/* Quantity / Count */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Count / Uses</label>
+          <input 
+            type="number" 
+            value={itemData.quantity || 1} 
+            onChange={(e) => onChange('quantity', parseInt(e.target.value))} 
+            className="w-full px-3 py-2 border rounded-md" 
+            min="1" 
+            placeholder="Default 1"
+          />
+        </div>
       </div>
       
-      {/* --- UPDATED: Equippable and Encumbrance Bonus Fields --- */}
+      {/* --- Updated: Item Flags (Equippable / Consumable) --- */}
       <div className="space-y-4 pt-4 border-t">
+        
+        {/* Equippable Checkbox */}
         <div className="flex items-center">
           <input
             id="equippable"
@@ -168,12 +185,12 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
             className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
           />
           <label htmlFor="equippable" className="ml-2 block text-sm font-medium text-gray-800">
-            Equippable
+            Equippable (Can be worn/wielded)
           </label>
         </div>
 
         {itemData.equippable && (
-          <div>
+          <div className="ml-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Encumbrance Bonus
             </label>
@@ -188,6 +205,20 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
              <p className="text-xs text-gray-500 mt-1">Increases carrying capacity by this amount when equipped.</p>
           </div>
         )}
+
+        {/* Consumable Checkbox */}
+        <div className="flex items-center">
+          <input
+            id="is_consumable"
+            type="checkbox"
+            checked={!!itemData.is_consumable}
+            onChange={(e) => onChange('is_consumable', e.target.checked)}
+            className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+          />
+          <label htmlFor="is_consumable" className="ml-2 block text-sm font-medium text-gray-800">
+            Consumable (Can be 'Used')
+          </label>
+        </div>
       </div>
 
 

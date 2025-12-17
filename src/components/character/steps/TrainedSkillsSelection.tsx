@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { useSkills, GameSkill } from '../../../hooks/useSkills';
-import { CheckCircle2, AlertCircle, Info, Filter, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, Loader2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
@@ -32,15 +32,14 @@ export function TrainedSkillsSelection() {
   const [selectedProfessionSkillNames, setSelectedProfessionSkillNames] = useState<string[]>([]);
   const [selectedAdditionalSkillNames, setSelectedAdditionalSkillNames] = useState<string[]>([]);
   const [step, setStep] = useState<'profession' | 'additional'>('profession');
-  const [skillFilter, setSkillFilter] = useState<'all' | 'general' | 'combat' | 'magic'>('all');
   const [loadedProfessionSkillNames, setLoadedProfessionSkillNames] = useState<string[]>([]);
   const [loadingProfessionSkills, setLoadingProfessionSkills] = useState(false);
   const [professionSkillsError, setProfessionSkillsError] = useState<string | null>(null);
   const [allMagicSchools, setAllMagicSchools] = useState<{id: string, name: string}[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(false);
 
-  // --- NEW: State for the info tooltip ---
-  const [tooltipContent, setTooltipContent] = useState<string | null>(null);
+  // --- Mobile Friendly Tooltip State ---
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
 
   const isMage = useMemo(() => character.profession?.toLowerCase().includes('mage'), [character.profession]);
@@ -54,6 +53,13 @@ export function TrainedSkillsSelection() {
         .finally(() => setLoadingSchools(false));
     }
   }, [isMage]);
+
+  // Close tooltip on scroll
+  useEffect(() => {
+    const handleScroll = () => setActiveTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
   
   const magicSchoolDisplay = useMemo(() => {
     const schoolValue = character.magicSchool;
@@ -89,7 +95,7 @@ export function TrainedSkillsSelection() {
     return basePool.filter(skill => !magicSkillNames.includes(skill.name));
   }, [allSkills, skillsLoading, selectedProfessionSkillNames, isMage, magicSchoolDisplay]);
   
-  // --- NEW: Memos to separate skills into categories ---
+  // --- Memos to separate skills into categories ---
   const filterSkills = (skills: GameSkill[], isCombat: boolean) => skills.filter(s => combatSkillNames.includes(s.name) === isCombat);
 
   const professionGeneralSkills = useMemo(() => filterSkills(availableProfessionSkillsData, false), [availableProfessionSkillsData]);
@@ -112,14 +118,32 @@ export function TrainedSkillsSelection() {
   };
 
   // --- NEW: Tooltip handlers ---
-  const handleMouseEnter = (e: React.MouseEvent, description: string) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setTooltipContent(description); setTooltipPosition({ top: rect.top, left: rect.left + rect.width / 2 });
+  const handleInfoClick = (e: React.MouseEvent, skillId: string) => {
+    e.stopPropagation(); // Prevent triggering row selection
+    if (activeTooltip === skillId) {
+      setActiveTooltip(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      let leftPos = rect.left + rect.width / 2;
+      
+      // Boundary check to keep on screen
+      if (leftPos < 140) leftPos = 140; 
+      if (leftPos > window.innerWidth - 140) leftPos = window.innerWidth - 140;
+
+      setTooltipPosition({ top: rect.top, left: leftPos });
+      setActiveTooltip(skillId);
+    }
   };
-  const handleMouseLeave = () => { setTooltipContent(null); setTooltipPosition(null); };
-  const handleInfoClick = (e: React.MouseEvent, description: string) => {
-    e.stopPropagation();
-    if (tooltipContent === description) { handleMouseLeave(); } else { handleMouseEnter(e, description); }
+
+  const handleBackgroundClick = () => {
+    setActiveTooltip(null);
+  };
+
+  // Helper to find description for active tooltip
+  const getActiveDescription = () => {
+    if (!activeTooltip) return null;
+    const skill = allSkills.find(s => s.id === activeTooltip);
+    return skill?.description;
   };
 
   const renderSkillRow = (skill: GameSkill, type: 'profession' | 'additional') => {
@@ -136,9 +160,13 @@ export function TrainedSkillsSelection() {
           <div className="flex items-center gap-2">
             <h5 className="font-medium text-gray-800">{skill.name}</h5>
             {skill.description && (
-              <div className="p-1" onClick={(e) => handleInfoClick(e, skill.description!)} onMouseEnter={(e) => handleMouseEnter(e, skill.description!)} onMouseLeave={handleMouseLeave}>
-                <Info className="w-4 h-4 text-blue-500 cursor-help" />
-              </div>
+              <button
+                type="button"
+                onClick={(e) => handleInfoClick(e, skill.id)}
+                className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === skill.id ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`}
+              >
+                <Info size={16} />
+              </button>
             )}
           </div>
         </div>
@@ -157,7 +185,7 @@ export function TrainedSkillsSelection() {
   const canContinueProfession = profSkillsCount === professionSkillLimit; const canContinueAdditional = addSkillsCount === additionalSkillLimit;
 
   return (
-    <div className="space-y-6" onClick={handleMouseLeave}>
+    <div className="space-y-6" onClick={handleBackgroundClick}>
       {/* Header and Progress (largely unchanged) */}
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Select Skills</h3>
@@ -166,7 +194,7 @@ export function TrainedSkillsSelection() {
       </div>
       <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg"> <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" /> <div> <h4 className="font-medium text-blue-800 text-sm">Selection Progress</h4> <p className="text-sm text-blue-700">{step === 'profession' ? `Professional Skills: ${profSkillsCount}/${professionSkillLimit}` : `Additional Skills: ${addSkillsCount}/${additionalSkillLimit}`}</p> </div> </div>
 
-      {/* --- NEW: List-based Rendering with Separated Skill Categories --- */}
+      {/* --- List-based Rendering with Separated Skill Categories --- */}
       <div className="border rounded-lg bg-white shadow-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {step === 'profession' ? (
           <>
@@ -201,12 +229,21 @@ export function TrainedSkillsSelection() {
         )}
       </div>
 
-      {/* Continue Button and Warnings (Unchanged) */}
+      {/* Continue Button and Warnings */}
       {((step === 'profession' && !canContinueProfession && profSkillsCount > 0) || (step === 'additional' && !canContinueAdditional && addSkillsCount > 0)) && ( <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg"> <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" /> <div> <h4 className="font-medium text-amber-800 text-sm">Incomplete Selection</h4> <p className="text-sm text-amber-700">{step === 'profession' ? `Please select ${professionSkillLimit - profSkillsCount} more skill(s).` : `Please select ${additionalSkillLimit - addSkillsCount} more skill(s).`}</p> </div> </div> )}
       <button onClick={handleContinue} disabled={(step === 'profession' && !canContinueProfession) || (step === 'additional' && !canContinueAdditional) || loadingProfessionSkills} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"> {loadingProfessionSkills ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />} {step === 'profession' ? 'Continue to Additional Skills' : 'Confirm Skill Selections'} </button>
     
       {/* Tooltip Render */}
-      {tooltipContent && tooltipPosition && ( <div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px`, }} className="fixed -translate-x-1/2 -translate-y-full mb-2 w-72 p-3 bg-gray-800 text-white text-sm rounded-lg shadow-lg z-[60] pointer-events-none"> <p>{tooltipContent}</p> </div> )}
+      {activeTooltip && tooltipPosition && ( 
+        <div 
+          style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
+          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-72 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[60] animate-in fade-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()}
+        > 
+          <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          {getActiveDescription() || "No description available."}
+        </div> 
+      )}
     </div>
   );
 }

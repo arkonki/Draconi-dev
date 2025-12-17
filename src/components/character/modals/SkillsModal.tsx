@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { X, Info, CheckSquare, Target, Swords, GraduationCap, Sparkles, BookOpen } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
 import { useDice } from '../../dice/DiceContext';
@@ -25,8 +25,11 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
 
   const [skillInfo, setSkillInfo] = useState<Record<string, { description: string }>>({});
   const [isLoadingInfo, setIsLoadingInfo] = useState(true);
-  const [tooltipContent, setTooltipContent] = useState<string | null>(null);
+  
+  // Tooltip State
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null); // Store skill name instead of just content
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  
   const [markedSkills, setMarkedSkills] = useState<Set<string>>(
     new Set(character?.marked_skills || [])
   );
@@ -35,6 +38,13 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   useEffect(() => {
     const fetchSkillInfo = async () => { setIsLoadingInfo(true); const { data } = await supabase.from('game_skills').select('name, description'); if (data) { const infoMap = data.reduce((acc, skill) => { acc[skill.name] = { description: skill.description }; return acc; }, {} as Record<string, { description: string }>); setSkillInfo(infoMap); } setIsLoadingInfo(false); };
     fetchSkillInfo();
+  }, []);
+
+  // Close tooltip on scroll or when clicking outside (handled by wrapper)
+  useEffect(() => {
+    const handleScroll = () => setActiveTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
   }, []);
 
   // --- DERIVED SKILL LISTS ---
@@ -77,9 +87,25 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   
   const handleSkillClick = (skillName: string, skillValue: number, isAffected: boolean) => { toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `${skillName} Check`, requiresBane: isAffected, skillName, }); onClose(); };
   
-  const handleMouseEnter = (e: React.MouseEvent, description: string) => { const rect = e.currentTarget.getBoundingClientRect(); setTooltipContent(description); setTooltipPosition({ top: rect.top, left: rect.left + rect.width / 2 }); };
+  // Updated Tooltip Logic: Toggle on click
+  const handleInfoClick = (e: React.MouseEvent, skillName: string) => { 
+    e.stopPropagation(); // Prevent row click
+    if (activeTooltip === skillName) {
+        setActiveTooltip(null);
+    } else {
+        const rect = e.currentTarget.getBoundingClientRect(); 
+        // Adjust for mobile edges if needed
+        let leftPos = rect.left + rect.width / 2;
+        if (leftPos < 140) leftPos = 140; // Prevent going off left edge
+        if (leftPos > window.innerWidth - 140) leftPos = window.innerWidth - 140; // Prevent going off right edge
+
+        setActiveTooltip(skillName); 
+        setTooltipPosition({ top: rect.top, left: leftPos }); 
+    }
+  };
   
-  const handleMouseLeave = () => { setTooltipContent(null); setTooltipPosition(null); };
+  // Close tooltip when clicking modal background
+  const handleBackgroundClick = () => { setActiveTooltip(null); };
   
   const handleMarkSkill = (e: React.ChangeEvent<HTMLInputElement>, skillName: string) => {
     e.stopPropagation();
@@ -139,12 +165,14 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
                 </span>
                 {isTrained && <GraduationCap size={12} className="text-indigo-500 shrink-0" title="Trained Skill"/>}
                 {description && (
-                   <Info 
-                      size={12} 
-                      className="text-gray-400 hover:text-indigo-500 transition-colors shrink-0" 
-                      onMouseEnter={(e) => handleMouseEnter(e, description)} 
-                      onMouseLeave={handleMouseLeave}
-                   />
+                   // Updated Info Icon: Button behavior for touch
+                   <button
+                      type="button"
+                      onClick={(e) => handleInfoClick(e, skill.name)}
+                      className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === skill.name ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-500'}`}
+                   >
+                       <Info size={14} />
+                   </button>
                 )}
              </div>
              <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-wider text-gray-400">
@@ -177,11 +205,11 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const filteredSecondary = filterSkills(secondarySkills);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={handleMouseLeave}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={handleBackgroundClick}>
       <div className="bg-gray-50 rounded-2xl max-w-5xl w-full h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}
-        <div className="px-6 py-4 bg-white border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+        <div className="px-6 py-4 bg-white border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0" onClick={handleBackgroundClick}>
           <div>
              <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
                 <Target className="text-indigo-600" />
@@ -207,7 +235,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         </div>
 
         {/* Info Banner */}
-        <div className="bg-indigo-50/50 px-6 py-2 border-b border-indigo-100 flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-indigo-800">
+        <div className="bg-indigo-50/50 px-6 py-2 border-b border-indigo-100 flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-indigo-800" onClick={handleBackgroundClick}>
            <CheckSquare size={14} />
            <span>Rolled a 1 (Dragon) or 20 (Demon)? Check the box to mark for advancement.</span>
         </div>
@@ -216,7 +244,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         {isLoadingInfo ? (
           <div className="flex-grow flex items-center justify-center"><LoadingSpinner size="lg" /></div>
         ) : (
-          <div className="flex-grow overflow-y-auto p-6 custom-scrollbar">
+          <div className="flex-grow overflow-y-auto p-6 custom-scrollbar" onClick={handleBackgroundClick}>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               
               {/* General Skills Column */}
@@ -270,13 +298,14 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
         )}
 
         {/* Tooltip */}
-        {tooltipContent && tooltipPosition && (
+        {activeTooltip && tooltipPosition && (
             <div 
                style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
-               className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[70] pointer-events-none animate-in fade-in zoom-in-95 duration-200"
+               className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[70] animate-in fade-in zoom-in-95 duration-200"
+               onClick={(e) => e.stopPropagation()} // Prevent clicking tooltip from closing it immediately
             >
                <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
-               {tooltipContent}
+               {skillInfo[activeTooltip]?.description || "No description available."}
             </div>
         )}
       </div>
