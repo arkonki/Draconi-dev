@@ -6,7 +6,7 @@ import { fetchMagicSchools, MagicSchool } from '../../../lib/api/magic';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { CharacterCreationData } from '../../../types/character';
-import { Info, CheckCircle2, ChevronRight, ArrowLeft, Search } from 'lucide-react'; // Added ArrowLeft
+import { Info, CheckCircle2, ChevronRight, ArrowLeft, Search, AlertCircle } from 'lucide-react';
 
 type HeroicAbility = {
   id: number;
@@ -26,7 +26,7 @@ export function ProfessionSelection() {
   const [haLoading, setHaLoading] = useState<boolean>(false);
   const [haError, setHaError] = useState<string | null>(null);
   
-  // --- NEW: Mobile View State ---
+  // Mobile View State
   const [isMobileDetailView, setIsMobileDetailView] = useState(false);
 
   // Tooltip State
@@ -49,28 +49,20 @@ export function ProfessionSelection() {
     return () => window.removeEventListener('scroll', handleScroll, true);
   }, []);
 
+  // Initial Sync from Store
   useEffect(() => {
     if (character.profession && professionList.length > 0) {
       const currentProfession = professionList.find(p => p.name === character.profession);
       if (currentProfession) {
         setSelectedProfession(currentProfession);
-        // On initial load, if we have a selection, stay on list on desktop, but maybe show detail?
-        // Actually, for better UX on mobile wizard return, let's default to list unless explicitly navigating.
-        // But if the user clicks "Back" in wizard and returns here, showing details might be nice?
-        // Let's stick to list default to prevent confusion, or check screen width. 
-        // For simplicity: Default to list, user clicks to see details.
-        
-        if (currentProfession.magic_school_id === null && character.professionHeroicAbilityName) {
+        // If non-mage, load abilities
+        if (currentProfession.magic_school_id === null) {
           fetchHeroicAbilities(currentProfession.name, character.professionHeroicAbilityName);
-        }
-        if (character.professionHeroicAbilityName && heroicAbilities.length > 0) {
-           const preSelectedHA = heroicAbilities.find(ha => ha.name === character.professionHeroicAbilityName);
-           if (preSelectedHA) setSelectedHeroicAbility(preSelectedHA);
         }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.profession, professionList, character.professionHeroicAbilityName]); 
+  }, [character.profession, professionList]); 
 
   const fetchHeroicAbilities = async (professionName: string, preselectAbilityName?: string | null) => {
      setHaLoading(true);
@@ -79,13 +71,22 @@ export function ProfessionSelection() {
        const data = await fetchHeroicAbilitiesByProfession(professionName);
        const abilities = data as HeroicAbility[];
        setHeroicAbilities(abilities);
-       const abilityToSelect = preselectAbilityName ?? character.professionHeroicAbilityName;
-       if (abilityToSelect) {
-           const preSelected = abilities.find(ha => ha.name === abilityToSelect);
+
+       // --- AUTO-SELECTION LOGIC ---
+       if (abilities.length === 1) {
+           // If only one option, select it automatically
+           const autoSelect = abilities[0];
+           setSelectedHeroicAbility(autoSelect);
+           updateCharacter({ professionHeroicAbilityName: autoSelect.name });
+       } else if (preselectAbilityName) {
+           // If multiple, check if one was previously selected
+           const preSelected = abilities.find(ha => ha.name === preselectAbilityName);
            if (preSelected) setSelectedHeroicAbility(preSelected);
            else setSelectedHeroicAbility(null);
        } else {
+           // Multiple options and no previous selection -> Force user choice
            setSelectedHeroicAbility(null);
+           updateCharacter({ professionHeroicAbilityName: null }); // Clear store to block next step
        }
      } catch (err) {
        setHaError(err instanceof Error ? err.message : 'Failed to load heroic abilities');
@@ -96,34 +97,26 @@ export function ProfessionSelection() {
      }
   };
 
-  useEffect(() => {
-    if (selectedProfession && selectedProfession.magic_school_id === null) {
-      fetchHeroicAbilities(selectedProfession.name);
-    } else {
-      setHeroicAbilities([]);
-      setSelectedHeroicAbility(null);
-      if (character.professionHeroicAbilityName) {
-        updateCharacter({ professionHeroicAbilityName: null });
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProfession]); 
-
-
   const handleProfessionSelect = (profession: Profession) => {
     setSelectedProfession(profession);
     setIsMobileDetailView(true); // Switch to detail view on mobile
     
+    // Reset state for new profession
+    setHeroicAbilities([]);
+    setSelectedHeroicAbility(null);
+
     const updates: Partial<CharacterCreationData> = {
         profession: profession.name,
         key_attribute: profession.key_attribute,
         magicSchool: profession.magic_school_id ?? null,
-        professionHeroicAbilityName: null 
+        professionHeroicAbilityName: null // Resetability on change
     };
-    if (profession.magic_school_id !== null) {
-        setSelectedHeroicAbility(null);
-    }
     updateCharacter(updates);
+
+    // If non-mage, fetch abilities (which triggers auto-select logic)
+    if (profession.magic_school_id === null) {
+      fetchHeroicAbilities(profession.name);
+    }
   };
 
   const handleBackToList = () => {
@@ -178,7 +171,6 @@ export function ProfessionSelection() {
     <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6" onClick={() => setActiveTooltip(null)}>
       
       {/* Left Column: List */}
-      {/* Hidden on mobile if viewing details */}
       <div className={`w-full md:w-1/3 flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden h-full ${isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
         <div className="bg-gray-50 p-3 border-b font-bold text-gray-700 sticky top-0 flex justify-between items-center">
             <span>Professions</span>
@@ -206,10 +198,9 @@ export function ProfessionSelection() {
       </div>
 
       {/* Right Column: Details */}
-      {/* Hidden on mobile if NOT viewing details (unless selection is null, but logic handles that) */}
       <div className={`w-full md:w-2/3 flex flex-col h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
         
-        {/* Mobile Back Button Header */}
+        {/* Mobile Back Button */}
         <div className="md:hidden bg-gray-50 p-2 border-b flex items-center gap-2">
             <button onClick={handleBackToList} className="p-2 hover:bg-gray-200 rounded-full text-gray-600">
                 <ArrowLeft size={20} />
@@ -262,6 +253,15 @@ export function ProfessionSelection() {
                 ) : (
                     <div className="space-y-3">
                     {haLoading && <LoadingSpinner size="sm"/>}
+                    
+                    {/* Prompt for Multiple Options */}
+                    {!haLoading && heroicAbilities.length > 1 && !selectedHeroicAbility && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-sm text-amber-800 animate-in fade-in">
+                            <AlertCircle size={16} />
+                            <span>This profession has multiple options. Please select one below.</span>
+                        </div>
+                    )}
+
                     {!haLoading && heroicAbilities.map((ability) => (
                         <div
                         key={ability.id}
@@ -278,7 +278,7 @@ export function ProfessionSelection() {
                         </div>
                         <p className="text-sm text-gray-600 line-clamp-2">{ability.description}</p>
                         
-                        {/* Info Button for Full Description */}
+                        {/* Info Button */}
                         <button 
                             onClick={(e) => handleInfoClick(e, `ha-${ability.id}`, ability.description)}
                             className="absolute bottom-3 right-3 text-gray-400 hover:text-blue-500"
@@ -290,7 +290,7 @@ export function ProfessionSelection() {
                             <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-600 font-medium">WP: {ability.willpower_cost ?? 0}</span>
                         </div>
 
-                        {/* Tooltip Popup */}
+                        {/* Tooltip */}
                         {activeTooltip === `ha-${ability.id}` && tooltipPosition && (
                             <div 
                             style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 

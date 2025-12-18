@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { useSkills, GameSkill } from '../../../hooks/useSkills';
-import { CheckCircle2, AlertCircle, Info, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, Loader2, X, Dices } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
@@ -22,6 +22,15 @@ const skillAttributeMap: Record<string, AttributeName> = {
     'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL'
 };
 
+// Base Chance Calculation
+const getBaseChance = (value: number): number => {
+  if (value <= 5) return 3;
+  if (value <= 8) return 4;
+  if (value <= 12) return 5;
+  if (value <= 15) return 6;
+  return 7;
+};
+
 const combatSkillNames = ['Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords'];
 const magicSkillNames = ["Animism", "Elementalism", "Mentalism"];
 
@@ -37,6 +46,7 @@ export function TrainedSkillsSelection() {
   const [professionSkillsError, setProfessionSkillsError] = useState<string | null>(null);
   const [allMagicSchools, setAllMagicSchools] = useState<{id: string, name: string}[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(false);
+  const [showInfoPane, setShowInfoPane] = useState(true);
 
   // --- Mobile Friendly Tooltip State ---
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
@@ -146,6 +156,14 @@ export function TrainedSkillsSelection() {
     return skill?.description;
   };
 
+  // Helper to get current skill value based on selection
+  const getSkillValue = (skillName: string, isSelected: boolean) => {
+      const attribute = skillAttributeMap[skillName];
+      const attrValue = character.attributes?.[attribute] ?? 10;
+      const baseChance = getBaseChance(attrValue);
+      return isSelected ? baseChance * 2 : baseChance;
+  };
+
   const renderSkillRow = (skill: GameSkill, type: 'profession' | 'additional') => {
     if (!skill?.id || !skill.name) return null;
     const isSelected = type === 'profession' ? selectedProfessionSkillNames.includes(skill.name) : selectedAdditionalSkillNames.includes(skill.name);
@@ -153,24 +171,33 @@ export function TrainedSkillsSelection() {
     const currentCount = type === 'profession' ? selectedProfessionSkillNames.length : selectedAdditionalSkillNames.length;
     const isDisabled = currentCount >= limit && !isSelected;
 
+    const skillValue = getSkillValue(skill.name, isSelected);
+
     return (
       <div key={skill.id} onClick={() => !isDisabled && handleSkillSelection(skill.name, type)} className={`flex items-center justify-between p-3 border-b transition-colors ${isDisabled ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
         <div className="flex items-center gap-3">
-          <CheckCircle2 className={`w-6 h-6 flex-shrink-0 ${isSelected ? 'text-blue-500' : 'text-gray-300'}`} />
-          <div className="flex items-center gap-2">
-            <h5 className="font-medium text-gray-800">{skill.name}</h5>
-            {skill.description && (
-              <button
-                type="button"
-                onClick={(e) => handleInfoClick(e, skill.id)}
-                className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === skill.id ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`}
-              >
-                <Info size={16} />
-              </button>
-            )}
+          <CheckCircle2 className={`w-6 h-6 flex-shrink-0 transition-colors ${isSelected ? 'text-blue-600 fill-blue-50' : 'text-gray-300'}`} />
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+                <h5 className="font-medium text-gray-800">{skill.name}</h5>
+                {skill.description && (
+                <button
+                    type="button"
+                    onClick={(e) => handleInfoClick(e, skill.id)}
+                    className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === skill.id ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`}
+                >
+                    <Info size={14} />
+                </button>
+                )}
+            </div>
+            <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">{skillAttributeMap[skill.name] || 'N/A'}</span>
           </div>
         </div>
-        <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{skillAttributeMap[skill.name] || 'N/A'}</span>
+        
+        {/* Skill Value Badge */}
+        <div className={`flex items-center justify-center w-8 h-8 rounded-lg font-bold text-sm border ${isSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            {skillValue}
+        </div>
       </div>
     );
   };
@@ -186,13 +213,39 @@ export function TrainedSkillsSelection() {
 
   return (
     <div className="space-y-6" onClick={handleBackgroundClick}>
-      {/* Header and Progress (largely unchanged) */}
+      {/* Header and Progress */}
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Select Skills</h3>
         {character.profession && ( <div className="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm"> <p className="text-indigo-800">Profession: <strong>{character.profession}</strong>{character.key_attribute && ` (Key Attribute: ${character.key_attribute})`}{isMage && magicSchoolDisplay && ` (School: ${magicSchoolDisplay})`}</p> <p className="text-indigo-700 mt-1">Age: <strong>{character.age}</strong> (Grants {additionalSkillLimit} additional skill points)</p> </div> )}
         <p className="text-gray-600 text-sm">{step === 'profession' ? `Choose ${professionSkillLimit} skills from your profession's list below.` : `Choose ${additionalSkillLimit} additional skills based on your age (${character.age}).`}</p>
       </div>
-      <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg"> <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" /> <div> <h4 className="font-medium text-blue-800 text-sm">Selection Progress</h4> <p className="text-sm text-blue-700">{step === 'profession' ? `Professional Skills: ${profSkillsCount}/${professionSkillLimit}` : `Additional Skills: ${addSkillsCount}/${additionalSkillLimit}`}</p> </div> </div>
+
+      {/* Info Pane */}
+      {showInfoPane && (
+          <div className="relative p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+              <Dices className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-900">
+                  <p className="font-bold mb-1">How Skill Rolls Work</p>
+                  <p className="leading-relaxed">
+                      To succeed, you must roll <strong>equal to or lower</strong> than your Skill Level on a D20.
+                      <br/>
+                      <span className="text-blue-700 mt-1 block">
+                          <strong>Base Chance:</strong> Derived from your attribute score. <br/>
+                          <strong>Trained Skill:</strong> Doubles your base chance.
+                      </span>
+                  </p>
+              </div>
+              <button onClick={() => setShowInfoPane(false)} className="absolute top-2 right-2 text-blue-400 hover:text-blue-700"><X size={16} /></button>
+          </div>
+      )}
+
+      <div className="flex items-start gap-2 p-3 bg-gray-100 border border-gray-200 rounded-lg"> 
+          <Info className="w-5 h-5 text-gray-500 flex-shrink-0 mt-0.5" /> 
+          <div> 
+              <h4 className="font-bold text-gray-700 text-sm">Selection Progress</h4> 
+              <p className="text-sm text-gray-600">{step === 'profession' ? `Professional Skills: ${profSkillsCount}/${professionSkillLimit}` : `Additional Skills: ${addSkillsCount}/${additionalSkillLimit}`}</p> 
+          </div> 
+      </div>
 
       {/* --- List-based Rendering with Separated Skill Categories --- */}
       <div className="border rounded-lg bg-white shadow-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -200,13 +253,13 @@ export function TrainedSkillsSelection() {
           <>
             {professionGeneralSkills.length > 0 && (
               <div>
-                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b">General Skills</h4>
+                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b text-sm uppercase tracking-wide">General Skills</h4>
                 {professionGeneralSkills.map(skill => renderSkillRow(skill, 'profession'))}
               </div>
             )}
             {professionCombatSkills.length > 0 && (
               <div>
-                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b border-t">Combat Skills</h4>
+                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b border-t text-sm uppercase tracking-wide">Combat Skills</h4>
                 {professionCombatSkills.map(skill => renderSkillRow(skill, 'profession'))}
               </div>
             )}
@@ -215,13 +268,13 @@ export function TrainedSkillsSelection() {
           <>
             {additionalGeneralSkills.length > 0 && (
               <div>
-                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b">General Skills</h4>
+                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b text-sm uppercase tracking-wide">General Skills</h4>
                 {additionalGeneralSkills.map(skill => renderSkillRow(skill, 'additional'))}
               </div>
             )}
             {additionalCombatSkills.length > 0 && (
               <div>
-                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b border-t">Combat Skills</h4>
+                <h4 className="font-bold text-gray-700 p-3 bg-gray-50 border-b border-t text-sm uppercase tracking-wide">Combat Skills</h4>
                 {additionalCombatSkills.map(skill => renderSkillRow(skill, 'additional'))}
               </div>
             )}
@@ -231,14 +284,13 @@ export function TrainedSkillsSelection() {
 
       {/* Continue Button and Warnings */}
       {((step === 'profession' && !canContinueProfession && profSkillsCount > 0) || (step === 'additional' && !canContinueAdditional && addSkillsCount > 0)) && ( <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg"> <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" /> <div> <h4 className="font-medium text-amber-800 text-sm">Incomplete Selection</h4> <p className="text-sm text-amber-700">{step === 'profession' ? `Please select ${professionSkillLimit - profSkillsCount} more skill(s).` : `Please select ${additionalSkillLimit - addSkillsCount} more skill(s).`}</p> </div> </div> )}
-      <button onClick={handleContinue} disabled={(step === 'profession' && !canContinueProfession) || (step === 'additional' && !canContinueAdditional) || loadingProfessionSkills} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"> {loadingProfessionSkills ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />} {step === 'profession' ? 'Continue to Additional Skills' : 'Confirm Skill Selections'} </button>
+      <button onClick={handleContinue} disabled={(step === 'profession' && !canContinueProfession) || (step === 'additional' && !canContinueAdditional) || loadingProfessionSkills} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"> {loadingProfessionSkills ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />} {step === 'profession' ? 'Continue to Additional Skills' : 'Confirm Skill Selections'} </button>
     
       {/* Tooltip Render */}
       {activeTooltip && tooltipPosition && ( 
         <div 
           style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
-          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-72 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[60] animate-in fade-in zoom-in-95 duration-200"
-          onClick={(e) => e.stopPropagation()}
+          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-72 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[60] animate-in fade-in zoom-in-95 duration-200 pointer-events-none"
         > 
           <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
           {getActiveDescription() || "No description available."}
