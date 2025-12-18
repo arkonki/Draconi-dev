@@ -10,20 +10,20 @@ import { GearSelection } from './steps/GearSelection';
 import { AppearanceSelection } from './steps/AppearanceSelection';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { Save, AlertCircle } from 'lucide-react';
+import { Save, AlertCircle, Info, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AttributeName } from '../../types/character';
 import { useQueryClient } from '@tanstack/react-query';
 
 const steps = [
-  { title: 'Kin', component: KinSelection },
-  { title: 'Profession', component: ProfessionSelection },
-  { title: 'Name & Age', component: NameAgeSelection },
-  { title: 'Attributes', component: AttributesSelection },
-  { title: 'Magic', component: MagicSelection },
-  { title: 'Trained Skills', component: TrainedSkillsSelection },
-  { title: 'Gear', component: GearSelection },
-  { title: 'Appearance', component: AppearanceSelection },
+  { title: 'Kin', component: KinSelection, tooltip: 'Your Kin determines your innate ability and movement speed.' },
+  { title: 'Profession', component: ProfessionSelection, tooltip: 'Your Profession defines your starting skills, gear, and heroic ability.' },
+  { title: 'Name & Age', component: NameAgeSelection, tooltip: 'Age affects your starting attributes and skill points. Young = High Stats, Old = Many Skills.' },
+  { title: 'Attributes', component: AttributesSelection, tooltip: 'Roll or assign scores. Attributes range from 3-18. High stats grant bonuses.' },
+  { title: 'Magic', component: MagicSelection, tooltip: 'Only Mages select spells. Pick 3 Tricks and 3 Rank 1 Spells.' },
+  { title: 'Trained Skills', component: TrainedSkillsSelection, tooltip: 'Trained skills start at double your base chance. Select based on your profession and age.' },
+  { title: 'Gear', component: GearSelection, tooltip: 'Choose a starting equipment pack. You can roll for items or money.' },
+  { title: 'Appearance', component: AppearanceSelection, tooltip: 'Define your look, memento, and weakness. This adds flavor to your character.' },
 ];
 
 // --- UTILS ---
@@ -59,7 +59,6 @@ export function CharacterCreationWizard() {
   const queryClient = useQueryClient();
   const CurrentStep = steps[step].component;
   
-  // Local state for Magic School lookup to map ID -> Name on save
   const [allMagicSchools, setAllMagicSchools] = useState<{id: string, name: string}[]>([]);
   
   useEffect(() => {
@@ -103,7 +102,7 @@ export function CharacterCreationWizard() {
       return;
     }
     if (!canProceed()) {
-      setError('Please complete all required fields for the final step before saving.');
+      setError('Please complete all required fields.');
       return;
     }
 
@@ -138,11 +137,8 @@ export function CharacterCreationWizard() {
         ...(finalCharacterState.professionHeroicAbilityName ? [finalCharacterState.professionHeroicAbilityName] : [])
       ].filter(Boolean);
 
-      // --- 3. HYDRATE/CLEAN EQUIPMENT DATA ---
+      // --- 3. HYDRATE EQUIPMENT ---
       const startingItemsRaw = finalCharacterState.startingEquipment?.items || [];
-      
-      // FIX: Retrieve money from the correct location in the store (equipment.money)
-      // GearSelection updates 'equipment', not 'startingEquipment' for the money calculation.
       const startingMoney = finalCharacterState.equipment?.money || { gold: 0, silver: 0, copper: 0 };
 
       const initialInventory = startingItemsRaw.map(item => {
@@ -150,7 +146,6 @@ export function CharacterCreationWizard() {
         let quantity = 1;
 
         if (typeof item === 'string') {
-            // Regex to handle "3x Torch" or "Torch (x3)" or "Torch"
             const quantityRegex = /(?:(\d+)\s*x\s+)|(?:x\s*(\d+))|(?:[(\[]x?(\d+)[)\]])|^(\d+)\s+/;
             const match = item.match(quantityRegex);
             
@@ -175,7 +170,6 @@ export function CharacterCreationWizard() {
         };
       }).filter((i): i is NonNullable<typeof i> => i !== null);
 
-      // Construct the final object matching the JSON structure you provided
       const validEquipment = {
         money: {
             gold: startingMoney.gold || 0,
@@ -204,22 +198,16 @@ export function CharacterCreationWizard() {
         attributes: finalCharacterState.attributes,
         trained_skills: finalCharacterState.trainedSkills || [],
         skill_levels: initialSkillLevels,
-        
         equipment: validEquipment, 
-        
-        // Keep record of what was selected in text form
         starting_equipment: finalCharacterState.startingEquipment || { items: [], money: { gold: 0, silver: 0, copper: 0 } },
-        
         appearance: finalCharacterState.appearance?.trim(),
         conditions: { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
         spells: finalCharacterState.spells || null,
         experience: { marked_skills: [] },
-        
         max_hp: finalCharacterState.attributes.CON,
         current_hp: finalCharacterState.attributes.CON,
         max_wp: finalCharacterState.attributes.WIL,
         current_wp: finalCharacterState.attributes.WIL,
-        
         heroic_ability: combinedHeroicAbilities,
         memento: finalCharacterState.mementos?.[0] || null,
         weak_spot: finalCharacterState.weak_spot || null,
@@ -247,49 +235,73 @@ export function CharacterCreationWizard() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-6 md:p-8 my-8">
-      <div className="mb-8">
+    <div className="max-w-4xl mx-auto px-4 py-6 md:p-8">
+      {/* HEADER: Title & Progress Bar */}
+      <div className="mb-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-3xl font-bold text-gray-800">Create New Character</h2>
-          <span className="text-sm font-medium text-gray-500">Step {step + 1} of {steps.length}</span>
+          <h2 className="text-2xl md:text-3xl font-bold text-gray-800">Character Creation</h2>
+          <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">Step {step + 1} of {steps.length}</span>
         </div>
-        <div className="flex space-x-1">
+        
+        {/* Mobile-Friendly Progress Bar */}
+        <div className="flex gap-1 h-2 mb-2">
           {steps.map((s, i) => (
-            <div key={s.title} className="flex-1 h-2 rounded-full overflow-hidden bg-gray-200">
-               <div className={`h-full rounded-full transition-all duration-300 ${i < step ? 'bg-blue-500' : i === step ? 'bg-blue-300' : 'bg-gray-200'}`} style={{ width: i === step ? '50%' : i < step ? '100%' : '0%' }}/>
+            <div key={s.title} className="flex-1 rounded-full overflow-hidden bg-gray-200">
+               <div className={`h-full transition-all duration-300 ${i < step ? 'bg-green-500' : i === step ? 'bg-blue-600' : 'bg-transparent'}`} />
             </div>
           ))}
         </div>
-         <p className="text-center text-lg font-semibold mt-3 text-gray-700">{steps[step].title}</p>
+        <p className="text-center text-lg font-semibold text-gray-700">{steps[step].title}</p>
       </div>
 
+      {/* ERROR BANNER */}
       {error && (
-        <div className="mb-6 flex items-start gap-3 p-4 bg-red-50 border border-red-300 rounded-lg shadow-sm">
+        <div className="mb-6 flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg shadow-sm animate-in fade-in slide-in-from-top-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <h4 className="font-semibold text-red-800">Creation Error</h4>
-            <p className="text-sm text-red-700">{error}</p>
+          <div className="flex-1">
+            <h4 className="font-semibold text-red-800 text-sm">Action Required</h4>
+            <p className="text-sm text-red-700 mt-1">{error}</p>
           </div>
         </div>
       )}
 
-      <div className="min-h-[400px] mb-8">
+      {/* TOOLTIP / INFO BOX */}
+      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-3 shadow-sm">
+         <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+         <p className="text-sm text-blue-800 leading-relaxed">{steps[step].tooltip}</p>
+      </div>
+
+      {/* CONTENT AREA */}
+      <div className="min-h-[300px] mb-8 bg-white rounded-lg shadow-sm border border-gray-100 p-4 md:p-6">
         <CurrentStep />
       </div>
 
-      <div className="flex justify-between items-center mt-8 border-t pt-6">
-        <button onClick={() => setStep(step - 1)} disabled={step === 0 || saving} className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
-          Previous
+      {/* FOOTER NAVIGATION */}
+      <div className="flex justify-between items-center pt-4 border-t border-gray-200 sticky bottom-0 bg-white/95 backdrop-blur-sm p-4 -mx-4 md:mx-0 z-20">
+        <button 
+          onClick={() => setStep(step - 1)} 
+          disabled={step === 0 || saving} 
+          className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+        >
+          <ChevronLeft className="w-4 h-4" /> Previous
         </button>
 
         {step === steps.length - 1 ? (
-          <button onClick={handleSave} disabled={!canProceed() || saving} className={`inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-150 ${saving ? 'bg-gray-400 cursor-not-allowed' : !canProceed() ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}>
-            <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
-            {saving ? 'Saving Character...' : 'Create Character'}
+          <button 
+            onClick={handleSave} 
+            disabled={!canProceed() || saving} 
+            className={`flex items-center gap-2 px-6 py-2 text-sm font-bold text-white rounded-lg shadow-md transition-all active:scale-95 ${saving ? 'bg-gray-400 cursor-not-allowed' : !canProceed() ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+          >
+            {saving ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Create Character'}
           </button>
         ) : (
-          <button onClick={() => setStep(step + 1)} disabled={!canProceed() || saving} className={`inline-flex items-center px-5 py-2 text-sm font-medium text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-150 ${!canProceed() || saving ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
-            Next Step
+          <button 
+            onClick={() => setStep(step + 1)} 
+            disabled={!canProceed() || saving} 
+            className={`flex items-center gap-1 px-6 py-2 text-sm font-bold text-white rounded-lg shadow-md transition-all active:scale-95 ${!canProceed() || saving ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+          >
+            Next <ChevronRight className="w-4 h-4" />
           </button>
         )}
       </div>

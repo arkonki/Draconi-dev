@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, Sword, Dices, Star, X, Save, Hammer, Info, Crosshair } from 'lucide-react';
+import { Shield, Sword, Dices, Star, X, Save, Hammer, Info, Crosshair, AlertCircle } from 'lucide-react';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -119,6 +119,13 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
     return totalArmor;
   };
   
+  // Parse Banes from Effect text
+  const getBaneEffects = (item: GameItem | undefined) => {
+    if (!item?.effect) return null;
+    const baneMatch = item.effect.match(/Bane on ([^.]+)/i);
+    return baneMatch ? baneMatch[1] : null;
+  };
+
   const handleDamageRoll = (weaponName: string, damageDiceString: string) => {
     const weaponDetails = findItemDetails(weaponName);
     const note = getNoteForItem(weaponDetails, 'weapon');
@@ -185,15 +192,25 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                 { label: 'Body', item: bodyArmorDetails },
                 { label: 'Head', item: helmetDetails }
               ].map(({ label, item }) => (
-                <div key={label} className="flex justify-between items-center text-sm p-2 bg-white border border-stone-200 rounded-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 w-10">{label}</span>
-                    <button onClick={() => item && setEditingItem({ item: item, category: 'armor' })} className="font-serif font-bold text-stone-800 hover:text-[#1a472a] hover:underline disabled:cursor-default disabled:hover:no-underline text-left" disabled={!item}>
-                      {item?.name || <span className="italic text-stone-400 font-normal">None Equipped</span>}
-                    </button>
-                    {isItemEnhanced(item, 'armor') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
+                <div key={label} className="flex flex-col gap-1 p-2 bg-white border border-stone-200 rounded-sm">
+                  <div className="flex justify-between items-center text-sm">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 w-10">{label}</span>
+                        <button onClick={() => item && setEditingItem({ item: item, category: 'armor' })} className="font-serif font-bold text-stone-800 hover:text-[#1a472a] hover:underline disabled:cursor-default disabled:hover:no-underline text-left" disabled={!item}>
+                        {item?.name || <span className="italic text-stone-400 font-normal">None Equipped</span>}
+                        </button>
+                        {isItemEnhanced(item, 'armor') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
+                    </div>
+                    {item && <span className="text-xs bg-[#e8d5b5] px-1.5 py-0.5 rounded text-[#5c4d3c] font-bold">{item.armor_rating} AR</span>}
                   </div>
-                  {item && <span className="text-xs bg-[#e8d5b5] px-1.5 py-0.5 rounded text-[#5c4d3c] font-bold">{item.armor_rating} AR</span>}
+                  
+                  {/* Bane Effect Display */}
+                  {item && getBaneEffects(item) && (
+                    <div className="text-[10px] text-red-600 flex items-start gap-1 ml-12">
+                       <AlertCircle size={10} className="mt-0.5 flex-shrink-0" />
+                       <span>Bane on {getBaneEffects(item)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

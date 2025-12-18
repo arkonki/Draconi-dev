@@ -5,6 +5,7 @@ import { Ability } from '../../../types/character';
 import { fetchKinList, fetchAbilityDetailsByNames, Kin } from '../../../lib/api/kin';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
+import { ChevronRight, ArrowLeft, CheckCircle2, User, Sparkles, Footprints, Info } from 'lucide-react';
 
 // Helper function to parse the heroic_ability string
 const parseAbilityNames = (abilityString: string | null | undefined): string[] => {
@@ -12,12 +13,23 @@ const parseAbilityNames = (abilityString: string | null | undefined): string[] =
   return abilityString
     .split(',')
     .map(name => name.trim())
-    .filter(name => name); // Remove empty strings
+    .filter(name => name);
+};
+
+// Helper to determine movement speed based on Dragonbane Rules
+const getMovementSpeed = (kinName: string) => {
+  const name = kinName.toLowerCase();
+  if (name === 'wolfkin') return 12;
+  if (name === 'human' || name === 'elf') return 10;
+  return 8; // Dwarf, Halfling, Mallard
 };
 
 export function KinSelection() {
   const { character, updateCharacter } = useCharacterCreation();
   const [selectedKinId, setSelectedKinId] = useState<string | null>(null);
+  
+  // Mobile View State
+  const [isMobileDetailView, setIsMobileDetailView] = useState(false);
 
   // Fetch Kin list
   const { data: kinList = [], isLoading: kinLoading, error: kinError } = useQuery<Kin[], Error>({
@@ -32,7 +44,7 @@ export function KinSelection() {
       const currentKin = kinList.find(k => k.name === character.kin);
       if (currentKin) {
         setSelectedKinId(currentKin.id);
-        // Also update the stored ability names if re-entering the step
+        // Ensure store is synced
         const abilityNames = parseAbilityNames(currentKin.heroic_ability);
         if (JSON.stringify(character.kinAbilityNames) !== JSON.stringify(abilityNames)) {
            updateCharacter({ kinAbilityNames: abilityNames });
@@ -44,8 +56,12 @@ export function KinSelection() {
   const handleKinSelect = (kin: Kin) => {
     setSelectedKinId(kin.id);
     const abilityNames = parseAbilityNames(kin.heroic_ability);
-    // Update both kin name and the parsed ability names in the store
     updateCharacter({ kin: kin.name, kinAbilityNames: abilityNames });
+    setIsMobileDetailView(true); // Switch to detail view on mobile
+  };
+
+  const handleBack = () => {
+    setIsMobileDetailView(false); // Go back to list on mobile
   };
 
   // Find the full selected Kin object from the list
@@ -53,7 +69,7 @@ export function KinSelection() {
     return kinList.find(k => k.id === selectedKinId);
   }, [kinList, selectedKinId]);
 
-  // Get ability names directly from the store (updated on selection)
+  // Get ability names directly from the store
   const abilityNamesFromStore = useMemo(() => character.kinAbilityNames || [], [character.kinAbilityNames]);
 
   // Fetch full details for the parsed ability names
@@ -62,94 +78,129 @@ export function KinSelection() {
     isLoading: detailsLoading,
     error: detailsError,
   } = useQuery<Ability[], Error>({
-    queryKey: ['abilityDetails', abilityNamesFromStore.sort().join(',')], // Use names from store
+    queryKey: ['abilityDetails', abilityNamesFromStore.sort().join(',')],
     queryFn: () => fetchAbilityDetailsByNames(abilityNamesFromStore),
     enabled: abilityNamesFromStore.length > 0,
     staleTime: 10 * 60 * 1000,
     retry: false,
   });
 
-  // Render a single ability with details
-  const renderAbilityDetails = (ability: Ability) => (
-    <div key={ability.id} className="mb-4 p-3 border rounded bg-gray-50 shadow-sm">
-      <h4 className="font-semibold text-md text-gray-800">{ability.name}</h4>
-      {ability.willpower_cost != null && (
-        <p className="text-xs text-purple-700 font-medium mt-1">Willpower Cost: {ability.willpower_cost}</p>
-      )}
-      {ability.requirement && (
-         <p className="text-xs text-gray-600 mt-1">Requirement: {ability.requirement}</p>
-      )}
-      <p className="text-sm text-gray-700 mt-2">{ability.description}</p>
-    </div>
-  );
-
-  if (kinLoading) {
-     return (
-      <div className="flex justify-center items-center h-[60vh]">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
-
-  if (kinError) {
-    const errorMessage = kinError instanceof Error ? kinError.message : 'Failed to load Kin options.';
-    console.error("Error loading Kin:", kinError);
-    return <ErrorMessage title="Error Loading Kin" message={errorMessage} />;
-  }
-
+  if (kinLoading) return <LoadingSpinner size="lg" />;
+  if (kinError) return <ErrorMessage title="Error Loading Kin" message={kinError.message} />;
 
   return (
-    <div className="flex space-x-6 h-[60vh]">
-      {/* Left Column: Kin Names */}
-      <div className="w-1/3 border-r pr-4 overflow-y-auto">
-        <h3 className="text-xl font-bold mb-4 sticky top-0 bg-white pb-2 z-10">Kin List</h3>
-        <ul className="space-y-1">
+    <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6">
+      
+      {/* LEFT COLUMN: LIST */}
+      <div className={`w-full md:w-1/3 flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden h-full ${isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+        <div className="bg-gray-50 p-3 border-b font-bold text-gray-700 sticky top-0 flex justify-between items-center">
+            <span>Kins</span>
+            <span className="text-xs font-normal text-gray-400">{kinList.length} available</span>
+        </div>
+        <div className="overflow-y-auto flex-1 p-2 space-y-1">
           {kinList.map((kin) => (
-            <li
+            <button
               key={kin.id}
-              className={`cursor-pointer p-2 rounded-md text-sm ${
-                selectedKinId === kin.id ? 'bg-blue-100 font-semibold text-blue-800' : 'hover:bg-gray-100 text-gray-700'
-              }`}
               onClick={() => handleKinSelect(kin)}
+              className={`w-full text-left px-3 py-3 md:py-2 rounded-md text-sm transition-colors flex justify-between items-center border border-transparent ${
+                selectedKinId === kin.id
+                  ? 'bg-green-50 text-green-800 font-semibold border-green-200'
+                  : 'hover:bg-gray-50 text-gray-700 border-b-gray-50'
+              }`}
             >
-              {kin.name}
-            </li>
+              <span>{kin.name}</span>
+              <ChevronRight size={16} className={`text-gray-300 ${selectedKinId === kin.id ? 'text-green-500' : ''}`} />
+            </button>
           ))}
-        </ul>
+        </div>
       </div>
 
-      {/* Right Column: Kin Details (Scrollable) */}
-      <div className="w-2/3 pl-4 overflow-y-auto">
-        {selectedKin ? (
-          <div>
-            <h2 className="text-2xl font-bold mb-1">{selectedKin.name}</h2>
-            <p className="text-gray-700 mb-4 text-sm">{selectedKin.description}</p>
-            <hr className="my-4 border-gray-300"/>
-            <h3 className="text-lg font-semibold mb-3 text-gray-800">Kin Abilities</h3>
-            {detailsLoading ? (
-              <div className="flex justify-center py-4">
-                <LoadingSpinner />
-              </div>
-            ) : detailsError ? (
-               <ErrorMessage title="Error Loading Abilities" message={detailsError.message || 'Failed to load ability details.'} />
-            ) : abilityDetails.length > 0 ? (
-               abilityDetails.map(renderAbilityDetails)
-            ) : abilityNamesFromStore.length > 0 && !detailsLoading ? ( // Check names from store
-               <>
-                 <p className="text-sm text-orange-600 italic mb-2">Could not fetch full details for the following abilities (check names in database):</p>
-                 <ul className="list-disc list-inside text-sm text-gray-600">
-                   {abilityNamesFromStore.map(name => <li key={name}>{name}</li>)}
-                 </ul>
-               </>
+      {/* RIGHT COLUMN: DETAILS */}
+      <div className={`w-full md:w-2/3 flex flex-col h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+        
+        {/* Mobile Back Header */}
+        <div className="md:hidden bg-gray-50 p-2 border-b flex items-center gap-2 sticky top-0 z-10">
+            <button onClick={handleBack} className="p-2 hover:bg-gray-200 rounded-full text-gray-600">
+                <ArrowLeft size={20} />
+            </button>
+            <span className="font-bold text-gray-700">Back to List</span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
+            {selectedKin ? (
+            <div className="space-y-6">
+                
+                {/* Header Info */}
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h2 className="text-3xl font-bold text-gray-800 mb-1">{selectedKin.name}</h2>
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                           <Footprints size={14} />
+                           <span>Base Movement: <strong>{getMovementSpeed(selectedKin.name)} meters</strong></span>
+                        </div>
+                    </div>
+                    <CheckCircle2 className="text-green-500 w-8 h-8 opacity-20" />
+                </div>
+
+                {/* Description */}
+                <div className="prose prose-sm text-gray-600 leading-relaxed border-b border-gray-100 pb-4">
+                    {selectedKin.description}
+                </div>
+
+                {/* Innate Abilities Section */}
+                <div>
+                    <h4 className="font-bold text-gray-400 text-xs uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <Sparkles size={14} /> Innate Abilities
+                    </h4>
+                    
+                    {detailsLoading ? (
+                      <div className="flex justify-center py-8"><LoadingSpinner size="sm" /></div>
+                    ) : detailsError ? (
+                       <ErrorMessage message="Failed to load ability details." />
+                    ) : (
+                      <div className="space-y-3">
+                        {abilityDetails.length > 0 ? (
+                           abilityDetails.map(ability => (
+                             <div key={ability.id} className="p-4 bg-green-50 border border-green-200 rounded-xl relative overflow-hidden shadow-sm">
+                                <div className="absolute top-0 right-0 -mt-2 -mr-2 w-16 h-16 bg-green-100 rounded-full opacity-50 blur-xl"></div>
+                                <h5 className="font-bold text-lg text-green-900 mb-1 relative z-10">{ability.name}</h5>
+                                
+                                {ability.willpower_cost != null && (
+                                    <span className="inline-block px-2 py-0.5 bg-white/60 rounded text-[10px] font-bold text-green-700 mb-2 border border-green-100">
+                                        WP Cost: {ability.willpower_cost}
+                                    </span>
+                                )}
+
+                                <p className="text-sm text-green-800 leading-relaxed relative z-10">
+                                    {ability.description}
+                                </p>
+                             </div>
+                           ))
+                        ) : (
+                           // Fallback if details not found but names exist
+                           abilityNamesFromStore.length > 0 && (
+                             <div className="p-4 bg-gray-50 border rounded-xl text-sm text-gray-600">
+                                <p className="font-semibold mb-2">Abilities:</p>
+                                <ul className="list-disc list-inside">
+                                   {abilityNamesFromStore.map(name => <li key={name}>{name}</li>)}
+                                </ul>
+                                <p className="text-xs text-gray-400 mt-2 italic">Detailed descriptions unavailable.</p>
+                             </div>
+                           )
+                        )}
+                      </div>
+                    )}
+                </div>
+
+            </div>
             ) : (
-              <p className="text-sm text-gray-500 italic">No specific heroic abilities listed for this Kin.</p>
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8 text-center">
+                <User size={48} className="opacity-20 mb-4"/>
+                <p className="text-lg font-medium">Select a Kin</p>
+                <p className="text-sm mt-1">Choose a kin to view their description, movement speed, and innate abilities.</p>
+            </div>
             )}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-             <p className="text-gray-500">Select a kin from the list to view details and abilities.</p>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

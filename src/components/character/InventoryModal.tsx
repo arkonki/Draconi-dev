@@ -2,10 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Package, Search, ShoppingBag, Coins, Shield, Sword,
-  ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, 
-  CheckSquare, MinusCircle, MinusSquare, // <--- Added MinusSquare here
+  ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, CheckSquare, MinusCircle,
   Info, Target, Star, Heart, Zap, AlertTriangle, Weight, ChevronDown, ChevronUp,
-  Feather, Dices, Utensils, MoreVertical, Flame, Anchor
+  Feather, Utensils, MoreVertical, Flame, Anchor, MinusSquare
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../shared/Button';
@@ -159,13 +158,11 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
 
         if (details && typeof details.weight === 'number') {
             weightPerUnit = details.weight;
-
             const packMatch = details.name.match(/\((\d+)(?:\s*\w*)?\)/);
             if (packMatch) {
                 const packSize = parseInt(packMatch[1], 10);
                 const unit = details.name.match(/\d+\s*([a-zA-Z]+)/)?.[1]?.toLowerCase();
                 const isMeasurement = unit && MEASUREMENT_UNITS.includes(unit) && !['dose', 'doses', 'unit', 'units'].includes(unit);
-
                 if (packSize > 0 && !isMeasurement) {
                     weightPerUnit = details.weight / packSize;
                 }
@@ -277,8 +274,6 @@ export function InventoryModal({ onClose }: any) {
   
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-  const { rollDice } = useDice();
-
   useEffect(() => {
     const handleClickOutside = () => setMenuOpenId(null);
     window.addEventListener('click', handleClickOutside);
@@ -314,15 +309,8 @@ export function InventoryModal({ onClose }: any) {
 
   const handleUpdateEquipment = (newEquipment: any) => updateCharacterData({ ...character, equipment: newEquipment });
 
-  const handleAttackClick = (weaponName: string) => {
-    const itemDetails = findItemDetails(weaponName);
-    const skillName = getWeaponSkill(weaponName);
-    const skillLevel = character.skill_levels?.[skillName] || character.skill_levels?.[skillName.toUpperCase()] || character.skill_levels?.[Object.keys(character.skill_levels || {}).find(k => k.toLowerCase() === skillName.toLowerCase()) || ''] || 0;
-    rollDice({ label: `Attack: ${weaponName}`, skillName: skillName, target: skillLevel, damageFormula: itemDetails?.damage || '1d6', type: 'attack' });
-  };
-
   const handleAddRations = (amount: number) => {
-    const rationItem: InventoryItem = { id: generateId(), name: "Field Rations", quantity: amount };
+    const rationItem: InventoryItem = { id: generateId(), name: "Field Ration", quantity: amount };
     const existingPlural = character.equipment?.inventory?.find((i: InventoryItem) => i.name === "Field Rations");
     if(existingPlural) rationItem.name = "Field Rations";
     const newInventory = mergeIntoInventory(character.equipment!.inventory!, rationItem);
@@ -364,16 +352,29 @@ export function InventoryModal({ onClose }: any) {
         if (newEquipment.equipped.wornClothes.includes(name)) { setError("Already wearing one."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
         newEquipment.equipped.wornClothes.push(name);
     } else if (DEFAULT_EQUIPPABLE_CATEGORIES.includes(category!)) {
-        const isWeaponOrShield = category !== 'ARMOR & HELMETS' || name.toLowerCase().includes('shield');
-        const isArmor = category === 'ARMOR & HELMETS' && !isWeaponOrShield;
+        const lowerName = name.toLowerCase();
         
-        if (isWeaponOrShield) {
+        // --- FIX: Check for Shield and Helmet specifically by name ---
+        const isShield = category === 'ARMOR & HELMETS' && lowerName.includes('shield');
+        
+        // Check for helmet keywords
+        const isHelmet = category === 'ARMOR & HELMETS' && !isShield &&
+            (lowerName.includes('helm') || lowerName.includes('hat') || 
+             lowerName.includes('cap') || lowerName.includes('coif') || 
+             lowerName.includes('basinet'));
+
+        // Body armor is anything in "ARMOR & HELMETS" that isn't a shield or helmet
+        const isArmor = category === 'ARMOR & HELMETS' && !isShield && !isHelmet;
+
+        const isWeapon = category === 'MELEE WEAPONS' || category === 'RANGED WEAPONS' || isShield;
+        
+        if (isWeapon) {
             if (newEquipment.equipped.weapons.length >= 3) { setError("Max 3 at hand."); newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
             newEquipment.equipped.weapons.push({ name: itemDetails.name, grip: itemDetails.grip, range: itemDetails.range, damage: itemDetails.damage, durability: itemDetails.durability, features: itemDetails.features });
         } else if (isArmor) {
             if (newEquipment.equipped.armor) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.armor, quantity: 1, id: generateId() });
             newEquipment.equipped.armor = name;
-        } else {
+        } else if (isHelmet) {
             if (newEquipment.equipped.helmet) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.helmet, quantity: 1, id: generateId() });
             newEquipment.equipped.helmet = name;
         }
@@ -465,11 +466,6 @@ export function InventoryModal({ onClose }: any) {
                         <div className="flex items-center justify-between">
                             <span className="text-sm font-medium">{item.name} <span className="text-xs text-gray-500">({item.type})</span></span>
                             <div className="flex items-center gap-2">
-                                {item.type === 'weapon' && (
-                                    <Button variant="primary" size="xs" onClick={() => handleAttackClick(item.name)} className="flex items-center gap-1 bg-red-700 hover:bg-red-800 border-red-900">
-                                        <Dices size={14} /> <span>Attack</span>
-                                    </Button>
-                                )}
                                 <Button variant="secondary" size="xs" icon={MinusSquare} onClick={() => handleUnequipItem(item.name, item.type as any, item.id, (item as any).index)} disabled={isSaving}>Unequip</Button>
                             </div>
                         </div>
@@ -503,8 +499,8 @@ export function InventoryModal({ onClose }: any) {
     };
 
     return (
-      <div key={item.id} className="p-3 border rounded-lg flex items-center justify-between gap-2 bg-white relative min-h-[50px]">
-          <div className="flex flex-col min-w-0 flex-1 mr-2">
+      <div key={item.id} className="p-3 border rounded-lg flex items-center justify-between gap-2 bg-white relative">
+          <div className="flex flex-col min-w-0">
              <h3 className="font-medium text-sm truncate">{formatInventoryItemName(item)}</h3>
              <div className="flex gap-2 text-[10px] text-gray-400 mt-0.5">
                {itemDetails?.weight !== undefined && <span>W: {itemDetails.weight}</span>}
@@ -524,14 +520,14 @@ export function InventoryModal({ onClose }: any) {
               <div className="relative">
                   <button 
                     onClick={toggleMenu}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors touch-manipulation"
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                   >
-                    <MoreVertical size={18} />
+                    <MoreVertical size={16} />
                   </button>
 
                   {/* DROPDOWN MENU */}
                   {isMenuOpen && (
-                    <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 flex flex-col animate-in fade-in zoom-in-95">
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 flex flex-col">
                         
                         {/* Info / Details */}
                         {itemDetails?.effect && (
@@ -544,7 +540,7 @@ export function InventoryModal({ onClose }: any) {
                         {/* Drop Item */}
                         <button 
                             onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleDropItem(item); }}
-                            className="w-full text-left px-3 py-3 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium transition-colors"
+                            className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium transition-colors"
                         >
                             <Trash2 size={14} /> Drop Item
                         </button>
@@ -616,7 +612,7 @@ export function InventoryModal({ onClose }: any) {
                       </div>
                   </div>
 
-                  {/* --- RESTORED SEARCH BARS WITH CLEAR BUTTON --- */}
+                  {/* --- RESTORED SEARCH BARS --- */}
                   {activeTab === 'inventory' && (
                     <div className="flex items-center gap-3 mt-3">
                       <div className="relative flex-1">
@@ -626,16 +622,8 @@ export function InventoryModal({ onClose }: any) {
                           placeholder="Search carried items..." 
                           value={filters.search} 
                           onChange={(e) => setFilters({ search: e.target.value })} 
-                          className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm"
+                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
                         />
-                        {filters.search && (
-                          <button 
-                            onClick={() => setFilters({ search: '' })}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        )}
                       </div>
                     </div>
                   )}
@@ -655,18 +643,10 @@ export function InventoryModal({ onClose }: any) {
                           placeholder={selectedShopGroup ? `Search in ${selectedShopGroup.name}...` : "Search shop..."} 
                           value={filters.search} 
                           onChange={(e) => setFilters({ ...filters, search: e.target.value })} 
-                          className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm"
+                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
                         />
-                        {filters.search && (
-                          <button 
-                            onClick={() => setFilters({ ...filters, search: '' })}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        )}
                       </div>
-                      {/* Sort Dropdown */}
+                      {/* Sort Dropdown only visible when category selected OR searching globally */}
                       {(selectedShopGroup || filters.search.length > 0) && (
                         <div className="relative">
                           <select 
