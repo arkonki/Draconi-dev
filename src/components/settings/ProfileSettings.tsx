@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User as AuthUser } from '@supabase/supabase-js'; // Alias Supabase User
-import { User as UserIcon, Mail, Camera, Save, AlertCircle, CheckCircle } from 'lucide-react'; // Rename icon import
+import { User as AuthUser } from '@supabase/supabase-js';
+import { User as UserIcon, Mail, Save, AlertCircle, CheckCircle, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { PasswordChangeForm } from './PasswordChangeForm';
-import { getUserProfile, updateUserProfile, updateUserAuthEmail, UserProfile, UserProfileUpdate } from '../../lib/api/users'; // Import new functions and types
-import { LoadingSpinner } from '../shared/LoadingSpinner'; // Assuming you have this component
+import { getUserProfile, updateUserProfile, updateUserAuthEmail, UserProfile, UserProfileUpdate } from '../../lib/api/users';
+import { LoadingSpinner } from '../shared/LoadingSpinner';
 
 export function ProfileSettings() {
-  const { user: authUser, session } = useAuth(); // Use aliased authUser
+  const { user: authUser, session } = useAuth();
+  
+  // --- STATE ---
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  
+  // Form State
   const [formData, setFormData] = useState<UserProfileUpdate>({
     first_name: '',
     last_name: '',
@@ -17,87 +21,74 @@ export function ProfileSettings() {
     avatar_url: '',
     bio: ''
   });
-  const [emailForm, setEmailForm] = useState(''); // Separate state for email input
-  const [initialEmail, setInitialEmail] = useState(''); // Store initial *verified* email to detect changes
+  
+  const [emailForm, setEmailForm] = useState('');
+  const [initialEmail, setInitialEmail] = useState('');
 
-  const [isLoading, setIsLoading] = useState(true); // Loading profile data
-  const [isUpdating, setIsUpdating] = useState(false); // Updating profile
+  // UI State
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [imageError, setImageError] = useState(false);
 
-  // Fetch profile data
+  // --- DATA FETCHING ---
   const fetchProfile = useCallback(async (currentUser: AuthUser) => {
     setIsLoading(true);
     setError(null);
-    setSuccessMessage(null); // Clear messages on fetch
+    setSuccessMessage(null);
+    setImageError(false);
+    
     try {
       const userProfile = await getUserProfile(currentUser.id);
-      const currentEmail = currentUser.email ?? ''; // Get email from authUser
+      const currentEmail = currentUser.email ?? '';
 
       if (userProfile) {
         setProfile(userProfile);
-        // Populate form with fetched data, handling null values
         setFormData({
           first_name: userProfile.first_name ?? '',
           last_name: userProfile.last_name ?? '',
-          // Use profile username if available, otherwise fallback to metadata, then empty
           username: userProfile.username ?? currentUser.user_metadata?.username ?? '',
           avatar_url: userProfile.avatar_url ?? '',
           bio: userProfile.bio ?? '',
         });
       } else {
-         // Handle case where profile doesn't exist yet
-         console.warn("User profile not found in 'users' table, initializing form with defaults/metadata.");
+         // Fallback for new users without profile rows
          setFormData({
              first_name: '',
              last_name: '',
-             username: currentUser.user_metadata?.username ?? '', // Fallback to metadata username
+             username: currentUser.user_metadata?.username ?? '',
              avatar_url: '',
              bio: ''
          });
       }
-      // Set email states based on the verified authUser email
+      
       setEmailForm(currentEmail);
       setInitialEmail(currentEmail);
 
     } catch (err) {
       console.error("Failed to load profile:", err);
-      setError(err instanceof Error ? err.message : "Failed to load profile data.");
-      // Initialize form with auth data as fallback in case of error
-      const currentEmail = authUser?.email ?? '';
-      setEmailForm(currentEmail);
-      setInitialEmail(currentEmail);
-      setFormData({
-          first_name: '',
-          last_name: '',
-          username: authUser?.user_metadata?.username ?? '',
-          avatar_url: '',
-          bio: ''
-      });
+      setError("Failed to load profile data. Please refresh.");
     } finally {
       setIsLoading(false);
     }
-  }, []); // Removed authUser dependency, pass it directly
+  }, []);
 
   useEffect(() => {
     if (authUser) {
       fetchProfile(authUser);
     } else {
-      // Handle case where authUser is null (e.g., logged out)
       setIsLoading(false);
-      setProfile(null);
-      setFormData({ first_name: '', last_name: '', username: '', avatar_url: '', bio: '' });
-      setEmailForm('');
-      setInitialEmail('');
-      setError(null);
-      setSuccessMessage(null);
     }
-  }, [authUser, fetchProfile]); // Fetch when authUser changes
+  }, [authUser, fetchProfile]);
+
+  // --- HANDLERS ---
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    setError(null); // Clear error on input change
+    if (name === 'avatar_url') setImageError(false); // Reset image error when URL changes
+    setError(null);
     setSuccessMessage(null);
   };
 
@@ -109,290 +100,225 @@ export function ProfileSettings() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUser) {
-      setError("You must be logged in to update your profile.");
-      return;
-    }
+    if (!authUser) return;
 
     setIsUpdating(true);
     setError(null);
     setSuccessMessage(null);
 
-    let profileUpdateSuccess = false;
-    let emailUpdateInitiated = false;
-    let emailUpdateMessage = '';
     let changesMade = false;
+    let emailUpdateMessage = '';
 
     try {
-      // 1. Update non-email profile fields in public.users
+      // 1. Update Profile (Public Table)
       const profileUpdates: UserProfileUpdate = {};
-      // Determine the baseline for comparison (fetched profile or initial defaults if profile was null)
-      const baselineProfileData = profile ?? {
-          username: authUser.user_metadata?.username ?? '',
-          first_name: null,
-          last_name: null,
-          avatar_url: null,
-          bio: null
-      };
+      const baseline = profile ?? { username: '', first_name: '', last_name: '', avatar_url: '', bio: '' };
 
-      // Compare current form data against the baseline
-      if (formData.first_name !== (baselineProfileData.first_name ?? '')) profileUpdates.first_name = formData.first_name;
-      if (formData.last_name !== (baselineProfileData.last_name ?? '')) profileUpdates.last_name = formData.last_name;
-      if (formData.username !== (baselineProfileData.username ?? '')) profileUpdates.username = formData.username;
-      if (formData.avatar_url !== (baselineProfileData.avatar_url ?? '')) profileUpdates.avatar_url = formData.avatar_url;
-      if (formData.bio !== (baselineProfileData.bio ?? '')) profileUpdates.bio = formData.bio;
-
+      // Diff check to only send changed fields
+      if (formData.first_name !== (baseline.first_name ?? '')) profileUpdates.first_name = formData.first_name;
+      if (formData.last_name !== (baseline.last_name ?? '')) profileUpdates.last_name = formData.last_name;
+      if (formData.username !== (baseline.username ?? '')) profileUpdates.username = formData.username;
+      if (formData.avatar_url !== (baseline.avatar_url ?? '')) profileUpdates.avatar_url = formData.avatar_url;
+      if (formData.bio !== (baseline.bio ?? '')) profileUpdates.bio = formData.bio;
 
       if (Object.keys(profileUpdates).length > 0) {
           changesMade = true;
           const updatedProfile = await updateUserProfile(authUser.id, profileUpdates);
-          // Update local state based on response
           setProfile(prev => prev ? { ...prev, ...updatedProfile } : updatedProfile);
-          // Update form data to reflect saved state (important if API modifies data, e.g., trimming)
-           setFormData({
-              first_name: updatedProfile.first_name ?? '',
-              last_name: updatedProfile.last_name ?? '',
-              username: updatedProfile.username ?? '',
-              avatar_url: updatedProfile.avatar_url ?? '',
-              bio: updatedProfile.bio ?? '',
-           });
-          profileUpdateSuccess = true;
-      } else {
-          // No profile fields changed, still consider it a success for this part
-          profileUpdateSuccess = true; // Allows proceeding to email check
       }
 
-
-      // 2. Handle email change (auth.users) if necessary
-      const trimmedEmailForm = emailForm.trim();
-      if (trimmedEmailForm !== initialEmail) {
-        if (!trimmedEmailForm) {
-            throw new Error("Email cannot be empty.");
-        }
+      // 2. Update Email (Auth Table)
+      const trimmedEmail = emailForm.trim();
+      if (trimmedEmail !== initialEmail) {
+        if (!trimmedEmail) throw new Error("Email cannot be empty.");
+        
         changesMade = true;
-        await updateUserAuthEmail(trimmedEmailForm);
-        emailUpdateInitiated = true;
-        // IMPORTANT: Do NOT update initialEmail here. It remains the last *verified* email.
-        // The emailForm state holds the new, unverified email.
-        // Supabase handles the verification flow.
-        emailUpdateMessage = " Email update initiated. Please check both your current and new email addresses for a verification link to complete the change.";
+        await updateUserAuthEmail(trimmedEmail);
+        emailUpdateMessage = " Check your new email for a verification link.";
       }
 
-      // Set success message based on what happened
-       if (changesMade) {
-           let message = '';
-           if (profileUpdateSuccess && Object.keys(profileUpdates).length > 0) message += 'Profile fields updated successfully.';
-           message += emailUpdateMessage; // Append email message if relevant
-           setSuccessMessage(message.trim());
-       } else {
-           setSuccessMessage("No changes were detected.");
-       }
-
+      if (changesMade) {
+           setSuccessMessage(`Profile updated successfully.${emailUpdateMessage}`);
+      } else {
+           setSuccessMessage("No changes were made.");
+      }
 
     } catch (err) {
-      console.error("Failed to update profile:", err);
-      const message = err instanceof Error ? err.message : "An unknown error occurred during update.";
-      setError(message);
-      // Do not revert form data on error, let the user correct it.
+      console.error("Profile update failed:", err);
+      setError(err instanceof Error ? err.message : "An unknown error occurred.");
     } finally {
       setIsUpdating(false);
     }
   };
 
-  // Simple image error handler for the avatar
-  const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-      const img = e.currentTarget;
-      img.style.display = 'none'; // Hide the broken image element
-      // Find the sibling fallback icon and display it
-      const fallback = img.parentElement?.querySelector('.fallback-icon');
-      if (fallback) (fallback as HTMLElement).style.display = 'flex';
-  };
-
-  if (isLoading) {
-    return <div className="flex justify-center items-center h-40"><LoadingSpinner /></div>;
-  }
-
-  // Display message if user is not logged in or session expired
-  if (!authUser || !session) {
-      return <p className="text-center text-red-600">Please log in to view or edit your profile.</p>;
-  }
-
+  if (isLoading) return <div className="flex justify-center items-center py-12"><LoadingSpinner /></div>;
+  if (!authUser) return <p className="text-center text-red-600 py-8">Please log in to edit your profile.</p>;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-3xl mx-auto">
       <div>
-        <h2 className="text-2xl font-bold mb-6">Profile Settings</h2>
+        <h2 className="text-xl md:text-2xl font-bold mb-6 text-gray-900 border-b pb-4">Profile Settings</h2>
 
-        {/* Avatar Section */}
-        <div className="flex flex-col sm:flex-row items-center gap-6 mb-8">
-          {/* Avatar Display */}
-          <div className="relative w-24 h-24">
-            <div className="w-full h-full rounded-full bg-gray-200 flex items-center justify-center overflow-hidden border">
-               {/* Image - Hidden by default until loaded or if no URL */}
-               {formData.avatar_url && (
+        {/* --- AVATAR SECTION --- */}
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 mb-8 bg-gray-50 p-6 rounded-xl border border-gray-200">
+          
+          {/* Avatar Preview */}
+          <div className="relative shrink-0">
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-white shadow-sm flex items-center justify-center overflow-hidden border-4 border-white ring-1 ring-gray-200">
+               {!imageError && formData.avatar_url ? (
                  <img
-                   key={formData.avatar_url} // Re-render if URL changes
                    src={formData.avatar_url}
                    alt="Profile"
                    className="w-full h-full object-cover"
-                   onError={handleAvatarError}
-                   style={{ display: 'block' }} // Initially block, error handler hides it
+                   onError={() => setImageError(true)}
                  />
+               ) : (
+                 <UserIcon className="w-12 h-12 text-gray-300" />
                )}
-               {/* Fallback Icon - Shown if no URL or if image errors */}
-               <div className="absolute inset-0 flex items-center justify-center fallback-icon"
-                    style={{ display: !formData.avatar_url ? 'flex' : 'none' }}>
-                   <UserIcon className="w-12 h-12 text-gray-400" />
-               </div>
             </div>
+            {/* Status indicator (optional) */}
+            <div className="absolute bottom-1 right-1 w-5 h-5 bg-green-500 border-2 border-white rounded-full" title="Online"></div>
           </div>
 
-          {/* User Info & Avatar URL Input */}
-          <div className="flex-grow w-full sm:w-auto">
-            {/* Display username from form state, fallback to auth user */}
-            <h3 className="font-medium text-lg text-center sm:text-left">{formData.username || authUser?.user_metadata?.username || 'User'}</h3>
-            {/* Display email from form state (the potentially unverified one) */}
-            <p className="text-sm text-gray-600 flex items-center justify-center sm:justify-start gap-1">
-                <Mail className="w-4 h-4" />
-                {emailForm || 'No email set'}
-            </p>
-             {/* Avatar URL Input */}
-             <div className="mt-2">
-                 <label htmlFor="avatar_url" className="block text-xs font-medium text-gray-600 mb-1">Avatar URL</label>
+          {/* Avatar Inputs */}
+          <div className="flex-grow w-full text-center sm:text-left space-y-3">
+            <div>
+              <h3 className="font-bold text-lg text-gray-900">{formData.username || 'Adventurer'}</h3>
+              <p className="text-sm text-gray-500">{emailForm}</p>
+            </div>
+            
+            <div className="space-y-1">
+                 <label htmlFor="avatar_url" className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1">
+                    <LinkIcon size={12} /> Avatar Image URL
+                 </label>
                  <input
                      id="avatar_url"
                      name="avatar_url"
                      type="url"
                      value={formData.avatar_url ?? ''}
                      onChange={handleInputChange}
-                     placeholder="https://example.com/avatar.png"
-                     className="w-full px-2 py-1 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                     placeholder="https://imgur.com/..."
+                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
                  />
-             </div>
+                 <p className="text-[10px] text-gray-400">Paste a direct link to an image (JPG, PNG).</p>
+            </div>
           </div>
         </div>
 
-        {/* Profile Form */}
+        {/* --- MAIN FORM --- */}
         <form onSubmit={handleSubmit} className="space-y-6">
-           {/* Success Message */}
+           
+           {/* Feedback Banners */}
            {successMessage && (
-             <div className="p-4 mb-4 text-sm text-green-700 bg-green-100 rounded-lg flex items-start gap-2" role="alert">
-               <CheckCircle className="w-5 h-5 mt-px flex-shrink-0" />
-               <div><span className="font-medium">Success!</span> {successMessage}</div>
+             <div className="p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+               <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-600" />
+               <p className="text-sm font-medium">{successMessage}</p>
              </div>
            )}
 
-           {/* Error Message */}
            {error && (
-             <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg flex items-start gap-2" role="alert">
-               <AlertCircle className="w-5 h-5 mt-px flex-shrink-0" />
-               <div><span className="font-medium">Error!</span> {error}</div>
+             <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-800 flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+               <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
+               <p className="text-sm font-medium">{error}</p>
              </div>
            )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Names Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
-              <label htmlFor="first_name" className="block text-sm font-medium text-gray-700 mb-1">
-                First Name
-              </label>
+              <label htmlFor="first_name" className="block text-sm font-medium text-gray-700 mb-1.5">First Name</label>
               <input
                 id="first_name"
                 name="first_name"
                 type="text"
                 value={formData.first_name ?? ''}
                 onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="Gandalf"
               />
             </div>
             <div>
-              <label htmlFor="last_name" className="block text-sm font-medium text-gray-700 mb-1">
-                Last Name
-              </label>
+              <label htmlFor="last_name" className="block text-sm font-medium text-gray-700 mb-1.5">Last Name</label>
               <input
                 id="last_name"
                 name="last_name"
                 type="text"
                 value={formData.last_name ?? ''}
                 onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="The Grey"
               />
             </div>
           </div>
 
-          {/* Email - Requires special handling */}
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Email Address
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              value={emailForm}
-              onChange={handleEmailChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-              aria-describedby="email-description"
-              // disabled={isUpdating} // Disable during update
-            />
-             <p id="email-description" className="text-xs text-gray-500 mt-1">
-                Changing your email requires verification via links sent to both addresses.
-             </p>
+          {/* Account Details */}
+          <div className="space-y-5">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-2">
+                <Mail size={16} /> Email Address
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={emailForm}
+                onChange={handleEmailChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+              {emailForm !== initialEmail && (
+                 <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={12} /> Changing email requires verification.
+                 </p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1.5">Username (Public)</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                value={formData.username ?? ''}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="bio" className="block text-sm font-medium text-gray-700 mb-1.5">Bio</label>
+              <textarea
+                id="bio"
+                name="bio"
+                value={formData.bio ?? ''}
+                onChange={handleInputChange}
+                rows={4}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none"
+                placeholder="Tell us about your adventures..."
+              />
+            </div>
           </div>
 
-          {/* Username */}
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-              Username
-            </label>
-            <input
-              id="username"
-              name="username"
-              type="text"
-              value={formData.username ?? ''}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-              // disabled={isUpdating} // Disable during update
-            />
-             <p className="text-xs text-gray-500 mt-1">
-                Must be unique. Used for display and potentially logging in.
-             </p>
-          </div>
-
-          {/* Bio */}
-          <div>
-            <label htmlFor="bio" className="block text-sm font-medium text-gray-700 mb-1">
-              Bio
-            </label>
-            <textarea
-              id="bio"
-              name="bio"
-              value={formData.bio ?? ''}
-              onChange={handleInputChange}
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="Tell us a little about yourself..."
-              // disabled={isUpdating} // Disable during update
-            />
-          </div>
-
-          <div className="flex justify-end pt-4">
+          {/* Actions */}
+          <div className="pt-4 flex flex-col sm:flex-row sm:justify-end gap-3">
             <Button
               type="submit"
               variant="primary"
-              icon={Save}
-              loading={isUpdating}
-              disabled={isUpdating || isLoading} // Disable while loading profile or updating
+              disabled={isUpdating || isLoading}
+              className="w-full sm:w-auto flex justify-center items-center gap-2 px-6 py-2.5"
             >
-              Save Changes
+              {isUpdating ? <Loader2 className="animate-spin w-5 h-5" /> : <Save className="w-5 h-5" />}
+              {isUpdating ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </form>
       </div>
 
       {/* Password Change Section */}
-      <div className="border-t pt-8 mt-12">
-        <h3 className="text-lg font-semibold mb-6">Change Password</h3>
-        <PasswordChangeForm />
+      <div className="border-t border-gray-200 pt-10 mt-10">
+        <h3 className="text-xl font-bold text-gray-900 mb-6">Security</h3>
+        <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+           <PasswordChangeForm />
+        </div>
       </div>
     </div>
   );

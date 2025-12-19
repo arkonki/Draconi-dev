@@ -54,7 +54,7 @@ const formatAbilityRequirement = (requirement: any) => {
     }
 };
 
-// --- CUSTOM HOOK FOR LOGIC ---
+// --- CUSTOM HOOK ---
 const useGameDataManagement = () => {
     const [editingEntry, setEditingEntry] = useState<any>(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -96,15 +96,11 @@ const useGameDataManagement = () => {
 
     const handleSave = useCallback(async () => {
         if (!editingEntry) return;
-
         let dataToSave = editingEntry;
-        // Remove helper properties if necessary before saving
         if (activeCategory === 'spells') {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { magic_schools, ...cleanEntry } = editingEntry;
             dataToSave = cleanEntry;
         }
-
         await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
     }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
 
@@ -142,19 +138,13 @@ const useGameDataManagement = () => {
         if (!nameMatch) return false;
 
         if (selectedSubCategory) {
-            if (activeCategory === 'items') {
-                return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
-            }
+            if (activeCategory === 'items') return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
             if (activeCategory === 'spells') {
-                if (selectedSubCategory === 'General') {
-                    return !entry.school_id;
-                }
+                if (selectedSubCategory === 'General') return !entry.school_id;
                 const school = magicSchools.find(s => s.id === entry.school_id);
                 return school?.name?.toLowerCase() === selectedSubCategory.toLowerCase();
             }
-            if (activeCategory === 'monsters') {
-                return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
-            }
+            if (activeCategory === 'monsters') return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
         }
         return true;
     }), [entries, searchTerm, selectedSubCategory, activeCategory, magicSchools]);
@@ -172,17 +162,17 @@ const useGameDataManagement = () => {
     };
 };
 
-// --- CHILD COMPONENTS ---
+// --- COMPONENTS ---
 
 const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCategory: string, switchCategory: (cat: string) => void, loading: boolean }) => (
-    <div className="flex gap-2 border-b border-gray-200 overflow-x-auto pb-1 no-scrollbar">
+    <div className="flex gap-1 border-b border-gray-200 overflow-x-auto hide-scrollbar px-2 pt-2">
         {CATEGORIES.map(({ id: cat, label, icon: Icon }) => (
             <button key={cat} onClick={() => switchCategory(cat)}
                 className={`
-                    px-4 py-2.5 text-sm font-medium rounded-t-lg flex items-center gap-2 whitespace-nowrap transition-colors
+                    px-4 py-2.5 text-sm font-medium rounded-t-lg flex items-center gap-2 whitespace-nowrap transition-all
                     ${activeCategory === cat 
-                        ? 'bg-white border-x border-t border-gray-200 text-indigo-600 border-b-white -mb-px relative z-10' 
-                        : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                        ? 'bg-white border-x border-t border-gray-200 text-indigo-600 shadow-[0_2px_0_0_#fff] relative z-10' 
+                        : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50 border border-transparent'
                     }
                 `}
                 disabled={loading}>
@@ -193,7 +183,7 @@ const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCateg
 );
 
 const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, currentSubCategories, selectedSubCategory, setSelectedSubCategory }: any) => (
-    <div className="flex flex-col sm:flex-row gap-4 mb-6 p-1">
+    <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input 
@@ -228,24 +218,24 @@ const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, c
 const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory, searchTerm, selectedSubCategory, loadError }: any) => (
     <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
         <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px]">
+            <table className="w-full min-w-[800px]">
                 <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
                         {columns.map((col: any) => (
-                            <th key={col.header} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{col.header}</th>
+                            <th key={col.header} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{col.header}</th>
                         ))}
-                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky right-0 bg-gray-50">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                     {entries.map((entry: any) => (
-                        <tr key={entry.id || entry.name} className="hover:bg-gray-50 transition-colors">
+                        <tr key={entry.id || entry.name} className="hover:bg-gray-50 transition-colors group">
                             {columns.map((col: any) => (
-                                <td key={col.header} className={`px-4 py-3 text-sm text-gray-700 align-top ${col.className || ''}`} title={col.titleAccessor ? col.titleAccessor(entry) : undefined}>
+                                <td key={col.header} className={`px-4 py-3 text-sm text-gray-700 align-middle ${col.className || ''}`} title={col.titleAccessor ? col.titleAccessor(entry) : undefined}>
                                     {col.accessor(entry)}
                                 </td>
                             ))}
-                            <td className="px-4 py-3 text-sm align-top text-right whitespace-nowrap">
+                            <td className="px-4 py-3 text-sm align-middle text-right whitespace-nowrap sticky right-0 bg-white group-hover:bg-gray-50">
                                 <div className="flex justify-end gap-2">
                                     <Button variant="secondary" size="sm" icon={Edit2} onClick={() => onEdit(entry)} disabled={!entry.id}>Edit</Button>
                                     <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => entry.id && onDelete(entry.id)} disabled={!entry.id || loading}>Delete</Button>
@@ -257,9 +247,9 @@ const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory
             </table>
         </div>
         {entries.length === 0 && !loading && !loadError && (
-            <div className="text-center py-12 bg-white">
-                <div className="text-gray-400 mb-2">
-                    {searchTerm || selectedSubCategory ? <Search className="w-8 h-8 mx-auto opacity-20"/> : <Plus className="w-8 h-8 mx-auto opacity-20"/>}
+            <div className="text-center py-16 bg-white">
+                <div className="text-gray-300 mb-3">
+                    {searchTerm || selectedSubCategory ? <Search className="w-10 h-10 mx-auto opacity-30"/> : <Plus className="w-10 h-10 mx-auto opacity-30"/>}
                 </div>
                 <p className="text-gray-500 text-sm">
                     {searchTerm || selectedSubCategory ? `No ${activeCategory} found matching your filters.` : `No entries found for '${activeCategory}'.`}
@@ -286,41 +276,27 @@ const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError,
     }, [entry, activeCategory, onFieldChange, magicSchools]);
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[80]">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-                
-                {/* Header */}
                 <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
                     <h3 className="text-lg font-bold text-gray-900 capitalize">{entry.id ? `Edit ${activeCategory}` : `New ${activeCategory}`}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded-full transition-colors">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
-
-                {/* Body */}
-                <div className="flex-grow overflow-y-auto p-6">
-                   {saveError && (
-                       <div className="mb-6">
-                           <ErrorMessage message={saveError} />
-                       </div>
-                   )}
+                <div className="flex-grow overflow-y-auto p-6 custom-scrollbar">
+                   {saveError && <div className="mb-6"><ErrorMessage message={saveError} /></div>}
                    {renderForm()}
                 </div>
-
-                {/* Footer */}
                 <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
                     <Button variant="ghost" onClick={onClose} disabled={loading}>Cancel</Button>
-                    <Button variant="primary" icon={Save} onClick={onSave} disabled={loading}>
-                        {loading ? 'Saving...' : (entry.id ? 'Update' : 'Create')}
-                    </Button>
+                    <Button variant="primary" icon={Save} onClick={onSave} disabled={loading}>{loading ? 'Saving...' : (entry.id ? 'Update' : 'Create')}</Button>
                 </div>
             </div>
         </div>
     );
 };
 
-
-// --- MAIN COMPONENT ---
 export function GameDataManager() {
     const {
         editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
@@ -399,76 +375,20 @@ export function GameDataManager() {
     }, [activeCategory, magicSchools]);
 
     return (
-        <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8 min-h-[calc(100vh-4rem)]">
-            
-            {/* Page Header */}
+        <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6 md:space-y-8 min-h-[calc(100vh-4rem)]">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-200 pb-6">
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Game Data</h1>
-                    <p className="text-gray-500 mt-1">Manage core rules, items, and compendium data.</p>
-                </div>
-                <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading} className="shadow-sm">Add Entry</Button>
+                <div><h1 className="text-3xl font-bold text-gray-900 tracking-tight">Game Data</h1><p className="text-gray-500 mt-1">Manage core rules, items, and compendium data.</p></div>
+                <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading} className="shadow-sm w-full md:w-auto justify-center">Add Entry</Button>
             </div>
-
-            {/* Error Banner */}
             {loadError && <ErrorMessage message={`Error loading data: ${loadError}`} />}
-
-            {/* Main Content */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                
-                {/* Tabs */}
-                <div className="bg-gray-50 px-4 pt-2 border-b border-gray-200">
-                    <CategoryTabs activeCategory={activeCategory} switchCategory={switchCategory} loading={loading} />
-                </div>
-
-                {/* Toolbar */}
-                <div className="p-4 bg-white border-b border-gray-100">
-                    <SearchAndFilter
-                        searchTerm={searchTerm}
-                        setSearchTerm={setSearchTerm}
-                        activeCategory={activeCategory}
-                        loading={loading}
-                        currentSubCategories={currentSubCategories}
-                        selectedSubCategory={selectedSubCategory}
-                        setSelectedSubCategory={setSelectedSubCategory}
-                    />
-                </div>
-
-                {/* Data Table */}
+                <div className="bg-gray-50 border-b border-gray-200"><CategoryTabs activeCategory={activeCategory} switchCategory={switchCategory} loading={loading} /></div>
+                <div className="p-4 bg-white border-b border-gray-100"><SearchAndFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} activeCategory={activeCategory} loading={loading} currentSubCategories={currentSubCategories} selectedSubCategory={selectedSubCategory} setSelectedSubCategory={setSelectedSubCategory}/></div>
                 <div>
-                    {loading && !entries.length ? (
-                        <div className="flex justify-center items-center h-64 text-gray-400">
-                            <p>Loading {activeCategory}...</p>
-                        </div>
-                    ) : (
-                        <DataTable
-                            columns={tableColumns}
-                            entries={filteredEntries}
-                            onEdit={(entry: any) => { setSaveError(null); setEditingEntry(entry); }}
-                            onDelete={handleDelete}
-                            loading={loading}
-                            activeCategory={activeCategory}
-                            searchTerm={searchTerm}
-                            selectedSubCategory={selectedSubCategory}
-                            loadError={loadError}
-                        />
-                    )}
+                    {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries} onEdit={(entry: any) => { setSaveError(null); setEditingEntry(entry); }} onDelete={handleDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
                 </div>
             </div>
-
-            {/* Edit Modal */}
-            {editingEntry && (
-                <EditModal
-                    entry={editingEntry}
-                    onClose={closeModal}
-                    onSave={handleSave}
-                    loading={loading}
-                    activeCategory={activeCategory}
-                    saveError={saveError}
-                    onFieldChange={handleFieldChange}
-                    magicSchools={magicSchools}
-                />
-            )}
+            {editingEntry && <EditModal entry={editingEntry} onClose={closeModal} onSave={handleSave} loading={loading} activeCategory={activeCategory} saveError={saveError} onFieldChange={handleFieldChange} magicSchools={magicSchools} />}
         </div>
     );
 }

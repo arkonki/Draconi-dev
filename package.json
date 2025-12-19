@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "^3.1.0",
+    "@react-pdf/renderer": "^4.3.1",
     "@supabase/supabase-js": "^2.45.0",
     "@tanstack/react-query": "^5.51.11",
     "@uiw/react-md-editor": "^4.0.8",
