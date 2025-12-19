@@ -1,8 +1,8 @@
-import React, { useState } from 'react'; // Added { useState }
+import React, { useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { Download, Loader2 } from 'lucide-react';
 import { Character } from '../../types/character';
-import { DragonbanePdfDocument } from './CharacterSheetPdf'; // Ensure this path matches where you saved the document component
+import { DragonbanePdfDocument } from './CharacterSheetPdf'; // Ensure path is correct
 
 export const PdfExportButton = ({ character }: { character: Character }) => {
   const [isGenerating, setIsGenerating] = useState(false);

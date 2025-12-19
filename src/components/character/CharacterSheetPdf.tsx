@@ -1,31 +1,24 @@
- import React from 'react';
-import { Document, Page, Text, View, StyleSheet, Font, Image as PdfImage } from '@react-pdf/renderer';
+import React from 'react';
+import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
 import { Character } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 
-// Register a nice serif font (optional, using standard Times here)
-// You can register custom fonts like "DragonbaneFont" if you have the .ttf file
-Font.register({
-  family: 'StandardSerif',
-  fonts: [
-    { src: 'https://fonts.gstatic.com/s/crimsontext/v18/wlp2gwHKFkZgtmSR3NB0oRJfbwhT.ttf' }, // Regular
-    { src: 'https://fonts.gstatic.com/s/crimsontext/v18/wlppgwHKFkZgtmSR3NB0oRJX1C1i.ttf', fontWeight: 'bold' } // Bold
-  ]
-});
+// NOTE: We are using default fonts (Helvetica) to prevent network errors in WebContainers.
 
 // Define CSS-like styles
 const styles = StyleSheet.create({
   page: {
     padding: 30,
     backgroundColor: '#fdfbf7', // Parchment color
-    fontFamily: 'StandardSerif',
     color: '#2d2d2d',
+    fontSize: 10,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 10,
-    borderBottom: '2px solid #8b2e2e', // Dragonbane Red
+    borderBottomWidth: 2,
+    borderBottomColor: '#8b2e2e', // Dragonbane Red
     paddingBottom: 10,
   },
   titleBlock: {
@@ -37,21 +30,22 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#8b2e2e',
     textTransform: 'uppercase',
+    marginBottom: 4,
   },
   subHeader: {
     fontSize: 10,
     flexDirection: 'row',
     gap: 10,
-    marginTop: 5,
     color: '#555',
   },
   appearanceBlock: {
     width: '35%',
     fontSize: 8,
-    fontStyle: 'italic',
-    border: '1px solid #ddd',
+    borderWidth: 1,
+    borderColor: '#ddd',
     padding: 5,
     backgroundColor: '#fff',
+    color: '#666',
   },
   
   // Attributes Row
@@ -62,7 +56,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: '#f4f1ea',
     borderRadius: 5,
-    border: '1px solid #d4c5a3',
+    borderWidth: 1,
+    borderColor: '#d4c5a3',
   },
   attrBox: {
     alignItems: 'center',
@@ -71,7 +66,8 @@ const styles = StyleSheet.create({
     width: 35,
     height: 35,
     borderRadius: 17.5,
-    border: '2px solid #1a472a', // Dragonbane Green
+    borderWidth: 2,
+    borderColor: '#1a472a', // Dragonbane Green
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#fff',
@@ -89,7 +85,7 @@ const styles = StyleSheet.create({
   conditionBox: {
     fontSize: 7,
     marginTop: 2,
-    color: '#888',
+    color: '#aaa',
     textTransform: 'uppercase',
   },
   conditionActive: {
@@ -112,6 +108,7 @@ const styles = StyleSheet.create({
     color: '#e8d5b5',
     padding: 3,
     marginBottom: 5,
+    marginTop: 10,
     textAlign: 'center',
     textTransform: 'uppercase',
   },
@@ -122,25 +119,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 2,
     fontSize: 9,
-    borderBottom: '1px solid #eee',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
     paddingBottom: 1,
   },
-  label: { fontWeight: 'bold' },
-  value: {},
   
+  // Vitals
+  vitalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 5,
+  },
+  vitalLabel: { fontSize: 8, color: '#666' },
+  vitalValue: { fontSize: 14, fontWeight: 'bold' },
+
   // Weapons Table
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#ddd',
     fontSize: 8,
-    padding: 2,
+    padding: 3,
     fontWeight: 'bold',
+    marginTop: 5,
   },
   tableRow: {
     flexDirection: 'row',
     fontSize: 8,
-    padding: 2,
-    borderBottom: '1px solid #ccc',
+    padding: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
   },
   colName: { width: '30%' },
   colGrip: { width: '10%', textAlign: 'center' },
@@ -153,23 +160,30 @@ const styles = StyleSheet.create({
 // Helper for skill lists
 const SkillRow = ({ name, value, isTrained, attribute }: any) => (
   <View style={styles.row}>
-    <Text style={{ fontFamily: isTrained ? 'StandardSerif' : 'StandardSerif', fontWeight: isTrained ? 'bold' : 'normal' }}>
-      {name} <Text style={{ fontSize: 7, color: '#666' }}>({attribute})</Text>
+    <Text>
+      {name} <Text style={{ fontSize: 7, color: '#888' }}>({attribute})</Text>
     </Text>
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {isTrained && <Text style={{ fontSize: 7, marginRight: 4 }}>[T]</Text>}
-      <Text>{value}</Text>
+      {isTrained && <Text style={{ fontSize: 7, marginRight: 4, color: '#1a472a' }}>[T]</Text>}
+      <Text style={{ fontWeight: isTrained ? 'bold' : 'normal' }}>{value}</Text>
     </View>
   </View>
 );
 
 export const DragonbanePdfDocument = ({ character }: { character: Character }) => {
-  // Logic helpers (same as before)
   const getBaseChance = (val: number) => {
       if (val <= 5) return 3; if (val <= 8) return 4; if (val <= 12) return 5; if (val <= 15) return 6; return 7;
   };
   
-  const skillAttributeMap: Record<string, string> = { 'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT', 'Bluffing': 'CHA', 'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL', 'Healing': 'INT', 'Hunting & Fishing': 'AGL', 'Languages': 'INT', 'Myths & Legends': 'INT', 'Performance': 'CHA', 'Persuasion': 'CHA', 'Riding': 'AGL', 'Seamanship': 'INT', 'Sleight of Hand': 'AGL', 'Sneaking': 'AGL', 'Spot Hidden': 'INT', 'Swimming': 'AGL', 'Axes': 'STR', 'Bows': 'AGL', 'Brawling': 'STR', 'Crossbows': 'AGL', 'Hammers': 'STR', 'Knives': 'AGL', 'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR' };
+  const skillAttributeMap: Record<string, string> = { 
+    'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT', 'Bluffing': 'CHA', 
+    'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL', 'Healing': 'INT', 'Hunting & Fishing': 'AGL', 
+    'Languages': 'INT', 'Myths & Legends': 'INT', 'Performance': 'CHA', 'Persuasion': 'CHA', 'Riding': 'AGL', 
+    'Seamanship': 'INT', 'Sleight of Hand': 'AGL', 'Sneaking': 'AGL', 'Spot Hidden': 'INT', 'Swimming': 'AGL', 
+    'Axes': 'STR', 'Bows': 'AGL', 'Brawling': 'STR', 'Crossbows': 'AGL', 'Hammers': 'STR', 'Knives': 'AGL', 
+    'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR', 'Mentalism': 'WIL', 'Animism': 'WIL', 
+    'Elementalism': 'WIL' 
+  };
   
   const getSkillValue = (name: string) => {
     return character.skill_levels?.[name] || getBaseChance(character.attributes?.[skillAttributeMap[name] as any] || 10);
@@ -209,14 +223,13 @@ export const DragonbanePdfDocument = ({ character }: { character: Character }) =
               <View style={styles.attrCircle}>
                 <Text style={styles.attrValue}>{character.attributes?.[attr as any]}</Text>
               </View>
-              {/* Map attribute to condition name */}
               {(() => {
-                const map: any = { STR: 'exhausted', CON: 'sickly', AGL: 'dazed', INT: 'angry', WIL: 'scared', CHA: 'disheartened' };
-                const condKey = map[attr];
+                const map: any = { STR: 'EXHAUSTED', CON: 'SICKLY', AGL: 'DAZED', INT: 'ANGRY', WIL: 'SCARED', CHA: 'DISHEARTENED' };
+                const condKey = map[attr].toLowerCase();
                 const isActive = character.conditions?.[condKey];
                 return (
-                  <Text style={[styles.conditionBox, isActive ? styles.conditionActive : {}]}>
-                    {isActive ? '[X] ' : '[ ] '}{condKey}
+                  <Text style={isActive ? styles.conditionActive : styles.conditionBox}>
+                    {map[attr]}
                   </Text>
                 );
               })()}
@@ -229,7 +242,7 @@ export const DragonbanePdfDocument = ({ character }: { character: Character }) =
           
           {/* COL 1: SKILLS */}
           <View style={styles.column}>
-            <Text style={styles.sectionTitle}>General Skills</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 0 }]}>General Skills</Text>
             {[ 'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft', 'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 'Languages', 'Myths & Legends', 'Performance', 'Persuasion', 'Riding', 'Seamanship', 'Sleight of Hand', 'Sneaking', 'Spot Hidden', 'Swimming'].map(skill => (
               <SkillRow key={skill} name={skill} attribute={skillAttributeMap[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
             ))}
@@ -237,26 +250,28 @@ export const DragonbanePdfDocument = ({ character }: { character: Character }) =
 
           {/* COL 2: COMBAT & ABILITIES */}
           <View style={styles.column}>
-            <Text style={styles.sectionTitle}>Weapon Skills</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Weapon Skills</Text>
             {['Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords'].map(skill => (
               <SkillRow key={skill} name={skill} attribute={skillAttributeMap[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
             ))}
 
-            <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Abilities & Spells</Text>
+            <Text style={styles.sectionTitle}>Abilities & Spells</Text>
             <View style={{ fontSize: 9 }}>
                {character.heroic_abilities && character.heroic_abilities.map((ha, i) => (
-                 <Text key={i} style={{ marginBottom: 2 }}>• {ha}</Text>
+                 <Text key={i} style={{ marginBottom: 3 }}>• {ha}</Text>
                ))}
+               
+               {/* Magic Sections */}
                {character.spells?.general && character.spells.general.length > 0 && (
                  <View style={{ marginTop: 5 }}>
-                   <Text style={{ fontWeight: 'bold' }}>Tricks:</Text>
-                   {character.spells.general.map((s: string, i: number) => <Text key={i}>- {s}</Text>)}
+                   <Text style={{ fontWeight: 'bold', marginBottom: 2 }}>Tricks:</Text>
+                   {character.spells.general.map((s: string, i: number) => <Text key={i}>  - {s}</Text>)}
                  </View>
                )}
                {character.spells?.school && character.spells.school.spells.length > 0 && (
                  <View style={{ marginTop: 5 }}>
-                   <Text style={{ fontWeight: 'bold' }}>{character.spells.school.name}:</Text>
-                   {character.spells.school.spells.map((s: string, i: number) => <Text key={i}>- {s}</Text>)}
+                   <Text style={{ fontWeight: 'bold', marginBottom: 2 }}>{character.spells.school.name}:</Text>
+                   {character.spells.school.spells.map((s: string, i: number) => <Text key={i}>  - {s}</Text>)}
                  </View>
                )}
             </View>
@@ -264,27 +279,28 @@ export const DragonbanePdfDocument = ({ character }: { character: Character }) =
 
           {/* COL 3: INVENTORY & VITALS */}
           <View style={styles.column}>
-            <Text style={styles.sectionTitle}>Vitals</Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+            <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Vitals</Text>
+            <View style={styles.vitalRow}>
                 <View>
-                    <Text style={{ fontSize: 8 }}>Hit Points</Text>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{character.max_hp}</Text>
+                    <Text style={styles.vitalLabel}>Hit Points</Text>
+                    <Text style={styles.vitalValue}>{character.current_hp}/{character.max_hp}</Text>
                 </View>
                 <View>
-                    <Text style={{ fontSize: 8 }}>Willpower</Text>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{character.max_wp}</Text>
+                    <Text style={styles.vitalLabel}>Willpower</Text>
+                    <Text style={styles.vitalValue}>{character.current_wp}/{character.max_wp}</Text>
                 </View>
                 <View>
-                    <Text style={{ fontSize: 8 }}>Movement</Text>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{calculateMovement(character.kin, character.attributes?.AGL)}</Text>
+                    <Text style={styles.vitalLabel}>Move</Text>
+                    <Text style={styles.vitalValue}>{calculateMovement(character.kin, character.attributes?.AGL)}</Text>
                 </View>
             </View>
-            <View style={{ borderTop: '1px solid #ccc', paddingTop: 5, marginBottom: 10 }}>
-                <Text style={{ fontSize: 9 }}>Money:</Text>
-                <View style={{ flexDirection: 'row', gap: 5, fontSize: 10 }}>
-                    <Text style={{ color: '#b8860b' }}>{character.equipment?.money?.gold || 0} G</Text>
-                    <Text style={{ color: '#718096' }}>{character.equipment?.money?.silver || 0} S</Text>
-                    <Text style={{ color: '#a0522d' }}>{character.equipment?.money?.copper || 0} C</Text>
+            
+            <View style={{ borderTopWidth: 1, borderTopColor: '#ccc', paddingTop: 5, marginBottom: 10 }}>
+                <Text style={{ fontSize: 9, marginBottom: 2 }}>Money:</Text>
+                <View style={{ flexDirection: 'row', gap: 10, fontSize: 10 }}>
+                    <Text style={{ color: '#b8860b', fontWeight: 'bold' }}>{character.equipment?.money?.gold || 0} G</Text>
+                    <Text style={{ color: '#555', fontWeight: 'bold' }}>{character.equipment?.money?.silver || 0} S</Text>
+                    <Text style={{ color: '#a0522d', fontWeight: 'bold' }}>{character.equipment?.money?.copper || 0} C</Text>
                 </View>
             </View>
 
@@ -300,40 +316,48 @@ export const DragonbanePdfDocument = ({ character }: { character: Character }) =
                )}
             </View>
 
-            <View style={{ marginTop: 10, padding: 5, border: '1px solid #ccc', borderRadius: 4 }}>
-                <Text style={{ fontSize: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Memento</Text>
-                <Text style={{ fontSize: 9, fontStyle: 'italic' }}>{character.memento || "None"}</Text>
-            </View>
+            {character.memento && (
+              <View style={{ marginTop: 10, padding: 5, borderWidth: 1, borderColor: '#ccc', borderRadius: 4 }}>
+                  <Text style={{ fontSize: 8, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 2 }}>Memento</Text>
+                  <Text style={{ fontSize: 9, fontStyle: 'italic' }}>{character.memento}</Text>
+              </View>
+            )}
           </View>
         </View>
 
         {/* BOTTOM: WEAPONS TABLE */}
         <View style={{ marginTop: 20 }}>
-            <Text style={styles.sectionTitle}>Equipped Weapons & Armor</Text>
+            <Text style={styles.sectionTitle}>Equipped</Text>
             
             <View style={{ flexDirection: 'row', gap: 20, marginBottom: 10 }}>
                 <Text style={{ fontSize: 9 }}>Armor: <Text style={{ fontWeight: 'bold' }}>{character.equipment?.equipped?.armor || "None"}</Text></Text>
                 <Text style={{ fontSize: 9 }}>Helmet: <Text style={{ fontWeight: 'bold' }}>{character.equipment?.equipped?.helmet || "None"}</Text></Text>
             </View>
 
-            <View style={styles.tableHeader}>
-                <Text style={styles.colName}>Weapon</Text>
-                <Text style={styles.colGrip}>Grip</Text>
-                <Text style={styles.colRange}>Range</Text>
-                <Text style={styles.colDmg}>Damage</Text>
-                <Text style={styles.colDur}>Durability</Text>
-                <Text style={styles.colFeat}>Features</Text>
-            </View>
-            {(character.equipment?.equipped?.weapons || []).map((w, i) => (
-                <View key={i} style={styles.tableRow}>
-                    <Text style={styles.colName}>{w.name}</Text>
-                    <Text style={styles.colGrip}>{w.grip}</Text>
-                    <Text style={styles.colRange}>{w.range}</Text>
-                    <Text style={styles.colDmg}>{w.damage}</Text>
-                    <Text style={styles.colDur}>{w.durability}</Text>
-                    <Text style={styles.colFeat}>{Array.isArray(w.features) ? w.features.join(', ') : w.features}</Text>
+            {character.equipment?.equipped?.weapons && character.equipment.equipped.weapons.length > 0 ? (
+              <>
+                <View style={styles.tableHeader}>
+                    <Text style={styles.colName}>Weapon</Text>
+                    <Text style={styles.colGrip}>Grip</Text>
+                    <Text style={styles.colRange}>Range</Text>
+                    <Text style={styles.colDmg}>Damage</Text>
+                    <Text style={styles.colDur}>Dur</Text>
+                    <Text style={styles.colFeat}>Features</Text>
                 </View>
-            ))}
+                {character.equipment.equipped.weapons.map((w, i) => (
+                    <View key={i} style={styles.tableRow}>
+                        <Text style={styles.colName}>{w.name}</Text>
+                        <Text style={styles.colGrip}>{w.grip}</Text>
+                        <Text style={styles.colRange}>{w.range}</Text>
+                        <Text style={styles.colDmg}>{w.damage}</Text>
+                        <Text style={styles.colDur}>{w.durability}</Text>
+                        <Text style={styles.colFeat}>{Array.isArray(w.features) ? w.features.join(', ') : w.features}</Text>
+                    </View>
+                ))}
+              </>
+            ) : (
+              <Text style={{ fontSize: 9, fontStyle: 'italic', color: '#888' }}>No weapons equipped.</Text>
+            )}
         </View>
 
         {/* Footer Credit */}
