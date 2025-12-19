@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { Download, Loader2 } from 'lucide-react';
 import { Character } from '../../types/character';
-import { DragonbanePdfDocument } from './CharacterSheetPdf'; // Ensure path is correct
+import { DragonbanePdfDocument } from './CharacterSheetPdf';
 
 export const PdfExportButton = ({ character }: { character: Character }) => {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -10,20 +10,15 @@ export const PdfExportButton = ({ character }: { character: Character }) => {
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
-      // 1. Generate PDF Blob
       const blob = await pdf(<DragonbanePdfDocument character={character} />).toBlob();
-      
-      // 2. Create Download Link
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.download = `${character.name.replace(/\s+/g, '_')}_Dragonbane.pdf`;
-      
-      // 3. Trigger Download
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url); // Cleanup
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('PDF generation failed:', error);
       alert('Could not generate PDF');
