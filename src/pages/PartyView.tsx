@@ -7,21 +7,22 @@ import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import { 
-  Users, Trash2, UserX, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Award, Sparkles 
+  Users, Trash2, UserX, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Award, Sparkles, Hourglass
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
-import { PartyMemberList } from '../components/party/PartyMemberList'; // Use the new component
+import { PartyMemberList } from '../components/party/PartyMemberList';
 import { PartyNotes } from '../components/party/PartyNotes';
 import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
 import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
 import { StoryHelperApp } from '../components/party/StoryHelper';
+import { TimeTrackerView } from '../components/party/TimeTracker'; // Import Time Tracker
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
 import { GMScreen } from '../components/party/GMScreen';
 
-type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'sessionEnd' | 'gmScreen' | 'storyhelper';
+type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'sessionEnd' | 'gmScreen' | 'storyhelper';
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -75,8 +76,9 @@ export function PartyView() {
     { id: 'notes', label: 'Journal', icon: FileText },
     { id: 'tasks', label: 'Quests', icon: ClipboardList },
     { id: 'inventory', label: 'Stash', icon: Backpack },
+    { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true }, // New Tab
     { id: 'encounter', label: 'Combat', icon: Swords, dmOnly: true },
-    { id: 'sessionEnd', label: 'Session End', icon: Award, dmOnly: true },
+    { id: 'sessionEnd', label: 'End Session', icon: Award, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
@@ -183,6 +185,13 @@ export function PartyView() {
              <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />
           </div>
         )}
+
+        {/* TIME TRACKER */}
+        {activeTab === 'time' && (
+           <div className="p-6">
+             <TimeTrackerView partyId={partyId!} />
+           </div>
+        )}
         
         {activeTab === 'encounter' && (
            <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />
@@ -196,7 +205,6 @@ export function PartyView() {
 
         {activeTab === 'gmScreen' && <GMScreen />}
         
-        {/* Story Helper with auto-injected party context */}
         {activeTab === 'storyhelper' && (
           <div className="p-6">
              <StoryHelperApp partyId={partyId!} initialPartyData={partyMembersString} />
