@@ -94,20 +94,6 @@ const generateId = (): string => {
   return `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-const getWeaponSkill = (itemName: string): string => {
-  const name = itemName.toLowerCase();
-  if (name.includes('axe')) return 'Axes';
-  if (name.includes('bow') && !name.includes('cross')) return 'Bows';
-  if (name.includes('crossbow')) return 'Crossbows';
-  if (name.includes('hammer') || name.includes('club') || name.includes('mace')) return 'Hammers';
-  if (name.includes('knife') || name.includes('dagger')) return 'Knives';
-  if (name.includes('spear') || name.includes('trident') || name.includes('lance')) return 'Spears';
-  if (name.includes('staff')) return 'Staves';
-  if (name.includes('sword') || name.includes('scimitar')) return 'Swords';
-  if (name.includes('sling')) return 'Slings';
-  return 'Brawling';
-};
-
 const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) => {
     const strength = getStrengthFromCharacter(character);
     const equipment = typeof character.equipment === 'string' ? JSON.parse(character.equipment) : character.equipment;
@@ -273,6 +259,9 @@ export function InventoryModal({ onClose }: any) {
   const [sortOrder, setSortOrder] = useState('name-asc');
   
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  // Helper to clear search text
+  const clearSearch = () => setFilters({ ...filters, search: '' });
 
   useEffect(() => {
     const handleClickOutside = () => setMenuOpenId(null);
@@ -612,18 +601,27 @@ export function InventoryModal({ onClose }: any) {
                       </div>
                   </div>
 
-                  {/* --- RESTORED SEARCH BARS --- */}
+                  {/* --- RESTORED & IMPROVED SEARCH BARS --- */}
                   {activeTab === 'inventory' && (
                     <div className="flex items-center gap-3 mt-3">
-                      <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <div className="relative flex-1 group">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 group-focus-within:text-blue-500 transition-colors" />
                         <input 
                           type="text" 
                           placeholder="Search carried items..." 
                           value={filters.search} 
                           onChange={(e) => setFilters({ search: e.target.value })} 
-                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
+                          className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                         />
+                         {filters.search && (
+                          <button 
+                            onClick={clearSearch}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 bg-transparent hover:bg-gray-100 rounded-full transition-all"
+                            aria-label="Clear search"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -636,29 +634,39 @@ export function InventoryModal({ onClose }: any) {
                           Back
                         </Button>
                       )}
-                      <div className="relative flex-1 min-w-[200px]">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <div className="relative flex-1 min-w-[200px] group">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 group-focus-within:text-blue-500 transition-colors" />
                         <input 
                           type="text" 
                           placeholder={selectedShopGroup ? `Search in ${selectedShopGroup.name}...` : "Search shop..."} 
                           value={filters.search} 
                           onChange={(e) => setFilters({ ...filters, search: e.target.value })} 
-                          className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
+                          className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                         />
+                         {filters.search && (
+                          <button 
+                            onClick={clearSearch}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 bg-transparent hover:bg-gray-100 rounded-full transition-all"
+                            aria-label="Clear search"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                       {/* Sort Dropdown only visible when category selected OR searching globally */}
                       {(selectedShopGroup || filters.search.length > 0) && (
-                        <div className="relative">
+                         <div className="relative">
                           <select 
                             value={sortOrder} 
                             onChange={(e) => setSortOrder(e.target.value)} 
-                            className="appearance-none w-full bg-white border rounded-lg text-sm px-4 py-2 pr-8"
+                            className="appearance-none w-full bg-white border border-gray-300 rounded-lg text-sm px-4 py-2 pr-8 focus:ring-2 focus:ring-blue-500 outline-none"
                           >
                             <option value="name-asc">Name (A-Z)</option>
                             <option value="name-desc">Name (Z-A)</option>
                             <option value="cost-asc">Cost (Low-High)</option>
                             <option value="cost-desc">Cost (High-Low)</option>
                           </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                         </div>
                       )}
                     </div>
