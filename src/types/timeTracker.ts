@@ -16,4 +16,4 @@ export interface TimeTracker {
   current_day: number;
   current_shift: number;
   grid_state: TimeTrackerGrid;
-} 
+}
