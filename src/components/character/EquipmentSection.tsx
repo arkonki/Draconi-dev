@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, Sword, Dices, Star, X, Save, Hammer, Info, Crosshair, AlertCircle } from 'lucide-react';
+import { Shield, Sword, Dices, Star, X, Save, Hammer, Crosshair, AlertCircle } from 'lucide-react';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -9,21 +9,59 @@ import { useDice } from '../dice/DiceContext';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 
-// --- (Helper functions are unchanged) ---
-const skillAttributeMap: Record<string, AttributeName> = { 'Axes': 'STR', 'Bows': 'AGL', 'Brawling': 'STR', 'Crossbows': 'AGL', 'Hammers': 'STR', 'Knives': 'AGL', 'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR' };
-const getBaseChance = (value: number): number => { if (value <= 5) return 3; if (value <= 8) return 4; if (value <= 12) return 5; if (value <= 15) return 6; return 7; };
-const calculateFallbackLevel = (character: Character, skillName: string, attribute: AttributeName): number => { const isTrained = character.trainedSkills?.includes(skillName) ?? false; const baseValue = character.attributes?.[attribute] ?? 10; const baseChance = getBaseChance(baseValue); return isTrained ? baseChance * 2 : baseChance; };
-const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => { return { 'STR': 'exhausted', 'CON': 'sickly', 'AGL': 'dazed', 'INT': 'angry', 'WIL': 'scared', 'CHA': 'disheartened' }[attr] as keyof Character['conditions']; };
-const parseSkillLevels = (skillLevelsData: any): Record<string, number> => { if (typeof skillLevelsData === 'object' && skillLevelsData !== null) {return skillLevelsData;} return {}; };
-const parseBaseSkillName = (skillNameWithAttr: string | null | undefined): string | null => { if (!skillNameWithAttr) return null; return skillNameWithAttr.split('(')[0].trim(); };
-const isValidDiceType = (s: string): s is DiceType => { return ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(s); };
-const formatItemFeatures = (features: string | string[] | undefined): string => { if (!features) return '-'; if (Array.isArray(features)) return features.join(', '); return features; };
-// --- End Helper Functions ---
+// --- HELPER FUNCTIONS ---
 
+// Keys are lowercase to ensure case-insensitive matching
+const skillAttributeMap: Record<string, AttributeName> = { 
+  'axes': 'STR', 'bows': 'AGL', 'brawling': 'STR', 'crossbows': 'AGL', 
+  'hammers': 'STR', 'knives': 'AGL', 'slings': 'AGL', 'spears': 'STR', 
+  'staves': 'AGL', 'swords': 'STR' 
+};
+
+const getBaseChance = (value: number): number => { 
+  if (value <= 5) return 3; 
+  if (value <= 8) return 4; 
+  if (value <= 12) return 5; 
+  if (value <= 15) return 6; 
+  return 7; 
+};
+
+const calculateFallbackLevel = (character: Character, skillName: string, attribute: AttributeName): number => { 
+  const isTrained = character.trainedSkills?.includes(skillName) ?? false; 
+  const baseValue = character.attributes?.[attribute] ?? 10; 
+  const baseChance = getBaseChance(baseValue); 
+  return isTrained ? baseChance * 2 : baseChance; 
+};
+
+const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => { 
+  return { 'STR': 'exhausted', 'CON': 'sickly', 'AGL': 'dazed', 'INT': 'angry', 'WIL': 'scared', 'CHA': 'disheartened' }[attr] as keyof Character['conditions']; 
+};
+
+const parseSkillLevels = (skillLevelsData: any): Record<string, number> => { 
+  if (typeof skillLevelsData === 'object' && skillLevelsData !== null) { return skillLevelsData; } 
+  return {}; 
+};
+
+const parseBaseSkillName = (skillNameWithAttr: string | null | undefined): string | null => { 
+  if (!skillNameWithAttr) return null; 
+  return skillNameWithAttr.split('(')[0].trim(); 
+};
+
+const isValidDiceType = (s: string): s is DiceType => { 
+  return ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(s); 
+};
+
+const formatItemFeatures = (features: string | string[] | undefined): string => { 
+  if (!features) return '-'; 
+  if (Array.isArray(features)) return features.join(', '); 
+  return features; 
+};
+
+// --- TYPES ---
 interface ItemNote { enhanced?: boolean; bonus?: string; }
 type ItemCategory = 'armor' | 'weapon';
 
-// --- STYLED MODAL COMPONENT (Unchanged) ---
+// --- MODAL COMPONENT ---
 const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: any) => void; }) => {
   const [isEnhanced, setIsEnhanced] = useState(false);
   const [bonusText, setBonusText] = useState('');
@@ -88,6 +126,8 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
   );
 };
 
+// --- MAIN COMPONENT ---
+
 interface EquipmentSectionProps { character: Character; }
 
 export function EquipmentSection({ character }: EquipmentSectionProps) {
@@ -101,7 +141,7 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
   const getNoteForItem = (item: GameItem | undefined, category: ItemCategory): ItemNote | null => { if (!item) return null; return character.item_notes?.[category]?.[item.id] || null; };
   const isItemEnhanced = (item: GameItem | undefined, category: ItemCategory): boolean => getNoteForItem(item, category)?.enhanced || false;
 
-  // --- Logic Functions ---
+  // --- LOGIC: Armor Total ---
   const calculateTotalArmor = () => {
     let totalArmor = 0;
     const armor = findItemDetails(character.equipment?.equipped?.armor || '');
@@ -119,42 +159,70 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
     return totalArmor;
   };
   
-  // Parse Banes from Effect text
+  // --- LOGIC: Banes ---
   const getBaneEffects = (item: GameItem | undefined) => {
     if (!item?.effect) return null;
     const baneMatch = item.effect.match(/Bane on ([^.]+)/i);
     return baneMatch ? baneMatch[1] : null;
   };
 
+  // --- LOGIC: Damage Roll ---
   const handleDamageRoll = (weaponName: string, damageDiceString: string) => {
     const weaponDetails = findItemDetails(weaponName);
     const note = getNoteForItem(weaponDetails, 'weapon');
-    let dicePool: DiceType[] = []; let formulaParts: string[] = [];
+    
+    let dicePool: DiceType[] = []; 
+    let formulaParts: string[] = [];
+
+    // 1. Base Weapon Dice
     const baseDiceMatch = damageDiceString?.match(/(\d+)?d(\d+)/i);
     if (baseDiceMatch) {
-      const num = baseDiceMatch[1] ? parseInt(baseDiceMatch[1], 10) : 1; const size = `d${baseDiceMatch[2]}`;
-      if (isValidDiceType(size)) { dicePool.push(...Array(num).fill(size)); formulaParts.push(`${num}d${baseDiceMatch[2]}`); }
+      const num = baseDiceMatch[1] ? parseInt(baseDiceMatch[1], 10) : 1; 
+      const size = `d${baseDiceMatch[2]}`;
+      if (isValidDiceType(size)) { 
+        dicePool.push(...Array(num).fill(size)); 
+        formulaParts.push(`${num}${size}`); 
+      }
     }
-    const skillName = parseBaseSkillName(weaponDetails?.skill);
+
+    // 2. Attribute Bonuses (Dynamic Check)
+    const rawSkillName = parseBaseSkillName(weaponDetails?.skill);
+    const skillName = rawSkillName ? rawSkillName.toLowerCase() : null; // Lowercase for map lookup
     const attr = skillName ? skillAttributeMap[skillName] : null;
-    let attrBonusType: DiceType | null = null;
-    if (attr === 'STR' && (character.attributes?.STR || 10) > 15) attrBonusType = 'd6'; 
-    else if (attr === 'STR' && (character.attributes?.STR || 10) > 12) attrBonusType = 'd4';
-    if (attr === 'AGL' && (character.attributes?.AGL || 10) > 15) attrBonusType = 'd6'; 
-    else if (attr === 'AGL' && (character.attributes?.AGL || 10) > 12) attrBonusType = 'd4';
-    if (attrBonusType) { dicePool.push(attrBonusType); formulaParts.push(attrBonusType.toUpperCase()); }
+
+    if (attr) {
+      const attrValue = Number(character.attributes?.[attr] || 10);
+      let attrBonusType: DiceType | null = null;
+      
+      if (attrValue > 16) attrBonusType = 'd6'; 
+      else if (attrValue > 12) attrBonusType = 'd4';
+
+      if (attrBonusType) { 
+        dicePool.push(attrBonusType); 
+        formulaParts.push(`${attrBonusType.toUpperCase()} (${attr})`); 
+      }
+    }
     
+    // 3. Enhancement Bonuses
     if (note?.enhanced) {
       const noteBonusMatch = note?.bonus?.match(/d(\d+)/i);
       if (noteBonusMatch) {
         const size = `d${noteBonusMatch[1]}`;
-        if (isValidDiceType(size)) { dicePool.push(size); formulaParts.push(size.toUpperCase()); }
+        if (isValidDiceType(size)) { 
+          dicePool.push(size); 
+          formulaParts.push(`${size.toUpperCase()} (Enh)`); 
+        }
       }
     }
-    toggleDiceRoller({ rollMode: 'attackDamage', initialDice: dicePool, description: `Damage: ${weaponName} (${formulaParts.join(' + ')})` });
+
+    toggleDiceRoller({ 
+      rollMode: 'attackDamage', 
+      initialDice: dicePool, 
+      description: `Damage: ${weaponName} (${formulaParts.join(' + ')})` 
+    });
   };
 
-  // Specific Handler for Attacks
+  // --- LOGIC: Attack Roll ---
   const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean) => {
     toggleDiceRoller({ 
       initialDice: ['d20'], 
@@ -191,28 +259,47 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
               {[
                 { label: 'Body', item: bodyArmorDetails },
                 { label: 'Head', item: helmetDetails }
-              ].map(({ label, item }) => (
-                <div key={label} className="flex flex-col gap-1 p-2 bg-white border border-stone-200 rounded-sm">
-                  <div className="flex justify-between items-center text-sm">
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 w-10">{label}</span>
-                        <button onClick={() => item && setEditingItem({ item: item, category: 'armor' })} className="font-serif font-bold text-stone-800 hover:text-[#1a472a] hover:underline disabled:cursor-default disabled:hover:no-underline text-left" disabled={!item}>
-                        {item?.name || <span className="italic text-stone-400 font-normal">None Equipped</span>}
-                        </button>
-                        {isItemEnhanced(item, 'armor') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
+              ].map(({ label, item }) => {
+                // Calculate Armor Slot Bonus
+                let bonusDisplay = '';
+                if (item) {
+                   const note = getNoteForItem(item, 'armor');
+                   if (note?.enhanced && note.bonus) {
+                      const bonusVal = parseInt(note.bonus.match(/\d+/)?.[0] || '0');
+                      if (bonusVal > 0) bonusDisplay = `+${bonusVal}`;
+                   }
+                }
+
+                return (
+                  <div key={label} className="flex flex-col gap-1 p-2 bg-white border border-stone-200 rounded-sm">
+                    <div className="flex justify-between items-center text-sm">
+                      <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 w-10">{label}</span>
+                          <button onClick={() => item && setEditingItem({ item: item, category: 'armor' })} className="font-serif font-bold text-stone-800 hover:text-[#1a472a] hover:underline disabled:cursor-default disabled:hover:no-underline text-left" disabled={!item}>
+                          {item?.name || <span className="italic text-stone-400 font-normal">None Equipped</span>}
+                          </button>
+                          {isItemEnhanced(item, 'armor') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
+                      </div>
+                      {item && (
+                        <span className="text-xs bg-[#e8d5b5] px-1.5 py-0.5 rounded text-[#5c4d3c] font-bold flex items-center gap-0.5">
+                          {item.armor_rating}
+                          {/* SHOW ENHANCED BONUS IF EXISTS */}
+                          {bonusDisplay && <span className="text-amber-700 font-bold">{bonusDisplay}</span>}
+                          <span className="ml-0.5">AR</span>
+                        </span>
+                      )}
                     </div>
-                    {item && <span className="text-xs bg-[#e8d5b5] px-1.5 py-0.5 rounded text-[#5c4d3c] font-bold">{item.armor_rating} AR</span>}
+                    
+                    {/* Bane Effect Display */}
+                    {item && getBaneEffects(item) && (
+                      <div className="text-[10px] text-red-600 flex items-start gap-1 ml-12">
+                         <AlertCircle size={10} className="mt-0.5 flex-shrink-0" />
+                         <span>Bane on {getBaneEffects(item)}</span>
+                      </div>
+                    )}
                   </div>
-                  
-                  {/* Bane Effect Display */}
-                  {item && getBaneEffects(item) && (
-                    <div className="text-[10px] text-red-600 flex items-start gap-1 ml-12">
-                       <AlertCircle size={10} className="mt-0.5 flex-shrink-0" />
-                       <span>Bane on {getBaneEffects(item)}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
             
             <div className="flex items-center justify-end gap-3 mt-2 border-t border-stone-300 pt-2">
@@ -250,13 +337,35 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
               <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
                 {equippedWeapons.map((weapon, index) => {
                   const weaponDetails = findItemDetails(weapon.name);
-                  const skillName = parseBaseSkillName(weaponDetails?.skill);
-                  let skillValue: number | null = null; let isAffected = false;
+                  const rawSkillName = parseBaseSkillName(weaponDetails?.skill);
+                  const skillName = rawSkillName ? rawSkillName.toLowerCase() : '';
+                  const displayName = rawSkillName || '';
+                  
+                  // Retrieve Mastercraft note
+                  const note = getNoteForItem(weaponDetails, 'weapon');
+
+                  let skillValue: number | null = null; 
+                  let isAffected = false;
+
+                  // --- ATTRIBUTE BONUS DISPLAY ---
+                  let attributeBonus = '';
                   if (skillName && skillAttributeMap[skillName]) {
-                    const attr = skillAttributeMap[skillName]; skillValue = parsedSkillLevels?.[skillName] ?? calculateFallbackLevel(character, skillName, attr);
-                    isAffected = character.conditions?.[getConditionForAttribute(attr)] ?? false;
+                    const attr = skillAttributeMap[skillName];
+                    const val = Number(character.attributes?.[attr] || 10);
+                    if (val > 16) attributeBonus = '+D6';
+                    else if (val > 12) attributeBonus = '+D4';
+                    
+                    const attrKeyForCondition = getConditionForAttribute(attr);
+                    skillValue = parsedSkillLevels?.[displayName] ?? calculateFallbackLevel(character, displayName, attr);
+                    isAffected = character.conditions?.[attrKeyForCondition] ?? false;
                   }
                   
+                  // --- ENHANCED BONUS DISPLAY ---
+                  let enhancedBonus = '';
+                  if (note?.enhanced && note.bonus) {
+                    enhancedBonus = ` ${note.bonus}`;
+                  }
+
                   return (
                     <tr key={`${weapon.name}-${index}`} className="group hover:bg-[#f9f7f2] transition-colors">
                       <td className="px-3 py-2 font-serif font-bold">
@@ -267,13 +376,15 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                       </td>
                       <td className="px-3 py-2 text-stone-600 text-xs">{weapon.grip || '-'}</td>
                       <td className="px-3 py-2 text-stone-600 text-xs">{weapon.range || '-'}</td>
-                      <td className="px-3 py-2 font-bold text-stone-800">{weapon.damage || '-'}</td>
+                      <td className="px-3 py-2 font-bold text-stone-800">
+                        {weapon.damage || '-'}
+                        {attributeBonus && <span className="ml-1 text-xs text-[#8b2e2e] font-bold" title="Attribute Bonus">{attributeBonus}</span>}
+                        {enhancedBonus && <span className="ml-1 text-xs text-amber-600 font-bold" title="Mastercrafted Bonus">{enhancedBonus}</span>}
+                      </td>
                       <td className="px-3 py-2 text-stone-600 text-xs text-center">{weaponDetails?.durability || '-'}</td>
                       <td className="px-3 py-2 text-[10px] text-stone-500 max-w-[150px]">{formatItemFeatures(weapon.features)}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
-                          
-                          {/* DAMAGE BUTTON (Touch Friendly) */}
                           {weapon.damage && (
                             <button 
                               onClick={() => handleDamageRoll(weapon.name, weapon.damage!)} 
@@ -281,20 +392,18 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                               title="Roll for damage"
                             >
                               <Dices className="w-4 h-4" />
-                              <span className="text-xs font-bold uppercase tracking-wide">Roll Damage</span>
+                              <span className="text-xs font-bold uppercase tracking-wide">Roll</span>
                             </button>
                           )}
-
-                          {/* ATTACK BUTTON (Touch Friendly & Explicit) */}
-                          {skillName && skillValue !== null && (
+                          {displayName && skillValue !== null && (
                             <button 
-                              onClick={() => handleAttackRoll(weapon.name, skillName, skillValue!, isAffected)} 
+                              onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected)} 
                               title={`Attack with ${weapon.name}`}
                               className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}
                             >
                               <Crosshair className="w-4 h-4" />
                               <div className="flex flex-col items-start leading-none -mt-0.5">
-                                <span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{skillName}</span>
+                                <span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{displayName}</span>
                                 <span className="text-sm font-bold">Roll {skillValue}</span>
                               </div>
                             </button>
