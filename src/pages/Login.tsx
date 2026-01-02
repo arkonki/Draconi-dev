@@ -1,28 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { AlertCircle, Mail, Lock, User as UserIcon, LogIn, UserPlus } from 'lucide-react';
-import { loginSchema, signupSchema } from '../lib/auth/validation';
+import { AlertCircle, Mail, Lock, LogIn } from 'lucide-react';
+import { loginSchema } from '../lib/auth/validation';
 import { Button } from '../components/shared/Button';
 
 export function Login() {
-  const [isLoginView, setIsLoginView] = useState(true);
+  // Removed isLoginView, username, confirmPassword, role state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<'player' | 'dm'>('player');
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const { signIn, signUp } = useAuth();
+  // Removed signUp from destructuring
+  const { signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Reference to the image in the public folder
   const dragonBaneIcon = "/dragonbane-icon.png";
 
   useEffect(() => {
@@ -46,18 +43,10 @@ export function Login() {
   const clearForm = () => {
     setEmail('');
     setPassword('');
-    setUsername('');
-    setConfirmPassword('');
-    setRole('player');
     setError(null);
     setSuccessMessage(null);
     setValidationErrors({});
   }
-
-  const toggleView = () => {
-    setIsLoginView(!isLoginView);
-    clearForm();
-  };
 
   const handleLoginSubmit = async () => {
     const validationResult = loginSchema.safeParse({ email: email.trim(), password });
@@ -84,42 +73,6 @@ export function Login() {
     }
   };
 
-  const handleSignupSubmit = async () => {
-    const validationResult = signupSchema.safeParse({
-      username: username.trim(),
-      email: email.trim(),
-      password,
-      confirmPassword,
-      role,
-    });
-
-    if (!validationResult.success) {
-      const fieldErrors: Record<string, string> = {};
-      validationResult.error.errors.forEach((err) => {
-        if (err.path[0]) fieldErrors[String(err.path[0])] = err.message;
-      });
-      setValidationErrors(fieldErrors);
-      setError('Please fix the errors in the form.');
-      return false;
-    }
-
-    try {
-      setLoading(true);
-      const { email: validatedEmail, password: validatedPassword, username: validatedUsername, role: validatedRole } = validationResult.data;
-      await signUp(validatedEmail, validatedPassword, validatedUsername, validatedRole);
-      setSuccessMessage('Registration successful! Please check your email to verify your account before logging in.');
-      setIsLoginView(true); 
-      clearForm(); 
-      setEmail(validatedEmail); 
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Signup failed. Please try again.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -131,11 +84,8 @@ export function Login() {
       return;
     }
 
-    if (isLoginView) {
-      await handleLoginSubmit();
-    } else {
-      await handleSignupSubmit();
-    }
+    // Directly call login logic
+    await handleLoginSubmit();
   };
 
   return (
@@ -143,19 +93,11 @@ export function Login() {
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           
-          {/* Logo Container with Advanced Green Flame Effect */}
+          {/* Logo Container */}
           <div className="relative mx-auto w-fit mb-8 group">
-            
-            {/* 1. Outer Glow (The Aura) */}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[130%] h-[130%] bg-green-900/20 blur-[60px] rounded-full pointer-events-none"></div>
-            
-            {/* 2. Base Flame (Dark Green, Pulsing) */}
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[110%] h-[90%] bg-gradient-to-t from-green-800 via-green-600 to-transparent blur-[40px] rounded-full animate-pulse duration-1000 pointer-events-none"></div>
-            
-            {/* 3. Core Flame (Bright Emerald, Slightly Smaller) */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[90%] h-[80%] bg-gradient-to-t from-emerald-600 via-emerald-400 to-transparent blur-[30px] rounded-[40%] animate-pulse delay-150 pointer-events-none opacity-80"></div>
-            
-            {/* The Image (Larger now: h-72) */}
             <img 
               src={dragonBaneIcon} 
               alt="DragonBane Logo" 
@@ -164,10 +106,10 @@ export function Login() {
           </div>
 
           <h2 className="text-3xl font-bold text-gray-900">
-            {isLoginView ? 'Sign In' : 'Create Account'}
+            Sign In
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            {isLoginView ? 'Enter your details to access your account' : 'Fill in the details to register'}
+            Enter your details to access your account
           </p>
         </div>
 
@@ -188,7 +130,7 @@ export function Login() {
             <div className="flex items-center">
               <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
               <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">{isLoginView ? 'Login Error' : 'Signup Error'}</h3>
+                <h3 className="text-sm font-medium text-red-800">Login Error</h3>
                 <p className="mt-2 text-sm text-red-700">{error}</p>
               </div>
             </div>
@@ -209,25 +151,8 @@ export function Login() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit} noValidate>
           <div className="space-y-4">
-            {!isLoginView && (
-              <div>
-                <label htmlFor="username" className="block text-sm font-medium text-gray-700">Username</label>
-                <div className="mt-1 relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <UserIcon className="h-5 w-5 text-gray-400" />
-                  </div>
-                  <input
-                    id="username" name="username" type="text" required autoComplete="username"
-                    value={username} onChange={(e) => setUsername(e.target.value)}
-                    className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.username ? 'border-red-500' : 'border-gray-300'}`}
-                    placeholder="Choose a username"
-                    disabled={loading}
-                  />
-                </div>
-                {validationErrors.username && <p className="mt-1 text-xs text-red-600">{validationErrors.username}</p>}
-              </div>
-            )}
-
+            
+            {/* Email Field */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email address</label>
               <div className="mt-1 relative">
@@ -245,6 +170,7 @@ export function Login() {
               {validationErrors.email && <p className="mt-1 text-xs text-red-600">{validationErrors.email}</p>}
             </div>
 
+            {/* Password Field */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">Password</label>
               <div className="mt-1 relative">
@@ -253,7 +179,7 @@ export function Login() {
                 </div>
                 <input
                   id="password" name="password" type="password" required
-                  autoComplete={isLoginView ? "current-password" : "new-password"}
+                  autoComplete="current-password"
                   value={password} onChange={(e) => setPassword(e.target.value)}
                   className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.password ? 'border-red-500' : 'border-gray-300'}`}
                   placeholder="Enter password"
@@ -262,42 +188,6 @@ export function Login() {
               </div>
               {validationErrors.password && <p className="mt-1 text-xs text-red-600">{validationErrors.password}</p>}
             </div>
-
-            {!isLoginView && (
-              <>
-                <div>
-                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">Confirm Password</label>
-                  <div className="mt-1 relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input
-                      id="confirmPassword" name="confirmPassword" type="password" required autoComplete="new-password"
-                      value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={`pl-10 w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${validationErrors.confirmPassword ? 'border-red-500' : 'border-gray-300'}`}
-                      placeholder="Confirm password"
-                      disabled={loading}
-                    />
-                  </div>
-                  {validationErrors.confirmPassword && <p className="mt-1 text-xs text-red-600">{validationErrors.confirmPassword}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Register as</label>
-                  <div className="mt-2 flex items-center space-x-4">
-                    <label className="inline-flex items-center">
-                      <input type="radio" className="form-radio text-blue-600" name="role" value="player" checked={role === 'player'} onChange={() => setRole('player')} disabled={loading} />
-                      <span className="ml-2 text-sm text-gray-700">Player</span>
-                    </label>
-                    <label className="inline-flex items-center">
-                      <input type="radio" className="form-radio text-blue-600" name="role" value="dm" checked={role === 'dm'} onChange={() => setRole('dm')} disabled={loading} />
-                      <span className="ml-2 text-sm text-gray-700">Dungeon Master (DM)</span>
-                    </label>
-                  </div>
-                   {validationErrors.role && <p className="mt-1 text-xs text-red-600">{validationErrors.role}</p>}
-                </div>
-              </>
-            )}
           </div>
 
           <Button
@@ -306,23 +196,14 @@ export function Login() {
             fullWidth
             loading={loading}
             disabled={!isOnline || loading}
-            icon={isLoginView ? LogIn : UserPlus}
+            icon={LogIn}
             iconPosition="left"
           >
-            {isLoginView ? 'Sign in' : 'Create account'}
+            Sign in
           </Button>
         </form>
-
-        <div className="text-sm text-center">
-          <button
-            type="button"
-            onClick={toggleView}
-            className="font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
-            disabled={loading}
-          >
-            {isLoginView ? "Don't have an account? Create one" : "Already have an account? Sign in"}
-          </button>
-        </div>
+        
+        {/* Removed the "Don't have an account?" toggle link */}
       </div>
     </div>
   );

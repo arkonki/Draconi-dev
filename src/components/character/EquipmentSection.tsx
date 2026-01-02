@@ -385,16 +385,7 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                       <td className="px-3 py-2 text-[10px] text-stone-500 max-w-[150px]">{formatItemFeatures(weapon.features)}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
-                          {weapon.damage && (
-                            <button 
-                              onClick={() => handleDamageRoll(weapon.name, weapon.damage!)} 
-                              className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation" 
-                              title="Roll for damage"
-                            >
-                              <Dices className="w-4 h-4" />
-                              <span className="text-xs font-bold uppercase tracking-wide">Roll</span>
-                            </button>
-                          )}
+                          
                           {displayName && skillValue !== null && (
                             <button 
                               onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected)} 
@@ -406,6 +397,16 @@ export function EquipmentSection({ character }: EquipmentSectionProps) {
                                 <span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{displayName}</span>
                                 <span className="text-sm font-bold">Roll {skillValue}</span>
                               </div>
+                            </button>
+                          )}
+													{weapon.damage && (
+                            <button 
+                              onClick={() => handleDamageRoll(weapon.name, weapon.damage!)} 
+                              className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation" 
+                              title="Roll for damage"
+                            >
+                              <Dices className="w-4 h-4" />
+                              <span className="text-xs font-bold uppercase tracking-wide">Damage</span>
                             </button>
                           )}
                         </div>

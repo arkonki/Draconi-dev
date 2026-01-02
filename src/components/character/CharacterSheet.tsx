@@ -5,7 +5,7 @@ import { calculateMovement } from '../../lib/movement';
 import {
   Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, StickyNote, Plus, Save, Trash2, Minus,
   Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, Table as TableIcon, Eye, EyeOff, Quote, Code, Pencil, Calendar, Skull, Package, Sparkles, Book, UserSquare,
-  Gem, X, Backpack, Scroll, AlertCircle
+  Gem, X, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
@@ -39,6 +39,346 @@ const PaperSection = ({ title, children, className = "", action }: { title?: str
     <div className="pt-2">{children}</div>
   </div>
 );
+
+// --- NEW STAT TRACKER COMPONENTS ---
+
+interface StatHistoryItem {
+  id: string;
+  amount: number; // positive = heal/recover, negative = damage/spend
+  timestamp: Date;
+  previousValue: number;
+}
+
+const StatModificationModal = ({ 
+  statName, 
+  currentValue, 
+  maxValue, 
+  onApply, 
+  onClose,
+  history,
+  onRevert
+}: { 
+  statName: string; 
+  currentValue: number; 
+  maxValue: number; 
+  onApply: (amount: number) => void; 
+  onClose: () => void;
+  history: StatHistoryItem[];
+  onRevert: (item: StatHistoryItem) => void;
+}) => {
+  const [inputValue, setInputValue] = useState<string>('');
+  const [mode, setMode] = useState<'damage' | 'heal'>('damage');
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Handle Physical Keyboard events
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key;
+      if (/^[0-9]$/.test(key)) {
+        handleNumPress(key);
+      } else if (key === 'Backspace') {
+        handleBackspace();
+      } else if (key === 'Enter') {
+        handleApply();
+      } else if (key === 'Escape') {
+        onClose();
+      } else if (key === 'c' || key === 'C') {
+        handleClear();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [inputValue, mode]);
+
+  const handleNumPress = (num: string) => {
+    if (inputValue.length >= 3) return; // Cap at 3 digits (999)
+    setInputValue(prev => prev === '0' ? num : prev + num);
+  };
+
+  const handleBackspace = () => {
+    setInputValue(prev => prev.slice(0, -1));
+  };
+
+  const handleClear = () => {
+    setInputValue('');
+  };
+
+  const handleApply = () => {
+    const val = parseInt(inputValue);
+    if (isNaN(val) || val === 0) return;
+    
+    // If mode is damage (HP) or spend (WP), make negative
+    // If mode is heal (HP) or recover (WP), make positive
+    const finalAmount = mode === 'damage' ? -val : val;
+    onApply(finalAmount);
+    setInputValue('');
+  };
+
+  const isHp = statName === 'HP';
+
+  const NumpadBtn = ({ children, onClick, variant = 'default', className = '' }: any) => {
+    const baseStyles = "h-14 md:h-16 rounded-lg font-serif text-2xl font-bold transition-all active:scale-95 shadow-sm border-b-4 active:border-b-0 active:translate-y-1";
+    const variants = {
+      default: "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:border-stone-400",
+      primary: "bg-[#1a472a] text-[#e8d5b5] border-[#0f2e1b] hover:bg-[#2c5e3f]",
+      danger: "bg-red-100 text-red-800 border-red-300 hover:bg-red-200",
+      action: "bg-stone-200 text-stone-600 border-stone-300 hover:bg-stone-300"
+    };
+
+    // @ts-ignore
+    return (
+      <button onClick={onClick} className={`${baseStyles} ${variants[variant] || variants.default} ${className}`}>
+        {children}
+      </button>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90] backdrop-blur-sm p-4">
+      <div ref={modalRef} className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden">
+        
+        {/* Header */}
+        <div className="bg-[#1a472a] text-[#e8d5b5] p-3 flex justify-between items-center border-b-4 border-[#d4c5a3] shrink-0">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-serif font-bold uppercase tracking-wide flex items-center gap-2">
+              <Calculator size={18} /> Modify {statName}
+            </h3>
+            <span className="text-xs opacity-80 font-mono">
+              Current: {currentValue} / {maxValue}
+            </span>
+          </div>
+          <button onClick={onClose} className="hover:text-white bg-white/10 p-1.5 rounded hover:bg-white/20 transition-colors"><X size={20} /></button>
+        </div>
+
+        <div className="p-4 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+          
+          {/* Mode Toggles */}
+          <div className="flex gap-2 shrink-0">
+            <button 
+              onClick={() => setMode('damage')} 
+              className={`flex-1 py-3 px-2 font-bold uppercase text-xs tracking-wider border-2 rounded-lg transition-all
+              ${mode === 'damage' 
+                ? 'bg-red-700 border-red-900 text-white shadow-inner scale-[0.98]' 
+                : 'bg-white border-stone-200 text-stone-500 hover:border-red-300 hover:text-red-700 shadow-sm'}`}
+            >
+              {isHp ? 'Damage' : 'Spend'} (-)
+            </button>
+            <button 
+              onClick={() => setMode('heal')} 
+              className={`flex-1 py-3 px-2 font-bold uppercase text-xs tracking-wider border-2 rounded-lg transition-all
+              ${mode === 'heal' 
+                ? 'bg-emerald-700 border-emerald-900 text-white shadow-inner scale-[0.98]' 
+                : 'bg-white border-stone-200 text-stone-500 hover:border-emerald-300 hover:text-emerald-700 shadow-sm'}`}
+            >
+              {isHp ? 'Heal' : 'Recover'} (+)
+            </button>
+          </div>
+
+          {/* Calculator Display Screen */}
+          <div className="bg-[#dcdcdc] p-4 rounded-lg border-2 border-stone-400 shadow-inner flex flex-col items-end justify-center h-20 mb-2 relative overflow-hidden">
+            {/* LCD Glare Effect */}
+            <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/30 to-transparent pointer-events-none"></div>
+            
+            <div className={`text-4xl font-mono font-bold tracking-widest z-10 
+              ${!inputValue ? 'opacity-30' : 'opacity-100'} 
+              ${mode === 'damage' ? 'text-red-900' : 'text-emerald-900'}`
+            }>
+              {inputValue || '0'}
+            </div>
+          </div>
+
+          {/* Keypad Grid */}
+          <div className="grid grid-cols-3 gap-3">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+              <NumpadBtn key={num} onClick={() => handleNumPress(num.toString())}>
+                {num}
+              </NumpadBtn>
+            ))}
+            
+            <NumpadBtn variant="danger" onClick={handleClear} className="text-base">
+              CLR
+            </NumpadBtn>
+            <NumpadBtn onClick={() => handleNumPress('0')}>
+              0
+            </NumpadBtn>
+            <NumpadBtn variant="action" onClick={handleBackspace}>
+              <Delete size={24} className="mx-auto" />
+            </NumpadBtn>
+          </div>
+
+          {/* Apply Button */}
+          <button
+            onClick={handleApply}
+            disabled={!inputValue}
+            className={`w-full py-4 rounded-lg font-serif font-bold text-lg uppercase tracking-widest shadow-md transition-all active:scale-95 active:shadow-none
+              ${!inputValue 
+                ? 'bg-stone-200 text-stone-400 cursor-not-allowed' 
+                : mode === 'damage' 
+                  ? 'bg-red-700 text-white hover:bg-red-800' 
+                  : 'bg-emerald-700 text-white hover:bg-emerald-800'
+              }`}
+          >
+            {inputValue ? (
+              <span className="flex items-center justify-center gap-2">
+                {mode === 'damage' ? 'Apply Damage' : 'Apply Healing'}
+                <CornerDownLeft size={20} />
+              </span>
+            ) : 'Enter Amount'}
+          </button>
+
+          {/* History Log (Collapsible or Small) */}
+          {history.length > 0 && (
+            <div className="mt-4 pt-4 border-t-2 border-stone-200">
+              <div className="flex items-center gap-2 mb-3 text-stone-400">
+                <History size={14} />
+                <span className="text-xs font-bold uppercase tracking-widest">Recent Changes</span>
+              </div>
+              <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
+                {history.slice().reverse().map((item) => (
+                  <div key={item.id} className="flex items-center justify-between text-sm bg-white p-2 rounded border border-stone-100 shadow-sm animate-in fade-in slide-in-from-right-4">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-bold font-mono ${item.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {item.amount > 0 ? '+' : ''}{item.amount}
+                      </span>
+                      <span className="text-stone-400 text-xs">
+                        ({item.previousValue} → {item.previousValue + item.amount})
+                      </span>
+                    </div>
+                    <button 
+                      onClick={() => onRevert(item)}
+                      title="Undo"
+                      className="text-stone-400 hover:text-red-600 transition-colors p-1 hover:bg-stone-100 rounded"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StatTracker = ({ 
+  label, 
+  currentValue, 
+  maxValue, 
+  colorClass, 
+  onModify 
+}: { 
+  label: string, 
+  currentValue: number, 
+  maxValue: number, 
+  colorClass: string, // e.g., 'bg-red-600'
+  onModify: (stat: string, amount: number) => void 
+}) => {
+  const [showModal, setShowModal] = useState(false);
+  const [history, setHistory] = useState<StatHistoryItem[]>([]);
+
+  // Calculate percentage for the bar
+  const percent = Math.min(100, Math.max(0, (currentValue / maxValue) * 100));
+
+  const handleApplyChange = (amount: number) => {
+    // 1. Add to history
+    const newItem: StatHistoryItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      amount: amount,
+      timestamp: new Date(),
+      previousValue: currentValue
+    };
+    setHistory(prev => [...prev, newItem]);
+
+    // 2. Apply to store
+    onModify(label === 'HP' ? 'current_hp' : 'current_wp', amount);
+  };
+
+  const handleRevert = (item: StatHistoryItem) => {
+    // To revert, we apply the inverse of the amount
+    onModify(label === 'HP' ? 'current_hp' : 'current_wp', -item.amount);
+    
+    // Remove from history
+    setHistory(prev => prev.filter(h => h.id !== item.id));
+  };
+
+  return (
+    <>
+      <div className="w-full bg-stone-100 rounded-md border border-stone-300 p-2 shadow-sm relative overflow-hidden group">
+        
+        {/* Header Row */}
+        <div className="flex justify-between items-end mb-1 relative z-10">
+          <div className="flex items-center gap-2">
+            <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white shadow-sm ${colorClass === 'bg-red-600' ? 'bg-red-800' : 'bg-teal-800'}`}>
+              {label}
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              {label === 'HP' ? 'Health' : 'Willpower'}
+            </span>
+          </div>
+          <div className="font-serif font-bold text-stone-700">
+            <span className="text-lg">{currentValue}</span>
+            <span className="text-sm text-stone-400"> / {maxValue}</span>
+          </div>
+        </div>
+
+        {/* Bar Container */}
+        <div className="h-3 bg-stone-200 rounded-full overflow-hidden border border-stone-300 relative z-10">
+          <div 
+            className={`h-full ${colorClass} transition-all duration-500 ease-out`} 
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+
+        {/* Buttons - Overlay on hover for desktop, persistent for mobile? No, let's put them below or beside */}
+        <div className="mt-2 flex justify-between items-center relative z-10">
+            <div className="flex gap-1">
+                 {/* Quick Adjust Buttons */}
+                <button 
+                  onClick={() => handleApplyChange(-1)}
+                  className="w-8 h-8 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-red-400 text-stone-600 flex items-center justify-center transition-colors"
+                  title="-1"
+                >
+                    <Minus size={14} />
+                </button>
+                <button 
+                  onClick={() => handleApplyChange(1)}
+                  className="w-8 h-8 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-emerald-400 text-stone-600 flex items-center justify-center transition-colors"
+                  title="+1"
+                >
+                    <Plus size={14} />
+                </button>
+            </div>
+            
+            <button 
+                onClick={() => setShowModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#e8d5b5] hover:bg-[#d4c5a3] text-[#5c4d3c] text-xs font-bold uppercase tracking-wider rounded border border-[#d4c5a3] transition-colors shadow-sm"
+            >
+                <Calculator size={14} />
+                Modify
+            </button>
+        </div>
+      </div>
+
+      {showModal && (
+        <StatModificationModal 
+          statName={label}
+          currentValue={currentValue}
+          maxValue={maxValue}
+          onApply={handleApplyChange}
+          onClose={() => setShowModal(false)}
+          history={history}
+          onRevert={handleRevert}
+        />
+      )}
+    </>
+  );
+};
+
+
+// --- EXISTING HELPERS (Unchanged) ---
 
 const AttributeEditModal = ({ 
   attribute, 
@@ -82,7 +422,6 @@ const AttributeEditModal = ({
 const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onClick, isSaving }: any) => {
   const displayValue = value ?? 10;
   return (
-    // UPDATED: w-full ensures it fits the grid cell; max-w allows it to stay contained on desktop
     <div className="flex flex-col items-center relative group w-full max-w-[120px]"> 
       <button 
         onClick={onClick}
@@ -97,8 +436,6 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
       <button 
         onClick={onToggle}
         disabled={isSaving}
-        // UPDATED: Removed clip-path-banner to ensure text "Disheartened" has max possible space.
-        // Used a simpler rounded style that matches the aesthetic but is much more text-friendly.
         className={`mt-2 w-full py-1.5 px-1 text-[9px] md:text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm
         ${conditionActive 
           ? 'bg-red-700 border-red-800 text-white' 
@@ -220,27 +557,6 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   );
 };
 
-const StatBar = ({ label, currentValue, maxValue, onDecrement, onIncrement, colorClass }: any) => (
-  <div className="flex items-center gap-2 w-full">
-    <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 border-stone-400 font-bold text-white shadow-sm shrink-0 ${colorClass === 'bg-red-600' ? 'bg-red-800' : 'bg-teal-800'}`}>
-      <span className="text-xs">{label}</span>
-    </div>
-    <div className="flex-1 min-w-0">
-      <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-stone-600 mb-1">
-        <span>Current</span>
-        <span>{currentValue} / {maxValue}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <button onClick={onDecrement} className="w-6 h-6 rounded border border-stone-300 bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-600 shrink-0 touch-manipulation"><Minus size={12} /></button>
-        <div className="flex-1 h-3 bg-stone-300 rounded-full overflow-hidden border border-stone-400 relative">
-           <div className={`h-full ${colorClass} transition-all duration-300`} style={{ width: `${(currentValue / maxValue) * 100}%` }}></div>
-        </div>
-        <button onClick={onIncrement} className="w-6 h-6 rounded border border-stone-300 bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-600 shrink-0 touch-manipulation"><Plus size={12} /></button>
-      </div>
-    </div>
-  </div>
-);
-
 // --- MAIN SHEET COMPONENT ---
 
 export function CharacterSheet() {
@@ -292,6 +608,11 @@ export function CharacterSheet() {
     } finally {
       setEditingAttribute(null);
     }
+  };
+
+  // Wrapper for adjustStat to handle the string key requirement
+  const handleStatModify = (stat: string, amount: number) => {
+    adjustStat(stat as any, amount);
   };
 
   const renderRestModal = () => {
@@ -422,12 +743,27 @@ export function CharacterSheet() {
             <div className="space-y-4 md:space-y-6">
                <PaperSection title="Vitals & Combat">
                   <div className="space-y-4 pt-2">
+                    {/* UPDATED: StatTracker for HP */}
                     {currentHP > 0 ? (
-                        <StatBar label="HP" currentValue={currentHP} maxValue={maxHP} colorClass="bg-red-600" onIncrement={() => adjustStat('current_hp', 1)} onDecrement={() => adjustStat('current_hp', -1)} />
+                        <StatTracker 
+                          label="HP" 
+                          currentValue={currentHP} 
+                          maxValue={maxHP} 
+                          colorClass="bg-red-600"
+                          onModify={handleStatModify}
+                        />
                     ) : (
                         <DeathRollTracker character={character} />
                     )}
-                    <StatBar label="WP" currentValue={currentWP} maxValue={maxWP} colorClass="bg-teal-600" onIncrement={() => adjustStat('current_wp', 1)} onDecrement={() => adjustStat('current_wp', -1)} />
+                    
+                    {/* UPDATED: StatTracker for WP */}
+                    <StatTracker 
+                      label="WP" 
+                      currentValue={currentWP} 
+                      maxValue={maxWP} 
+                      colorClass="bg-teal-600"
+                      onModify={handleStatModify}
+                    />
                   </div>
                   <div className="mt-4 pt-4 border-t border-stone-300"><StatusPanelView /></div>
                </PaperSection>

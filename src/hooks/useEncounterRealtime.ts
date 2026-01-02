@@ -11,65 +11,53 @@ export function useEncounterRealtime(encounterId: string | null) {
       return;
     }
 
-    const channels: RealtimeChannel[] = [];
+    console.log(`Setting up realtime subscription for encounter: ${encounterId}`);
 
-    // Channel for the encounter itself (e.g., status, current_round changes)
-    const encounterChannel = supabase
-      .channel(`encounter:${encounterId}`)
+    const channel = supabase
+      .channel(`encounter_room:${encounterId}`)
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*', // Listen to ALL events (INSERT, UPDATE, DELETE)
           schema: 'public',
           table: 'encounters',
           filter: `id=eq.${encounterId}`,
         },
         (payload) => {
-          console.log('Encounter updated:', payload);
+          console.log('Realtime: Encounter updated', payload);
+          // Immediately invalidate to trigger a refetch
           queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] });
-          // Also invalidate list of encounters for the party if the status changes significantly
-          // queryClient.invalidateQueries({ queryKey: ['encounters', payload.old?.party_id] });
         }
       )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`Subscribed to encounter:${encounterId}`);
-        }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error(`Encounter channel error for ${encounterId}:`, err);
-        }
-      });
-    channels.push(encounterChannel);
-
-    // Channel for combatants in this encounter
-    const combatantsChannel = supabase
-      .channel(`encounter_combatants:${encounterId}`)
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to INSERT, UPDATE, DELETE
+          event: '*',
           schema: 'public',
           table: 'encounter_combatants',
           filter: `encounter_id=eq.${encounterId}`,
         },
         (payload) => {
-          console.log('Encounter combatants changed:', payload);
+          console.log('Realtime: Combatants updated', payload);
+          // Immediately invalidate to trigger a refetch
           queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] });
         }
       )
-      .subscribe((status, err) => {
+      .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log(`Subscribed to encounter_combatants:${encounterId}`);
+          console.log(`Connected to realtime for encounter ${encounterId}`);
         }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error(`Encounter combatants channel error for ${encounterId}:`, err);
+        if (status === 'CHANNEL_ERROR') {
+          console.error(`Realtime connection error for encounter ${encounterId}`);
+        }
+        if (status === 'TIMED_OUT') {
+          console.error(`Realtime connection timed out for encounter ${encounterId}`);
         }
       });
-    channels.push(combatantsChannel);
-    
-		return () => {
-      console.log(`Unsubscribing from encounter channels for ${encounterId}`);
-      channels.forEach(channel => supabase.removeChannel(channel));
+
+    return () => {
+      console.log(`Cleaning up realtime for encounter ${encounterId}`);
+      supabase.removeChannel(channel);
     };
   }, [encounterId, queryClient]);
 }

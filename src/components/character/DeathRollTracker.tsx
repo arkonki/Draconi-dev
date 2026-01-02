@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Character } from '../../types/character';
 import { useDice, RollHistoryEntry } from '../dice/DiceContext';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { Skull, HeartPulse, ShieldQuestion, CheckCircle, XCircle, Zap, Info, Plus, Minus, Check, HelpCircle } from 'lucide-react';
+import { Skull, HeartPulse, ShieldQuestion, CheckCircle, XCircle, Zap, Info, Plus, Minus, Check, HelpCircle, Power } from 'lucide-react';
 import { Button } from '../shared/Button';
 
 interface DeathRollTrackerProps {
@@ -27,6 +27,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
   // Derive state
   const deathRollSuccesses = character.death_rolls_passed ?? 0;
   const deathRollFailures = character.death_rolls_failed ?? 0;
+  // Default to false, but logic below handles the "First Time" auto-rally
   const isRallied = character.is_rallied ?? false;
 
   // Safe attribute access
@@ -36,6 +37,15 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
 
   const isRecovering = deathRollSuccesses >= 3;
   const isDead = deathRollFailures >= 3;
+
+  // --- Auto-Rally Logic ---
+  // If the character is fresh into Death Rolls (0/0) and is_rallied hasn't been set (null/undefined),
+  // we automatically set them to Rallied.
+  useEffect(() => {
+    if (deathRollSuccesses === 0 && deathRollFailures === 0 && (character.is_rallied === null || character.is_rallied === undefined)) {
+      setDeathRollState(0, 0, true);
+    }
+  }, [deathRollSuccesses, deathRollFailures, character.is_rallied, setDeathRollState]);
 
   // --- Handlers ---
 
@@ -68,6 +78,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
     }
 
     setLastRollResult({ msg, type });
+    // Persist current rallied state unless logic dictates otherwise (usually death roll doesn't consume rally, Actions do)
     setDeathRollState(Math.min(3, newSuccesses), Math.min(3, newFailures), isRallied); 
     toggleDiceRoller();
   };
@@ -107,6 +118,10 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
       setLastRollResult({ msg: `Manually Recovered ${amount} HP`, type: 'success' });
       setManualHP('');
     }
+  };
+
+  const toggleRallyState = () => {
+    setDeathRollState(deathRollSuccesses, deathRollFailures, !isRallied);
   };
 
   // --- Actions ---
@@ -261,11 +276,16 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
         </div>
       )}
 
-      {/* Rally Status */}
+      {/* Rally Status & Actions */}
       {isRallied && !isRecovering && !isDead && (
-        <div className="flex items-center justify-center gap-2 text-xs text-yellow-800 bg-yellow-100 p-2 rounded border border-yellow-200">
-          <Zap className="w-4 h-4 fill-yellow-500 text-yellow-600" />
-          <span><strong>Rallied!</strong> You can act this turn.</span>
+        <div className="relative group flex items-center justify-between text-xs text-yellow-800 bg-yellow-100 p-2 rounded border border-yellow-200">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 fill-yellow-500 text-yellow-600" />
+            <span><strong>Rallied!</strong> You can act this turn.</span>
+          </div>
+          <button onClick={toggleRallyState} className="p-1 hover:bg-yellow-200 rounded text-yellow-700" title="Un-rally manually">
+            <XCircle size={14} />
+          </button>
         </div>
       )}
 
@@ -329,19 +349,30 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
                </Button>
             </div>
             
-            <div className="relative group">
+            <div className="relative flex gap-2 items-center">
                 <Button 
-                onClick={performRallyRoll} 
-                disabled={isRallied || isRolling || isSaving}
-                className={`w-full ${isRallied ? 'opacity-50 cursor-not-allowed bg-stone-200 text-stone-500' : 'bg-yellow-100 hover:bg-yellow-200 text-yellow-900 border-yellow-300'}`}
-                icon={ShieldQuestion}
+                  onClick={performRallyRoll} 
+                  disabled={isRallied || isRolling || isSaving}
+                  className={`flex-1 ${isRallied ? 'opacity-50 cursor-not-allowed bg-stone-200 text-stone-500' : 'bg-yellow-100 hover:bg-yellow-200 text-yellow-900 border-yellow-300'}`}
+                  icon={ShieldQuestion}
                 >
-                {isRallied ? 'Already Rallied' : 'Attempt Rally (Bane)'}
+                  {isRallied ? 'Already Rallied' : 'Attempt Rally'}
                 </Button>
-                {/* Rally Tooltip for Manual Players */}
-                <div className="text-[9px] text-center text-stone-400 mt-1">
-                    Manual Target: <strong>≤ {wilTarget}</strong> (WIL) w/ Bane
-                </div>
+                
+                {/* Manual Rally Toggle for GM Overrides */}
+                {!isRallied && (
+                   <button 
+                     onClick={toggleRallyState}
+                     className="p-3 bg-stone-100 border border-stone-300 rounded hover:bg-stone-200 text-stone-500"
+                     title="Force Rally State (Manual)"
+                   >
+                     <Zap size={18} />
+                   </button>
+                )}
+            </div>
+             {/* Rally Tooltip for Manual Players */}
+             <div className="text-[9px] text-center text-stone-400">
+                Manual Rally: <strong>≤ {wilTarget}</strong> (WIL) w/ Bane
             </div>
           </>
         )}
