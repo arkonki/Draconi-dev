@@ -2,12 +2,31 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import packageJson from './package.json';
+
+// --- VERSION CALCULATION LOGIC ---
+const getAppVersion = () => {
+  // 1. Get the base version from package.json (e.g., "1.0.0")
+  const baseVersion = packageJson.version;
+  
+  // 2. Get the Netlify Commit Hash (if available)
+  // process.env.COMMIT_REF is automatically provided by Netlify during build
+  const commitHash = process.env.COMMIT_REF 
+    ? process.env.COMMIT_REF.substring(0, 7) // Take first 7 chars (e.g., "a1b2c3d")
+    : 'dev'; // Fallback for local development
+
+  // 3. Combine them (e.g., "1.0.0-a1b2c3d")
+  return `${baseVersion}-${commitHash}`;
+};
+
+const appVersion = getAppVersion();
+const buildDate = new Date().toISOString();
 
 export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt', // <--- CHANGED: Must be 'prompt' for the ReloadPrompt UI to work
+      registerType: 'prompt', // Enables "New Content Available" toast
       devOptions: {
         enabled: true,
       },
@@ -128,6 +147,9 @@ export default defineConfig({
   define: {
     'import.meta.env.PROD': JSON.stringify(process.env.NODE_ENV === 'production'),
     'import.meta.env.DEV': JSON.stringify(process.env.NODE_ENV !== 'production'),
+    // Inject the calculated version and build date
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+    'import.meta.env.VITE_BUILD_DATE': JSON.stringify(buildDate),
   },
 
   build: {
@@ -139,11 +161,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            // Keep Supabase separate
             if (id.includes('@supabase')) {
               return 'supabase';
             }
-            // All other vendors
             return 'vendor';
           }
         },

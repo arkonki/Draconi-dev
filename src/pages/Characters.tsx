@@ -13,6 +13,8 @@ import { Button } from '../components/shared/Button';
 import { fetchCharacters, deleteCharacters } from '../lib/api/characters';
 import { JoinPartyDialog } from '../components/party/JoinPartyDialog';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
+// 1. Import the VersionDisplay component
+import { VersionDisplay } from '../components/shared/VersionDisplay'; 
 
 export function Characters() {
   const { user } = useAuth();
@@ -176,7 +178,6 @@ export function Characters() {
       )}
 
       {/* --- FLOATING ACTION BAR (Mobile & Desktop) --- */}
-      {/* Shows up at bottom of screen when items are selected */}
       {selectedIds.length > 0 && (
         <div className="fixed bottom-6 left-0 right-0 z-50 px-4 flex justify-center animate-in slide-in-from-bottom-10 fade-in duration-300">
           <div className="bg-white border border-gray-200 shadow-2xl rounded-2xl p-2 pl-4 pr-2 flex items-center justify-between ring-1 ring-black/5 w-full max-w-sm md:max-w-md backdrop-blur-xl bg-white/95">
@@ -225,6 +226,9 @@ export function Characters() {
         isLoading={deleteMutation.isPending}
         icon={<AlertTriangle className="h-6 w-6 text-red-600" />}
       />
+
+      {/* 2. Add the Version Counter here */}
+      <VersionDisplay />
     </div>
   );
 }
