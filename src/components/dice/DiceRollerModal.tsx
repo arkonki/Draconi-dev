@@ -25,7 +25,6 @@ function Loader2({ className }: { className?: string }) {
 export function DiceRollerModal() {
   const { showDiceRoller, toggleDiceRoller, currentConfig, dicePool, addDie, removeLastDie, clearDicePool, isBoonActive, isBaneActive, setBoon, setBane, addRollToHistory, rollHistory, clearHistory } = useDice();
 
-  // IMPORT STORE ACTIONS
   const { markSkillThisSession, performRest, setInitiativeForCombatant } = useCharacterSheetStore();
 
   const [results, setResults] = useState<DiceRollResult[]>([]);
@@ -98,16 +97,48 @@ export function DiceRollerModal() {
       }
       
       const val = numericFinalValue;
-      if (val === 1) { crit = true; finalValue = "Dragon!"; success = true; }
-      if (val === 20) { crit = true; finalValue = "Demon!"; success = false; }
 
-      if (currentConfig?.targetValue !== undefined && !crit) {
-        if (isSkillCheck || isRallyRoll || isAdvancementRoll || isDeathRoll) success = val <= currentConfig.targetValue;
+      // ---------------------------------------------------------
+      // SMART LOGIC: Differentiate between Skill Check & Advancement
+      // ---------------------------------------------------------
+      
+      if (isAdvancementRoll) {
+        // === ADVANCEMENT ROLL ===
+        // Success: Roll > Skill Level
+        // Dragon (1): Failure (1 is never > skill).
+        // Demon (20): Success (20 is always > skill).
+        
+        if (currentConfig?.targetValue !== undefined) {
+             success = val > currentConfig.targetValue;
+        }
+        
+        // We do NOT treat 1/20 as "Dragon/Demon" labels here, 
+        // because seeing "Dragon!" (usually good) on a 1 (Failure) is confusing.
+        finalValue = val; 
+
+      } else {
+        // === STANDARD SKILL CHECK / RALLY / DEATH ===
+        // Success: Roll <= Skill Level
+        // Dragon (1): Critical Success
+        // Demon (20): Critical Failure
+
+        if (val === 1) { 
+            crit = true; 
+            finalValue = "Dragon!"; 
+            success = true; 
+        } else if (val === 20) { 
+            crit = true; 
+            finalValue = "Demon!"; 
+            success = false; 
+        } else if (currentConfig?.targetValue !== undefined) {
+            if (isSkillCheck || isRallyRoll || isDeathRoll) {
+                success = val <= currentConfig.targetValue;
+            }
+        }
       }
     } 
     // --- LOGIC: Recovery / Rest ---
     else if ((isRecoveryRoll || isRest) && dicePool.every(d => d === 'd6')) {
-        // Just sum them up (handled by default reduce above)
         numericFinalValue = currentResults.reduce((acc, curr) => acc + curr.value, 0);
         finalValue = numericFinalValue;
     }
@@ -133,7 +164,7 @@ export function DiceRollerModal() {
         setIsSuccess(success);
 
         // --- SIDE EFFECTS (STORE UPDATES) ---
-        // 1. Skill Marking (Dragon/Demon)
+        // 1. Skill Marking (Dragon/Demon) - ONLY for standard checks
         if (isSkillCheck && skillName && (numericFinalValue === 1 || numericFinalValue === 20)) {
             markSkillThisSession(skillName);
         }
@@ -143,20 +174,11 @@ export function DiceRollerModal() {
             setInitiativeForCombatant(currentConfig.combatantId, numericFinalValue);
         }
 
-        // 3. Resting (Visualizing the roll)
+        // 3. Resting
         if (isRest && currentConfig?.restType) {
-            // If Stretch Rest (usually 1d6 or 2d6), we apply to HP/WP logic
-            // Simple approach: Assume all dice are for HP, unless Round rest (WP).
-            // A more complex modal might separate HP dice from WP dice. 
-            // For now, we assume the dice pool passed in is correct for the rest type.
-            
             if (currentConfig.restType === 'round') {
-                performRest('round', 0, numericFinalValue); // Apply to WP
+                performRest('round', 0, numericFinalValue); 
             } else if (currentConfig.restType === 'stretch') {
-                // Heuristic: If 2 dice (healer), sum them. 
-                // Note: Standard rules say Stretch is D6 HP OR D6 WP. 
-                // Store logic allows both. We will apply total to HP and 0 to WP for now, 
-                // or you can split logic. Let's apply to HP as that's the common need.
                 performRest('stretch', numericFinalValue, 0); 
             }
         }
@@ -182,7 +204,7 @@ export function DiceRollerModal() {
       }
     }, 60);
 
-  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, rollMode]);
+  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, rollMode, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll]);
 
   useEffect(() => {
     if (!showDiceRoller) {
@@ -298,9 +320,16 @@ export function DiceRollerModal() {
                    <div className={`text-5xl font-black mb-2 ${isCritical ? 'text-purple-600 animate-bounce' : isRolling ? 'text-gray-400 blur-sm' : 'text-indigo-900'}`}>{displayedOutcome}</div>
                    {!isRolling && (
                      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        {currentConfig?.targetValue !== undefined && !isCritical && <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Target: {currentConfig.targetValue}</p>}
+                        {/* Smart Target Display */}
+                        {currentConfig?.targetValue !== undefined && !isCritical && (
+                            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
+                                {isAdvancementRoll ? `Need > ${currentConfig.targetValue}` : `Target: ${currentConfig.targetValue}`}
+                            </p>
+                        )}
+
                         {isSuccess === true && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-bold"><Star size={14} className="fill-current" /> Success</div>}
                         {isSuccess === false && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-bold"><X size={14} /> Failure</div>}
+                        
                         {boonResults.length > 0 && <p className="text-xs text-indigo-400 mt-2">Rolls: [{results[0].value}, {boonResults.map(b => b.value).join(', ')}] <span className="font-semibold">{isBoonActive ? 'Took Lowest' : 'Took Highest'}</span></p>}
                      </div>
                    )}
