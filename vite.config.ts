@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // <--- CHANGED: Must be 'prompt' for the ReloadPrompt UI to work
       devOptions: {
         enabled: true,
       },
@@ -135,20 +135,15 @@ export default defineConfig({
     sourcemap: false,
     chunkSizeWarningLimit: 1600,
     
-    // --- UPDATED CODE SPLITTING ---
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            // Keep Supabase separate (it's safe and large)
+            // Keep Supabase separate
             if (id.includes('@supabase')) {
               return 'supabase';
             }
-            
-            // REMOVED: Separate 'editor' and 'markdown' chunks.
-            // Putting them all into 'vendor' solves the initialization crash.
-            
-            // Everything else goes into vendor
+            // All other vendors
             return 'vendor';
           }
         },
