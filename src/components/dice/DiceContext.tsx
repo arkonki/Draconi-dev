@@ -1,12 +1,16 @@
+// src/components/dice/DiceContext.tsx
+
 import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { parseDiceString } from '../../lib/dice-utils';
 
-// Define types for dice and rolls
+// --- Types ---
 export type DiceType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
+
 export interface DiceRollResult {
   type: DiceType;
   value: number;
 }
+
 export interface RollHistoryEntry {
   id: string; // Unique ID for key prop
   timestamp: number;
@@ -20,20 +24,23 @@ export interface RollHistoryEntry {
   targetValue?: number; // For skill checks
   isSuccess?: boolean; // General success/failure if applicable
   isCritical?: boolean; // General critical if applicable
-  skillName?: string; // NEW: Track the skill name for advancement marking
+  skillName?: string; // Track the skill name for advancement marking
 }
 
 // Define the structure for the initial roll configuration
 export interface RollConfig {
-  dice?: string; // NEW: e.g., "2d6"
+  dice?: string; // e.g., "2d6"
   initialDice?: DiceType[]; // Pre-populate dice pool
-  rollMode?: 'skillCheck' | 'attackDamage' | 'generic' | 'deathRoll' | 'recoveryRoll' | 'rallyRoll' | 'advancementRoll';
+  // Updated roll modes to include 'initiative' and 'rest'
+  rollMode?: 'skillCheck' | 'attackDamage' | 'generic' | 'deathRoll' | 'recoveryRoll' | 'rallyRoll' | 'advancementRoll' | 'initiative' | 'rest';
   targetValue?: number;
   description?: string; // Optional description for the roll
-  label?: string; // NEW: Alias for description
+  label?: string; // Alias for description
   requiresBane?: boolean;
   skillName?: string;
-  onRoll?: (result: { total: number | string }) => void; // NEW: Simplified callback
+  restType?: 'round' | 'stretch' | 'shift'; // Payload for resting logic
+  combatantId?: string; // Payload for initiative logic
+  onRoll?: (result: { total: number | string }) => void; // Simplified callback
   onRollComplete?: (result: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => void;
 }
 
@@ -46,7 +53,7 @@ interface DiceContextType {
   isBaneActive: boolean;
   toggleDiceRoller: (config?: RollConfig) => void;
   addDie: (die: DiceType) => void;
-  removeLastDie: (die?: DiceType) => void; // Optional: specify which type to remove last of
+  removeLastDie: (die?: DiceType) => void; 
   clearDicePool: () => void;
   setBoon: (active: boolean) => void;
   setBane: (active: boolean) => void;
@@ -58,6 +65,7 @@ const DiceContext = createContext<DiceContextType | undefined>(undefined);
 
 const MAX_HISTORY = 20; // Max number of history entries
 
+// --- Provider Implementation ---
 export function DiceProvider({ children }: { children: ReactNode }) {
   const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<RollConfig | null>(null);
@@ -93,10 +101,13 @@ export function DiceProvider({ children }: { children: ReactNode }) {
         } else if (config?.rollMode === 'rallyRoll') {
             initialPool = ['d20'];
         } else if (config?.rollMode === 'skillCheck' && initialPool.length === 0) {
-            initialPool = ['d20']; // Default to d20 for skill checks if no dice specified
+            initialPool = ['d20']; 
         } else if (config?.rollMode === 'advancementRoll') {
             initialPool = ['d20'];
+        } else if (config?.rollMode === 'initiative') {
+            initialPool = ['d10']; // Standard Dragonbane initiative is D10 (lowest wins) or D6 depending on house rules, usually D10.
         }
+        
         setDicePool(initialPool);
         
         // Set Boon/Bane based on config
@@ -116,7 +127,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
 
   const addDie = useCallback((die: DiceType) => {
     // Prevent adding dice if in a specific mode that doesn't allow it
-    if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll'].includes(currentConfig.rollMode)) {
+    if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
         return;
     }
     setDicePool(prev => [...prev, die]);
@@ -127,104 +138,108 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   }, [isBoonActive, isBaneActive, currentConfig]);
 
   const removeLastDie = useCallback((die?: DiceType) => {
-     if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll'].includes(currentConfig.rollMode)) {
+     if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
         return;
     }
     setDicePool(prev => {
-      if (prev.length === 0) return []; if (die) {
-const lastIndex = prev.lastIndexOf(die);
-if (lastIndex !== -1) {
-const newPool = [...prev];
-newPool.splice(lastIndex, 1);
-return newPool;
-}
-}
-return prev.slice(0, -1);
-});
-}, [currentConfig]);
+      if (prev.length === 0) return []; 
+      if (die) {
+        const lastIndex = prev.lastIndexOf(die);
+        if (lastIndex !== -1) {
+          const newPool = [...prev];
+          newPool.splice(lastIndex, 1);
+          return newPool;
+        }
+      }
+      return prev.slice(0, -1);
+    });
+  }, [currentConfig]);
 
-const clearDicePool = useCallback(() => {
-if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll'].includes(currentConfig.rollMode)) {
-return;
-}
-setDicePool([]);
-setIsBoonActive(false);
-setIsBaneActive(false);
-}, [currentConfig]);
+  const clearDicePool = useCallback(() => {
+    if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
+      return;
+    }
+    setDicePool([]);
+    setIsBoonActive(false);
+    setIsBaneActive(false);
+  }, [currentConfig]);
 
-const setBoon = useCallback((active: boolean) => {
-if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll'].includes(currentConfig.rollMode)) {
-return;
-}
-if (active) {
-setIsBoonActive(true);
-setIsBaneActive(false);
-setDicePool(['d20']);
-} else {
-setIsBoonActive(false);
-}
-}, [currentConfig]);
+  const setBoon = useCallback((active: boolean) => {
+    if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
+      return;
+    }
+    if (active) {
+      setIsBoonActive(true);
+      setIsBaneActive(false);
+      // Usually boon/bane applies to d20 rolls, ensure pool is correct if needed, or let user manage
+      if (dicePool.length === 0) setDicePool(['d20']);
+    } else {
+      setIsBoonActive(false);
+    }
+  }, [currentConfig, dicePool]);
 
-const setBane = useCallback((active: boolean) => {
-if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll'].includes(currentConfig.rollMode)) {
-return;
-}
-if (active) {
-setIsBaneActive(true);
-setIsBoonActive(false);
-setDicePool(['d20']);
-} else {
-if (currentConfig?.rollMode !== 'rallyRoll') {
-setIsBaneActive(false);
-}
-}
-}, [currentConfig]);
+  const setBane = useCallback((active: boolean) => {
+    if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
+      return;
+    }
+    if (active) {
+      setIsBaneActive(true);
+      setIsBoonActive(false);
+      if (dicePool.length === 0) setDicePool(['d20']);
+    } else {
+      // Rally roll implies bane, don't turn off if that's the mode
+      if (currentConfig?.rollMode !== 'rallyRoll') {
+        setIsBaneActive(false);
+      }
+    }
+  }, [currentConfig, dicePool]);
 
-const addRollToHistory = useCallback((entryData: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
-setRollHistory(prev => {
-const newEntry: RollHistoryEntry = {
-...entryData,
-id: crypto.randomUUID(),
-timestamp: Date.now(),
-};
-const updatedHistory = [newEntry, ...prev];
-if (updatedHistory.length > MAX_HISTORY) {
-updatedHistory.pop();
+  const addRollToHistory = useCallback((entryData: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
+    setRollHistory(prev => {
+      const newEntry: RollHistoryEntry = {
+        ...entryData,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+      };
+      const updatedHistory = [newEntry, ...prev];
+      if (updatedHistory.length > MAX_HISTORY) {
+        updatedHistory.pop();
+      }
+      return updatedHistory;
+    });
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    setRollHistory([]);
+  }, []);
+
+  return (
+    <DiceContext.Provider value={{
+      showDiceRoller,
+      currentConfig,
+      dicePool,
+      rollHistory,
+      isBoonActive,
+      isBaneActive,
+      toggleDiceRoller,
+      addDie,
+      removeLastDie,
+      clearDicePool,
+      setBoon,
+      setBane,
+      addRollToHistory,
+      clearHistory,
+    }}>
+      {children}
+    </DiceContext.Provider>
+  );
 }
-return updatedHistory;
-});
-}, []);
 
-const clearHistory = useCallback(() => {
-setRollHistory([]);
-}, []);
-
-return (
-<DiceContext.Provider value={{
-showDiceRoller,
-currentConfig,
-dicePool,
-rollHistory,
-isBoonActive,
-isBaneActive,
-toggleDiceRoller,
-addDie,
-removeLastDie,
-clearDicePool,
-setBoon,
-setBane,
-addRollToHistory,
-clearHistory,
-}}>
-{children}
-</DiceContext.Provider>
-);
-}
-
+// --- Hook Export ---
 export function useDice() {
-const context = useContext(DiceContext);
-if (context === undefined) {
-throw new Error('useDice must be used within a DiceProvider');
-}
-return context;
+  const context = useContext(DiceContext);
+  if (context === undefined) {
+    throw new Error('useDice must be used within a DiceProvider');
+  }
+  return context;
 }

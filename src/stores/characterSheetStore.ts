@@ -5,7 +5,6 @@ import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells
 import { Spell, MagicSchool } from '../types/magic';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
-// ALIASING updateCombatant to apiUpdateCombatant to avoid conflict
 import { fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
@@ -40,9 +39,13 @@ interface CharacterSheetState {
   _loadGameItems: () => Promise<void>;
   _loadAllHeroicAbilities: () => Promise<void>;
   updateCharacterData: (updates: Partial<Character>) => Promise<void>;
+  
+  // Logic updated to accept VALUES (from Dice Roller) instead of internal random()
+  performRest: (type: 'round' | 'stretch' | 'shift', hpHealed?: number, wpHealed?: number) => Promise<void>;
+  setInitiativeForCombatant: (combatantId: string, initiative: number) => Promise<void>;
+  
   adjustStat: (stat: 'current_hp' | 'current_wp', amount: number) => Promise<void>;
   toggleCondition: (conditionName: keyof Character['conditions']) => Promise<void>;
-  performRest: (type: 'round' | 'stretch' | 'shift', healerPresent?: boolean) => Promise<void>;
   setDeathRollState: (successes: number, failures: number, rallied?: boolean) => Promise<void>;
   updateAttribute: (attribute: AttributeName, value: number) => Promise<void>;
   updateCurrentHP: (value: number) => Promise<void>;
@@ -64,16 +67,14 @@ interface CharacterSheetState {
   learnSpell: (spell: Spell) => Promise<void>;
   addMagicSchool: (school: MagicSchool, level: number) => Promise<void>;
   setSkillUnderStudy: (skillName: string | null) => Promise<void>;
-  markSkillThisSession: (skillName: string) => void;
+  
+  markSkillThisSession: (skillName: string) => Promise<void>; // Changed to Promise
   clearMarkedSkillsThisSession: () => void;
   setActiveStatusMessage: (message: string, duration?: number) => void;
   clearActiveStatusMessage: () => void;
   
-  // Encounter Actions
   fetchActiveEncounter: (partyId: string, characterId: string) => Promise<void>;
   clearActiveEncounter: () => void;
-  drawInitiative: () => Promise<void>;
-  setInitiativeForCombatant: (combatantId: string, initiative: number) => Promise<void>;
   updateCombatant: (combatantId: string, updates: Partial<EncounterCombatant>) => Promise<void>;
 }
 
@@ -104,7 +105,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       if (!characterData) {
         throw new Error(`Character with ID ${id} not found.`);
       }
-      set({ character: characterData, isLoading: false });
+      set({ character: characterData, isLoading: false, markedSkillsThisSession: new Set(characterData.marked_skills || []) });
       if (characterData?.party_id) {
         get().fetchActiveEncounter(characterData.party_id, characterData.id);
       } else {
@@ -123,7 +124,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       if (latestEncounter && latestEncounter.status === 'active') {
         const allCombatants = await fetchEncounterCombatants(latestEncounter.id);
         const characterCombatant = allCombatants.find(c => c.character_id === characterId);
-        // Dragonbane Sort: 1 is best, 10 is worst. Nulls last.
         const sortedCombatants = allCombatants.sort((a, b) => (a.initiative_roll ?? 100) - (b.initiative_roll ?? 100));
         set({
           activeEncounter: latestEncounter,
@@ -205,6 +205,50 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     return get()._saveCharacter(updates);
   },
 
+  // --- REFACTORED: Now accepts rolled values from UI ---
+  performRest: async (type, hpHealed = 0, wpHealed = 0) => {
+    const character = get().character;
+    if (!character) return;
+    const updates: Partial<Character> = {};
+    const currentHP = character.current_hp ?? 0;
+    const maxHP = character.max_hp ?? 10;
+    const currentWP = character.current_wp ?? 0;
+    const maxWP = character.max_wp ?? 10;
+
+    if (type === 'round') {
+      updates.current_wp = Math.min(maxWP, currentWP + wpHealed);
+    } else if (type === 'stretch') {
+      if (currentHP <= 0) {
+        get().setActiveStatusMessage("Cannot take Stretch Rest while dying.", 3000);
+        return;
+      }
+      if (hpHealed > 0) updates.current_hp = Math.min(maxHP, currentHP + hpHealed);
+      if (wpHealed > 0) updates.current_wp = Math.min(maxWP, currentWP + wpHealed);
+      
+      const currentConditions = character.conditions ?? {};
+      const newConditions = { ...currentConditions };
+      // Heals one condition
+      for (const key of Object.keys(newConditions) as Array<keyof typeof newConditions>) {
+        if (newConditions[key] === true) {
+          newConditions[key] = false;
+          updates.conditions = newConditions;
+          break;
+        }
+      }
+    } else if (type === 'shift') {
+      updates.current_hp = maxHP;
+      updates.current_wp = maxWP;
+      updates.conditions = { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false };
+      updates.death_rolls_failed = 0;
+      updates.death_rolls_passed = 0;
+      updates.is_rallied = false;
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      await get()._saveCharacter(updates);
+    }
+  },
+
   adjustStat: async (stat, amount) => {
     const character = get().character;
     if (!character) return;
@@ -239,48 +283,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     await get()._saveCharacter({ conditions: newConditions });
   },
 
-  performRest: async (type, healerPresent) => {
-    const character = get().character;
-    if (!character) return;
-    const updates: Partial<Character> = {};
-    const currentHP = character.current_hp ?? 0;
-    const maxHP = character.max_hp ?? 10;
-    const currentWP = character.current_wp ?? 0;
-    const maxWP = character.max_wp ?? 10;
-    const rollD6 = () => Math.floor(Math.random() * 6) + 1;
-
-    if (type === 'round') {
-      updates.current_wp = Math.min(maxWP, currentWP + rollD6());
-    } else if (type === 'stretch') {
-      if (currentHP <= 0) {
-        get().setActiveStatusMessage("Cannot take Stretch Rest while dying.", 3000);
-        return;
-      }
-      const hpToHeal = healerPresent ? rollD6() + rollD6() : rollD6();
-      updates.current_hp = Math.min(maxHP, currentHP + hpToHeal);
-      updates.current_wp = Math.min(maxWP, currentWP + rollD6());
-      const currentConditions = character.conditions ?? {};
-      const newConditions = { ...currentConditions };
-      for (const key of Object.keys(newConditions) as Array<keyof typeof newConditions>) {
-        if (newConditions[key] === true) {
-          newConditions[key] = false;
-          updates.conditions = newConditions;
-          break;
-        }
-      }
-    } else if (type === 'shift') {
-      updates.current_hp = maxHP;
-      updates.current_wp = maxWP;
-      updates.conditions = { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false };
-      updates.death_rolls_failed = 0;
-      updates.death_rolls_passed = 0;
-      updates.is_rallied = false;
-    }
-    if (Object.keys(updates).length > 0) {
-      await get()._saveCharacter(updates);
-    }
-  },
-
   setDeathRollState: async (successes, failures, rallied) => {
     const updates: Partial<Character> = { death_rolls_passed: successes, death_rolls_failed: failures };
     if (rallied !== undefined) {
@@ -307,19 +309,13 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
 
   updateCurrentHP: async (value) => {
     const maxHP = get().character?.max_hp ?? 10;
-    if (value > maxHP) {
-      console.warn("Attempted to set current_hp higher than max_hp. Operation blocked.");
-      return;
-    }
+    if (value > maxHP) return;
     await get()._saveCharacter({ current_hp: value });
   },
 
   updateWillpowerPoints: async (value) => {
     const maxWP = get().character?.max_wp ?? 10;
-    if (value > maxWP) {
-      console.warn("Attempted to set current_wp higher than max_wp. Operation blocked.");
-      return;
-    }
+    if (value > maxWP) return;
     await get()._saveCharacter({ current_wp: value });
   },
 
@@ -346,8 +342,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   updateSkillLevel: async (skillName, level) => {
     const character = get().character;
     if (!character) return;
-    const currentSkillLevels = character.skill_levels || {};
-    const newSkillLevels = { ...currentSkillLevels, [skillName]: level };
+    const newSkillLevels = { ...character.skill_levels, [skillName]: level };
     await get()._saveCharacter({ skill_levels: newSkillLevels });
   },
 
@@ -374,15 +369,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
 
   increaseMaxStat: async (stat, amount) => {
     const character = get().character;
-    if (!character?.id) {
-      throw new Error("Character ID not found for RPC call.");
-    }
+    if (!character?.id) throw new Error("Character ID not found for RPC call.");
     set({ isSaving: true, saveError: null });
     try {
       const { error } = await supabase.rpc('increase_character_max_stat', { character_id_input: character.id, stat_name: stat, amount_increase: amount });
-      if (error) {
-        throw new Error(`PostgreSQL Function Error: ${error.message}`);
-      }
+      if (error) throw new Error(error.message);
       set({ isSaving: false });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'A failure occurred in increaseMaxStat';
@@ -393,46 +384,26 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
 
   learnSpell: async (spellToLearn: Spell) => {
     const { character, _saveCharacter } = get();
-    if (!character) {
-      throw new Error("Cannot learn spell: No active character.");
-    }
-    if (!spellToLearn || typeof spellToLearn.name !== 'string') {
-      console.error("learnSpell was called with an invalid object:", spellToLearn);
-      throw new Error("Invalid spell data provided.");
-    }
-
+    if (!character) throw new Error("Cannot learn spell: No active character.");
     const currentSpells: CharacterSpells = JSON.parse(JSON.stringify(character.spells ?? {}));
-    if (!currentSpells.school) {
-      currentSpells.school = { name: null, spells: [] };
-    }
-    if (!currentSpells.school.spells) {
-      currentSpells.school.spells = [];
-    }
-    if (!currentSpells.general) {
-      currentSpells.general = [];
-    }
+    if (!currentSpells.school) currentSpells.school = { name: null, spells: [] };
+    if (!currentSpells.school.spells) currentSpells.school.spells = [];
+    if (!currentSpells.general) currentSpells.general = [];
     
     let wasUpdated = false;
-
     if (spellToLearn.school_id) {
-      const schoolSpells = currentSpells.school.spells;
-      if (!schoolSpells.includes(spellToLearn.name)) {
-        schoolSpells.push(spellToLearn.name);
+      if (!currentSpells.school.spells.includes(spellToLearn.name)) {
+        currentSpells.school.spells.push(spellToLearn.name);
         wasUpdated = true;
       }
     } else {
-      const generalSpells = currentSpells.general;
-      if (!generalSpells.includes(spellToLearn.name)) {
-        generalSpells.push(spellToLearn.name);
+      if (!currentSpells.general.includes(spellToLearn.name)) {
+        currentSpells.general.push(spellToLearn.name);
         wasUpdated = true;
       }
     }
-
     if (wasUpdated) {
       await _saveCharacter({ spells: currentSpells });
-      set(state => ({
-        character: state.character ? { ...state.character, spells: currentSpells } : null
-      }));
     }
   },
 
@@ -441,9 +412,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (!character) return;
     const newSkillLevels = { ...character.skill_levels, [school.name]: level, };
     const updates: Partial<Character> = { skill_levels: newSkillLevels, };
-    if (!character.magic_school) {
-      updates.magic_school = school.id;
-    }
+    if (!character.magic_school) updates.magic_school = school.id;
     await get()._saveCharacter(updates);
   },
 
@@ -451,8 +420,22 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     await get()._saveCharacter({ teacher: skillName ? { skillUnderStudy: skillName } : null });
   },
 
-  markSkillThisSession: (skillName) => {
-    set(state => ({ markedSkillsThisSession: new Set(state.markedSkillsThisSession).add(skillName) }));
+  // --- REFACTORED: Persistent Marking ---
+  markSkillThisSession: async (skillName) => {
+    const { character, _saveCharacter, markedSkillsThisSession } = get();
+    
+    // 1. Update local memory Set (for UI speed)
+    const newSet = new Set(markedSkillsThisSession).add(skillName);
+    set({ markedSkillsThisSession: newSet });
+
+    // 2. Persist to Database immediately
+    if (character) {
+      const currentMarks = new Set(character.marked_skills || []);
+      if (!currentMarks.has(skillName)) {
+        currentMarks.add(skillName);
+        await _saveCharacter({ marked_skills: Array.from(currentMarks) });
+      }
+    }
   },
 
   clearMarkedSkillsThisSession: () => set({ markedSkillsThisSession: new Set() }),
@@ -471,21 +454,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ activeStatusMessage: null, statusMessageTimeoutId: null });
   },
 
-  drawInitiative: async () => {
-    const { currentCombatant } = get();
-    if (currentCombatant) {
-      const initiativeRoll = Math.floor(Math.random() * 10) + 1;
-      await get().setInitiativeForCombatant(currentCombatant.id, initiativeRoll);
-    }
-  },
-
   setInitiativeForCombatant: async (combatantId, initiative) => {
     set({ isSaving: true, saveError: null });
     try {
-      // Use aliased API function
       await apiUpdateCombatant(combatantId, { initiative_roll: initiative });
       get().setActiveStatusMessage(`Initiative set to ${initiative}`, 4000);
-      // Optimistic update
       set(state => ({
         encounterCombatants: state.encounterCombatants.map(c => 
           c.id === combatantId ? { ...c, initiative_roll: initiative } : c
@@ -504,12 +477,9 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     try {
       await apiUpdateCombatant(combatantId, updates);
       set(state => {
-        // 1. Update list
         const updatedCombatants = state.encounterCombatants.map(c => 
           c.id === combatantId ? { ...c, ...updates } : c
         );
-
-        // 2. Optimistic Sync to Character Sheet (for instant HP/WP feedback)
         let updatedCharacter = state.character;
         const combatant = state.encounterCombatants.find(c => c.id === combatantId);
         if (combatant && state.character && combatant.character_id === state.character.id) {
@@ -519,16 +489,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
                 current_wp: updates.current_wp !== undefined ? updates.current_wp : state.character.current_wp,
             };
         }
-
-        return {
-          encounterCombatants: updatedCombatants,
-          character: updatedCharacter
-        };
+        return { encounterCombatants: updatedCombatants, character: updatedCharacter };
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update combatant';
       set({ saveError: errorMessage });
-      console.error(errorMessage);
     } finally {
       set({ isSaving: false });
     }
