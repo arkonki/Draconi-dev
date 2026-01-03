@@ -4,7 +4,7 @@ import {
   Package, Search, ShoppingBag, Coins, Shield, Sword,
   ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, CheckSquare, MinusCircle,
   Info, Target, Star, Heart, Zap, AlertTriangle, Weight, ChevronDown, ChevronUp,
-  Feather, Utensils, MoreVertical, Flame, Anchor, MinusSquare
+  Feather, Utensils, MoreVertical, Flame, Anchor, MinusSquare, Minus
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../shared/Button';
@@ -186,17 +186,114 @@ const EncumbranceMeter = ({ load, capacity, isEncumbered }: { load: number, capa
   return (<div className="p-3 border rounded-lg bg-white mt-4"><div className="flex justify-between items-center mb-2"><h4 className="font-medium text-sm text-gray-700 flex items-center gap-2"><Weight size={16} /> Encumbrance</h4><span className="font-mono font-semibold text-sm">{displayLoad} / {capacity}</span></div><div className="w-full bg-gray-200 rounded-full h-2.5"><div className={`${barColor} h-2.5 rounded-full`} style={{ width: `${Math.min(percentage, 100)}%` }}></div></div>{isEncumbered && (<div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-center gap-2"><AlertTriangle size={16} /><div><span className="font-bold">Over-encumbered:</span> You must make a STR roll to move.</div></div>)}</div>);
 };
 
+// --- IMPROVED MONEY MODAL ---
+
 export const MoneyManagementModal = ({ onClose, currentMoney, onUpdateMoney }: any) => {
-  const [gold, setGold] = useState(0); const [silver, setSilver] = useState(0); const [copper, setCopper] = useState(0); const [error, setError] = useState<string | null>(null);
+  const [gold, setGold] = useState(0); 
+  const [silver, setSilver] = useState(0); 
+  const [copper, setCopper] = useState(0); 
+  const [error, setError] = useState<string | null>(null);
+
   const handleTransaction = (multiplier: 1 | -1) => {
     setError(null);
     if (gold === 0 && silver === 0 && copper === 0) { setError("Please enter an amount."); return; }
-    const newMoney = { gold: (currentMoney.gold || 0) + (gold * multiplier), silver: (currentMoney.silver || 0) + (silver * multiplier), copper: (currentMoney.copper || 0) + (copper * multiplier) };
+    
+    const newMoney = { 
+        gold: (currentMoney.gold || 0) + (gold * multiplier), 
+        silver: (currentMoney.silver || 0) + (silver * multiplier), 
+        copper: (currentMoney.copper || 0) + (copper * multiplier) 
+    };
+    
     if (newMoney.gold < 0 || newMoney.silver < 0 || newMoney.copper < 0) { setError("Cannot remove more money than is available."); return; }
+    
     onUpdateMoney(normalizeCurrency(newMoney));
     onClose();
   };
-  return (<div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[60]"><div className="bg-white rounded-lg shadow-xl w-full max-w-md"><div className="p-4 border-b flex justify-between items-center"><h3 className="text-lg font-bold">Manage Money</h3><button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200"><X size={20} /></button></div><div className="p-6"><div className="mb-6 p-4 bg-yellow-50 text-center rounded-lg"><p className="text-sm">Current Balance</p><p className="text-2xl font-bold">{formatCost(currentMoney)}</p></div><div className="grid grid-cols-3 gap-4 mb-4"><div><label className="block text-sm text-center">Gold</label><input type="number" min="0" value={gold} onChange={(e) => setGold(Math.max(0, parseInt(e.target.value) || 0))} className="w-full p-2 border rounded-lg text-center" /></div><div><label className="block text-sm text-center">Silver</label><input type="number" min="0" value={silver} onChange={(e) => setSilver(Math.max(0, parseInt(e.target.value) || 0))} className="w-full p-2 border rounded-lg text-center" /></div><div><label className="block text-sm text-center">Copper</label><input type="number" min="0" value={copper} onChange={(e) => setCopper(Math.max(0, parseInt(e.target.value) || 0))} className="w-full p-2 border rounded-lg text-center" /></div></div>{error && <ErrorMessage message={error} />}<div className="flex gap-4 mt-6"><Button variant="secondary" className="w-full" onClick={() => handleTransaction(-1)}>Remove</Button><Button variant="primary" className="w-full" onClick={() => handleTransaction(1)}>Add</Button></div></div></div></div>);
+
+  const CoinInput = ({ label, value, setter, color }: any) => (
+    <div className="flex flex-col items-center">
+        <label className={`text-xs font-bold uppercase tracking-wider mb-2 ${color}`}>{label}</label>
+        
+        <div className="flex items-center gap-3">
+            <button 
+                onClick={() => setter(Math.max(0, value - 1))}
+                className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"
+            >
+                <Minus size={20} strokeWidth={3} />
+            </button>
+            
+            <div className="w-16 h-12 flex items-center justify-center bg-gray-50 border-2 border-gray-200 rounded-xl">
+                <span className="text-xl font-mono font-bold">{value}</span>
+            </div>
+
+            <button 
+                onClick={() => setter(value + 1)}
+                className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"
+            >
+                <Plus size={20} strokeWidth={3} />
+            </button>
+        </div>
+        
+        {/* Quick Add Buttons */}
+        <div className="flex gap-1 mt-2">
+            {[5, 10].map(amt => (
+                <button 
+                    key={amt}
+                    onClick={() => setter(value + amt)}
+                    className="px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded text-gray-500 hover:bg-gray-100"
+                >
+                    +{amt}
+                </button>
+            ))}
+        </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[80]">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in zoom-in-95 duration-200 overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                <h3 className="text-lg font-bold text-gray-800">Wallet</h3>
+                <button onClick={onClose} className="p-2 bg-gray-200 rounded-full hover:bg-gray-300 transition-colors"><X size={18} /></button>
+            </div>
+
+            <div className="p-6">
+                {/* Current Balance Display */}
+                <div className="mb-8 p-4 bg-yellow-50 border border-yellow-100 text-center rounded-xl shadow-sm">
+                    <p className="text-xs text-yellow-700 font-bold uppercase tracking-widest mb-1">Current Balance</p>
+                    <p className="text-3xl font-serif font-bold text-yellow-900">{formatCost(currentMoney)}</p>
+                </div>
+
+                {/* Inputs */}
+                <div className="space-y-6 mb-8">
+                    <CoinInput label="Gold" value={gold} setter={setGold} color="text-yellow-600" />
+                    <CoinInput label="Silver" value={silver} setter={setSilver} color="text-gray-500" />
+                    <CoinInput label="Copper" value={copper} setter={setCopper} color="text-orange-700" />
+                </div>
+
+                {error && <ErrorMessage message={error} />}
+
+                {/* Actions */}
+                <div className="grid grid-cols-2 gap-4">
+                    <button 
+                        onClick={() => handleTransaction(-1)}
+                        className="py-4 bg-red-100 text-red-800 font-bold rounded-xl hover:bg-red-200 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <MinusCircle size={20} /> Spend
+                    </button>
+                    <button 
+                        onClick={() => handleTransaction(1)}
+                        className="py-4 bg-green-100 text-green-800 font-bold rounded-xl hover:bg-green-200 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <Plus size={20} /> Add
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+  );
 };
 
 const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: number) => void; }) => {

@@ -1,17 +1,160 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { 
-  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader 
+  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical, Image as ImageIcon
 } from 'lucide-react';
 import { Button } from '../../shared/Button';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
-import { supabase } from '../../../lib/supabase'; // Ensure this path is correct
+import { supabase } from '../../../lib/supabase';
 
 interface BioModalProps {
   onClose: () => void;
 }
 
-// --- HELPER COMPONENTS ---
+// --- HELPER: Parse Position from URL ---
+// We store position as a query param (e.g., image.jpg?pos=20) to avoid DB schema changes
+const parsePortraitData = (fullUrl: string | null) => {
+  if (!fullUrl) return { url: '', pos: 50 };
+  const [url, query] = fullUrl.split('?pos=');
+  const pos = query ? parseInt(query) : 50; // Default center (50%)
+  return { url, pos: isNaN(pos) ? 50 : pos };
+};
+
+// --- SUB-COMPONENT: PORTRAIT EDITOR ---
+
+const PortraitEditor = ({ 
+  currentUrl, 
+  currentPos, 
+  onSave, 
+  onCancel, 
+  isSaving 
+}: { 
+  currentUrl: string, 
+  currentPos: number, 
+  onSave: (url: string, pos: number) => void, 
+  onCancel: () => void, 
+  isSaving: boolean 
+}) => {
+  const [tempUrl, setTempUrl] = useState(currentUrl);
+  const [tempPos, setTempPos] = useState(currentPos);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      // Create safe filename with timestamp
+      const fileExt = file.name.split('.').pop();
+      const fileName = `portrait-${Date.now()}.${fileExt}`;
+      const filePath = `portraits/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage.from('images').upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('images').getPublicUrl(filePath);
+      setTempUrl(data.publicUrl);
+      setTempPos(50); // Reset position on new image
+    } catch (err: any) {
+      console.error("Upload failed:", err);
+      setError("Upload failed. Please try again.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 animate-in slide-in-from-top-2 space-y-4">
+      
+      {/* 1. Image Preview with Live Positioning */}
+      <div className="flex gap-4">
+        <div className="relative w-24 h-32 bg-gray-200 rounded-lg overflow-hidden border border-gray-300 shadow-inner flex-shrink-0">
+          {tempUrl ? (
+            <img 
+              src={tempUrl} 
+              alt="Preview" 
+              className="w-full h-full object-cover transition-none"
+              style={{ objectPosition: `center ${tempPos}%` }}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-400"><User /></div>
+          )}
+        </div>
+
+        <div className="flex-1 space-y-3">
+          {/* Position Slider */}
+          <div>
+            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
+              <MoveVertical size={12} /> Position (Y-Axis)
+            </label>
+            <input 
+              type="range" 
+              min="0" 
+              max="100" 
+              value={tempPos} 
+              onChange={(e) => setTempPos(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              disabled={!tempUrl}
+            />
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+              <span>Top</span>
+              <span>Center</span>
+              <span>Bottom</span>
+            </div>
+          </div>
+
+          {/* URL Input */}
+          <div>
+             <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
+             <input 
+                type="text" 
+                value={tempUrl} 
+                onChange={(e) => setTempUrl(e.target.value)}
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
+                placeholder="https://..."
+             />
+          </div>
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
+
+      {/* Buttons */}
+      <div className="space-y-2 pt-2 border-t border-gray-200">
+        <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleUpload} 
+            className="hidden" 
+            accept="image/*" 
+        />
+        <Button 
+            variant="secondary" 
+            size="sm" 
+            fullWidth
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            icon={isUploading ? Loader : Upload}
+        >
+            {isUploading ? 'Uploading...' : 'Upload New Image'}
+        </Button>
+
+        <div className="flex gap-2">
+            <Button size="sm" fullWidth onClick={() => onSave(tempUrl, tempPos)} disabled={isSaving || isUploading}>Save Portrait</Button>
+            <Button size="sm" variant="ghost" fullWidth onClick={onCancel} disabled={isUploading}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- HELPER COMPONENT ---
+
 const EditableDetailItem = ({ label, children, icon: Icon }: { label: string, children: React.ReactNode, icon: React.ElementType }) => (
     <div className="space-y-1">
         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-1">
@@ -21,6 +164,8 @@ const EditableDetailItem = ({ label, children, icon: Icon }: { label: string, ch
         {children}
     </div>
 );
+
+// --- MAIN COMPONENT ---
 
 export function BioModal({ onClose }: BioModalProps) {
   const { character, updateCharacterData, isSaving, saveError } = useCharacterSheetStore();
@@ -33,19 +178,18 @@ export function BioModal({ onClose }: BioModalProps) {
 
   // Form Data
   const [portraitUrl, setPortraitUrl] = useState('');
+  const [portraitPos, setPortraitPos] = useState(50);
   const [appearance, setAppearance] = useState('');
   const [memento, setMemento] = useState('');
   const [flaw, setFlaw] = useState('');
   const [backstory, setBackstory] = useState('');
 
-  // Upload State
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   // Sync state
   const syncStateFromCharacter = () => {
     if (character) {
-      setPortraitUrl(character.portrait_url || '');
+      const { url, pos } = parsePortraitData(character.portrait_url);
+      setPortraitUrl(url);
+      setPortraitPos(pos);
       setAppearance(character.appearance || '');
       setMemento(character.memento || '');
       setFlaw(character.flaw || '');
@@ -63,9 +207,16 @@ export function BioModal({ onClose }: BioModalProps) {
     setIsEditingBio(false);
   };
 
-  const handleSavePortrait = async () => {
+  const handleSavePortrait = async (newUrl: string, newPos: number) => {
     if (!character) return;
-    await updateCharacterData({ portrait_url: portraitUrl });
+    // We combine the URL and the position into a single string to avoid DB schema changes
+    // If newPos is 50 (default), we don't need to append it to keep URL clean, 
+    // but appending it ensures consistency if the user explicitly set it.
+    const finalString = newPos === 50 ? newUrl : `${newUrl}?pos=${newPos}`;
+    
+    await updateCharacterData({ portrait_url: finalString });
+    setPortraitUrl(newUrl);
+    setPortraitPos(newPos);
     setIsEditingPortrait(false);
   };
 
@@ -82,62 +233,12 @@ export function BioModal({ onClose }: BioModalProps) {
     setIsEditingBackstory(false);
   };
 
-  // --- IMAGE UPLOAD LOGIC ---
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !e.target.files[0] || !character) return;
-
-    const file = e.target.files[0];
-    setIsUploading(true);
-
-    try {
-      // 1. Sanitize character name for filename
-      // "Conan the Barbarian" -> "conan-the-barbarian"
-      const safeName = character.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-
-      const fileExt = file.name.split('.').pop();
-      // Add timestamp to prevent caching issues and collisions
-      const fileName = `${safeName}-${Date.now()}.${fileExt}`;
-      const filePath = `portraits/${fileName}`;
-
-      // 2. Upload to Supabase
-      const { error: uploadError } = await supabase.storage
-        .from('images') // Bucket name
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      // 3. Get Public URL
-      const { data: urlData } = supabase.storage
-        .from('images')
-        .getPublicUrl(filePath);
-
-      // 4. Update Local State
-      setPortraitUrl(urlData.publicUrl);
-
-    } catch (error: any) {
-      console.error("Upload failed:", error);
-      alert("Failed to upload image: " + error.message);
-    } finally {
-      setIsUploading(false);
-      // Reset input so same file can be selected again if needed
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
   // --- RENDER CONTENT ---
 
   if (!character) {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-        <div className="bg-white rounded-lg p-8 shadow-xl flex flex-col items-center gap-4">
-          <LoadingSpinner size="lg"/>
-          <span className="text-gray-500 font-medium">Loading character data...</span>
-        </div>
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
@@ -148,87 +249,49 @@ export function BioModal({ onClose }: BioModalProps) {
       {/* TOP SECTION: PORTRAIT & CORE STATS */}
       <div className="flex flex-col md:flex-row gap-8 items-start">
         
-        {/* Portrait Card */}
-        <div className="w-full md:w-1/3 flex flex-col gap-3 group relative">
-            <div className="relative aspect-[3/4] bg-gray-100 rounded-xl border-2 border-gray-200 overflow-hidden shadow-sm group-hover:border-indigo-300 transition-all">
-                {portraitUrl ? (
-                    <img 
-                        src={portraitUrl} 
-                        alt={character.name} 
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x400/f3f4f6/9ca3af?text=No+Image'; }} 
-                    />
-                ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-50">
-                        <User size={48} strokeWidth={1.5} />
-                        <span className="text-xs mt-2 font-medium">No Portrait</span>
-                    </div>
-                )}
-                
-                {/* Hover Edit Button (Only visible if not editing) */}
-                {!isEditingPortrait && (
-                    <button 
-                        onClick={() => setIsEditingPortrait(true)}
-                        className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold gap-2 backdrop-blur-[2px]"
-                    >
-                        <Camera size={20} /> Change Photo
-                    </button>
-                )}
-            </div>
-
-            {isEditingPortrait && (
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-in slide-in-from-top-2 space-y-3">
-                    {/* URL Input */}
-                    <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
-                        <input 
-                            type="text" 
-                            value={portraitUrl} 
-                            onChange={(e) => setPortraitUrl(e.target.value)} 
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="https://..."
-                        />
-                    </div>
-
-                    {/* Upload Divider */}
-                    <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t border-gray-300" />
-                        </div>
-                        <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-gray-50 px-2 text-gray-400">Or upload</span>
-                        </div>
-                    </div>
-
-                    {/* Upload Button */}
-                    <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        onChange={handleImageUpload} 
-                        className="hidden" 
-                        accept="image/*" 
-                    />
-                    <Button 
-                        variant="secondary" 
-                        size="sm" 
-                        className="w-full" 
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
-                        icon={isUploading ? Loader : Upload}
-                    >
-                        {isUploading ? 'Uploading...' : 'Upload File'}
-                    </Button>
-
-                    {/* Actions */}
-                    <div className="flex gap-2 pt-1">
-                        <Button size="xs" onClick={handleSavePortrait} disabled={isSaving || isUploading} className="flex-1">Save</Button>
-                        <Button size="xs" variant="ghost" onClick={handleCancel} disabled={isUploading} className="flex-1">Cancel</Button>
+        {/* Left Column: Portrait */}
+        <div className="w-full md:w-1/3 flex flex-col gap-3">
+            
+            {/* The Portrait Display */}
+            {!isEditingPortrait ? (
+                <div className="group relative">
+                    <div className="relative aspect-[3/4] bg-gray-100 rounded-xl border-2 border-gray-200 overflow-hidden shadow-sm group-hover:border-indigo-300 transition-all">
+                        {portraitUrl ? (
+                            <img 
+                                src={portraitUrl} 
+                                alt={character.name} 
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                style={{ objectPosition: `center ${portraitPos}%` }}
+                                onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x400/f3f4f6/9ca3af?text=No+Image'; }} 
+                            />
+                        ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-50">
+                                <User size={48} strokeWidth={1.5} />
+                                <span className="text-xs mt-2 font-medium">No Portrait</span>
+                            </div>
+                        )}
+                        
+                        {/* Edit Overlay */}
+                        <button 
+                            onClick={() => setIsEditingPortrait(true)}
+                            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold gap-2 backdrop-blur-[2px]"
+                        >
+                            <Camera size={20} /> Edit / Position
+                        </button>
                     </div>
                 </div>
+            ) : (
+                <PortraitEditor 
+                    currentUrl={portraitUrl}
+                    currentPos={portraitPos}
+                    onSave={handleSavePortrait}
+                    onCancel={() => setIsEditingPortrait(false)}
+                    isSaving={isSaving}
+                />
             )}
         </div>
 
-        {/* Details Card */}
+        {/* Right Column: Details */}
         <div className="flex-1 w-full">
             <div className="flex justify-between items-end mb-6 border-b border-gray-100 pb-4">
                 <div>
@@ -266,8 +329,6 @@ export function BioModal({ onClose }: BioModalProps) {
                             <p className="text-sm font-medium text-red-900">{flaw || "None"}</p>
                         </div>
                     </div>
-
-                    
                 </div>
             ) : (
                 // Edit Mode
