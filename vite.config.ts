@@ -2,21 +2,32 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-import packageJson from './package.json';
+import { readFileSync } from 'fs'; // <--- THIS WAS MISSING
 
-// --- VERSION CALCULATION LOGIC ---
+// --- ROBUST VERSION CALCULATION ---
 const getAppVersion = () => {
-  // 1. Get the base version from package.json (e.g., "1.0.0")
-  const baseVersion = packageJson.version;
-  
-  // 2. Get the Netlify Commit Hash (if available)
-  // process.env.COMMIT_REF is automatically provided by Netlify during build
-  const commitHash = process.env.COMMIT_REF 
-    ? process.env.COMMIT_REF.substring(0, 7) // Take first 7 chars (e.g., "a1b2c3d")
-    : 'dev'; // Fallback for local development
+  try {
+    // 1. Read package.json using standard Node fs (works on all servers)
+    // We use readFileSync instead of 'import' to avoid caching/resolution issues on some CIs
+    const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
+    const baseVersion = pkg.version;
 
-  // 3. Combine them (e.g., "1.0.0-a1b2c3d")
-  return `${baseVersion}-${commitHash}`;
+    // 2. Get Netlify Commit Hash
+    const commitHash = process.env.COMMIT_REF 
+      ? process.env.COMMIT_REF.substring(0, 7) 
+      : 'dev';
+
+    const versionString = `${baseVersion}-${commitHash}`;
+    
+    // 3. Log to Build Output (Check your Netlify Deploy Logs for this!)
+    // eslint-disable-next-line no-console
+    console.log(`✅ BUILDING VERSION: ${versionString}`);
+    
+    return versionString;
+  } catch (e) {
+    console.error("⚠️ Failed to read version", e);
+    return '0.0.0-error';
+  }
 };
 
 const appVersion = getAppVersion();
