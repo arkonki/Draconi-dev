@@ -63,7 +63,7 @@ export const mapCharacterData = (char: any): Character => {
     
     // Ensure arrays are initialized
     trainedSkills: char.trained_skills || [],
-    marked_skills: char.marked_skills || [], // <--- CRITICAL FOR ADVANCEMENT SYSTEM
+    marked_skills: char.marked_skills || [], 
     
     spells: char.spells || { known: [] },
     
@@ -75,6 +75,11 @@ export const mapCharacterData = (char: any): Character => {
         equipped: equipmentData.equipped || { weapons: [] },
         money: equipmentData.money || { gold: 0, silver: 0, copper: 0 },
     },
+
+    // --- FIX ADDED HERE ---
+    // Ensure item_notes are loaded from DB, or default to empty object
+    item_notes: char.item_notes || {}, 
+    // ----------------------
     
     conditions: char.conditions || { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
     is_rallied: char.is_rallied ?? false,
@@ -158,8 +163,6 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
   }
   
   // Map 'magicSchool' -> 'magic_school'
-  // Note: Only if we are updating the ID directly. If passing a full object, logic might differ.
-  // Assuming typical usage updates the foreign key ID.
   if ('magicSchool' in dbUpdates) {
     // If it's an object with an ID (from a selection), use the ID. 
     // If it's just the ID string, use it.
@@ -176,6 +179,9 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
     dbUpdates.weak_spot = dbUpdates.flaw;
     delete dbUpdates.flaw;
   }
+
+  // Note: 'item_notes' does not need manual mapping because the app key 'item_notes' 
+  // matches the DB column 'item_notes' exactly.
 
   dbUpdates.updated_at = new Date().toISOString();
 
