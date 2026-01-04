@@ -39,7 +39,8 @@ const formatInventoryItemName = (item: InventoryItem): string => {
 
 const isItemEquippable = (details?: any): boolean => {
     if (details?.equippable === true) return true;
-    return details?.category ? DEFAULT_EQUIPPABLE_CATEGORIES.includes(details.category) : false;
+    const cat = details?.category?.toUpperCase();
+    return cat ? DEFAULT_EQUIPPABLE_CATEGORIES.includes(cat) : false;
 };
 
 const isItemConsumable = (item: InventoryItem, details?: any): boolean => {
@@ -94,16 +95,20 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
     const getItemData = (item: InventoryItem | string) => {
         const name = typeof item === 'string' ? item : item.name;
         if (!name) return undefined;
+        
         const parsedQuery = parseComplexItemName(name);
         const searchName = parsedQuery.baseName || name;
         const staticDetails = allGameItems.find(i => 
           i.name?.toLowerCase() === searchName.toLowerCase() ||
           parseComplexItemName(i.name).baseName.toLowerCase() === searchName.toLowerCase()
         );
-        if (typeof item !== 'string' && (item as any).weight !== undefined) { return { ...staticDetails, ...item }; }
+        if (typeof item !== 'string') { return { ...staticDetails, ...item }; }
         return staticDetails;
     };
+    
     let capacity = Math.ceil(strength / 2);
+
+    // Calculate capacity modifiers from equipped items
     const allEquippedItems = [
       ...(equipment.equipped.armor ? [equipment.equipped.armor] : []),
       ...(equipment.equipped.helmet ? [equipment.equipped.helmet] : []),
@@ -112,16 +117,32 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
       ...(equipment.equipped.containers?.map((c: InventoryItem) => c?.name).filter(Boolean) || []),
       ...(equipment.equipped.animals?.map((a: InventoryItem) => a?.name).filter(Boolean) || []),
     ];
-    allEquippedItems.forEach(itemName => { const details = getItemData(itemName); if (details?.encumbrance_modifier) { capacity += details.encumbrance_modifier; } });
+
+    allEquippedItems.forEach(itemName => { 
+        const details = getItemData(itemName); 
+        if (details?.encumbrance_modifier) { capacity += details.encumbrance_modifier; } 
+    });
+
     let load = 0;
     let rationCount = 0;
+
     (equipment.inventory || []).forEach((item: InventoryItem) => { 
         if (!item || !item.name) return;
-        if (item.name.toLowerCase().includes('ration')) { rationCount += (item.quantity || 1); return; }
+        
+        if (item.name.toLowerCase().includes('ration')) {
+            rationCount += (item.quantity || 1);
+            return;
+        }
+
         const details = getItemData(item);
-        if (details && Number(details.weight) === 0) return;
+        
+        if (details && (Number(details.weight) === 0 || details.weight === "0")) {
+            return; 
+        }
+
         let weightPerUnit = 1; 
-        if (details && details.weight !== undefined) {
+
+        if (details && details.weight !== undefined && details.weight !== null && details.weight !== "") {
             weightPerUnit = Number(details.weight);
             if (!item.weight && details.name) { 
                 const packMatch = details.name.match(/\((\d+)(?:\s*\w*)?\)/);
@@ -129,13 +150,19 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
                     const packSize = parseInt(packMatch[1], 10);
                     const unit = details.name.match(/\d+\s*([a-zA-Z]+)/)?.[1]?.toLowerCase();
                     const isMeasurement = unit && MEASUREMENT_UNITS.includes(unit) && !['dose', 'doses', 'unit', 'units'].includes(unit);
-                    if (packSize > 0 && !isMeasurement) { weightPerUnit = details.weight / packSize; }
+                    if (packSize > 0 && !isMeasurement) {
+                        weightPerUnit = details.weight / packSize;
+                    }
                 }
             }
         }
         load += weightPerUnit * (item.quantity || 1); 
     });
-    if (rationCount > 0) { load += Math.ceil(rationCount / 4); }
+
+    if (rationCount > 0) {
+        load += Math.ceil(rationCount / 4);
+    }
+    
     return { capacity, load, isEncumbered: load > capacity };
 };
 
@@ -149,13 +176,15 @@ const mergeIntoInventory = (inventory: InventoryItem[], itemToMerge: InventoryIt
 // --- DISPLAY HELPERS ---
 
 const formatCleanCost = (costStr: string | undefined): string => {
-    if (!costStr) return 'N/A';
+    if (!costStr || costStr === '0') return 'N/A';
     const cost = parseCost(costStr);
     if (!cost) return costStr;
+
     const parts = [];
     if (cost.gold > 0) parts.push(`${cost.gold} Gold`);
     if (cost.silver > 0) parts.push(`${cost.silver} Silver`);
     if (cost.copper > 0) parts.push(`${cost.copper} Copper`);
+    
     return parts.length > 0 ? parts.join(', ') : 'Free';
 };
 
@@ -164,7 +193,7 @@ const getCompactStats = (item: GameItem) => {
     if (item.damage) stats.push({ label: 'Dmg', value: item.damage, color: 'text-red-600' });
     if (item.armor_rating) stats.push({ label: 'AR', value: item.armor_rating, color: 'text-blue-600' });
     if (item.grip) stats.push({ label: 'Grip', value: item.grip });
-    if (item.range) stats.push({ label: 'Range', value: item.range });
+    if (item.range) stats.push({ label: 'Rng', value: item.range });
     if (item.durability) stats.push({ label: 'Dur', value: item.durability });
     if (item.strength_requirement) stats.push({ label: 'STR', value: item.strength_requirement });
     if (item.weight !== undefined && item.weight !== null) stats.push({ label: 'W', value: item.weight });
@@ -179,7 +208,7 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
     const featuresList = Array.isArray(item.features) ? item.features.join(', ') : item.features;
 
     return (
-        <div className="flex flex-col p-3 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-white h-full">
+        <div className="flex flex-col p-3 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-white h-full relative group">
             <div className="mb-2">
                 <div className="flex justify-between items-start gap-2">
                     <h4 className="font-bold text-sm text-gray-800 leading-tight">{item.name}</h4>
@@ -187,6 +216,7 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
                 </div>
                 <p className="text-[10px] text-gray-500 uppercase font-medium">{item.category}</p>
             </div>
+            
             <div className="flex-1 space-y-2 mb-3">
                 {stats.length > 0 && (
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs bg-gray-50 p-2 rounded border border-gray-100">
@@ -198,16 +228,19 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
                         ))}
                     </div>
                 )}
+                
                 {featuresList && (
                     <div className="flex items-start gap-1.5 text-xs text-indigo-700">
                         <Star size={10} className="mt-0.5 flex-shrink-0" />
                         <span className="font-medium leading-tight">{featuresList}</span>
                     </div>
                 )}
+                
                 {item.effect && (
                     <div className="text-xs text-gray-600 italic leading-snug">{item.effect}</div>
                 )}
             </div>
+            
             <div className="mt-auto pt-2 border-t border-gray-100 flex justify-between items-center">
                 <span className="text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded">{cleanCost}</span>
                 <Button variant="primary" size="xs" onClick={() => onBuy(item)} disabled={!item.cost || cleanCost === 'N/A'} className="h-7">Buy</Button>
@@ -271,7 +304,7 @@ const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: 
 export function InventoryModal({ onClose }: any) {
   const [isEquippedOpen, setIsEquippedOpen] = useState(true);
   const { character: rawCharacter, updateCharacterData, isSaving } = useCharacterSheetStore();
-  const { data: allGameItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const { data: allGameItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
   
   const [activeTab, setActiveTab] = useState<'inventory' | 'shop'>('inventory');
   const [filters, setFilters] = useState({ search: '' });
@@ -306,7 +339,10 @@ export function InventoryModal({ onClose }: any) {
       if (!name) return undefined;
       const parsedQuery = parseComplexItemName(name);
       const searchName = parsedQuery.baseName || name;
-      const staticDetails = allGameItems.find(i => i.name?.toLowerCase() === searchName.toLowerCase() || parseComplexItemName(i.name).baseName.toLowerCase() === searchName.toLowerCase());
+      const staticDetails = allGameItems.find(i => 
+        i.name?.toLowerCase() === searchName.toLowerCase() ||
+        parseComplexItemName(i.name).baseName.toLowerCase() === searchName.toLowerCase()
+      );
       if (typeof item !== 'string') { return { ...staticDetails, ...item }; }
       return staticDetails;
   };
@@ -318,10 +354,11 @@ export function InventoryModal({ onClose }: any) {
 
   const handleUpdateEquipment = (newEquipment: any) => updateCharacterData({ ...character, equipment: newEquipment });
 
+  // [Actions]
   const handleAddRations = (amount: number) => {
-      const rationItem: InventoryItem = { id: generateId(), name: "Field rations", quantity: amount };
-      const existingPlural = character.equipment?.inventory?.find((i: InventoryItem) => i.name === "Field rations");
-      if(existingPlural) rationItem.name = "Field rations";
+      const rationItem: InventoryItem = { id: generateId(), name: "Field Rations", quantity: amount };
+      const existingPlural = character.equipment?.inventory?.find((i: InventoryItem) => i.name === "Field Rations");
+      if(existingPlural) rationItem.name = "Field Rations";
       const newInventory = mergeIntoInventory(character.equipment!.inventory!, rationItem);
       handleUpdateEquipment({ ...character.equipment, inventory: newInventory });
       setIsForageModalOpen(false);
@@ -336,7 +373,6 @@ export function InventoryModal({ onClose }: any) {
       const newInventory = mergeIntoInventory(character.equipment!.inventory!, newItem);
       handleUpdateEquipment({ ...character.equipment, inventory: newInventory, money: newMoney });
   };
-  
   const handleEquipItem = (itemToEquip: InventoryItem) => {
       const itemDetails = getItemData(itemToEquip); if (!itemDetails) return;
       let newEquipment = structuredClone(character.equipment!);
@@ -503,7 +539,7 @@ export function InventoryModal({ onClose }: any) {
                                       const allItems = (character.equipment?.inventory || []).filter(item => item?.name && item.name.toLowerCase().includes(filters.search.toLowerCase()));
                                       const tinyItems: InventoryItem[] = [];
                                       const carriedItems: InventoryItem[] = [];
-                                      allItems.forEach(item => { const details = getItemData(item); if (details && Number(details.weight) === 0) tinyItems.push(item); else carriedItems.push(item); });
+                                      allItems.forEach(item => { const details = getItemData(item); if (details && (Number(details.weight) === 0 || details.weight === "0")) tinyItems.push(item); else carriedItems.push(item); });
                                       return (
                                           <>
                                               {carriedItems.map(item => renderInventoryRow(item, getItemData(item)))}
@@ -524,7 +560,25 @@ export function InventoryModal({ onClose }: any) {
                              <div>
                                 <div className="flex items-center gap-2 mb-4"><button onClick={() => { setSelectedShopGroup(null); setFilters({search: ''}); }} className="p-2 bg-white border rounded-lg hover:bg-gray-50"><ArrowLeft size={16}/></button><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Search shop..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} className="w-full pl-10 py-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"/></div>{/* Sort Dropdown */}{(selectedShopGroup || filters.search.length > 0) && (<div className="relative"><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="appearance-none w-full bg-white border border-gray-300 rounded-lg text-sm px-4 py-2 pr-8 focus:ring-2 focus:ring-blue-500 outline-none"><option value="name-asc">Name (A-Z)</option><option value="name-desc">Name (Z-A)</option><option value="cost-asc">Cost (Low-High)</option><option value="cost-desc">Cost (High-Low)</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" /></div>)}</div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                   {allGameItems.filter(item => { if (filters.search) return item.name.toLowerCase().includes(filters.search.toLowerCase()); return selectedShopGroup?.categories.includes(item.category); }).sort((a,b) => { const costA = parseCost(a.cost)?.totalCopper || 0; const costB = parseCost(b.cost)?.totalCopper || 0; switch (sortOrder) { case 'cost-asc': return costA - costB; case 'cost-desc': return costB - costA; case 'name-desc': return b.name.localeCompare(a.name); case 'name-asc': default: return a.name.localeCompare(b.name); } }).map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)}
+                                   {allGameItems
+                                    .filter(item => { 
+                                        // EXCLUDE CUSTOM ITEMS (Keep Shop Clean)
+                                        if (item.is_custom) return false;
+                                        // Case insensitive matching
+                                        if (filters.search) return item.name.toLowerCase().includes(filters.search.toLowerCase());
+                                        return selectedShopGroup?.categories.includes(item.category?.toUpperCase()); 
+                                    })
+                                    .sort((a,b) => { 
+                                        const costA = parseCost(a.cost)?.totalCopper || 0; 
+                                        const costB = parseCost(b.cost)?.totalCopper || 0; 
+                                        switch (sortOrder) { 
+                                            case 'cost-asc': return costA - costB; 
+                                            case 'cost-desc': return costB - costA; 
+                                            case 'name-desc': return b.name.localeCompare(a.name); 
+                                            case 'name-asc': default: return a.name.localeCompare(b.name); 
+                                        } 
+                                    })
+                                    .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)}
                                 </div>
                              </div>
                           )}
