@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Swords, Heart, Map, X, Wand2, HelpCircle, Skull } from 'lucide-react';
+import { BookOpen, Swords, Heart, Map, X, Wand2, HelpCircle, Skull, Info } from 'lucide-react';
 
 // --- DATA STRUCTURE ---
 const aidData = {
@@ -30,7 +30,8 @@ const aidData = {
         title: "Encumbrance",
         items: [
           { title: 'Limit', description: 'Items = STR / 2 (rounded up).' },
-          { title: 'Over-Encumbered', description: 'Must make STR roll to move in combat or travel.' },
+          { title: 'Over-Encumbered', description: 'Must make STR roll to move.' },
+          { title: 'Failure Effect', description: 'If STR roll fails: Drop gear OR Stay put.' },
         ]
       }
     ]
@@ -84,7 +85,7 @@ const aidData = {
             title: "Casting Rules",
             items: [
                 { title: 'Cost', description: '2 WP per Power Level. Magic Tricks cost 1 WP.' },
-                { title: 'Power from Body', description: 'If 0 WP, roll die (e.g. D6). Gain that WP but take equal Damage.' },
+                { title: 'Power from Body', description: 'If 0 or 1 WP left: Roll die (e.g. D6). Gain that WP but take equal Damage.' },
                 { title: 'Metal', description: 'Cannot cast while wearing/holding metal armor/weapons.' },
                 { title: 'Concentration', description: 'Broken if you take damage, fail Fear roll, or perform another action.' },
             ]
@@ -183,7 +184,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
             
             {section.description && (
               <div className="mb-2 p-2 bg-yellow-50 border border-yellow-100 rounded text-xs text-yellow-800 italic flex gap-2 items-start">
-                <div className="mt-0.5 shrink-0 opacity-60"><HelpCircle size={12}/></div>
+                <Info className="w-3 h-3 mt-0.5 shrink-0" />
                 <span>{section.description}</span>
               </div>
             )}
@@ -209,7 +210,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[90]" onClick={onClose}>
       <div className="bg-white rounded-xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={e => e.stopPropagation()}>
         
-        {/* Header */}
+        {/* Compact Header */}
         <div className="bg-white px-4 py-3 border-b flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-indigo-100 rounded text-indigo-600">
@@ -222,7 +223,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
           </button>
         </div>
         
-        {/* Tabs */}
+        {/* Compact Tabs */}
         <div className="bg-gray-50 border-b flex overflow-x-auto shrink-0 no-scrollbar px-2 pt-1">
           {(Object.keys(aidData) as TabKey[]).map(key => {
             const Icon = aidData[key].icon;
@@ -246,7 +247,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
           })}
         </div>
 
-        {/* Content */}
+        {/* Dense Content Area */}
         <div className="flex-grow overflow-y-auto p-4 bg-gray-50/30 custom-scrollbar">
           {renderContent()}
         </div>
