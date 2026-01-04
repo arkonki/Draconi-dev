@@ -44,9 +44,9 @@ const aidData = {
         title: "Reactions (Defenses)",
         description: "Reactions use your turn. Flip init card. Cannot use if already acted.",
         items: [
-          { title: 'Parry', description: 'Roll skill. Fail = Hit. Dragon = Counterattack. Shields can parry Ranged.' },
+          { title: 'Parry', description: 'Roll skill. Fail = Hit. Dragon = Counterattack. Shields can parry Ranged. Shield parry use any STR-based melee skill (except KNIVES and STAVES). ' },
           { title: 'Dodge', description: 'Roll Evade. Success = No dmg & Move 2m. Works vs Monsters.' },
-          { title: 'Durability', description: 'If damage > durability on a parry, weapon/shield is damaged.' },
+          { title: 'Durability', description: 'If damage > durability on a parry, weapon/shield is damaged and cannot be used until repaired with CRAFTING roll' },
         ]
       },
       {
