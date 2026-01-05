@@ -166,6 +166,8 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
             <img src={src} alt={alt} className="max-w-full h-auto rounded shadow-sm border border-stone-200 my-4 mx-auto" />
           )
         }}
+
+        
       >
         {content}
       </ReactMarkdown>
