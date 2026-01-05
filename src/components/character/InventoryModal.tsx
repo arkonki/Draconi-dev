@@ -37,6 +37,15 @@ const formatInventoryItemName = (item: InventoryItem): string => {
     return `${item.name}${item.quantity > 1 ? ` (x${item.quantity})` : ''}`;
 };
 
+const formatCategoryLabel = (cat: string) => {
+    return cat
+      .toLowerCase()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+      .replace('&', '&');
+};
+
 const isItemEquippable = (details?: any): boolean => {
     if (details?.equippable === true) return true;
     const cat = details?.category?.toUpperCase();
@@ -108,7 +117,6 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
     
     let capacity = Math.ceil(strength / 2);
 
-    // Calculate capacity modifiers from equipped items
     const allEquippedItems = [
       ...(equipment.equipped.armor ? [equipment.equipped.armor] : []),
       ...(equipment.equipped.helmet ? [equipment.equipped.helmet] : []),
@@ -249,14 +257,6 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
     );
 };
 
-const StatBadge = ({ icon: Icon, value, color, label }: { icon: any, value: string | number, color: string, label?: string }) => (
-    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${color}`}>
-        <Icon size={10} strokeWidth={3} />
-        <span>{value}</span>
-        {label && <span className="opacity-70 ml-0.5">{label}</span>}
-    </div>
-);
-
 const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: any, label: string, item?: string | InventoryItem | EquippedWeapon, onUnequip: () => void, subItems?: React.ReactNode }) => {
     const name = typeof item === 'string' ? item : item?.name;
     return (
@@ -302,20 +302,35 @@ const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: 
 // --- MAIN COMPONENT ---
 
 export function InventoryModal({ onClose }: any) {
-  const [isEquippedOpen, setIsEquippedOpen] = useState(true);
-  const { character: rawCharacter, updateCharacterData, isSaving } = useCharacterSheetStore();
+  const { character: rawCharacter, updateCharacterData } = useCharacterSheetStore();
   const { data: allGameItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
   
+  // States
   const [activeTab, setActiveTab] = useState<'inventory' | 'shop'>('inventory');
-  const [filters, setFilters] = useState({ search: '' });
+  
+  // Separate Search States
+  const [inventorySearch, setInventorySearch] = useState(''); 
+  const [shopSearch, setShopSearch] = useState(''); 
+  
   const [isMoneyModalOpen, setIsMoneyModalOpen] = useState(false);
   const [isForageModalOpen, setIsForageModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
+  
+  // Shop Navigation
   const [selectedShopGroup, setSelectedShopGroup] = useState<any>(null);
+  const [activeShopSubCategory, setActiveShopSubCategory] = useState<string | null>(null);
+  
   const [sortOrder, setSortOrder] = useState('name-asc');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-  const clearSearch = () => setFilters({ ...filters, search: '' });
+  // Clearing
+  const clearInventorySearch = () => setInventorySearch('');
+  const clearShopSearch = () => setShopSearch('');
+
+  // Reset sub-category when group changes
+  useEffect(() => {
+    setActiveShopSubCategory(null);
+  }, [selectedShopGroup]);
 
   useEffect(() => {
     const handleClickOutside = () => setMenuOpenId(null);
@@ -348,7 +363,6 @@ export function InventoryModal({ onClose }: any) {
   };
 
   const encumbrance = useMemo(() => (character && allGameItems.length > 0) ? calculateEncumbrance(character, allGameItems) : { capacity: 0, load: 0, isEncumbered: false }, [character, allGameItems]);
-  const hasValidStrength = useMemo(() => character?.attributes && typeof character.attributes.STR === 'number', [character]);
 
   if (!character) return <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"><LoadingSpinner /></div>;
 
@@ -506,14 +520,6 @@ export function InventoryModal({ onClose }: any) {
       );
   };
 
-  const MissingStatWarning = () => ( <div className="p-3 mt-4 border border-orange-300 bg-orange-50 rounded-lg flex items-center gap-3"><AlertTriangle className="w-6 h-6 text-orange-500 flex-shrink-0" /><div><h4 className="font-bold text-orange-800">Cannot Calculate Encumbrance</h4><p className="text-sm text-orange-700">Character's Strength (STR) value is missing.</p></div></div> );
-  const EncumbranceMeter = ({ load, capacity, isEncumbered }: { load: number, capacity: number, isEncumbered: boolean }) => {
-      const displayLoad = Number.isInteger(load) ? load : load.toFixed(1).replace(/\.0$/, '');
-      const percentage = capacity > 0 ? (load / capacity) * 100 : 0;
-      let barColor = 'bg-green-500'; if (percentage >= 100) barColor = 'bg-red-500'; else if (percentage > 75) barColor = 'bg-yellow-500';
-      return (<div className="p-3 border rounded-lg bg-white mt-4"><div className="flex justify-between items-center mb-2"><h4 className="font-medium text-sm text-gray-700 flex items-center gap-2"><Weight size={16} /> Encumbrance</h4><span className="font-mono font-semibold text-sm">{displayLoad} / {capacity}</span></div><div className="w-full bg-gray-200 rounded-full h-2.5"><div className={`${barColor} h-2.5 rounded-full`} style={{ width: `${Math.min(percentage, 100)}%` }}></div></div>{isEncumbered && (<div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-center gap-2"><AlertTriangle size={16} /><div><span className="font-bold">Over-encumbered:</span> You must make a STR roll to move.</div></div>)}</div>);
-  };
-
   return (
     <>
       {isMoneyModalOpen && <MoneyManagementModal onClose={() => setIsMoneyModalOpen(false)} currentMoney={character.equipment?.money || {}} onUpdateMoney={(newMoney) => handleUpdateEquipment({ ...character.equipment, money: newMoney })} />}
@@ -533,10 +539,24 @@ export function InventoryModal({ onClose }: any) {
                       <div className="pb-20">
                           {renderLoadout()}
                           <div className="p-4">
-                              <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Filter items..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} className="w-full pl-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>{filters.search && <button onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 bg-gray-100 rounded-full text-gray-500"><X size={12}/></button>}</div>
+                              <div className="relative mb-4">
+                                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Filter my items..." 
+                                    value={inventorySearch} 
+                                    onChange={(e) => setInventorySearch(e.target.value)} 
+                                    className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl text-sm shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none touch-manipulation"
+                                  />
+                                  {inventorySearch && (
+                                    <button onClick={clearInventorySearch} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full">
+                                        <X size={16}/>
+                                    </button>
+                                  )}
+                              </div>
                               <div className="space-y-3">
                                   {(() => {
-                                      const allItems = (character.equipment?.inventory || []).filter(item => item?.name && item.name.toLowerCase().includes(filters.search.toLowerCase()));
+                                      const allItems = (character.equipment?.inventory || []).filter(item => item?.name && item.name.toLowerCase().includes(inventorySearch.toLowerCase()));
                                       const tinyItems: InventoryItem[] = [];
                                       const carriedItems: InventoryItem[] = [];
                                       allItems.forEach(item => { const details = getItemData(item); if (details && (Number(details.weight) === 0 || details.weight === "0")) tinyItems.push(item); else carriedItems.push(item); });
@@ -553,40 +573,136 @@ export function InventoryModal({ onClose }: any) {
                       </div>
                   )}
                   {activeTab === 'shop' && (
-                      <div className="p-4">
-                          {!selectedShopGroup && !filters.search ? (
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">{shopGroups.map(g => (<button key={g.name} onClick={() => setSelectedShopGroup(g)} className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-xl hover:border-indigo-500 hover:shadow-md transition-all group"><g.Icon className="w-8 h-8 text-gray-400 group-hover:text-indigo-600 mb-3 transition-colors"/><span className="font-bold text-gray-700 text-sm">{g.name}</span></button>))}</div>
-                          ) : (
-                             <div>
-                                <div className="flex items-center gap-2 mb-4"><button onClick={() => { setSelectedShopGroup(null); setFilters({search: ''}); }} className="p-2 bg-white border rounded-lg hover:bg-gray-50"><ArrowLeft size={16}/></button><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Search shop..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} className="w-full pl-10 py-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"/></div>{/* Sort Dropdown */}{(selectedShopGroup || filters.search.length > 0) && (<div className="relative"><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="appearance-none w-full bg-white border border-gray-300 rounded-lg text-sm px-4 py-2 pr-8 focus:ring-2 focus:ring-blue-500 outline-none"><option value="name-asc">Name (A-Z)</option><option value="name-desc">Name (Z-A)</option><option value="cost-asc">Cost (Low-High)</option><option value="cost-desc">Cost (High-Low)</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" /></div>)}</div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                   {allGameItems
-                                    .filter(item => { 
-                                        // EXCLUDE CUSTOM ITEMS (Keep Shop Clean)
-                                        if (item.is_custom) return false;
-                                        // Case insensitive matching
-                                        if (filters.search) return item.name.toLowerCase().includes(filters.search.toLowerCase());
-                                        return selectedShopGroup?.categories.includes(item.category?.toUpperCase()); 
-                                    })
-                                    .sort((a,b) => { 
-                                        const costA = parseCost(a.cost)?.totalCopper || 0; 
-                                        const costB = parseCost(b.cost)?.totalCopper || 0; 
-                                        switch (sortOrder) { 
-                                            case 'cost-asc': return costA - costB; 
-                                            case 'cost-desc': return costB - costA; 
-                                            case 'name-desc': return b.name.localeCompare(a.name); 
-                                            case 'name-asc': default: return a.name.localeCompare(b.name); 
-                                        } 
-                                    })
-                                    .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)}
-                                </div>
+                      <div className="p-4 min-h-full flex flex-col">
+                          
+                          {/* Universal Shop Search Bar */}
+                          <div className="relative mb-6 flex-shrink-0">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                              <input 
+                                type="text" 
+                                placeholder="Search everything in shop..." 
+                                value={shopSearch} 
+                                onChange={(e) => setShopSearch(e.target.value)} 
+                                className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl text-sm shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none touch-manipulation"
+                              />
+                              {shopSearch && (
+                                <button onClick={clearShopSearch} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full">
+                                    <X size={16}/>
+                                </button>
+                              )}
+                          </div>
+
+                          {/* Search Results (Global) */}
+                          {shopSearch ? (
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {allGameItems
+                                  .filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase()))
+                                  .sort((a,b) => a.name.localeCompare(b.name))
+                                  .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)
+                                }
+                                {allGameItems.filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase())).length === 0 && (
+                                    <div className="col-span-full text-center py-10 text-gray-400">
+                                        <Search size={32} className="mx-auto mb-2 opacity-30"/>
+                                        <p>No items found matching "{shopSearch}"</p>
+                                    </div>
+                                )}
                              </div>
+                          ) : (
+                             // Browse Mode (Categories)
+                             <>
+                                {!selectedShopGroup ? (
+                                    // Main Categories Grid
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                        {shopGroups.map(g => (
+                                            <button 
+                                                key={g.name} 
+                                                onClick={() => setSelectedShopGroup(g)} 
+                                                className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-xl hover:border-indigo-500 hover:shadow-md transition-all group active:scale-95"
+                                            >
+                                                <g.Icon className="w-8 h-8 text-gray-400 group-hover:text-indigo-600 mb-3 transition-colors"/>
+                                                <span className="font-bold text-gray-700 text-sm text-center">{g.name}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    // Selected Category View
+                                    <div className="flex flex-col h-full animate-in fade-in zoom-in-95 duration-200">
+                                        
+                                        {/* Header & Back Button */}
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <button onClick={() => setSelectedShopGroup(null)} className="p-2 bg-white border rounded-lg hover:bg-gray-50 text-gray-600">
+                                                <ArrowLeft size={18}/>
+                                            </button>
+                                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                                <selectedShopGroup.Icon size={20} className="text-indigo-600"/>
+                                                {selectedShopGroup.name}
+                                            </h3>
+                                        </div>
+
+                                        {/* Sub-Category Filter Tabs */}
+                                        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+                                            <button 
+                                                onClick={() => setActiveShopSubCategory(null)}
+                                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors border ${!activeShopSubCategory ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                                            >
+                                                All
+                                            </button>
+                                            {selectedShopGroup.categories.map((cat: string) => (
+                                                <button
+                                                    key={cat}
+                                                    onClick={() => setActiveShopSubCategory(cat)}
+                                                    className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors border ${activeShopSubCategory === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                                                >
+                                                    {formatCategoryLabel(cat)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Sorting & Results */}
+                                        <div className="flex justify-end mb-3">
+                                            <div className="relative">
+                                                <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="appearance-none bg-transparent text-xs font-bold text-gray-500 py-1 pr-6 focus:outline-none cursor-pointer">
+                                                    <option value="name-asc">Name (A-Z)</option>
+                                                    <option value="name-desc">Name (Z-A)</option>
+                                                    <option value="cost-asc">Price (Low)</option>
+                                                    <option value="cost-desc">Price (High)</option>
+                                                </select>
+                                                <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-20">
+                                            {allGameItems
+                                                .filter(item => { 
+                                                    if (item.is_custom) return false;
+                                                    // Filter by Group Categories
+                                                    if (!selectedShopGroup.categories.includes(item.category?.toUpperCase())) return false;
+                                                    // Filter by specific sub-category tab if active
+                                                    if (activeShopSubCategory && item.category?.toUpperCase() !== activeShopSubCategory) return false;
+                                                    return true;
+                                                })
+                                                .sort((a,b) => { 
+                                                    const costA = parseCost(a.cost)?.totalCopper || 0; 
+                                                    const costB = parseCost(b.cost)?.totalCopper || 0; 
+                                                    switch (sortOrder) { 
+                                                        case 'cost-asc': return costA - costB; 
+                                                        case 'cost-desc': return costB - costA; 
+                                                        case 'name-desc': return b.name.localeCompare(a.name); 
+                                                        case 'name-asc': default: return a.name.localeCompare(b.name); 
+                                                    } 
+                                                })
+                                                .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)
+                                            }
+                                        </div>
+                                    </div>
+                                )}
+                             </>
                           )}
                       </div>
                   )}
               </div>
               
-              {/* --- FLOATING ACTION BUTTON (Moved Outside Scroll Container) --- */}
+              {/* --- FLOATING ACTION BUTTON --- */}
               {activeTab === 'inventory' && (
                   <div className="absolute bottom-6 right-6 z-50">
                       <button onClick={() => setIsForageModalOpen(true)} className="flex items-center gap-2 bg-green-600 text-white px-5 py-3 rounded-full shadow-lg hover:bg-green-700 transition-transform hover:scale-105 active:scale-95 font-bold">

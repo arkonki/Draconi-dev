@@ -1,21 +1,83 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag, Image as ImageIcon } from 'lucide-react';
+import { 
+  ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag, 
+  Image as ImageIcon, User, Package, Table 
+} from 'lucide-react';
 import { Button } from '../shared/Button';
 import { CompendiumEntry } from '../../types/compendium';
 
 import MDEditor, { commands, ICommand } from '@uiw/react-md-editor';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 // Ensure this path matches where you saved the previous file
 import { HomebrewRenderer } from './HomebrewRenderer'; 
 // Ensure this path matches where you saved the modal
 import { ImagePickerModal } from './ImagePickerModal'; 
 
-// --- Templates ---
-const monsterTemplate = "````monster\n### Monster Name\n*Size type (tag), alignment*\n___\n| Attribute | Value |\n| :--- | :--- |\n| **Movement** | 12 |\n| **HP** | 16 |\n| **WP** | 14 |\n| **Armor** | - |\n\n**Skills:** Awareness 14, Healing 10\n___\n**Abilities:** \n* **Ability Name:** Description here.\n\n**Weapons:** \n1. **Weapon Name:** Damage 2D8.\n````";
-const noteTemplate = "````note\n#### Section Title\n\"Flavor text or read-aloud text goes here.\"\n\n**GM Note:** Hidden information or mechanics here.\n````";
-const spellTemplate = "````spell\n### Spell Name\n*Rank 1, School*\n___\n* **Casting Time:** 1 Action\n* **Range:** 10 meters\n* **Duration:** Instantaneous\n\n**Effect:** \nThe description of the spell goes here.\n````";
+// --- DRAGONBANE TEMPLATES ---
+
+const monsterTemplate = `\`\`\`monster
+### Monster Name
+*Typical habitat or description*
+___
+| **Ferocity** | **Size** | **Movement** | **Armor** | **HP** |
+| :---: | :---: | :---: | :---: | :---: |
+| 1 | Normal | 12 | - | 24 |
+
+**Skills:** Awareness 12, Evade 10
+**Immunity:** Fire
+___
+#### Monster Attacks
+| D6 | Attack |
+| :---: | :--- |
+| **1** | **Attack Name!** Description of the attack. 2D6 damage. |
+| **2** | **Another Attack!** Description. |
+\`\`\``;
+
+const npcTemplate = `\`\`\`npc
+### NPC Name
+*Kin, Profession*
+___
+| **Movement** | **Damage Bonus** | **HP** | **WP** |
+| :---: | :---: | :---: | :---: |
+| 10 | STR +D4 | 12 | 10 |
+
+**Armor:** Leather (1)
+**Skills:** Awareness 10, Swords 12
+**Abilities:** Veteran
+**Gear:** Broadsword, D6 silver
+\`\`\``;
+
+const spellTemplate = `\`\`\`spell
+### Spell Name
+*Rank 1, Animism*
+___
+* **Prerequisite:** None
+* **Requirement:** Word, Gesture
+* **Casting Time:** Action
+* **Range:** 10 meters
+* **Duration:** Instant
+___
+**Effect:** 
+The description of the spell goes here.
+\`\`\``;
+
+const itemTemplate = `\`\`\`item
+### Item Name
+*Type (e.g. Weapon, Tool)*
+___
+* **Supply:** Common
+* **Cost:** 5 gold
+* **Weight:** 1
+___
+**Effect:** 
+Description of the item's mechanical effect or utility.
+\`\`\``;
+
+const noteTemplate = `\`\`\`note
+#### Rules Note
+"Flavor text or read-aloud text goes here."
+
+**Mechanic:** Specific rules explanation here.
+\`\`\``;
 
 interface CompendiumFullPageProps {
   entry: CompendiumEntry;
@@ -40,8 +102,6 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
   };
 
   const handleImageInsert = (url: string, width?: string, height?: string) => {
-    // If specific dimensions are provided, use HTML img tag for control
-    // Otherwise use standard markdown
     let imageString = '';
     
     if (width || height) {
@@ -50,14 +110,11 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
         height ? `height: ${height}` : ''
       ].filter(Boolean).join('; ');
       
-      // We use a centered div wrapper for better layout in the compendium
       imageString = `\n<div align="center">\n  <img src="${url}" style="${style}" alt="Image" />\n</div>\n`;
     } else {
       imageString = `\n![Image](${url})\n`;
     }
 
-    // Append to current cursor position would be ideal, but for now we append to end
-    // or simply update state. 
     setEditedEntry(prev => ({
         ...prev,
         content: prev.content + imageString
@@ -71,34 +128,24 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
     keyCommand: 'image',
     buttonProps: { 'aria-label': 'Insert Image', title: 'Insert Image' },
     icon: <ImageIcon size={14} />,
-    execute: () => {
-      setShowImagePicker(true);
-    },
+    execute: () => { setShowImagePicker(true); },
   };
 
-  const monsterCommand: ICommand = { 
-    name: 'monsterBlock', 
-    keyCommand: 'monsterBlock', 
-    buttonProps: { 'aria-label': 'Insert Monster Block', title: 'Insert Monster Block' }, 
-    icon: <Shield size={14} />, 
-    execute: (state, api) => { api.replaceSelection(monsterTemplate); } 
-  };
+  const createBlockCommand = (name: string, title: string, icon: React.ReactNode, template: string): ICommand => ({
+    name,
+    keyCommand: name,
+    buttonProps: { 'aria-label': title, title: title },
+    icon,
+    execute: (state, api) => { api.replaceSelection(template); }
+  });
 
-  const noteCommand: ICommand = { 
-    name: 'noteBlock', 
-    keyCommand: 'noteBlock', 
-    buttonProps: { 'aria-label': 'Insert Note Block', title: 'Insert Note Block' }, 
-    icon: <StickyNote size={14} />, 
-    execute: (state, api) => { api.replaceSelection(noteTemplate); } 
-  };
-
-  const spellCommand: ICommand = { 
-    name: 'spellBlock', 
-    keyCommand: 'spellBlock', 
-    buttonProps: { 'aria-label': 'Insert Spell Block', title: 'Insert Spell Block' }, 
-    icon: <BookOpen size={14} />, 
-    execute: (state, api) => { api.replaceSelection(spellTemplate); } 
-  };
+  const blockCommands = [
+    createBlockCommand('monsterBlock', 'Insert Monster', <Shield size={14} />, monsterTemplate),
+    createBlockCommand('npcBlock', 'Insert NPC', <User size={14} />, npcTemplate),
+    createBlockCommand('spellBlock', 'Insert Spell', <BookOpen size={14} />, spellTemplate),
+    createBlockCommand('itemBlock', 'Insert Item', <Package size={14} />, itemTemplate),
+    createBlockCommand('noteBlock', 'Insert Note', <StickyNote size={14} />, noteTemplate),
+  ];
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col h-screen">
@@ -155,43 +202,30 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
             visibleDragbar={false}
             className="w-full h-full border-none"
             textareaProps={{
-              placeholder: "Start writing your compendium entry here..."
+              placeholder: "Start writing your compendium entry here...\nUse the toolbar icons to insert Dragonbane stat blocks."
             }}
             previewOptions={{
-              // We reset default styles so our HomebrewRenderer controls the look entirely
-              style: { 
-                backgroundColor: 'transparent', 
-                padding: 0,
-                fontFamily: 'inherit'
-              },
-              // We wrap the raw markdown component output
-              wrapper: ({ children }) => (
-                <div className="h-full overflow-y-auto bg-white p-8">
-                  {/* The HomebrewRenderer takes the full content string, 
-                      so we actually ignore the children passed by MDEditor here 
-                      and pass the state directly to ensure consistent formatting */}
-                  <HomebrewRenderer content={editedEntry.content} />
-                </div>
-              ),
-              // MDEditor expects a component map. Because we want full control via HomebrewRenderer,
-              // we can trick it by rendering our renderer as the 'div' wrapper above, 
-              // OR we can use the `renderPreview` prop which is cleaner. See below.
+              style: { backgroundColor: 'transparent', padding: 0, fontFamily: 'inherit' },
             }}
-            // Using renderPreview allows us to completely replace the preview pane logic
+            // Render Preview using the Dragonbane-specific HomebrewRenderer
             renderPreview={(markdownContent) => (
                 <div className="h-full overflow-y-auto bg-white p-8 custom-scrollbar">
                     <HomebrewRenderer content={markdownContent} />
                 </div>
             )}
             commands={[
-              commands.bold, commands.italic, commands.strikethrough, commands.hr,
-              commands.title, commands.divider,
-              commands.quote, commands.code, commands.codeBlock, commands.table,
+              commands.bold, commands.italic, commands.title, commands.divider,
+              commands.quote, commands.table, commands.hr,
+              commands.group([commands.code, commands.codeBlock], {
+                name: 'code',
+                groupName: 'code',
+                buttonProps: { 'aria-label': 'Code' }
+              }),
               commands.divider,
-              customImageCommand, // Replaces default image command
+              customImageCommand, 
               commands.link, 
               commands.divider,
-              monsterCommand, noteCommand, spellCommand,
+              ...blockCommands, // Inject Dragonbane Stat Blocks here
               commands.divider,
               commands.fullscreen
             ]}

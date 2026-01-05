@@ -16,13 +16,13 @@ import { PartyNotes } from '../components/party/PartyNotes';
 import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
-import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
+//import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
 import { StoryHelperApp } from '../components/party/StoryHelper';
 import { TimeTrackerView } from '../components/party/TimeTracker'; // Import Time Tracker
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
 import { GMScreen } from '../components/party/GMScreen';
 
-type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'sessionEnd' | 'gmScreen' | 'storyhelper';
+type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper'; // 'sessionEnd' |
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -78,7 +78,7 @@ export function PartyView() {
     { id: 'inventory', label: 'Stash', icon: Backpack },
     { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true }, // New Tab
     { id: 'encounter', label: 'Combat', icon: Swords, dmOnly: true },
-    { id: 'sessionEnd', label: 'End Session', icon: Award, dmOnly: true },
+    //{ id: 'sessionEnd', label: 'End Session', icon: Award, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
