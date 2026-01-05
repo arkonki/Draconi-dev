@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Shield, X, MoreHorizontal } from 'lucide-react';
+import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Shield, X, MoreHorizontal, ListChecks } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Character } from '../types/character';
@@ -13,7 +13,6 @@ import { Button } from '../components/shared/Button';
 import { fetchCharacters, deleteCharacters } from '../lib/api/characters';
 import { JoinPartyDialog } from '../components/party/JoinPartyDialog';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
-// 1. Import the VersionDisplay component
 import { VersionDisplay } from '../components/shared/VersionDisplay'; 
 
 export function Characters() {
@@ -58,10 +57,6 @@ export function Characters() {
   };
 
   const handleCardClick = (event: React.MouseEvent, characterId: string) => {
-    // Mobile-friendly selection logic:
-    // 1. Explicit selection mode (toggled via button)
-    // 2. Shift key (desktop power user)
-    // 3. If items are already selected, clicking another just adds to selection
     if (isSelectionMode || event.shiftKey || selectedIds.length > 0) {
       event.preventDefault();
       if (!isSelectionMode) setIsSelectionMode(true);
@@ -92,27 +87,48 @@ export function Characters() {
         </div>
 
         {!isCreating && characters.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full md:w-auto">
+          <div className="w-full md:w-auto">
             {!isSelectionMode ? (
-              <>
-                <Button variant="ghost" onClick={() => setIsSelectionMode(true)} className="text-gray-500 hover:text-gray-900 hidden md:flex">
-                  Select...
-                </Button>
-                {/* Mobile Selection Toggle Icon */}
-                <button 
-                  onClick={() => setIsSelectionMode(true)} 
-                  className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
-                  aria-label="Select Characters"
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                
+                {/* Primary Action: Pushed to top on mobile, right on desktop */}
+                <Button 
+                  variant="primary" 
+                  icon={Plus} 
+                  onClick={() => setIsCreating(true)} 
+                  className="w-full md:w-auto justify-center md:order-3 shadow-sm h-11 md:h-10"
                 >
-                  <MoreHorizontal size={20} />
-                </button>
+                  Create New
+                </Button>
 
-                <div className="h-6 w-px bg-gray-300 mx-1 hidden md:block"></div>
-                <Button variant="secondary" icon={LogIn} onClick={() => setIsJoining(true)} className="flex-1 md:flex-none justify-center">Join Party</Button>
-                <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)} className="flex-1 md:flex-none justify-center">Create New</Button>
-              </>
+                {/* Divider (Desktop Only) */}
+                <div className="hidden md:block h-6 w-px bg-gray-300 mx-1 md:order-2"></div>
+
+                {/* Secondary Actions: Grid on mobile, Flex on desktop */}
+                <div className="grid grid-cols-2 gap-3 md:flex md:gap-2 md:order-1">
+                  <Button 
+                    variant="outline" 
+                    icon={ListChecks} 
+                    onClick={() => setIsSelectionMode(true)} 
+                    className="justify-center border-gray-300 text-gray-700 md:border-transparent md:text-gray-500 md:hover:text-gray-900 md:hover:bg-gray-100 h-11 md:h-10"
+                  >
+                    Select
+                  </Button>
+                  
+                  <Button 
+                    variant="secondary" 
+                    icon={LogIn} 
+                    onClick={() => setIsJoining(true)} 
+                    className="justify-center h-11 md:h-10"
+                  >
+                    Join Party
+                  </Button>
+                </div>
+              </div>
             ) : (
-              <Button variant="ghost" onClick={handleCancelSelection} className="ml-auto">Cancel</Button>
+              <div className="flex justify-end w-full">
+                <Button variant="ghost" onClick={handleCancelSelection} icon={X}>Cancel Selection</Button>
+              </div>
             )}
           </div>
         )}
@@ -144,19 +160,19 @@ export function Characters() {
                 `}
                 onClick={(e) => handleCardClick(e, character.id!)}
               >
-                {/* Selection Checkbox (Visible in mode or when selected) */}
+                {/* Selection Checkbox */}
                 {(isSelectionMode || isSelected) && (
                   <div className={`
                     absolute top-3 right-3 z-20 rounded-full p-1 transition-all duration-200 shadow-sm
-                    ${isSelected ? 'bg-indigo-600 text-white scale-100' : 'bg-white border border-gray-200 text-transparent scale-90'}
+                    ${isSelected ? 'bg-indigo-600 text-white scale-100' : 'bg-white border border-gray-200 text-gray-300 scale-100'}
                   `}>
-                    <Check size={14} strokeWidth={3} />
+                    <Check size={14} strokeWidth={3} className={isSelected ? 'opacity-100' : 'opacity-0'} />
                   </div>
                 )}
                 
                 <CharacterCard character={character} />
                 
-                {/* Click Overlay for touch devices to ensure easy selection */}
+                {/* Click Overlay */}
                 {isSelectionMode && <div className="absolute inset-0 z-10 rounded-xl bg-white/0" />}
               </div>
             );
@@ -177,7 +193,7 @@ export function Characters() {
         </div>
       )}
 
-      {/* --- FLOATING ACTION BAR (Mobile & Desktop) --- */}
+      {/* --- FLOATING ACTION BAR (Selection Mode) --- */}
       {selectedIds.length > 0 && (
         <div className="fixed bottom-6 left-0 right-0 z-50 px-4 flex justify-center animate-in slide-in-from-bottom-10 fade-in duration-300">
           <div className="bg-white border border-gray-200 shadow-2xl rounded-2xl p-2 pl-4 pr-2 flex items-center justify-between ring-1 ring-black/5 w-full max-w-sm md:max-w-md backdrop-blur-xl bg-white/95">
@@ -227,7 +243,6 @@ export function Characters() {
         icon={<AlertTriangle className="h-6 w-6 text-red-600" />}
       />
 
-      {/* 2. Add the Version Counter here */}
       <VersionDisplay />
     </div>
   );
