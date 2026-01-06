@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { useCharacterSheetStore } from '../../stores/characterSheetStore'; 
+import { useCharacterSheetStore } from '../../stores/characterSheetStore'; // Ensure path is correct
 import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 
-// --- SUB-COMPONENT: PLAYER COMBATANT CARD ---
+// --- 1. SUB-COMPONENT: PLAYER COMBATANT CARD ---
+// This was missing in your snippet but is required for the view to render
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
-  
-  // Local state for the input box
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
 
-  // CRITICAL: Sync local state when server data changes (Realtime)
+  // Sync local state when server data changes
   useEffect(() => {
     setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
   }, [combatant.initiative_roll]);
@@ -20,11 +19,13 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const handleSetInitiative = () => {
     const initiative = parseInt(initiativeValue, 10);
     if (!isNaN(initiative) && initiative >= 1 && initiative <= 10) {
+      // Ensure this action exists in your store
       setInitiativeForCombatant(combatant.id, initiative);
     }
   };
 
   const handleFlipCard = () => {
+    // Ensure this action exists in your store
     updateCombatant(combatant.id, { has_acted: !combatant.has_acted });
   };
 
@@ -101,7 +102,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   );
 };
 
-// --- MAIN COMPONENT ---
+// --- 2. MAIN COMPONENT ---
 export function EncounterChatView() {
   const {
     character,
@@ -113,7 +114,7 @@ export function EncounterChatView() {
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // 1. LISTEN FOR PARTY EVENTS (To detect when a new encounter starts)
+  // 1. LISTEN FOR ENCOUNTER STATUS CHANGES (Start/Stop)
   useEffect(() => {
     if (!character?.party_id) return;
     
@@ -141,7 +142,7 @@ export function EncounterChatView() {
     return () => { supabase.removeChannel(channel); };
   }, [character?.party_id, character?.id, fetchActiveEncounter]);
 
-  // 2. LISTEN FOR COMBATANT CHANGES (When encounter is active)
+  // 2. LISTEN FOR COMBATANT CHANGES
   useEffect(() => {
     if (!activeEncounter?.id) return;
 
@@ -155,7 +156,7 @@ export function EncounterChatView() {
           filter: `encounter_id=eq.${activeEncounter.id}` 
         },
         () => {
-           // Refresh combat data
+           // Safety check inside callback
            if (character?.party_id && character?.id) {
              fetchActiveEncounter(character.party_id, character.id);
            }

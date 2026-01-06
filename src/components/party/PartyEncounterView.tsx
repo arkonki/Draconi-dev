@@ -19,12 +19,12 @@ import {
   nextRound,
 } from '../../lib/api/encounters';
 import { fetchAllMonsters } from '../../lib/api/monsters';
-// IMPORT THE HOOK HERE
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
 import {
-  PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User, Sword, RefreshCw, Crosshair, Target, Link as LinkIcon
+  PlusCircle, UserPlus, ShieldPlus, Trash2, Play, Square, Save, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, ArrowUpDown, Users, Copy, List, ChevronDown, ChevronUp, ArrowLeft, LogIn, LogOut, ChevronsRight, ClipboardList, RotateCcw, ShieldAlert, Skull, Dices, Search, User, Sword, RefreshCw, MoreVertical, Crosshair, Target, Link as LinkIcon
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
@@ -327,7 +327,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const { data: encounterDetails } = useQuery<Encounter | null>({ queryKey: ['encounterDetails', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)), enabled: !!currentEncounterId });
   const { data: combatantsData } = useQuery<EncounterCombatant[]>({ queryKey: ['encounterCombatants', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])), enabled: !!currentEncounterId });
   
-  // ACTIVATE REALTIME HOOK
   useEncounterRealtime(currentEncounterId);
 
   // DERIVED
@@ -339,20 +338,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   useEffect(() => { if (!loadingEnc && (!allEncounters || allEncounters.length === 0)) setViewMode('create'); }, [allEncounters, loadingEnc]);
   useEffect(() => { if(encounterDetails) setEditedName(encounterDetails.name); }, [encounterDetails]);
-  
-  // Sync editable stats when server data changes
-  useEffect(() => { 
-    if (!combatants) return; 
-    const init: any = {}; 
-    combatants.forEach(c => { 
-      init[c.id] = { 
-        current_hp: String(c.current_hp ?? 0), 
-        current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp) : String(c.current_wp ?? ''), 
-        initiative_roll: String(c.initiative_roll || '') 
-      }; 
-    }); 
-    setEditingStats(init); 
-  }, [combatants]);
+  useEffect(() => { if (!combatants) return; const init: any = {}; combatants.forEach(c => { init[c.id] = { current_hp: String(c.current_hp ?? 0), current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp) : String(c.current_wp ?? ''), initiative_roll: String(c.initiative_roll || '') }; }); setEditingStats(init); }, [combatants]);
   
   // SMART NEXT ACTOR
   useEffect(() => { 
