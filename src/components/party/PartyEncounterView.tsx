@@ -19,13 +19,12 @@ import {
   nextRound,
 } from '../../lib/api/encounters';
 import { fetchAllMonsters } from '../../lib/api/monsters';
+// IMPORT THE HOOK HERE
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import {
-  PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, 
-  SkipForward, ArrowUpDown, Copy, List, Sword, RefreshCw, Crosshair, Target, 
-  Link as LinkIcon, RotateCcw, ShieldAlert, Skull, Dices, Search, User
+  PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User, Sword, RefreshCw, Crosshair, Target, Link as LinkIcon
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
@@ -39,7 +38,7 @@ interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; 
 interface EditableCombatantStats { current_hp: string; current_wp: string; initiative_roll?: string; }
 interface AttackDescriptionRendererProps { description: string; attackName: string; }
 
-// --- HELPERS ---
+// --- HELPER: SYNC LOGIC ---
 const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombatant[]) => {
   if (!target.monster_id) return [target];
   const baseName = target.display_name.replace(/ \(Act \d+\)$/, '');
@@ -49,6 +48,7 @@ const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombata
   );
 };
 
+// --- UTILS ---
 const generateDeck = (totalNeeded: number, manualValues: number[]): number[] => {
   let deck: number[] = [];
   const decksCount = Math.ceil(Math.max(totalNeeded, 1) / 10);
@@ -59,7 +59,6 @@ const generateDeck = (totalNeeded: number, manualValues: number[]): number[] => 
 };
 
 // --- SUB-COMPONENTS ---
-
 const StatsTableView = ({ stats }: { stats: object }) => (
   <div className="grid grid-cols-3 gap-2 text-xs">
     {Object.entries(stats).map(([key, value]) => (
@@ -103,6 +102,8 @@ function LogEntry({ entry }: { entry: any }) {
   if (entry.type === 'round_advanced') return <div className="flex items-center justify-center gap-2 my-2"><div className="h-px bg-stone-300 w-10"></div><span className="font-serif font-bold text-stone-600 text-xs uppercase tracking-widest">Round {entry.round}</span><div className="h-px bg-stone-300 w-10"></div></div>;
   let content = null; 
   switch (entry.type) { 
+    case 'turn_start': content = <span className="text-stone-600">Turn started: <strong>{entry.name}</strong></span>; break; 
+    case 'turn_end': content = <span className="text-stone-400 italic">Turn ended: {entry.name}</span>; break; 
     case 'hp_change': const isDamage = entry.delta < 0; content = (<span className={isDamage ? 'text-red-700' : 'text-green-700'}><strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(entry.delta)} DMG` : `healed ${entry.delta} HP`}</span>); break; 
     case 'wp_change': const isSpend = entry.delta < 0; content = (<span className="text-blue-700"><strong>{entry.name}</strong> {isSpend ? `spent ${Math.abs(entry.delta)} WP` : `recovered ${entry.delta} WP`}</span>); break; 
     case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12}/> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}</div></div>); break; 
@@ -117,8 +118,7 @@ function CombatLogView({ log }: { log: any[] }) {
   return (<div className="space-y-1 divide-y divide-gray-100">{log.slice().reverse().map((entry, index) => (<LogEntry key={index} entry={entry} />))}</div>); 
 }
 
-// --- MODALS ---
-
+// --- MODAL: ATTACK RESOLUTION ---
 interface AttackResolutionModalProps { isOpen: boolean; onClose: () => void; attacker: EncounterCombatant; targets: EncounterCombatant[]; attackName?: string; onConfirm: (targetId: string, damage: number) => void; }
 
 function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, onConfirm }: AttackResolutionModalProps) {
@@ -129,12 +129,17 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
 
   const isAttackerMonster = !!attacker.monster_id;
 
+  // DEDUPLICATE TARGETS (Collapse multi-turn monsters into one entry)
   const uniqueTargets = useMemo(() => {
     const seen = new Set<string>();
     return targets.filter(t => {
+      // Players are usually unique by definition of ID
       if (!t.monster_id) return true; 
+
+      // For monsters, group by ID + Base Name (stripping " (Act N)")
       const baseName = t.display_name.replace(/ \(Act \d+\)$/, '');
       const key = `${t.monster_id}:${baseName}`;
+      
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -158,10 +163,15 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
               {sortedTargets.map(t => { 
                 const isFoe = (isAttackerMonster && !t.monster_id) || (!isAttackerMonster && !!t.monster_id); 
                 const isDead = t.current_hp === 0; 
+                // Clean name for display (Remove " (Act 1)")
                 const displayName = t.monster_id ? t.display_name.replace(/ \(Act \d+\)$/, '') : t.display_name;
+                
                 return (
                   <div key={t.id} onClick={() => !isDead && setSelectedTargetId(t.id)} className={`p-3 rounded border flex justify-between items-center cursor-pointer transition-all ${selectedTargetId === t.id ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
-                    <div><span className={`font-bold ${isFoe ? 'text-red-700' : 'text-blue-700'}`}>{displayName}</span><div className="text-xs text-stone-500">{isFoe ? 'Enemy' : 'Ally'} • HP: {t.current_hp}/{t.max_hp}</div></div>
+                    <div>
+                      <span className={`font-bold ${isFoe ? 'text-red-700' : 'text-blue-700'}`}>{displayName}</span>
+                      <div className="text-xs text-stone-500">{isFoe ? 'Enemy' : 'Ally'} • HP: {t.current_hp}/{t.max_hp}</div>
+                    </div>
                     {selectedTargetId === t.id && <Target className="text-red-600 w-5 h-5 animate-pulse" />}
                   </div>
                 ); 
@@ -193,7 +203,7 @@ function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: any) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg h-[80vh] flex flex-col overflow-hidden border border-stone-200">
         <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Dices className="w-5 h-5"/> Draw Initiative</h3><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24}/></button></div>
-        <div className="p-3 bg-blue-50 text-blue-900 text-sm border-b border-blue-100">Enter manual values for characters keeping their card. Leave blank to draw from deck.</div>
+        <div className="p-3 bg-blue-50 text-blue-900 text-sm border-b border-blue-100">Enter manual values for characters keeping their card (e.g. <strong>Veteran</strong> talent). Leave blank to draw from deck.</div>
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-2">{combatants.map((c:any) => (<div key={c.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><span className="font-bold text-stone-800">{c.display_name}</span><input type="number" min="1" max="10" placeholder="Auto" className={`w-20 px-2 py-1 text-center border rounded font-mono font-bold ${manualValues[c.id] ? 'bg-yellow-50 border-yellow-400 text-yellow-900' : 'bg-white'}`} value={manualValues[c.id] || ''} onChange={(e) => setManualValues(prev => ({...prev, [c.id]: e.target.value}))} /></div>))}</div>
         <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" Icon={Dices} onClick={handleDraw}>Draw & Apply</Button></div>
       </div>
@@ -292,6 +302,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
 
 export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncounterViewProps) {
   const queryClient = useQueryClient();
+  const { toggleDiceRoller } = useDice();
 
   // STATE
   const [newEncounterName, setNewEncounterName] = useState('');
@@ -316,6 +327,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const { data: encounterDetails } = useQuery<Encounter | null>({ queryKey: ['encounterDetails', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)), enabled: !!currentEncounterId });
   const { data: combatantsData } = useQuery<EncounterCombatant[]>({ queryKey: ['encounterCombatants', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])), enabled: !!currentEncounterId });
   
+  // ACTIVATE REALTIME HOOK
   useEncounterRealtime(currentEncounterId);
 
   // DERIVED
@@ -327,20 +339,37 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   useEffect(() => { if (!loadingEnc && (!allEncounters || allEncounters.length === 0)) setViewMode('create'); }, [allEncounters, loadingEnc]);
   useEffect(() => { if(encounterDetails) setEditedName(encounterDetails.name); }, [encounterDetails]);
-  useEffect(() => { if (!combatants) return; const init: any = {}; combatants.forEach(c => { init[c.id] = { current_hp: String(c.current_hp ?? 0), current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp) : String(c.current_wp ?? ''), initiative_roll: String(c.initiative_roll || '') }; }); setEditingStats(init); }, [combatants]);
+  
+  // Sync editable stats when server data changes
+  useEffect(() => { 
+    if (!combatants) return; 
+    const init: any = {}; 
+    combatants.forEach(c => { 
+      init[c.id] = { 
+        current_hp: String(c.current_hp ?? 0), 
+        current_wp: c.max_wp != null ? String(c.current_wp ?? c.max_wp) : String(c.current_wp ?? ''), 
+        initiative_roll: String(c.initiative_roll || '') 
+      }; 
+    }); 
+    setEditingStats(init); 
+  }, [combatants]);
   
   // SMART NEXT ACTOR
   useEffect(() => { 
     if (encounterDetails?.status === 'active' && combatants.length > 0) {
       const currentSelected = combatants.find(c => c.id === selectedActorId);
       if (!selectedActorId || (currentSelected && (currentSelected.has_acted || (currentSelected.monster_id && currentSelected.current_hp === 0)))) {
+        // Auto-select next actor: must not have acted, must not be defeated
         const next = combatants.find(c => !c.has_acted && !(c.monster_id && c.current_hp === 0));
         if (next) setSelectedActorId(next.id);
       }
     }
   }, [combatants, encounterDetails, selectedActorId]);
 
-  useEffect(() => { if (selectedActorId && !combatants.find(c => c.id === selectedActorId)) setSelectedActorId(null); }, [combatants, selectedActorId]);
+  // CLEANUP SELECTION
+  useEffect(() => {
+    if (selectedActorId && !combatants.find(c => c.id === selectedActorId)) setSelectedActorId(null);
+  }, [combatants, selectedActorId]);
 
   // MUTATIONS
   const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
@@ -351,17 +380,9 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const updateCombatantMu = useMutation({ mutationFn: ({id, updates}:any) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  
-  // FIXED: Destructure args properly
-  const swapInitiativeMu = useMutation({ 
-    mutationFn: ({ id1, id2 }: { id1: string, id2: string }) => swapInitiative(id1, id2), 
-    onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); 
-      setSwapSourceId(null); 
-    } 
-  });
-  
+  const swapInitiativeMu = useMutation({ mutationFn: swapInitiative, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); setSwapSourceId(null); } });
   const appendLogMu = useMutation({ mutationFn: (entry: any) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
+  
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
   const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
   const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if(combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
@@ -377,7 +398,10 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const updates: any = {};
     let siblings = [c];
 
-    if (c.monster_id && combatantsData) siblings = getSiblings(c, combatantsData);
+    // If monster, find linked siblings (same monster type, different cards)
+    if (c.monster_id && combatantsData) {
+      siblings = getSiblings(c, combatantsData);
+    }
 
     if (!isNaN(nh) && nh !== c.current_hp) {
       updates.current_hp = nh;
@@ -388,16 +412,18 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
        appendLogMu.mutate({ type: 'wp_change', ts: Date.now(), who: id, name: c.display_name, delta: nw - (c.current_wp || 0) });
     }
     
-    if (Object.keys(updates).length > 0) siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
+    if (Object.keys(updates).length > 0) {
+      // Update ALL siblings to keep them in sync
+      siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
+    }
   };
   
-  // IMPROVED: Batch remove
-  const handleRemove = async (id: string) => {
+  const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
     if (c && c.monster_id && combatantsData) {
+      // If removing a monster, remove ALL cards (siblings) associated with that entity
       const siblings = getSiblings(c, combatantsData);
-      await Promise.all(siblings.map(sib => removeCombatant(sib.id)));
-      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] });
+      siblings.forEach(sib => removeCombatantMu.mutate(sib.id));
     } else {
       removeCombatantMu.mutate(id);
     }
@@ -413,14 +439,11 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   };
 
-  const handleInitApply = async (updates: {id:string, initiative_roll:number}[]) => { 
-      await Promise.all(updates.map(u => updateCombatant(u.id, { ...u, has_acted: false }))); 
-      setIsInitModalOpen(false); 
-      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); 
-      appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); 
-  };
+  const handleInitApply = async (updates: {id:string, initiative_roll:number}[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { ...u, has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
 
-  const handleFlip = (id: string, current: boolean) => updateCombatantMu.mutate({ id, updates: { has_acted: !current } });
+  const handleFlip = (id: string, current: boolean) => {
+    updateCombatantMu.mutate({ id, updates: { has_acted: !current } });
+  };
   
   const handleAttackConfirm = (targetId: string, dmg: number) => {
     if (!activeCombatant) return;
@@ -428,9 +451,13 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (!target) return;
     
     const newHp = Math.max(0, target.current_hp - dmg);
+    
+    // Use shared handler to ensure synced updates
     const updates: any = { current_hp: newHp };
     let siblings = [target];
-    if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
+    if (target.monster_id && combatantsData) {
+      siblings = getSiblings(target, combatantsData);
+    }
 
     siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
     appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: target.display_name, damage: dmg });
@@ -465,12 +492,12 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             {encounterDetails.status === 'active' && activeCombatant && (<ActiveCombatantSpotlight combatant={activeCombatant} monsterData={activeCombatantMonsterData || undefined} currentAttack={currentMonsterAttacks[activeCombatant.id]} onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData)} onEndTurn={() => handleFlip(activeCombatant.id, false)} onOpenAttackModal={() => setIsAttackModalOpen(true)} />)}
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{encounterDetails.status === 'active' && <Button size="sm" variant="outline" Icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}<Button size="sm" variant="outline" Icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button></div></div>
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({id1: swapSourceId, id2: id}) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={handleRemove} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v:any) => setEditingStats(prev => ({...prev, [c.id]: v}))} isDM={isDM} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id) => swapSourceId ? swapInitiativeMu.mutate({id1: swapSourceId, id2: id}) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v:any) => setEditingStats(prev => ({...prev, [c.id]: v}))} isDM={isDM} />))}</div>
             </div>
           </div>
         </div>
       )}
-      <AddCombatantsModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} partyMembers={partyMembers} availablePartyMembers={availableParty} allMonsters={allMonsters || []} onAddParty={(id: string) => addCharacterMu.mutate({ encounterId: currentEncounterId!, characterId: id, initiativeRoll: null })} onAddMonster={(id: string, count: number, name: string) => { const m = monstersById.get(id); const ferocity = m?.stats?.FEROCITY || 1; for(let i=1; i<=count; i++) { const base = count > 1 ? `${name || m?.name} ${i}` : (name || m?.name); for(let f=1; f<=ferocity; f++) { addMonsterMu.mutate({ encounterId: currentEncounterId!, monsterId: id, customName: ferocity > 1 ? `${base} (Act ${f})` : base, initiativeRoll: null }); } } }} />
+      <AddCombatantsModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} partyMembers={partyMembers} availablePartyMembers={availableParty} allMonsters={allMonsters || []} onAddParty={(id) => addCharacterMu.mutate({ encounterId: currentEncounterId!, characterId: id, initiativeRoll: null })} onAddMonster={(id, count, name) => { const m = monstersById.get(id); const ferocity = m?.stats?.FEROCITY || 1; for(let i=1; i<=count; i++) { const base = count > 1 ? `${name || m?.name} ${i}` : (name || m?.name); for(let f=1; f<=ferocity; f++) { addMonsterMu.mutate({ encounterId: currentEncounterId!, monsterId: id, customName: ferocity > 1 ? `${base} (Act ${f})` : base, initiativeRoll: null }); } } }} />
       <InitiativeDrawModal isOpen={isInitModalOpen} onClose={() => setIsInitModalOpen(false)} combatants={combatants} onApply={handleInitApply} />
       {isAttackModalOpen && activeCombatant && (
         <AttackResolutionModal 
