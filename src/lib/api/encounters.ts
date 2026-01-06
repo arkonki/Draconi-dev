@@ -49,7 +49,7 @@ export async function fetchLatestEncounterForParty(partyId: string): Promise<Enc
     .limit(1)
     .single();
   
-  // Ignore "No Rows Found" error
+  // Ignore "No Rows Found" error (PGRST116)
   if (error && error.code !== 'PGRST116') throw error;
   return data;
 }
@@ -67,6 +67,7 @@ export async function createEncounter(partyId: string, name: string, description
 }
 
 export async function duplicateEncounter(encounterId: string, newName: string): Promise<Encounter> {
+  // Requires SQL Function: duplicate_encounter_with_combatants
   const { data, error } = await supabase.rpc('duplicate_encounter_with_combatants', {
     p_encounter_id: encounterId,
     p_new_name: newName
@@ -82,7 +83,6 @@ export async function addCharacterToEncounter(params: {
   characterId: string;
   initiativeRoll: number | null;
 }) {
-  // Uses p_ prefixes to match SQL function arguments
   const { data, error } = await supabase.rpc('add_character_to_encounter', {
     p_encounter_id: params.encounterId,
     p_character_id: params.characterId,
@@ -116,7 +116,7 @@ export async function updateEncounter(id: string, updates: Partial<Encounter>): 
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); // FIX: Changed .single() to .maybeSingle() to prevent 406 errors
+    .maybeSingle(); 
 
   if (error) throw error;
   if (!data) throw new Error('Encounter not found or permission denied');
@@ -129,7 +129,7 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); // FIX: Changed .single() to .maybeSingle() to prevent 406 errors
+    .maybeSingle(); 
 
   if (error) throw error;
   if (!data) throw new Error('Combatant not found or permission denied');
@@ -139,15 +139,14 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
 // --- LOGGING ---
 
 export async function appendEncounterLog(encounterId: string, entry: any): Promise<void> {
-  // Make sure the 'append_to_log' RPC exists in your database!
-  // Fallback: If RPC fails, we could fetch->update JSON manually, but RPC is safer for concurrency.
+  // Fallback: If RPC fails, we could fetch->update JSON manually.
+  // Requires SQL Function: append_to_log
   const { error } = await supabase.rpc('append_to_log', {
     p_encounter_id: encounterId,
     p_log_entry: entry,
   });
   if (error) {
     console.error("Failed to append log:", error);
-    // Don't throw here, logging failure shouldn't crash the game flow
   }
 }
 
@@ -157,14 +156,14 @@ export const startEncounter = (id: string) => updateEncounter(id, { status: 'act
 export const endEncounter = (id: string) => updateEncounter(id, { status: 'completed' });
 
 export const nextRound = async (id: string) => {
-  // This calls the SQL function that increments round AND resets all cards
+  // Requires SQL Function: advance_encounter_round
+  // This must reset 'has_acted' to false and increment 'current_round'
   const { error } = await supabase.rpc('advance_encounter_round', {
     p_encounter_id: id
   });
   
   if (error) throw error;
 };
-
 
 // --- DELETE OPERATIONS ---
 
