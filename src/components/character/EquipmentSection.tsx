@@ -95,7 +95,7 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
           <div className={`p-4 border rounded-sm transition-colors ${isBroken ? 'bg-red-50 border-red-300' : 'bg-stone-50 border-stone-200'}`}>
              <h4 className="font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><AlertTriangle size={14} className={isBroken ? 'text-red-600' : 'text-stone-400'}/>Condition & Durability</h4>
              <div className="flex items-center justify-between">
-                <label htmlFor={uniqueId} className="text-sm font-bold text-stone-700 cursor-pointer select-none">Is the item broken?<span className="block text-[10px] font-normal text-stone-500 mt-0.5">Happens if Parry Damage &gt; Durability ({item.durability || 'N/A'})</span></label>
+                <label htmlFor={uniqueId} className="text-sm font-bold text-stone-700 cursor-pointer select-none">Is the item broken?<span className="block text-[10px] font-normal text-stone-500 mt-0.5">Happens if Parry Damage &gt; Durability ({item.durability || 'N/A'})</span></label>  
                 <label htmlFor={uniqueId} className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" id={uniqueId} checked={isBroken} onChange={(e) => setIsBroken(e.target.checked)} className="peer sr-only" />
                     <div className="w-11 h-6 bg-stone-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 shadow-inner"></div>

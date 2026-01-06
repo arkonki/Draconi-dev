@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { supabase } from '../supabase'; // Adjust path if needed (e.g. '../../lib/supabase')
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
 
 // --- FETCH (GET) OPERATIONS ---
@@ -28,18 +28,15 @@ export async function fetchEncounterCombatants(encounterId: string): Promise<Enc
     .from('encounter_combatants')
     .select('*') 
     .eq('encounter_id', encounterId)
-    // Primary Sort: Initiative (1 is best, null is worst)
+    // Dragonbane: Low initiative (1) goes first. Nulls (not drawn) go last.
     .order('initiative_roll', { ascending: true, nullsLast: true }) 
-    // Secondary Sort: Name (for ties)
     .order('display_name', { ascending: true });
 
-  if (error) {
-    console.error('Error fetching encounter combatants:', error);
-    throw error;
-  }
+  if (error) throw error;
   return data || [];
 }
 
+// --- MISSING FUNCTION RESTORED HERE ---
 export async function fetchLatestEncounterForParty(partyId: string): Promise<Encounter | null> {
   const { data, error } = await supabase
     .from('encounters')
@@ -49,7 +46,7 @@ export async function fetchLatestEncounterForParty(partyId: string): Promise<Enc
     .limit(1)
     .single();
   
-  // Ignore "No Rows Found" error
+  // Ignore "No Rows Found" error (PGRST116)
   if (error && error.code !== 'PGRST116') throw error;
   return data;
 }
@@ -75,14 +72,13 @@ export async function duplicateEncounter(encounterId: string, newName: string): 
   return data;
 }
 
-// --- RPC FUNCTIONS FOR ADDING COMBATANTS ---
+// --- RPC ADDITIONS ---
 
 export async function addCharacterToEncounter(params: {
   encounterId: string;
   characterId: string;
   initiativeRoll: number | null;
 }) {
-  // Uses p_ prefixes to match SQL function arguments
   const { data, error } = await supabase.rpc('add_character_to_encounter', {
     p_encounter_id: params.encounterId,
     p_character_id: params.characterId,
@@ -116,10 +112,10 @@ export async function updateEncounter(id: string, updates: Partial<Encounter>): 
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); // FIX: Changed .single() to .maybeSingle() to prevent 406 errors
+    .maybeSingle();
 
   if (error) throw error;
-  if (!data) throw new Error('Encounter not found or permission denied');
+  if (!data) throw new Error(`Encounter update failed: Item ${id} not found.`);
   return data;
 }
 
@@ -129,42 +125,34 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); // FIX: Changed .single() to .maybeSingle() to prevent 406 errors
+    .maybeSingle();
 
   if (error) throw error;
-  if (!data) throw new Error('Combatant not found or permission denied');
+  if (!data) throw new Error(`Combatant update failed: Item ${id} not found.`);
   return data;
 }
 
 // --- LOGGING ---
 
 export async function appendEncounterLog(encounterId: string, entry: any): Promise<void> {
-  // Make sure the 'append_to_log' RPC exists in your database!
-  // Fallback: If RPC fails, we could fetch->update JSON manually, but RPC is safer for concurrency.
   const { error } = await supabase.rpc('append_to_log', {
     p_encounter_id: encounterId,
     p_log_entry: entry,
   });
-  if (error) {
-    console.error("Failed to append log:", error);
-    // Don't throw here, logging failure shouldn't crash the game flow
-  }
+  if (error) console.error("Failed to append log:", error);
 }
 
-// --- ENCOUNTER FLOW OPERATIONS ---
+// --- FLOW OPERATIONS ---
 
 export const startEncounter = (id: string) => updateEncounter(id, { status: 'active', current_round: 1 });
 export const endEncounter = (id: string) => updateEncounter(id, { status: 'completed' });
 
 export const nextRound = async (id: string) => {
-  // This calls the SQL function that increments round AND resets all cards
   const { error } = await supabase.rpc('advance_encounter_round', {
     p_encounter_id: id
   });
-  
   if (error) throw error;
 };
-
 
 // --- DELETE OPERATIONS ---
 
@@ -180,19 +168,19 @@ export async function removeCombatant(id: string): Promise<void> {
 
 // --- COMPLEX ACTIONS ---
 
-export async function rollInitiativeForCombatants(encounterId: string, combatantIds: string[]): Promise<any> {
-  const { data, error } = await supabase.rpc('roll_initiative_for_combatants', {
-    p_encounter_id: encounterId,
-    p_combatant_ids: combatantIds
+export async function swapInitiative(combatantId1: string, combatantId2: string): Promise<any> {
+  const { data, error } = await supabase.rpc('swap_combatant_initiative', {
+    p_combatant_id_1: combatantId1,
+    p_combatant_id_2: combatantId2
   });
   if (error) throw error;
   return data;
 }
 
-export async function swapInitiative(combatantId1: string, combatantId2: string): Promise<any> {
-  const { data, error } = await supabase.rpc('swap_combatant_initiative', {
-    p_combatant_id_1: combatantId1,
-    p_combatant_id_2: combatantId2
+export async function rollInitiativeForCombatants(encounterId: string, combatantIds: string[]): Promise<any> {
+  const { data, error } = await supabase.rpc('roll_initiative_for_combatants', {
+    p_encounter_id: encounterId,
+    p_combatant_ids: combatantIds
   });
   if (error) throw error;
   return data;

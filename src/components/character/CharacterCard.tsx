@@ -33,7 +33,8 @@ export function CharacterCard({ character }: CharacterCardProps) {
           <img 
             src={character.portrait_url} 
             alt={character.name} 
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+            // UPDATED: Added 'object-top' to ensure faces (usually at the top) are not cut off
+            className="w-full h-full object-cover object-top transition-transform duration-700 group-hover:scale-110"
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 bg-gradient-to-br from-gray-50 to-gray-200">
