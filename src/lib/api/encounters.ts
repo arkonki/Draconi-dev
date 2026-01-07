@@ -54,6 +54,21 @@ export async function fetchLatestEncounterForParty(partyId: string): Promise<Enc
   return data;
 }
 
+export async function fetchActiveEncounterForParty(partyId: string): Promise<Encounter | null> {
+  const { data, error } = await supabase
+    .from('encounters')
+    .select('*')
+    .eq('party_id', partyId)
+    .eq('status', 'active') // Only finds running battles
+    .maybeSingle(); 
+  
+  if (error) {
+    console.error("Error fetching active encounter:", error);
+    return null;
+  }
+  return data;
+}
+
 // --- CREATE (POST) OPERATIONS ---
 
 export async function createEncounter(partyId: string, name: string, description?: string): Promise<Encounter> {

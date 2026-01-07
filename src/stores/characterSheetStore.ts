@@ -5,7 +5,7 @@ import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells
 import { Spell, MagicSchool } from '../types/magic';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
-import { fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
+import { fetchActiveEncounterForParty, fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
 
@@ -120,13 +120,19 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   fetchActiveEncounter: async (partyId, characterId) => {
     set({ isLoadingEncounter: true });
     try {
-      const latestEncounter = await fetchLatestEncounterForParty(partyId);
-      if (latestEncounter && latestEncounter.status === 'active') {
-        const allCombatants = await fetchEncounterCombatants(latestEncounter.id);
+      // 1. Fetch ONLY the active encounter
+      const activeEncounter = await fetchActiveEncounterForParty(partyId);
+
+      // 2. Check if an active encounter exists
+      if (activeEncounter) {
+        const allCombatants = await fetchEncounterCombatants(activeEncounter.id);
         const characterCombatant = allCombatants.find(c => c.character_id === characterId);
+        
+        // Sort by initiative (nulls last)
         const sortedCombatants = allCombatants.sort((a, b) => (a.initiative_roll ?? 100) - (b.initiative_roll ?? 100));
+        
         set({
-          activeEncounter: latestEncounter,
+          activeEncounter: activeEncounter, // Use the active one
           currentCombatant: characterCombatant ?? null,
           encounterCombatants: sortedCombatants,
         });
