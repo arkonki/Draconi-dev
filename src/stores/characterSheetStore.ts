@@ -147,6 +147,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
+	
+
   setCharacter: (character) => {
     set({ character });
     if (!character || !character.party_id) {
@@ -481,13 +483,32 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   updateCombatant: async (combatantId, updates) => {
     set({ isSaving: true, saveError: null });
     try {
+      // 1. Update the Encounter Combatant (Triggers Realtime for everyone)
       await apiUpdateCombatant(combatantId, updates);
+
+      // 2. CRITICAL: If this is MY character, also update the main Character Sheet
+      // This ensures the damage persists even after the encounter ends.
+      const state = get();
+      const combatant = state.encounterCombatants.find(c => c.id === combatantId);
+      
+      if (combatant && state.character && combatant.character_id === state.character.id) {
+          const charUpdates: Partial<Character> = {};
+          if (updates.current_hp !== undefined) charUpdates.current_hp = updates.current_hp;
+          if (updates.current_wp !== undefined) charUpdates.current_wp = updates.current_wp;
+          
+          if (Object.keys(charUpdates).length > 0) {
+              await updateCharacter(state.character.id, charUpdates);
+          }
+      }
+      
+      // 3. Update Local State immediately
       set(state => {
         const updatedCombatants = state.encounterCombatants.map(c => 
           c.id === combatantId ? { ...c, ...updates } : c
         );
+        
+        // Also update the loaded character object if it matches
         let updatedCharacter = state.character;
-        const combatant = state.encounterCombatants.find(c => c.id === combatantId);
         if (combatant && state.character && combatant.character_id === state.character.id) {
             updatedCharacter = {
                 ...state.character,

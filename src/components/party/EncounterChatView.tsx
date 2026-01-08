@@ -1,18 +1,69 @@
 import React, { useState, useEffect } from 'react';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore'; 
-import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull } from 'lucide-react';
+import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull, Zap } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
+
+// --- SUB-COMPONENT: EDITABLE STAT BOX ---
+const StatInput = ({ 
+  value, 
+  max, 
+  icon: Icon, 
+  colorClass, 
+  onChange,
+  disabled 
+}: { 
+  value: number, 
+  max: number, 
+  icon: any, 
+  colorClass: string, 
+  onChange: (val: number) => void,
+  disabled: boolean
+}) => {
+  const [localVal, setLocalVal] = useState(String(value));
+
+  useEffect(() => {
+    setLocalVal(String(value));
+  }, [value]);
+
+  const handleBlur = () => {
+    const num = parseInt(localVal);
+    if (!isNaN(num) && num !== value) {
+      onChange(num);
+    } else {
+      setLocalVal(String(value)); // Reset on invalid
+    }
+  };
+
+  return (
+    <div className="flex items-center bg-white border border-stone-200 rounded overflow-hidden shadow-sm h-7">
+      <div className={`px-1.5 h-full flex items-center justify-center bg-stone-50 border-r border-stone-200`}>
+        <Icon className={`w-3 h-3 ${value === 0 ? 'text-stone-400' : colorClass}`} />
+      </div>
+      <input 
+        type="number" 
+        className="w-10 px-1 text-center font-bold text-sm outline-none focus:bg-blue-50"
+        value={localVal}
+        onChange={(e) => setLocalVal(e.target.value)}
+        onBlur={handleBlur}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+        disabled={disabled}
+      />
+      <div className="px-1.5 h-full flex items-center justify-center text-[10px] text-stone-400 bg-stone-50 border-l border-stone-200">
+        /{max}
+      </div>
+    </div>
+  );
+};
 
 // --- SUB-COMPONENT: PLAYER COMBATANT CARD ---
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
   
-  // Local state for the input box
+  // Local state for initiative input
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
 
-  // CRITICAL: Sync local state when server data changes (Realtime)
   useEffect(() => {
     setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
   }, [combatant.initiative_roll]);
@@ -24,16 +75,16 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
     }
   };
 
-  const handleFlipCard = () => {
-    updateCombatant(combatant.id, { has_acted: !combatant.has_acted });
-  };
-
   const isMyCharacter = combatant.character_id === character?.id;
   const isPlayer = !!combatant.character_id;
   const hasActed = combatant.has_acted || false;
   const isMonster = !isPlayer;
   const isDefeated = isMonster && combatant.current_hp === 0;
   const isDying = isPlayer && combatant.current_hp === 0;
+
+  // Permissions: I can edit myself, or I can edit monsters (if table rules allow players to track monster dmg)
+  // For safety, let's say I can only fully edit myself, but initiative/flip is open.
+  const canEditStats = isMyCharacter; 
 
   let borderClass = isPlayer ? 'border-teal-600 bg-teal-50' : 'border-orange-700 bg-orange-50';
   if (isDefeated) borderClass = 'border-stone-400 bg-stone-200 opacity-70';
@@ -47,53 +98,76 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
         </div>
       )}
 
-      <div className="relative z-10 flex justify-between items-start">
-        <div>
-          <p className={`font-bold ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>
+      {/* HEADER: Name & Initiative */}
+      <div className="relative z-10 flex justify-between items-start mb-2">
+        <div className="flex-grow">
+          <p className={`font-bold leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>
             {combatant.display_name}
           </p>
           {isDying && <span className="text-xs font-bold text-red-600 flex items-center gap-1"><Skull size={12}/> DYING</span>}
         </div>
-        
-        <div className="flex items-center gap-1 text-sm font-mono bg-white/50 px-2 py-1 rounded">
-           <Heart className={`w-3 h-3 ${combatant.current_hp === 0 ? 'text-stone-400' : 'text-red-600'}`} />
-           <span>{combatant.current_hp} / {combatant.max_hp}</span>
-        </div>
-      </div>
 
-      <div className="relative z-10 mt-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        {/* INITIATIVE BOX */}
+        <div className="flex items-center gap-2 ml-2">
           {(!combatant.initiative_roll || isMyCharacter) && !isDefeated ? (
-             <>
+             <div className="flex items-center gap-1">
                <input 
                  type="number" 
                  value={initiativeValue} 
                  onChange={(e) => setInitiativeValue(e.target.value)} 
                  placeholder="#" 
-                 className="w-12 px-1 py-0.5 text-center border rounded text-sm font-bold" 
+                 className="w-8 px-1 py-0.5 text-center border rounded text-sm font-bold" 
                  min="1" max="10" 
                  disabled={isSaving} 
                />
                {!combatant.initiative_roll && (
                  <Button onClick={handleSetInitiative} size="xs" variant="secondary" disabled={isSaving}>Set</Button>
                )}
-             </>
+             </div>
           ) : (
              <div className="w-8 h-8 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-lg shadow-sm">
                {combatant.initiative_roll}
              </div>
           )}
         </div>
+      </div>
 
+      {/* STATS ROW (HP & WP) */}
+      <div className="relative z-10 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {/* HP INPUT */}
+          <StatInput 
+            value={combatant.current_hp || 0} 
+            max={combatant.max_hp || 10} 
+            icon={Heart} 
+            colorClass="text-red-600"
+            disabled={!canEditStats || isSaving}
+            onChange={(val) => updateCombatant(combatant.id, { current_hp: val })}
+          />
+
+          {/* WP INPUT (Only for players/NPCs with WP) */}
+          {(isPlayer || (combatant.max_wp || 0) > 0) && (
+            <StatInput 
+              value={combatant.current_wp || 0} 
+              max={combatant.max_wp || 10} 
+              icon={Zap} 
+              colorClass="text-blue-600"
+              disabled={!canEditStats || isSaving}
+              onChange={(val) => updateCombatant(combatant.id, { current_wp: val })}
+            />
+          )}
+        </div>
+
+        {/* ACTION BUTTON */}
         {(isMyCharacter || !isPlayer) && !isDefeated && (
           <Button 
-            onClick={handleFlipCard} 
+            onClick={() => updateCombatant(combatant.id, { has_acted: !combatant.has_acted })} 
             size="xs" 
             variant={hasActed ? "ghost" : "outline"}
             className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"}
+            title="End Turn"
           >
-            {hasActed ? <RotateCcw size={14} className="mr-1"/> : <ShieldAlert size={14} className="mr-1"/>}
-            {hasActed ? "Recover" : "Flip / Reaction"}
+            {hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}
           </Button>
         )}
       </div>
@@ -113,9 +187,9 @@ export function EncounterChatView() {
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // 1. LISTEN FOR PARTY EVENTS (To detect when a new encounter starts)
+  // 1. LISTEN FOR PARTY EVENTS (Status Changes)
   useEffect(() => {
-    if (!character?.party_id) return;
+    if (!character?.party_id || !character?.id) return;
     
     // Initial fetch
     fetchActiveEncounter(character.party_id, character.id);
@@ -130,8 +204,7 @@ export function EncounterChatView() {
           filter: `party_id=eq.${character.party_id}` 
         },
         () => {
-          // Safety check inside callback
-          if (character?.party_id && character?.id) {
+          if (character.party_id && character.id) {
              fetchActiveEncounter(character.party_id, character.id);
           }
         }
@@ -141,9 +214,9 @@ export function EncounterChatView() {
     return () => { supabase.removeChannel(channel); };
   }, [character?.party_id, character?.id, fetchActiveEncounter]);
 
-  // 2. LISTEN FOR COMBATANT CHANGES (When encounter is active)
+  // 2. LISTEN FOR COMBATANT CHANGES
   useEffect(() => {
-    if (!activeEncounter?.id) return;
+    if (!activeEncounter?.id || !character?.party_id || !character?.id) return;
 
     const channel = supabase.channel(`combat-monitor-${activeEncounter.id}`)
       .on(
@@ -155,10 +228,7 @@ export function EncounterChatView() {
           filter: `encounter_id=eq.${activeEncounter.id}` 
         },
         () => {
-           // Refresh combat data
-           if (character?.party_id && character?.id) {
-             fetchActiveEncounter(character.party_id, character.id);
-           }
+           fetchActiveEncounter(character.party_id!, character.id!);
         }
       )
       .subscribe();
