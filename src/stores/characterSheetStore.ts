@@ -5,7 +5,7 @@ import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells
 import { Spell, MagicSchool } from '../types/magic';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
-import { fetchActiveEncounterForParty, fetchLatestEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
+import { fetchActiveEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
 
@@ -40,6 +40,9 @@ interface CharacterSheetState {
   _loadAllHeroicAbilities: () => Promise<void>;
   updateCharacterData: (updates: Partial<Character>) => Promise<void>;
   
+  // --- SYNC HELPER ---
+  _syncToCombatant: (updates: Partial<EncounterCombatant>) => Promise<void>;
+
   // Logic updated to accept VALUES (from Dice Roller) instead of internal random()
   performRest: (type: 'round' | 'stretch' | 'shift', hpHealed?: number, wpHealed?: number) => Promise<void>;
   setInitiativeForCombatant: (combatantId: string, initiative: number) => Promise<void>;
@@ -68,7 +71,7 @@ interface CharacterSheetState {
   addMagicSchool: (school: MagicSchool, level: number) => Promise<void>;
   setSkillUnderStudy: (skillName: string | null) => Promise<void>;
   
-  markSkillThisSession: (skillName: string) => Promise<void>; // Changed to Promise
+  markSkillThisSession: (skillName: string) => Promise<void>; 
   clearMarkedSkillsThisSession: () => void;
   setActiveStatusMessage: (message: string, duration?: number) => void;
   clearActiveStatusMessage: () => void;
@@ -120,7 +123,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   fetchActiveEncounter: async (partyId, characterId) => {
     set({ isLoadingEncounter: true });
     try {
-      // 1. Fetch ONLY the active encounter
+      // 1. Fetch ONLY the active encounter (using the new API function)
       const activeEncounter = await fetchActiveEncounterForParty(partyId);
 
       // 2. Check if an active encounter exists
@@ -132,7 +135,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         const sortedCombatants = allCombatants.sort((a, b) => (a.initiative_roll ?? 100) - (b.initiative_roll ?? 100));
         
         set({
-          activeEncounter: activeEncounter, // Use the active one
+          activeEncounter: activeEncounter,
           currentCombatant: characterCombatant ?? null,
           encounterCombatants: sortedCombatants,
         });
@@ -147,8 +150,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-	
-
   setCharacter: (character) => {
     set({ character });
     if (!character || !character.party_id) {
@@ -158,16 +159,20 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
+  // --- CENTRALIZED SAVE & SYNC ---
   _saveCharacter: async (updates) => {
-    const characterId = get().character?.id;
-    if (!characterId) {
+    const { character, _syncToCombatant } = get();
+    if (!character?.id) {
       const errorMsg = 'Cannot save: Character ID is missing.';
       set({ saveError: errorMsg });
       throw new Error(errorMsg);
     }
     set({ isSaving: true, saveError: null });
     try {
-      await updateCharacter(characterId, updates);
+      // A. Update the Character Database
+      await updateCharacter(character.id, updates);
+      
+      // B. Update Local Character State
       set(state => {
         if (!state.character) return {};
         const newCharacterState: Character = {
@@ -177,10 +182,43 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         };
         return { character: newCharacterState, isSaving: false };
       });
+
+      // C. AUTOMATIC SYNC: Push HP/WP changes to Encounter
+      const combatantUpdates: Partial<EncounterCombatant> = {};
+      if (updates.current_hp !== undefined) combatantUpdates.current_hp = updates.current_hp;
+      if (updates.current_wp !== undefined) combatantUpdates.current_wp = updates.current_wp;
+      
+      if (Object.keys(combatantUpdates).length > 0) {
+        // Fire and forget (don't await) to keep UI snappy
+        _syncToCombatant(combatantUpdates);
+      }
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
       throw err;
+    }
+  },
+
+  // --- HELPER: Sync stats to Encounter Table ---
+  _syncToCombatant: async (updates: Partial<EncounterCombatant>) => {
+    const { activeEncounter, currentCombatant, encounterCombatants } = get();
+    
+    // Only proceed if we are actually in a fight
+    if (!activeEncounter || !currentCombatant) return;
+
+    // A. Optimistic Update (Update Chat UI immediately)
+    set({
+      encounterCombatants: encounterCombatants.map(c => 
+        c.id === currentCombatant.id ? { ...c, ...updates } : c
+      )
+    });
+
+    // B. API Update (Background)
+    try {
+      await apiUpdateCombatant(currentCombatant.id, updates);
+    } catch (err) {
+      console.error("Failed to sync stats to encounter:", err);
     }
   },
 
@@ -213,7 +251,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     return get()._saveCharacter(updates);
   },
 
-  // --- REFACTORED: Now accepts rolled values from UI ---
   performRest: async (type, hpHealed = 0, wpHealed = 0) => {
     const character = get().character;
     if (!character) return;
@@ -235,7 +272,6 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       
       const currentConditions = character.conditions ?? {};
       const newConditions = { ...currentConditions };
-      // Heals one condition
       for (const key of Object.keys(newConditions) as Array<keyof typeof newConditions>) {
         if (newConditions[key] === true) {
           newConditions[key] = false;
@@ -253,6 +289,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
     
     if (Object.keys(updates).length > 0) {
+      // Logic handled in _saveCharacter now includes sync
       await get()._saveCharacter(updates);
     }
   },
@@ -304,6 +341,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (!character) return;
     const newAttributes = { ...(character.attributes || {}), [attribute]: value };
     const updates: Partial<Character> = { attributes: newAttributes };
+    
     if (attribute === 'CON' && character.max_hp == null) {
       updates.max_hp = value;
       updates.current_hp = Math.min(character.current_hp ?? 0, value);
@@ -428,15 +466,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     await get()._saveCharacter({ teacher: skillName ? { skillUnderStudy: skillName } : null });
   },
 
-  // --- REFACTORED: Persistent Marking ---
   markSkillThisSession: async (skillName) => {
     const { character, _saveCharacter, markedSkillsThisSession } = get();
-    
-    // 1. Update local memory Set (for UI speed)
     const newSet = new Set(markedSkillsThisSession).add(skillName);
     set({ markedSkillsThisSession: newSet });
 
-    // 2. Persist to Database immediately
     if (character) {
       const currentMarks = new Set(character.marked_skills || []);
       if (!currentMarks.has(skillName)) {
@@ -480,14 +514,14 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
+  // --- REVERSE SYNC (Encounter -> Sheet) ---
   updateCombatant: async (combatantId, updates) => {
     set({ isSaving: true, saveError: null });
     try {
-      // 1. Update the Encounter Combatant (Triggers Realtime for everyone)
+      // 1. Update Encounter Table
       await apiUpdateCombatant(combatantId, updates);
 
-      // 2. CRITICAL: If this is MY character, also update the main Character Sheet
-      // This ensures the damage persists even after the encounter ends.
+      // 2. Sync BACK to Character Sheet (if it's me)
       const state = get();
       const combatant = state.encounterCombatants.find(c => c.id === combatantId);
       
@@ -501,13 +535,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
           }
       }
       
-      // 3. Update Local State immediately
+      // 3. Update Local State
       set(state => {
         const updatedCombatants = state.encounterCombatants.map(c => 
           c.id === combatantId ? { ...c, ...updates } : c
         );
-        
-        // Also update the loaded character object if it matches
         let updatedCharacter = state.character;
         if (combatant && state.character && combatant.character_id === state.character.id) {
             updatedCharacter = {

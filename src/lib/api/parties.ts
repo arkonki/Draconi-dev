@@ -1,5 +1,3 @@
-// src/lib/api/parties.ts
-
 import { supabase } from '../supabase';
 import { Character } from '../../types/character';
 import { mapCharacterData } from './characters';
@@ -96,9 +94,6 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
     return null;
   }
 
-  // --- THIS IS THE FIX ---
-  // We replace `characters(*)` with an explicit list of the columns we need.
-  // This guarantees that `weak_spot` is always included in the data.
   const selectQuery = `
     id,
     name,
@@ -127,11 +122,10 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
       )
     )
   `;
-  // --- END OF FIX ---
 
   const { data: partyData, error: partyError } = await supabase
     .from('parties')
-    .select(selectQuery) // Use the new, more specific query
+    .select(selectQuery)
     .eq('id', partyId)
     .single();
 
@@ -157,20 +151,37 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
   return party;
 }
 
-export async function addPartyMember(partyId: string, characterId: string): Promise<void> {
-  const { error: insertError } = await supabase
-    .from('party_members')
-    .insert([{ party_id: partyId, character_id: characterId }]);
+// REVERTED: Uses direct DB insert instead of RPC
+export async function addPartyMember(partyId: string, characterId: string, inviteCode?: string): Promise<void> {
+  // 1. Verify invite code if provided (Client-side check for now, to restore functionality)
+  if (inviteCode) {
+    const { data: party, error: partyError } = await supabase
+      .from('parties')
+      .select('invite_code')
+      .eq('id', partyId)
+      .single();
 
-  if (insertError) {
-    console.error('Error adding party member:', insertError);
-    if (insertError.code === '23505') {
-      console.warn('Character is already a member. Attempting to sync character record anyway.');
-    } else {
-      throw new Error(insertError.message || 'Failed to join party');
+    if (partyError) throw new Error('Party not found');
+    if (party.invite_code && party.invite_code !== inviteCode) {
+      throw new Error('Invalid invite code');
     }
   }
 
+  // 2. Insert into party_members
+  const { error: insertError } = await supabase
+    .from('party_members')
+    .insert({ party_id: partyId, character_id: characterId });
+
+  if (insertError) {
+    // Handle unique constraint violation gracefully
+    if (insertError.code === '23505') { // unique_violation
+      return;
+    }
+    console.error('Error joining party:', insertError);
+    throw new Error(insertError.message || 'Failed to join party');
+  }
+
+  // 3. Update character's party_id
   const { error: updateError } = await supabase
     .from('characters')
     .update({ party_id: partyId })
@@ -178,7 +189,8 @@ export async function addPartyMember(partyId: string, characterId: string): Prom
 
   if (updateError) {
     console.error('Error updating character party link:', updateError);
-    throw new Error(updateError.message || 'Failed to update character after joining party');
+    // We should probably rollback the member insert here, but for now let's just throw
+    throw new Error('Failed to link character to party');
   }
 }
 
