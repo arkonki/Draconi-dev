@@ -30,15 +30,18 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
-      // 1. SWITCH TO INJECT MANIFEST
       strategies: 'injectManifest',
-      // 2. POINT TO YOUR NEW FILE
       srcDir: 'src',
       filename: 'sw.js',
       
+      // --- FIX: Increase cache limit to 5MB ---
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
+      },
+
       devOptions: {
         enabled: true,
-        type: 'module', // Important for injectManifest in dev
+        type: 'module',
       },
       manifest: {
         name: 'Dragonbane Character Manager',
@@ -98,7 +101,6 @@ export default defineConfig({
           },
         ],
       },
-      // Note: 'workbox' config is removed because we moved it to src/sw.js
     }),
   ],
 
@@ -131,11 +133,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    chunkSizeWarningLimit: 1600,
+    chunkSizeWarningLimit: 1600, // Suppress standard Vite warning
+    
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            // Seperating Supabase helps, but the 'vendor' chunk is still large
             if (id.includes('@supabase')) {
               return 'supabase';
             }
