@@ -55,11 +55,8 @@ const formatItemFeatures = (features: string | string[] | undefined): string => 
 interface ItemNote { enhanced?: boolean; bonus?: string; broken?: boolean; }
 type ItemCategory = 'armor' | 'weapon';
 
-// --- MODAL COMPONENT (Unchanged) ---
+// --- MODAL COMPONENT ---
 const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: any) => void; }) => {
-  // ... [Keep existing implementation of Modal] ...
-  // For brevity, assuming the previous Modal code is here. 
-  // It handles "isBroken", "isEnhanced", etc.
   const [isEnhanced, setIsEnhanced] = useState(false);
   const [bonusText, setBonusText] = useState('');
   const [isBroken, setIsBroken] = useState(false);
@@ -122,27 +119,19 @@ export function EquipmentSection({ character }: { character: Character }) {
   const [editingItem, setEditingItem] = useState<{ item: GameItem; category: ItemCategory } | null>(null);
   const { data: allItems = [], isLoading, error } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
 
-  // --- SMART ITEM LOOKUP (Fix for Custom Loot) ---
-  // Looks in inventory FIRST, then falls back to static DB
+  // --- SMART ITEM LOOKUP ---
   const resolveItem = (itemName: string | undefined): GameItem | undefined => {
     if (!itemName) return undefined;
     const lowerName = itemName.toLowerCase().trim();
 
-    // 1. Check Character Inventory for custom stats
     const invItem = character.equipment?.inventory?.find(i => i.name.toLowerCase().trim() === lowerName);
-    
-    // 2. Check Static Database
     const staticItem = allItems.find(i => i.name.toLowerCase().trim() === lowerName);
 
-    // 3. Merge: Inventory props override Static DB props
     if (invItem && staticItem) {
-        // Cast invItem to any to access custom props like 'damage', 'armor_rating'
         return { ...staticItem, ...invItem } as any as GameItem;
     }
     
     if (invItem) {
-        // Purely custom item (not in DB at all)
-        // Ensure it has an ID, falling back to a generated one if needed for the modal key
         return { 
             id: invItem.id || `custom-${itemName}`,
             name: invItem.name,
@@ -186,29 +175,39 @@ export function EquipmentSection({ character }: { character: Character }) {
     return match ? match[1] : null;
   };
 
-  // ... (handleDamageRoll and handleAttackRoll use resolveItem internally now via logic below)
-
   const handleDamageRoll = (weaponName: string, damageDiceString: string) => {
     const weaponDetails = resolveItem(weaponName);
     const note = getNoteForItem(weaponDetails, 'weapon');
     let dicePool: DiceType[] = []; let formulaParts: string[] = [];
+    
+    // 1. Base Damage
     const baseMatch = damageDiceString?.match(/(\d+)?d(\d+)/i);
     if (baseMatch) {
       const num = baseMatch[1] ? parseInt(baseMatch[1]) : 1;
       const size = `d${baseMatch[2]}`;
       if (isValidDiceType(size)) { dicePool.push(...Array(num).fill(size)); formulaParts.push(`${num}${size}`); }
     }
-    // ... Attribute Bonus Logic ...
+
+    // 2. Check for "NO DAMAGE BONUS" Feature
+    const features = weaponDetails?.features;
+    // Normalize features to string (it can be array or string)
+    const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
+    const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
+
+    // 3. Attribute Bonus Logic
     const rawSkill = parseBaseSkillName(weaponDetails?.skill);
     const skill = rawSkill ? rawSkill.toLowerCase() : null;
     const attr = skill ? skillAttributeMap[skill] : null;
-    if (attr) {
+    
+    // Only apply attribute bonus if weapon doesn't have 'NO DAMAGE BONUS' feature
+    if (attr && !hasNoDamageBonus) {
       const val = Number(character.attributes?.[attr] || 10);
       let bonus: DiceType | null = null;
       if (val > 16) bonus = 'd6'; else if (val > 12) bonus = 'd4';
       if (bonus) { dicePool.push(bonus); formulaParts.push(`${bonus.toUpperCase()} (${attr})`); }
     }
-    // ... Enhanced Bonus Logic ...
+
+    // 4. Enhanced Bonus Logic
     if (note?.enhanced) {
       const match = note.bonus?.match(/d(\d+)/i);
       if (match && isValidDiceType(`d${match[1]}`)) {
@@ -293,7 +292,7 @@ export function EquipmentSection({ character }: { character: Character }) {
               </thead>
               <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
                 {equippedWeapons.map((weapon, index) => {
-                  const weaponDetails = resolveItem(weapon.name); // <--- Using smart resolver
+                  const weaponDetails = resolveItem(weapon.name);
                   const rawSkillName = parseBaseSkillName(weaponDetails?.skill);
                   const skillName = rawSkillName ? rawSkillName.toLowerCase() : '';
                   const displayName = rawSkillName || '';
@@ -303,10 +302,21 @@ export function EquipmentSection({ character }: { character: Character }) {
                   let isAffected = false;
                   let attributeBonus = '';
                   
+                  // Check for NO DAMAGE BONUS flag
+                  const features = weaponDetails?.features;
+                  const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
+                  const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
+
                   if (skillName && skillAttributeMap[skillName]) {
                     const attr = skillAttributeMap[skillName];
                     const val = Number(character.attributes?.[attr] || 10);
-                    if (val > 16) attributeBonus = '+D6'; else if (val > 12) attributeBonus = '+D4';
+                    
+                    // Only calculate visual bonus if NOT "NO DAMAGE BONUS"
+                    if (!hasNoDamageBonus) {
+                        if (val > 16) attributeBonus = '+D6'; 
+                        else if (val > 12) attributeBonus = '+D4';
+                    }
+
                     const attrKey = getConditionForAttribute(attr);
                     skillValue = parsedSkillLevels?.[displayName] ?? calculateFallbackLevel(character, displayName, attr);
                     isAffected = character.conditions?.[attrKey] ?? false;
