@@ -1,7 +1,8 @@
-// src/components/dice/DiceContext.tsx
-
 import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { parseDiceString } from '../../lib/dice-utils';
+import { useNotifications } from '../../contexts/NotificationContext';
+// 1. Import API
+import { sendMessage } from '../../lib/api/chat';
 
 // --- Types ---
 export type DiceType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
@@ -12,35 +13,33 @@ export interface DiceRollResult {
 }
 
 export interface RollHistoryEntry {
-  id: string; // Unique ID for key prop
+  id: string; 
   timestamp: number;
-  description?: string; // e.g., "Acrobatics Check", "Attack Roll"
+  description?: string; 
   dicePool: DiceType[];
   results: DiceRollResult[];
-  boonResults?: DiceRollResult[]; // For boon/bane second roll
-  finalOutcome?: number | string; // e.g., Total sum, "Dragon!", "Demon!"
+  boonResults?: DiceRollResult[]; 
+  finalOutcome?: number | string; 
   isBoon?: boolean;
   isBane?: boolean;
-  targetValue?: number; // For skill checks
-  isSuccess?: boolean; // General success/failure if applicable
-  isCritical?: boolean; // General critical if applicable
-  skillName?: string; // Track the skill name for advancement marking
+  targetValue?: number; 
+  isSuccess?: boolean; 
+  isCritical?: boolean; 
+  skillName?: string; 
 }
 
-// Define the structure for the initial roll configuration
 export interface RollConfig {
-  dice?: string; // e.g., "2d6"
-  initialDice?: DiceType[]; // Pre-populate dice pool
-  // Updated roll modes to include 'initiative' and 'rest'
+  dice?: string; 
+  initialDice?: DiceType[]; 
   rollMode?: 'skillCheck' | 'attackDamage' | 'generic' | 'deathRoll' | 'recoveryRoll' | 'rallyRoll' | 'advancementRoll' | 'initiative' | 'rest';
   targetValue?: number;
-  description?: string; // Optional description for the roll
-  label?: string; // Alias for description
+  description?: string; 
+  label?: string; 
   requiresBane?: boolean;
   skillName?: string;
-  restType?: 'round' | 'stretch' | 'shift'; // Payload for resting logic
-  combatantId?: string; // Payload for initiative logic
-  onRoll?: (result: { total: number | string }) => void; // Simplified callback
+  restType?: 'round' | 'stretch' | 'shift'; 
+  combatantId?: string; 
+  onRoll?: (result: { total: number | string }) => void; 
   onRollComplete?: (result: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => void;
 }
 
@@ -59,14 +58,17 @@ interface DiceContextType {
   setBane: (active: boolean) => void;
   addRollToHistory: (entry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => void;
   clearHistory: () => void;
+  // 2. Add function to interface
+  shareRollToParty: (partyId: string, userId: string, entry: RollHistoryEntry) => Promise<void>;
 }
 
 const DiceContext = createContext<DiceContextType | undefined>(undefined);
 
-const MAX_HISTORY = 20; // Max number of history entries
+const MAX_HISTORY = 20; 
 
-// --- Provider Implementation ---
 export function DiceProvider({ children }: { children: ReactNode }) {
+  const { playSound } = useNotifications();
+
   const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<RollConfig | null>(null);
   const [dicePool, setDicePool] = useState<DiceType[]>([]);
@@ -79,21 +81,18 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       const opening = !prev;
       if (opening) {
         const newConfig = { ...config };
-        // Use label as description if description is missing
         if (newConfig.label && !newConfig.description) {
             newConfig.description = newConfig.label;
         }
         setCurrentConfig(newConfig || null);
 
         let initialPool: DiceType[] = [];
-        // Prioritize `dice` string property
         if (config?.dice) {
             initialPool = parseDiceString(config.dice);
         } else if (config?.initialDice) {
             initialPool = config.initialDice;
         }
         
-        // Ensure dice pool matches config for specific modes, overriding if necessary
         if (config?.rollMode === 'deathRoll') {
             initialPool = ['d20'];
         } else if (config?.rollMode === 'recoveryRoll') {
@@ -105,17 +104,15 @@ export function DiceProvider({ children }: { children: ReactNode }) {
         } else if (config?.rollMode === 'advancementRoll') {
             initialPool = ['d20'];
         } else if (config?.rollMode === 'initiative') {
-            initialPool = ['d10']; // Standard Dragonbane initiative is D10 (lowest wins) or D6 depending on house rules, usually D10.
+            initialPool = ['d10']; 
         }
         
         setDicePool(initialPool);
         
-        // Set Boon/Bane based on config
         setIsBoonActive(false);
         setIsBaneActive(config?.requiresBane || config?.rollMode === 'rallyRoll' || false);
 
       } else {
-        // Clear state when closing
          setCurrentConfig(null);
          setDicePool([]);
          setIsBoonActive(false);
@@ -126,7 +123,6 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addDie = useCallback((die: DiceType) => {
-    // Prevent adding dice if in a specific mode that doesn't allow it
     if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
         return;
     }
@@ -171,7 +167,6 @@ export function DiceProvider({ children }: { children: ReactNode }) {
     if (active) {
       setIsBoonActive(true);
       setIsBaneActive(false);
-      // Usually boon/bane applies to d20 rolls, ensure pool is correct if needed, or let user manage
       if (dicePool.length === 0) setDicePool(['d20']);
     } else {
       setIsBoonActive(false);
@@ -187,7 +182,6 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       setIsBoonActive(false);
       if (dicePool.length === 0) setDicePool(['d20']);
     } else {
-      // Rally roll implies bane, don't turn off if that's the mode
       if (currentConfig?.rollMode !== 'rallyRoll') {
         setIsBaneActive(false);
       }
@@ -195,6 +189,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   }, [currentConfig, dicePool]);
 
   const addRollToHistory = useCallback((entryData: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
+    playSound('dice');
     setRollHistory(prev => {
       const newEntry: RollHistoryEntry = {
         ...entryData,
@@ -207,10 +202,29 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       }
       return updatedHistory;
     });
-  }, []);
+  }, [playSound]);
 
   const clearHistory = useCallback(() => {
     setRollHistory([]);
+  }, []);
+
+  // 3. Implement Share Function
+  const shareRollToParty = useCallback(async (partyId: string, userId: string, entry: RollHistoryEntry) => {
+    let message = `🎲 **${entry.description || 'Dice Roll'}**: `;
+    
+    if (entry.finalOutcome !== undefined) {
+        message += `Result: ${entry.finalOutcome}`;
+    } else {
+        const total = entry.results.reduce((sum, r) => sum + r.value, 0);
+        message += `Rolled ${total} (${entry.dicePool.join('+')})`;
+    }
+
+    if (entry.isCritical) message += " 🔥 CRITICAL!";
+    if (entry.isSuccess !== undefined) {
+      message += entry.isSuccess ? " ✅ Success" : " ❌ Failure";
+    }
+
+    await sendMessage(partyId, userId, message);
   }, []);
 
   return (
@@ -229,13 +243,13 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       setBane,
       addRollToHistory,
       clearHistory,
+      shareRollToParty, // Export it
     }}>
       {children}
     </DiceContext.Provider>
   );
 }
 
-// --- Hook Export ---
 export function useDice() {
   const context = useContext(DiceContext);
   if (context === undefined) {

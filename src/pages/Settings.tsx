@@ -7,11 +7,11 @@ import {
   Shield,
   ChevronRight,
   Sword,
-  Palette,
-  Bell,
-  Globe,
+  Bell, // Ensure Bell is imported
   ArrowLeft
 } from 'lucide-react';
+
+// Import your sub-components
 import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
@@ -44,6 +44,13 @@ const menuItems: SettingsMenuItem[] = [
     description: 'Manage your personal information',
     category: 'account'
   },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: Bell,
+    description: 'Configure email, desktop and sound alerts',
+    category: 'account'
+  },
   // Future implementations...
   // { id: 'appearance', label: 'Appearance', icon: Palette, description: 'Customize look and feel', category: 'system' },
   {
@@ -70,7 +77,7 @@ export function Settings() {
   // State
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
   
-  // New State for Mobile Navigation (Default to true = show menu list first on mobile)
+  // Mobile Navigation State
   const [showMobileMenu, setShowMobileMenu] = useState(true);
 
   // Security check effect
@@ -128,7 +135,6 @@ export function Settings() {
       <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
         
         {/* --- LEFT SIDEBAR NAVIGATION --- */}
-        {/* Logic: Hidden on mobile if content is active (`!showMobileMenu`). Always visible on Desktop (`lg:block`) */}
         <div className={`
           w-full lg:w-72 flex-shrink-0 space-y-6 md:space-y-8
           ${!showMobileMenu ? 'hidden lg:block' : 'block'}
@@ -156,7 +162,6 @@ export function Settings() {
                       </div>
                       <div className="text-left">
                         <span className="block font-semibold md:font-medium">{item.label}</span>
-                        {/* Show description on mobile list for better context */}
                         <span className="block lg:hidden text-xs text-gray-400 font-normal mt-0.5">{item.description}</span>
                       </div>
                     </div>
@@ -178,7 +183,6 @@ export function Settings() {
         </div>
 
         {/* --- RIGHT CONTENT PANEL --- */}
-        {/* Logic: Hidden on mobile if Menu is active (`showMobileMenu`). Always visible on Desktop (`lg:block`) */}
         <div className={`
           flex-1 min-w-0
           ${showMobileMenu ? 'hidden lg:block' : 'block'}
@@ -187,7 +191,6 @@ export function Settings() {
             
             {/* Content Header with Mobile Back Button */}
             <div className="border-b border-gray-100 px-4 md:px-6 py-4 md:py-5 bg-gray-50/50 flex items-center gap-3">
-              {/* Mobile Back Button */}
               <button 
                 onClick={handleBackToMenu}
                 className="lg:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 hover:bg-gray-200 rounded-full transition-colors"
@@ -197,7 +200,6 @@ export function Settings() {
 
               <div>
                 <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
-                  {/* Mobile Icon in Header */}
                   <span className="lg:hidden">
                     {activeItem && <activeItem.icon size={18} className="text-indigo-600"/>}
                   </span>

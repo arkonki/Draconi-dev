@@ -1,8 +1,11 @@
-// src/components/dice/DiceRollerModal.tsx
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams } from 'react-router-dom'; 
+import { useAuth } from '../../contexts/AuthContext';
 import { useDice, DiceType, DiceRollResult } from './DiceContext';
-import { Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, ShieldQuestion, GraduationCap, Zap, Moon } from 'lucide-react';
+import { 
+  Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
+  ShieldQuestion, GraduationCap, Zap, Moon, Share 
+} from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 
@@ -23,9 +26,27 @@ function Loader2({ className }: { className?: string }) {
 }
 
 export function DiceRollerModal() {
-  const { showDiceRoller, toggleDiceRoller, currentConfig, dicePool, addDie, removeLastDie, clearDicePool, isBoonActive, isBaneActive, setBoon, setBane, addRollToHistory, rollHistory, clearHistory } = useDice();
+  const { id: urlPartyId } = useParams<{ id: string }>(); // ID from URL (Party View)
+  const { user } = useAuth();
+  
+  // 1. Get the current character to check for party membership
+  const { 
+    markSkillThisSession, 
+    performRest, 
+    setInitiativeForCombatant,
+    currentCharacter 
+  } = useCharacterSheetStore();
 
-  const { markSkillThisSession, performRest, setInitiativeForCombatant } = useCharacterSheetStore();
+  const { 
+    showDiceRoller, toggleDiceRoller, currentConfig, dicePool, addDie, 
+    removeLastDie, clearDicePool, isBoonActive, isBaneActive, setBoon, 
+    setBane, addRollToHistory, rollHistory, clearHistory,
+    shareRollToParty 
+  } = useDice();
+
+  // 2. Determine Effective Party ID
+  // Priority: URL (we are looking at a specific party) -> Character's Party (we are looking at a sheet)
+  const effectivePartyId = urlPartyId || currentCharacter?.party_id;
 
   const [results, setResults] = useState<DiceRollResult[]>([]);
   const [boonResults, setBoonResults] = useState<DiceRollResult[]>([]);
@@ -36,6 +57,7 @@ export function DiceRollerModal() {
   const [modifierCount, setModifierCount] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
+  const [lastRolledEntry, setLastRolledEntry] = useState<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const rollMode = currentConfig?.rollMode;
@@ -74,8 +96,8 @@ export function DiceRollerModal() {
     setFinalOutcome(null);
     setIsCritical(false);
     setIsSuccess(undefined);
+    setLastRolledEntry(null);
 
-    // 1. Calculate Results Immediately
     const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
     let currentBoonResults: DiceRollResult[] = [];
     let finalValue: number | string = currentResults.reduce((sum, r) => sum + r.value, 0);
@@ -84,7 +106,7 @@ export function DiceRollerModal() {
     let success: boolean | undefined = undefined;
     const skillName = currentConfig?.skillName;
 
-    // --- LOGIC: Dragonbane D20 ---
+    // Logic
     if (dicePool.length === 1 && dicePool[0] === 'd20') {
       if (isBoonActive || isBaneActive) {
         for (let i = 0; i < modifierCount; i++) currentBoonResults.push({ type: 'd20', value: rollDie('d20') });
@@ -98,30 +120,12 @@ export function DiceRollerModal() {
       
       const val = numericFinalValue;
 
-      // ---------------------------------------------------------
-      // SMART LOGIC: Differentiate between Skill Check & Advancement
-      // ---------------------------------------------------------
-      
       if (isAdvancementRoll) {
-        // === ADVANCEMENT ROLL ===
-        // Success: Roll > Skill Level
-        // Dragon (1): Failure (1 is never > skill).
-        // Demon (20): Success (20 is always > skill).
-        
         if (currentConfig?.targetValue !== undefined) {
              success = val > currentConfig.targetValue;
         }
-        
-        // We do NOT treat 1/20 as "Dragon/Demon" labels here, 
-        // because seeing "Dragon!" (usually good) on a 1 (Failure) is confusing.
         finalValue = val; 
-
       } else {
-        // === STANDARD SKILL CHECK / RALLY / DEATH ===
-        // Success: Roll <= Skill Level
-        // Dragon (1): Critical Success
-        // Demon (20): Critical Failure
-
         if (val === 1) { 
             crit = true; 
             finalValue = "Dragon!"; 
@@ -137,13 +141,11 @@ export function DiceRollerModal() {
         }
       }
     } 
-    // --- LOGIC: Recovery / Rest ---
     else if ((isRecoveryRoll || isRest) && dicePool.every(d => d === 'd6')) {
         numericFinalValue = currentResults.reduce((acc, curr) => acc + curr.value, 0);
         finalValue = numericFinalValue;
     }
 
-    // 2. Animation Loop
     let shuffleCount = 0;
     if (intervalRef.current) clearInterval(intervalRef.current);
 
@@ -151,7 +153,6 @@ export function DiceRollerModal() {
       shuffleCount++;
       setDisplayedOutcome(Math.floor(Math.random() * (dicePool[0] === 'd20' ? 20 : 6)) + 1); 
       
-      // --- ANIMATION FINISH ---
       if (shuffleCount > 8) {
         if (intervalRef.current) clearInterval(intervalRef.current);
         
@@ -163,18 +164,12 @@ export function DiceRollerModal() {
         setIsCritical(crit);
         setIsSuccess(success);
 
-        // --- SIDE EFFECTS (STORE UPDATES) ---
-        // 1. Skill Marking (Dragon/Demon) - ONLY for standard checks
         if (isSkillCheck && skillName && (numericFinalValue === 1 || numericFinalValue === 20)) {
             markSkillThisSession(skillName);
         }
-
-        // 2. Initiative
         if (isInitiative && currentConfig?.combatantId) {
             setInitiativeForCombatant(currentConfig.combatantId, numericFinalValue);
         }
-
-        // 3. Resting
         if (isRest && currentConfig?.restType) {
             if (currentConfig.restType === 'round') {
                 performRest('round', 0, numericFinalValue); 
@@ -183,7 +178,6 @@ export function DiceRollerModal() {
             }
         }
 
-        // Log History
         const historyEntryData = {
           description: currentConfig?.description || `${dicePool.join(', ')} Roll`,
           dicePool: [...dicePool],
@@ -197,7 +191,9 @@ export function DiceRollerModal() {
           isCritical: crit,
           skillName: skillName,
         };
+        
         addRollToHistory(historyEntryData);
+        setLastRolledEntry(historyEntryData);
 
         if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
         if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
@@ -210,9 +206,24 @@ export function DiceRollerModal() {
     if (!showDiceRoller) {
       setResults([]); setBoonResults([]); setFinalOutcome(null); setDisplayedOutcome('...');
       setIsCritical(false); setIsSuccess(undefined); setShowHistory(false); setIsRolling(false);
+      setLastRolledEntry(null);
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
   }, [showDiceRoller]);
+
+  // 3. Update Share Handler to use effectivePartyId
+  const handleShare = async (entry: any) => {
+    if (effectivePartyId && user && shareRollToParty) {
+      // Add visual feedback
+      const btn = document.activeElement as HTMLElement;
+      if (btn) {
+         const originalText = btn.innerText;
+         btn.innerText = "Sent!";
+         setTimeout(() => btn.innerText = originalText, 1000);
+      }
+      await shareRollToParty(effectivePartyId, user.id, entry);
+    }
+  };
 
   if (!showDiceRoller) return null;
 
@@ -265,15 +276,27 @@ export function DiceRollerModal() {
               </div>
               <ul className="space-y-3 max-h-60 overflow-y-auto pr-2">
                   {rollHistory.map(entry => (
-                    <li key={entry.id} className="text-sm p-2 rounded bg-gray-50 border border-gray-100">
+                    <li key={entry.id} className="text-sm p-2 rounded bg-gray-50 border border-gray-100 relative group">
                       <div className="flex justify-between font-bold text-gray-700 mb-1">
                          <span>{entry.description}</span>
                          <span className={entry.isSuccess ? "text-green-600" : entry.isSuccess === false ? "text-red-600" : ""}>{String(entry.finalOutcome)}</span>
                       </div>
-                      <div className="text-xs text-gray-500 flex justify-between">
+                      <div className="text-xs text-gray-500 flex justify-between items-center">
                          <span>{entry.dicePool.join('+')} {entry.isBoon && '(Boon)'}{entry.isBane && '(Bane)'}</span>
                          {entry.isCritical && <span className="text-purple-600 font-bold">CRITICAL</span>}
                       </div>
+
+                      {/* HISTORY SHARE BUTTON */}
+                      {/* Check effectivePartyId instead of just URL ID */}
+                      {effectivePartyId && (
+                        <button 
+                          onClick={() => handleShare(entry)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 bg-white border border-gray-200 p-1.5 rounded-full shadow-sm text-gray-400 hover:text-indigo-600 hover:border-indigo-200 opacity-0 group-hover:opacity-100 transition-all"
+                          title="Share to Party Chat"
+                        >
+                          <Share size={14} />
+                        </button>
+                      )}
                     </li>
                   ))}
               </ul>
@@ -320,17 +343,28 @@ export function DiceRollerModal() {
                    <div className={`text-5xl font-black mb-2 ${isCritical ? 'text-purple-600 animate-bounce' : isRolling ? 'text-gray-400 blur-sm' : 'text-indigo-900'}`}>{displayedOutcome}</div>
                    {!isRolling && (
                      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        {/* Smart Target Display */}
                         {currentConfig?.targetValue !== undefined && !isCritical && (
                             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
                                 {isAdvancementRoll ? `Need > ${currentConfig.targetValue}` : `Target: ${currentConfig.targetValue}`}
                             </p>
                         )}
 
-                        {isSuccess === true && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-bold"><Star size={14} className="fill-current" /> Success</div>}
-                        {isSuccess === false && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-bold"><X size={14} /> Failure</div>}
+                        <div className="flex items-center justify-center gap-2 mb-2">
+                           {isSuccess === true && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-bold"><Star size={14} className="fill-current" /> Success</div>}
+                           {isSuccess === false && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-bold"><X size={14} /> Failure</div>}
+                        </div>
                         
-                        {boonResults.length > 0 && <p className="text-xs text-indigo-400 mt-2">Rolls: [{results[0].value}, {boonResults.map(b => b.value).join(', ')}] <span className="font-semibold">{isBoonActive ? 'Took Lowest' : 'Took Highest'}</span></p>}
+                        {boonResults.length > 0 && <p className="text-xs text-indigo-400">Rolls: [{results[0].value}, {boonResults.map(b => b.value).join(', ')}] <span className="font-semibold">{isBoonActive ? 'Took Lowest' : 'Took Highest'}</span></p>}
+
+                        {/* SHARE BUTTON FOR CURRENT ROLL */}
+                        {effectivePartyId && lastRolledEntry && (
+                            <button 
+                                onClick={() => handleShare(lastRolledEntry)}
+                                className="mt-3 flex items-center justify-center gap-2 mx-auto text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 px-3 py-1 rounded-full transition-colors"
+                            >
+                                <Share size={12} /> Share to Chat
+                            </button>
+                        )}
                      </div>
                    )}
                 </div>

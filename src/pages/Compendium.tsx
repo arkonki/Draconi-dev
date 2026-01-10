@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { 
-  Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown, Library, ArrowLeft, Menu
+  Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown, Library, ArrowLeft, Share
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { CompendiumEntry } from '../types/compendium';
@@ -12,14 +12,24 @@ import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { HomebrewRenderer } from '../components/compendium/HomebrewRenderer';
 import { CompendiumFullPage } from '../components/compendium/CompendiumFullPage';
 import { fetchCompendiumEntries } from '../lib/api/compendium';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { sendMessage } from '../lib/api/chat';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
 
 interface BookmarkedEntry extends CompendiumEntry {
   preview: string;
 }
 
+interface PartySummary {
+  id: string;
+  name: string;
+}
+
 export function Compendium() {
   const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
+  const { id: urlPartyId } = useParams<{ id: string }>(); // Context: Are we inside a specific party route?
+  const [searchParams] = useSearchParams();
 
   // State
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,7 +44,28 @@ export function Compendium() {
     queryFn: fetchCompendiumEntries 
   });
 
+  // Fetch User's Parties (For Smart Share functionality)
+  const { data: myParties = [] } = useQuery<PartySummary[]>({
+    queryKey: ['myPartiesShort', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('party_members')
+        .select('parties(id, name)')
+        .eq('user_id', user.id);
+      
+      if (error) {
+        console.error('Error fetching parties', error);
+        return [];
+      }
+      return data.map((item: any) => item.parties).filter(Boolean);
+    },
+    enabled: !!user
+  });
+
   // Effects
+  
+  // 1. Load Bookmarks
   useEffect(() => {
     const savedBookmarks = localStorage.getItem('compendium_bookmarks');
     if (savedBookmarks) {
@@ -46,16 +77,23 @@ export function Compendium() {
     }
   }, []);
 
+  // 2. Handle Deep Linking from Chat (URL ?entryId=...)
+  const entryIdFromUrl = searchParams.get('entryId');
+  useEffect(() => {
+    if (entryIdFromUrl && entries.length > 0) {
+      const targetEntry = entries.find(e => e.id === entryIdFromUrl);
+      if (targetEntry) {
+        setSelectedEntry(targetEntry);
+      }
+    }
+  }, [entryIdFromUrl, entries]);
+
   // Actions
   const toggleBookmark = (entry: CompendiumEntry) => {
     const preview = entry.content.slice(0, 400); 
-    
     setBookmarkedEntries(prev => {
       const isBookmarked = prev.some(b => b.id === entry.id);
-      const newBookmarks = isBookmarked 
-        ? prev.filter(b => b.id !== entry.id) 
-        : [...prev, { ...entry, preview }];
-      
+      const newBookmarks = isBookmarked ? prev.filter(b => b.id !== entry.id) : [...prev, { ...entry, preview }];
       localStorage.setItem('compendium_bookmarks', JSON.stringify(newBookmarks));
       return newBookmarks;
     });
@@ -67,6 +105,27 @@ export function Compendium() {
       next.has(category) ? next.delete(category) : next.add(category);
       return next;
     });
+  };
+
+  // Smart Share Handler
+  const handleShareEntry = async (targetPartyId: string) => {
+    if (!selectedEntry || !user) return;
+
+    // Visual feedback
+    const btn = document.getElementById('share-btn-icon'); 
+    if (btn) btn.classList.add('text-green-500');
+
+    try {
+      const tag = `<<<COMPENDIUM:${selectedEntry.id}:${selectedEntry.title}>>>`;
+      const message = `${tag} 📖 **Shared Entry:** ${selectedEntry.title}`;
+      await sendMessage(targetPartyId, user.id, message);
+    } catch (err) {
+      console.error("Failed to share entry", err);
+    } finally {
+      setTimeout(() => { 
+        if (btn) btn.classList.remove('text-green-500'); 
+      }, 1500);
+    }
   };
 
   // Mutations
@@ -92,10 +151,7 @@ export function Compendium() {
   const filteredEntries = useMemo(() => {
     if (!searchTerm) return entries;
     const lower = searchTerm.toLowerCase();
-    return entries.filter(e => 
-      e.title.toLowerCase().includes(lower) || 
-      e.category?.toLowerCase().includes(lower)
-    );
+    return entries.filter(e => e.title.toLowerCase().includes(lower) || e.category?.toLowerCase().includes(lower));
   }, [entries, searchTerm]);
 
   const categorizedDisplay = useMemo(() => {
@@ -105,19 +161,12 @@ export function Compendium() {
       acc[cat].push(entry);
       return acc;
     }, {} as Record<string, CompendiumEntry[]>);
-
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredEntries]);
 
   // Render Helpers
   const handleNewEntry = () => {
-    setFullPageEntry({ 
-      id: undefined, 
-      title: 'New Entry', 
-      content: '# New Entry\nWrite your content here...', 
-      category: 'General', 
-      created_by: user?.id 
-    });
+    setFullPageEntry({ id: undefined, title: 'New Entry', content: '# New Entry\nWrite your content here...', category: 'General', created_by: user?.id });
   };
 
   if (isLoading) return <div className="flex items-center justify-center h-96"><LoadingSpinner size="lg" /></div>;
@@ -126,23 +175,13 @@ export function Compendium() {
   const isBookmarked = (id?: string) => bookmarkedEntries.some(b => b.id === id);
 
   return (
-    // Layout Container: Changes direction on mobile vs desktop
     <div className="flex flex-col md:flex-row h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       
-      {/* --- SIDEBAR: NAVIGATION --- */}
-      {/* Logic: Hidden on mobile if an entry is selected. Visible on desktop always. */}
-      <div className={`
-        ${selectedEntry ? 'hidden md:flex' : 'flex'} 
-        w-full md:w-80 bg-gray-50 border-r border-gray-200 flex-col flex-shrink-0 h-full
-      `}>
-        
-        {/* Sidebar Header */}
+      {/* --- SIDEBAR --- */}
+      <div className={`${selectedEntry ? 'hidden md:flex' : 'flex'} w-full md:w-80 bg-gray-50 border-r border-gray-200 flex-col flex-shrink-0 h-full`}>
         <div className="p-4 border-b border-gray-200 bg-white sticky top-0 z-10">
           <div className="flex items-center justify-between mb-4">
-            <div 
-              className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer hover:text-indigo-600 transition-colors"
-              onClick={() => setSelectedEntry(null)}
-            >
+            <div className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer hover:text-indigo-600 transition-colors" onClick={() => setSelectedEntry(null)}>
               <Library className="w-5 h-5" />
               <span>Compendium</span>
             </div>
@@ -152,71 +191,40 @@ export function Compendium() {
               </Button>
             )}
           </div>
-          
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input 
-              type="text" 
-              placeholder="Search..." 
-              value={searchTerm} 
-              onChange={(e) => setSearchTerm(e.target.value)} 
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+            <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"/>
           </div>
         </div>
 
-        {/* List Content */}
         <div className="flex-1 overflow-y-auto p-2">
-          
-          {/* Mobile-Only Bookmarks Quick Access (Since Dashboard is hidden on mobile) */}
+          {/* Mobile Bookmarks */}
           <div className="md:hidden mb-4 border-b border-gray-200 pb-2">
              <div className="px-3 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Saved Bookmarks</div>
-             {bookmarkedEntries.length === 0 ? (
-               <div className="px-3 py-1 text-sm text-gray-400 italic">No bookmarks yet.</div>
-             ) : (
-               bookmarkedEntries.map(b => (
-                 <button key={b.id} onClick={() => setSelectedEntry(entries.find(e => e.id === b.id) || b)} className="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-2">
-                    <Bookmark size={12} className="fill-indigo-600" />
-                    <span className="truncate">{b.title}</span>
-                 </button>
-               ))
-             )}
+             {bookmarkedEntries.length === 0 ? <div className="px-3 py-1 text-sm text-gray-400 italic">No bookmarks yet.</div> : bookmarkedEntries.map(b => (
+               <button key={b.id} onClick={() => setSelectedEntry(entries.find(e => e.id === b.id) || b)} className="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-2">
+                  <Bookmark size={12} className="fill-indigo-600" /><span className="truncate">{b.title}</span>
+               </button>
+             ))}
           </div>
 
-          {categorizedDisplay.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm py-8">No entries found.</p>
-          ) : (
+          {categorizedDisplay.length === 0 ? <p className="text-center text-gray-400 text-sm py-8">No entries found.</p> : (
             <div className="space-y-1 pb-10">
               {categorizedDisplay.map(([category, categoryEntries]) => {
                 const isExpanded = searchTerm ? true : expandedCategories.has(category);
-                
                 return (
                   <div key={category} className="select-none">
-                    <button
-                      onClick={() => toggleCategory(category)}
-                      className="w-full flex items-center justify-between px-3 py-3 md:py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
+                    <button onClick={() => toggleCategory(category)} className="w-full flex items-center justify-between px-3 py-3 md:py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
                       <div className="flex items-center gap-2">
                         {isExpanded ? <ChevronDown size={16} className="text-gray-400"/> : <ChevronRight size={16} className="text-gray-400"/>}
                         {category}
                       </div>
                       <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{categoryEntries.length}</span>
                     </button>
-                    
                     {isExpanded && (
                       <div className="mt-1 ml-2 space-y-0.5 border-l-2 border-gray-200 pl-2">
                         {categoryEntries.map(entry => (
-                          <button
-                            key={entry.id}
-                            onClick={() => setSelectedEntry(entry)}
-                            className={`
-                              w-full text-left px-3 py-3 md:py-2 text-sm rounded-md transition-all flex items-center justify-between group
-                              ${selectedEntry?.id === entry.id 
-                                ? 'bg-white text-indigo-700 font-medium shadow-sm ring-1 ring-indigo-100' 
-                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                              }
-                            `}
-                          >
+                          <button key={entry.id} onClick={() => setSelectedEntry(entry)} className={`w-full text-left px-3 py-3 md:py-2 text-sm rounded-md transition-all flex items-center justify-between group ${selectedEntry?.id === entry.id ? 'bg-white text-indigo-700 font-medium shadow-sm ring-1 ring-indigo-100' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
                             <span className="truncate">{entry.title}</span>
                             {isBookmarked(entry.id) && <Bookmark size={12} className="text-indigo-400 fill-indigo-400 shrink-0"/>}
                           </button>
@@ -231,28 +239,13 @@ export function Compendium() {
         </div>
       </div>
 
-      {/* --- RIGHT MAIN: CONTENT --- */}
-      {/* Logic: Hidden on mobile if NO entry is selected. Visible on desktop always. */}
-      <div className={`
-        ${!selectedEntry ? 'hidden md:flex' : 'flex'} 
-        flex-1 overflow-y-auto bg-white relative flex-col h-full w-full
-      `}>
-        
+      {/* --- RIGHT MAIN --- */}
+      <div className={`${!selectedEntry ? 'hidden md:flex' : 'flex'} flex-1 overflow-y-auto bg-white relative flex-col h-full w-full`}>
         {selectedEntry ? (
-          // VIEW: Selected Entry
           <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col">
-            
-            {/* Sticky Header */}
             <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-4 md:px-8 py-3 md:py-4 flex justify-between items-center shadow-sm md:shadow-none">
               <div className="flex items-center gap-3 overflow-hidden">
-                {/* Mobile Back Button */}
-                <button 
-                  onClick={() => setSelectedEntry(null)}
-                  className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600"
-                >
-                  <ArrowLeft size={20} />
-                </button>
-                
+                <button onClick={() => setSelectedEntry(null)} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600"><ArrowLeft size={20} /></button>
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-0.5 truncate">{selectedEntry.category}</div>
                   <h1 className="text-lg md:text-2xl font-extrabold text-gray-900 truncate">{selectedEntry.title}</h1>
@@ -260,13 +253,49 @@ export function Compendium() {
               </div>
 
               <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 ml-2">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => toggleBookmark(selectedEntry)}
-                  className={isBookmarked(selectedEntry.id) ? "text-indigo-600 bg-indigo-50" : "text-gray-400"}
-                  title={isBookmarked(selectedEntry.id) ? "Remove Bookmark" : "Bookmark"}
-                >
+                
+                {/* SMART SHARE BUTTON LOGIC */}
+                {(() => {
+                  // A. Specific Party Context (URL)
+                  if (urlPartyId) {
+                    return (
+                      <Button variant="ghost" size="sm" onClick={() => handleShareEntry(urlPartyId)} className="text-indigo-600 bg-indigo-50" title="Share to Chat">
+                        <Share id="share-btn-icon" className="w-5 h-5 transition-colors" />
+                      </Button>
+                    );
+                  }
+                  // B. Multiple Parties (Global View) -> Dropdown
+                  if (myParties.length > 1) {
+                    return (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger>
+                          <Button variant="ghost" size="sm" className="text-indigo-600 bg-indigo-50 gap-1 px-2" title="Share to...">
+                            <Share id="share-btn-icon" className="w-5 h-5 transition-colors" />
+                            <ChevronDown className="w-3 h-3 opacity-50" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          {myParties.map(p => (
+                            <DropdownMenuItem key={p.id} onSelect={() => handleShareEntry(p.id)}>
+                              Share to {p.name}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    );
+                  }
+                  // C. Single Party (Global View) -> Direct Button
+                  if (myParties.length === 1) {
+                    return (
+                      <Button variant="ghost" size="sm" onClick={() => handleShareEntry(myParties[0].id)} className="text-indigo-600 bg-indigo-50" title={`Share to ${myParties[0].name}`}>
+                        <Share id="share-btn-icon" className="w-5 h-5 transition-colors" />
+                      </Button>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <Button variant="ghost" size="sm" onClick={() => toggleBookmark(selectedEntry)} className={isBookmarked(selectedEntry.id) ? "text-indigo-600 bg-indigo-50" : "text-gray-400"} title="Bookmark">
                   {isBookmarked(selectedEntry.id) ? <Bookmark className="fill-current w-5 h-5" /> : <BookmarkPlus className="w-5 h-5" />}
                 </Button>
                 {isAdmin() && (
@@ -277,18 +306,15 @@ export function Compendium() {
               </div>
             </div>
 
-            {/* Content */}
             <div className="p-4 md:p-8 w-full max-w-full overflow-x-hidden">
               <HomebrewRenderer content={selectedEntry.content} />
             </div>
             
-            {/* Footer */}
             <div className="mt-auto p-4 md:p-8 border-t border-gray-50 text-center text-gray-400 text-xs pb-8 md:pb-8">
                Entry Title: {selectedEntry.title}
             </div>
           </div>
         ) : (
-          // VIEW: Dashboard / Bookmarks (Desktop Only mostly, as mobile shows sidebar)
           <div className="p-4 md:p-8 max-w-5xl mx-auto w-full">
             <div className="text-center mb-8 md:mb-10 pt-4 md:pt-10">
               <div className="w-16 h-16 md:w-20 md:h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -306,23 +332,15 @@ export function Compendium() {
             {bookmarkedEntries.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
                 {bookmarkedEntries.map(bookmark => (
-                  <div 
-                    key={bookmark.id} 
-                    onClick={() => setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark)}
-                    className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden"
-                  >
+                  <div key={bookmark.id} onClick={() => setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark)} className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden">
                     <div className="flex justify-between items-start mb-2 relative z-10 bg-white">
                        <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2 text-sm md:text-base">{bookmark.title}</h3>
                        <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded shrink-0">{bookmark.category}</span>
                     </div>
-                    
                     <div className="relative h-20 md:h-24 overflow-hidden text-xs text-gray-500">
-                      <div className="origin-top-left transform scale-90 w-[110%]">
-                        <HomebrewRenderer content={bookmark.preview} />
-                      </div>
+                      <div className="origin-top-left transform scale-90 w-[110%]"><HomebrewRenderer content={bookmark.preview} /></div>
                       <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
                     </div>
-
                     <div className="mt-2 flex items-center text-xs text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-4 z-20 bg-white pl-2">
                        Read Entry <ChevronRight size={14} className="ml-1"/>
                     </div>
@@ -330,22 +348,13 @@ export function Compendium() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
-                 <p className="text-gray-400 text-sm">You haven't bookmarked any entries yet.</p>
-              </div>
+              <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50"><p className="text-gray-400 text-sm">You haven't bookmarked any entries yet.</p></div>
             )}
           </div>
         )}
       </div>
 
-      {/* FULL PAGE EDITOR MODAL */}
-      {fullPageEntry && (
-        <CompendiumFullPage 
-          entry={fullPageEntry} 
-          onClose={() => setFullPageEntry(null)} 
-          onSave={async (e) => { await saveMutation.mutateAsync(e); }} 
-        />
-      )}
+      {fullPageEntry && <CompendiumFullPage entry={fullPageEntry} onClose={() => setFullPageEntry(null)} onSave={async (e) => { await saveMutation.mutateAsync(e); }} />}
     </div>
   );
 }

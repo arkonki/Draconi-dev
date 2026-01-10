@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // 1. Added useSearchParams
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parties';
@@ -7,7 +7,8 @@ import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import { 
-  Users, Trash2, UserX, ShieldAlert, Notebook, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Award, Sparkles, Hourglass
+  Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass, 
+  MessageSquare
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
@@ -16,16 +17,18 @@ import { PartyNotes } from '../components/party/PartyNotes';
 import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
-//import { SessionEndCheatsheet } from '../components/party/SessionEndCheatsheet';
 import { StoryHelperApp } from '../components/party/StoryHelper';
-import { TimeTrackerView } from '../components/party/TimeTracker'; // Import Time Tracker
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/shared/DropdownMenu';
+import { TimeTrackerView } from '../components/party/TimeTracker'; 
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
 import { GMScreen } from '../components/party/GMScreen';
+import { PartyChat } from '../components/party/PartyChat';
+import { supabase } from '../lib/supabase';
 
-type Tab = 'members' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper'; // 'sessionEnd' |
+type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper'; 
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams(); // 2. Get Params
   const navigate = useNavigate();
   const { user, isDM } = useAuth();
   const queryClient = useQueryClient();
@@ -33,13 +36,62 @@ export function PartyView() {
   const [isInviteVisible, setIsInviteVisible] = useState(false);
   const [dialogOpen, setDialogOpen] = useState<'deleteParty' | 'removeMember' | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{id: string, name: string} | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('members');
+  
+  const [activeTab, setActiveTab] = useState<Tab>('members'); 
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // 3. Extract noteId from URL
+  const noteIdFromUrl = searchParams.get('noteId');
+
+  // 4. Effect: Switch to Notes tab if URL has a noteId
+  useEffect(() => {
+    if (noteIdFromUrl) {
+      setActiveTab('notes');
+    }
+  }, [noteIdFromUrl]);
 
   const { data: party, isLoading, error } = useQuery({
     queryKey: ['party', partyId],
     queryFn: () => fetchPartyById(partyId),
     enabled: !!partyId,
   });
+
+  // Realtime Listener for Unread Badge
+  useEffect(() => {
+    if (!partyId) return;
+
+    const channel = supabase
+      .channel(`party-view-badge:${partyId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `party_id=eq.${partyId}`,
+        },
+        () => {
+          setActiveTab(currentTab => {
+            if (currentTab !== 'chat') {
+              setUnreadCount(prev => prev + 1);
+            }
+            return currentTab;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [partyId]);
+
+  const handleTabChange = (tabId: Tab) => {
+    setActiveTab(tabId);
+    if (tabId === 'chat') {
+      setUnreadCount(0);
+    }
+  };
 
   const removeMemberMutation = useMutation({
     mutationFn: (characterId: string) => { if (!partyId) throw new Error('Party ID is missing'); return removePartyMember(partyId, characterId); },
@@ -55,14 +107,12 @@ export function PartyView() {
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
-  // Logic: Is the current user the CREATOR of this party? (Super Admin of the party)
   const isPartyOwner = user && party && user.id === party.created_by && isDM();
   const joinLink = party?.invite_code ? `${window.location.origin}/party/join/${party.invite_code}` : '';
 
-  // Prepare data for Story Helper (Auto-fill party members)
   const partyMembersString = useMemo(() => {
     return party?.members
-      ? party.members.map(m => `- ${m.name} (${m.kin} ${m.profession})`).join('\n')
+      ? party.members.map((m: any) => `- ${m.name} (${m.kin} ${m.profession})`).join('\n')
       : '';
   }, [party]);
 
@@ -70,20 +120,18 @@ export function PartyView() {
   if (error) return <div className="p-8"><ErrorMessage message={error.message} /></div>;
   if (!party) return <div className="p-8"><ErrorMessage message="Party not found." /></div>;
 
-  // Define Tabs
   const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Roster', icon: Users },
+    { id: 'chat', label: 'Chat', icon: MessageSquare }, 
     { id: 'notes', label: 'Journal', icon: FileText },
     { id: 'tasks', label: 'Quests', icon: ClipboardList },
     { id: 'inventory', label: 'Stash', icon: Backpack },
-    { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true }, // New Tab
+    { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true }, 
     { id: 'encounter', label: 'Combat', icon: Swords, dmOnly: true },
-    //{ id: 'sessionEnd', label: 'End Session', icon: Award, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
 
-  // Filter tabs based on permission
   const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isPartyOwner);
 
   return (
@@ -100,7 +148,6 @@ export function PartyView() {
               
               {isPartyOwner && (
                 <div className="flex items-center gap-2">
-                   {/* Quick Invite Toggle */}
                    <Button 
                       variant="secondary" 
                       size="sm" 
@@ -111,7 +158,6 @@ export function PartyView() {
                       Invite
                    </Button>
 
-                   {/* Actions Menu */}
                    <DropdownMenu>
                     <DropdownMenuTrigger>
                       <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
@@ -126,7 +172,6 @@ export function PartyView() {
               )}
             </div>
 
-            {/* Inline Invite Panel */}
             {isInviteVisible && isPartyOwner && (
               <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg animate-in slide-in-from-top-2 fade-in">
                 <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">Invite Link</h3>
@@ -140,15 +185,14 @@ export function PartyView() {
             )}
         </div>
 
-        {/* Tab Navigation Bar */}
         <div className="border-b border-gray-200 bg-white overflow-x-auto">
           <nav className="flex px-6 min-w-max">
             {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)} 
                 className={`
-                  group flex items-center gap-2 px-4 py-4 text-sm font-medium border-b-2 transition-all
+                  relative group flex items-center gap-2 px-4 py-4 text-sm font-medium border-b-2 transition-all
                   ${activeTab === tab.id 
                     ? 'border-indigo-600 text-indigo-600' 
                     : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
@@ -157,13 +201,19 @@ export function PartyView() {
               >
                 <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-indigo-600' : 'text-gray-400 group-hover:text-gray-600'}`} />
                 {tab.label}
+
+                {tab.id === 'chat' && unreadCount > 0 && (
+                  <span className="absolute top-3 right-0 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                  </span>
+                )}
               </button>
             ))}
           </nav>
         </div>
       </div>
 
-      {/* Main Content Area */}
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl min-h-[500px] overflow-hidden">
         {activeTab === 'members' && (
           <div className="p-6">
@@ -176,7 +226,20 @@ export function PartyView() {
           </div>
         )}
         
-        {activeTab === 'notes' && <PartyNotes partyId={partyId!} isDM={isPartyOwner} />}
+        {activeTab === 'chat' && (
+           <div className="p-6">
+             <PartyChat partyId={partyId!} members={party.members} />
+           </div>
+        )}
+        
+        {/* 5. Pass noteIdFromUrl to PartyNotes */}
+        {activeTab === 'notes' && (
+          <PartyNotes 
+            partyId={partyId!} 
+            isDM={isPartyOwner} 
+            openNoteId={noteIdFromUrl} // <--- Pass the ID
+          />
+        )}
         
         {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={isPartyOwner} />}
         
@@ -186,7 +249,6 @@ export function PartyView() {
           </div>
         )}
 
-        {/* TIME TRACKER */}
         {activeTab === 'time' && (
            <div className="p-6">
              <TimeTrackerView partyId={partyId!} />
@@ -195,12 +257,6 @@ export function PartyView() {
         
         {activeTab === 'encounter' && (
            <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />
-        )}
-
-        {activeTab === 'sessionEnd' && (
-           <div className="p-6">
-             <SessionEndCheatsheet members={party.members} partyId={partyId!} />
-           </div>
         )}
 
         {activeTab === 'gmScreen' && <GMScreen />}
@@ -212,7 +268,6 @@ export function PartyView() {
         )}
       </div>
 
-      {/* Confirmation Modals */}
       <ConfirmationDialog 
         isOpen={dialogOpen === 'removeMember'} 
         onClose={() => setDialogOpen(null)} 
@@ -230,7 +285,7 @@ export function PartyView() {
         onClose={() => setDialogOpen(null)} 
         onConfirm={confirmDeleteParty} 
         title="Disband Party" 
-        description="Are you sure? This will permanently delete the party and all associated data (notes, tasks, chat). Characters will remain but will be removed from this group." 
+        description="Are you sure? This will permanently delete the party and all associated data." 
         confirmText="Disband Permanently" 
         isDestructive={true} 
         isLoading={deletePartyMutation.isPending} 
