@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 import { useAuth } from '../../contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { PartyChat } from '../party/PartyChat'; // Reuse your chat component
+import { PartyChat } from '../party/PartyChat'; 
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 
 // --- HELPER: Editable Stat Box ---
@@ -113,17 +113,16 @@ export function EncounterChatView() {
     queryFn: async () => {
       if (!user) return [];
       const { data } = await supabase.from('party_members').select('parties(id, name, members:party_members(user_id, name))').eq('user_id', user.id);
-      // Flatten structure
       return data?.map((item: any) => ({
         id: item.parties.id,
         name: item.parties.name,
-        members: item.parties.members // Pass members for avatar logic in Chat
+        members: item.parties.members 
       })) || [];
     },
     enabled: !!user
   });
 
-  // 2. Set Default Party (Current Character's Party)
+  // 2. Set Default Party
   useEffect(() => {
     if (character?.party_id) {
       setSelectedPartyId(character.party_id);
@@ -139,11 +138,9 @@ export function EncounterChatView() {
     const channel = supabase.channel(`global-chat-monitor`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
           const msg = payload.new as any;
-          // If message is for one of my parties
           const isRelevant = myParties.some(p => p.id === msg.party_id);
           
           if (isRelevant) {
-             // If closed OR if open but on wrong tab/party
              if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== msg.party_id)) {
                 setUnreadCount(prev => prev + 1);
              }
@@ -161,7 +158,7 @@ export function EncounterChatView() {
     }
   }, [isOpen, activeTab]);
 
-  // 4. Listen for Encounter Updates (Standard Logic)
+  // 4. Listen for Encounter Updates
   useEffect(() => {
     if (!character?.party_id || !character?.id) return;
     fetchActiveEncounter(character.party_id, character.id);
@@ -188,9 +185,12 @@ export function EncounterChatView() {
   return (
     <>
       {/* --- FLOATING TOGGLE BUTTON --- */}
+      {/* Changed: Adjusted position 'bottom-20 md:bottom-4' to sit higher on mobile */}
+      {/* Changed: Z-index 50 to stay above standard UI but below modal */}
       <button 
-        className={`fixed bottom-4 right-4 p-4 rounded-full shadow-lg text-white transition-all duration-200 z-40 hover:scale-105 ${isInActiveEncounter ? 'bg-red-700 hover:bg-red-800 ring-2 ring-red-400' : 'bg-indigo-600 hover:bg-indigo-700'}`} 
+        className={`fixed bottom-20 md:bottom-4 right-4 p-3 md:p-4 rounded-full shadow-lg text-white transition-all duration-200 z-50 hover:scale-105 active:scale-95 ${isInActiveEncounter ? 'bg-red-700 hover:bg-red-800 ring-2 ring-red-400' : 'bg-indigo-600 hover:bg-indigo-700'}`} 
         onClick={() => setIsOpen(!isOpen)}
+        title={isOpen ? "Close Chat/Combat" : "Open Chat/Combat"}
       >
         <div className="relative">
           {isInActiveEncounter ? <Dices size={24} /> : <MessageSquare size={24} />}
@@ -203,8 +203,9 @@ export function EncounterChatView() {
       </button>
 
       {/* --- MODAL DRAWER --- */}
+      {/* Changed: Z-index 100 to ensure it is always on top */}
       {isOpen && (
-        <div className="fixed inset-0 bg-black/60 flex justify-end z-30 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsOpen(false)}>
+        <div className="fixed inset-0 bg-black/60 flex justify-end z-[100] backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsOpen(false)}>
           <div className="bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300 transform transition-transform animate-in slide-in-from-right duration-300" onClick={(e) => e.stopPropagation()}>
             
             {/* Header */}
@@ -219,7 +220,7 @@ export function EncounterChatView() {
                         {currentParty?.name || 'Select Party'} <ChevronDown size={14} />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-48 bg-stone-700 text-white border-stone-600">
+                    <DropdownMenuContent className="w-48 bg-stone-700 text-white border-stone-600 z-[110]">
                       {myParties.map(p => (
                         <DropdownMenuItem key={p.id} onSelect={() => setSelectedPartyId(p.id)} className="hover:bg-stone-600 focus:bg-stone-600 cursor-pointer">
                           {p.name}
@@ -286,7 +287,6 @@ export function EncounterChatView() {
               {/* --- TAB 2: CHAT --- */}
               {activeTab === 'chat' && selectedPartyId && (
                  <div className="h-full flex flex-col">
-                    {/* We pass the party members from our fetch so avatars work */}
                     <PartyChat partyId={selectedPartyId} members={currentParty?.members || []} />
                  </div>
               )}
