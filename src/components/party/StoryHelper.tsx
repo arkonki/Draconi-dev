@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saveStoryIdea, getStoryIdeasForParty, deleteStoryIdea, updateStoryIdea } from '../../lib/api/storyIdeas';
+import { supabase } from '../../lib/supabase';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import { 
   Save, Trash2, Sparkles, BookOpen, Search, Edit, X, KeyRound, 
   Settings, Wand2, ChevronRight, ChevronDown, Bot,
-  Shield, StickyNote, Copy, Check, RefreshCw, Eraser
+  Shield, StickyNote, Copy, Check, RefreshCw, Eraser,
+  Users, Maximize2, Minimize2, Eye, EyeOff
 } from 'lucide-react';
 
 import MDEditor, { commands, ICommand } from '@uiw/react-md-editor';
@@ -22,7 +24,6 @@ const QUICK_PROMPTS = [
   { label: 'Encounter', icon: SwordIcon, prompt: 'Design a combat encounter for the party involving terrain hazards and enemy tactics.' },
 ];
 
-// Helper icon for constants
 function SwordIcon(props: any) { return <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/></svg>; }
 
 const monsterTemplate = `\`\`\`monster
@@ -95,21 +96,28 @@ const customCommands = [
 
 // --- MAIN COMPONENT ---
 
-export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: string, initialPartyData?: string }) {
+export function StoryHelperApp({ partyId }: { partyId: string }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const resultRef = useRef<HTMLDivElement>(null); // For auto-scrolling
+  const resultRef = useRef<HTMLDivElement>(null);
   
   // Navigation & UI State
   const [activeTab, setActiveTab] = useState<'generate' | 'saved'>('generate');
   const [searchTerm, setSearchTerm] = useState('');
   const [showConfig, setShowConfig] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   
   // Generator State
   const [prompt, setPrompt] = useState('');
-  const [context, setContext] = useState({ party: initialPartyData, location: '', npc: '' });
-  const [showContext, setShowContext] = useState(false);
+  const [contextLocation, setContextLocation] = useState('');
+  const [contextNpc, setContextNpc] = useState('');
+  const [showContext, setShowContext] = useState(true);
   
+  // Character Context State
+  const [selectedCharIds, setSelectedCharIds] = useState<Set<string>>(new Set());
+  const [includeCharDesc, setIncludeCharDesc] = useState(true);
+  const [includeCharStats, setIncludeCharStats] = useState(false);
+
   // Content State
   const [response, setResponse] = useState('');
   const [editorContent, setEditorContent] = useState('');
@@ -124,20 +132,35 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
   const [selectedIdea, setSelectedIdea] = useState<any>(null);
   const [isEditingLibrary, setIsEditingLibrary] = useState(false);
 
-  // -- EFFECTS --
+  // -- DATA FETCHING --
 
-  // Sync editor when response arrives
-  useEffect(() => { 
-    if (response) {
-      setEditorContent(response);
-      // Auto-scroll to result on mobile
-      if (window.innerWidth < 1024) {
-        setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-      }
-    } 
-  }, [response]);
+  // 1. Fetch Party Characters Details for Context
+  const { data: partyCharacters = [] } = useQuery({
+    queryKey: ['partyCharactersDetail', partyId],
+    queryFn: async () => {
+      // Join party_members -> characters
+      const { data, error } = await supabase
+        .from('party_members')
+        .select(`
+          character:characters (
+            id, name, kin, profession, appearance, weak_spot, 
+            current_hp, max_hp, current_wp, max_wp
+          )
+        `)
+        .eq('party_id', partyId);
+      
+      if (error) throw error;
+      return data.map((d: any) => d.character).filter(Boolean);
+    },
+    enabled: !!partyId
+  });
 
-  // -- DATA & MUTATIONS --
+  // Auto-select all characters initially
+  useEffect(() => {
+    if (partyCharacters.length > 0 && selectedCharIds.size === 0) {
+      setSelectedCharIds(new Set(partyCharacters.map((c:any) => c.id)));
+    }
+  }, [partyCharacters.length]);
 
   const { data: savedIdeas, isLoading: isLoadingIdeas } = useQuery({ 
     queryKey: ['storyIdeas', partyId], 
@@ -145,13 +168,23 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
     enabled: !!user,
   });
 
+  // -- EFFECTS --
+  useEffect(() => { 
+    if (response) {
+      setEditorContent(response);
+      if (window.innerWidth < 1024) {
+        setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    } 
+  }, [response]);
+
+  // -- MUTATIONS --
   const saveMutation = useMutation({
     mutationFn: saveStoryIdea,
     onSuccess: (data) => {
         queryClient.invalidateQueries({ queryKey: ['storyIdeas', partyId] });
         setActiveTab('saved');
         if (data?.[0]) setSelectedIdea(data[0]);
-        // Don't clear response immediately so user can still see what they just saved if they switch back
     }
   });
 
@@ -171,54 +204,99 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
     }
   });
 
-  // -- HANDLERS --
+  // -- LOGIC --
 
-  const handleSaveKey = () => {
-    localStorage.setItem('openrouter_api_key', tempApiKey);
-    setApiKey(tempApiKey);
-    setShowConfig(false);
+  const toggleCharSelection = (id: string) => {
+    const next = new Set(selectedCharIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedCharIds(next);
+  };
+
+  const buildCharacterContextString = () => {
+    const selectedChars = partyCharacters.filter((c:any) => selectedCharIds.has(c.id));
+    if (selectedChars.length === 0) return "No specific party members.";
+
+    return selectedChars.map((c:any) => {
+      let details = `- ${c.name} (${c.kin} ${c.profession})`;
+      
+      if (includeCharDesc) {
+        if (c.appearance) details += `. Appearance: ${c.appearance}`;
+        if (c.weak_spot) details += `. Weakness: ${c.weak_spot}`;
+      }
+      
+      if (includeCharStats) {
+        details += ` [HP: ${c.current_hp}/${c.max_hp}, WP: ${c.current_wp}/${c.max_wp}]`;
+      }
+      
+      return details;
+    }).join('\n');
   };
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !apiKey) return;
     setLoading(true);
     
+    // Auto-maximize on mobile when generating to show spinner/result
+    if (window.innerWidth < 768) setIsMaximized(true);
+
     try {
+      const partyContextString = buildCharacterContextString();
+
       const fullPrompt = `
         You are a helpful Dragonbane RPG Gamemaster assistant. Generate content using Markdown.
         ${DRAGONBANE_RULES_SUMMARY}
         
         CRITICAL FORMATTING:
         - Use **bold** for mechanics.
-        - Use code blocks: \`\`\`monster, \`\`\`spell, \`\`\`note, \`\`\`item.
+        - Use code blocks for stat blocks: \`\`\`monster, \`\`\`spell, \`\`\`note, \`\`\`item.
         
         TASK: ${prompt}
         
         CONTEXT:
-        ${context.party ? `Party: ${context.party}` : ''}
-        ${context.location ? `Location: ${context.location}` : ''}
-        ${context.npc ? `NPCs: ${context.npc}` : ''}
+        Party Members:
+        ${partyContextString}
+        
+        ${contextLocation ? `Location/Scene: ${contextLocation}` : ''}
+        ${contextNpc ? `Involved NPCs: ${contextNpc}` : ''}
       `;
 
+      // 1. Connection Fix (Headers & Model)
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { 
+          'Authorization': `Bearer ${apiKey}`, 
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.href, // Required by OpenRouter
+          'X-Title': 'Dragonbane Manager' 
+        },
         body: JSON.stringify({ 
-            model: 'google/gemini-2.5-flash', 
+            model: 'google/gemini-2.0-flash-001', // Using 2.0 Flash (Stable & Fast)
             messages: [{ role: 'user', content: fullPrompt }],
             temperature: 0.7 
         })
       });
       
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error?.message || `API Error: ${res.status}`);
+      }
+      
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || 'No response.';
       setResponse(content);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setResponse('Error generating content. Please check your API key.');
+      setResponse(`Error: ${err.message}. Please check your API key.`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSaveKey = () => {
+    localStorage.setItem('openrouter_api_key', tempApiKey);
+    setApiKey(tempApiKey);
+    setShowConfig(false);
   };
 
   const copyToClipboard = () => {
@@ -233,7 +311,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[calc(100vh-100px)]">
       
       {/* --- HEADER --- */}
-      <div className="bg-white border-b border-gray-200 px-4 h-14 shrink-0 flex items-center justify-between relative z-20">
+      <div className={`bg-white border-b border-gray-200 px-4 h-14 shrink-0 flex items-center justify-between relative z-20 ${isMaximized ? 'hidden' : 'flex'}`}>
         <div className="flex gap-1">
            <button onClick={() => setActiveTab('generate')} className={`text-sm font-bold flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${activeTab === 'generate' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}>
              <Wand2 size={16}/> Generator
@@ -248,10 +326,11 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
         </Button>
       </div>
 
-      {/* --- CONFIG SLIDE-DOWN --- */}
-      <div className={`bg-gray-50 border-b border-gray-200 overflow-hidden transition-all duration-300 ease-in-out ${showConfig ? 'max-h-40 py-4 px-4' : 'max-h-0'}`}>
-         <div className="max-w-2xl mx-auto flex items-end gap-3">
-            <div className="flex-1">
+      {/* --- CONFIG SLIDE-DOWN (FIXED HEIGHT & LAYOUT) --- */}
+      <div className={`bg-gray-50 border-b border-gray-200 overflow-hidden transition-all duration-300 ease-in-out ${showConfig && !isMaximized ? 'max-h-96 py-4 px-4' : 'max-h-0'}`}>
+         {/* Fix: Changed to flex-col on mobile to prevent squashing */}
+         <div className="max-w-2xl mx-auto flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1 w-full">
                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">OpenRouter API Key</label>
                <div className="relative">
                  <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -264,22 +343,22 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                  />
                </div>
             </div>
-            <Button variant="primary" onClick={handleSaveKey}>Save Key</Button>
-            <Button variant="ghost" onClick={() => setShowConfig(false)}>Cancel</Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+                <Button className="flex-1 sm:flex-none" variant="primary" onClick={handleSaveKey}>Save Key</Button>
+                <Button className="flex-1 sm:flex-none" variant="ghost" onClick={() => setShowConfig(false)}>Cancel</Button>
+            </div>
          </div>
          <p className="text-center text-xs text-gray-400 mt-2">
             Keys are stored locally in your browser. Get one at <a href="https://openrouter.ai/" target="_blank" rel="noreferrer" className="underline hover:text-indigo-600">openrouter.ai</a>
          </p>
       </div>
 
-      {/* --- BODY --- */}
       <div className="flex-grow overflow-hidden flex flex-col md:flex-row bg-gray-50">
         
-        {/* === GENERATOR: LEFT PANE (INPUTS) === */}
-        {activeTab === 'generate' && (
+        {/* === LEFT PANE: INPUTS === */}
+        {activeTab === 'generate' && !isMaximized && (
           <div className="w-full md:w-1/3 border-r border-gray-200 bg-white flex flex-col z-10 shadow-lg md:shadow-none h-1/2 md:h-full">
             
-            {/* If no API Key, show blocker inside this pane */}
             {!apiKey ? (
                <div className="flex-grow flex flex-col items-center justify-center p-6 text-center text-gray-500">
                   <KeyRound size={40} className="mb-4 text-orange-300"/>
@@ -290,7 +369,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                <>
                 <div className="p-4 overflow-y-auto flex-grow space-y-5 custom-scrollbar">
                   
-                  {/* Prompt */}
+                  {/* Prompt Box */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
                        <label className="text-xs font-bold text-gray-500 uppercase">Prompt</label>
@@ -323,7 +402,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                     </div>
                   </div>
 
-                  {/* Context Accordion */}
+                  {/* Enhanced Context Accordion */}
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <button 
                         onClick={() => setShowContext(!showContext)} 
@@ -334,18 +413,62 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                     </button>
                     
                     {showContext && (
-                      <div className="p-3 space-y-3 bg-white animate-in slide-in-from-top-1">
-                        {['Party', 'Location', 'NPC'].map((key) => (
-                          <div key={key}>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">{key}</label>
-                            <input 
-                              className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" 
-                              value={(context as any)[key.toLowerCase()]}
-                              onChange={e => setContext({ ...context, [key.toLowerCase()]: e.target.value })}
-                              placeholder={`Current ${key} info...`}
-                            />
-                          </div>
-                        ))}
+                      <div className="p-3 space-y-4 bg-white animate-in slide-in-from-top-1">
+                        
+                        {/* 1. Character Selector */}
+                        <div>
+                           <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><Users size={10}/> Party Members</label>
+                           {partyCharacters.length === 0 ? (
+                             <div className="text-xs text-gray-400 italic">No characters found in party.</div>
+                           ) : (
+                             <div className="space-y-2">
+                               <div className="max-h-24 overflow-y-auto border rounded p-1 space-y-1 bg-gray-50">
+                                 {partyCharacters.map((c: any) => (
+                                   <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-white rounded cursor-pointer">
+                                     <input 
+                                       type="checkbox" 
+                                       checked={selectedCharIds.has(c.id)} 
+                                       onChange={() => toggleCharSelection(c.id)}
+                                       className="rounded text-indigo-600 focus:ring-indigo-500"
+                                     />
+                                     <span className="text-xs text-gray-700 truncate">{c.name}</span>
+                                   </label>
+                                 ))}
+                               </div>
+                               {/* Data Toggles */}
+                               <div className="flex gap-2">
+                                 <button onClick={() => setIncludeCharDesc(!includeCharDesc)} className={`flex-1 text-[10px] py-1 border rounded flex items-center justify-center gap-1 transition-colors ${includeCharDesc ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-400'}`}>
+                                    {includeCharDesc ? <Eye size={10}/> : <EyeOff size={10}/>} Desc/Weakness
+                                 </button>
+                                 <button onClick={() => setIncludeCharStats(!includeCharStats)} className={`flex-1 text-[10px] py-1 border rounded flex items-center justify-center gap-1 transition-colors ${includeCharStats ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-400'}`}>
+                                    {includeCharStats ? <Eye size={10}/> : <EyeOff size={10}/>} Stats (HP/WP)
+                                 </button>
+                               </div>
+                             </div>
+                           )}
+                        </div>
+
+                        <div className="w-full h-px bg-gray-100"></div>
+
+                        {/* 2. Text Inputs */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Location / Setting</label>
+                          <input 
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" 
+                            value={contextLocation}
+                            onChange={e => setContextLocation(e.target.value)}
+                            placeholder="e.g. A haunted crypt, Dark forest..."
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Involved NPCs</label>
+                          <input 
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" 
+                            value={contextNpc}
+                            onChange={e => setContextNpc(e.target.value)}
+                            placeholder="e.g. The mayor, A nervous goblin..."
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -353,7 +476,7 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
 
                 <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
                   <Button onClick={handleGenerate} disabled={loading} className="w-full justify-center shadow-sm" icon={loading ? RefreshCw : Sparkles} variant="primary" loading={loading}>
-                    {loading ? 'Conjuring...' : 'Generate'}
+                    {loading ? 'Conjuring...' : 'Generate (Gemini 2.0)'}
                   </Button>
                 </div>
                </>
@@ -361,8 +484,8 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
           </div>
         )}
 
-        {/* === LIBRARY: LEFT PANE (LIST) === */}
-        {activeTab === 'saved' && (
+        {/* === LEFT PANE: LIBRARY LIST === */}
+        {activeTab === 'saved' && !isMaximized && (
           <div className="w-full md:w-1/3 border-r border-gray-200 bg-white flex flex-col h-1/2 md:h-full z-10">
             <div className="p-3 border-b border-gray-100 bg-gray-50/50">
               <div className="relative group">
@@ -373,34 +496,16 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                   value={searchTerm} 
                   onChange={e => setSearchTerm(e.target.value)} 
                 />
-                {searchTerm && (
-                    <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                        <X size={12}/>
-                    </button>
-                )}
+                {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X size={12}/></button>}
               </div>
             </div>
             <div className="flex-grow overflow-y-auto custom-scrollbar">
-              {isLoadingIdeas ? (
-                <div className="flex justify-center py-8"><LoadingSpinner size="sm"/></div>
-              ) : filteredIdeas.length === 0 ? (
-                <div className="p-8 text-center">
-                    <BookOpen size={32} className="mx-auto text-gray-200 mb-2"/>
-                    <p className="text-gray-400 text-xs">No saved items found.</p>
-                </div>
-              ) : (
+              {isLoadingIdeas ? <div className="flex justify-center py-8"><LoadingSpinner size="sm"/></div> : filteredIdeas.length === 0 ? <div className="p-8 text-center"><BookOpen size={32} className="mx-auto text-gray-200 mb-2"/><p className="text-gray-400 text-xs">No saved items found.</p></div> : (
                 <div className="divide-y divide-gray-50">
                   {filteredIdeas.map((idea: any) => (
-                    <button
-                      key={idea.id}
-                      onClick={() => { setSelectedIdea(idea); setIsEditingLibrary(false); }}
-                      className={`w-full text-left p-3 hover:bg-gray-50 transition-all ${selectedIdea?.id === idea.id ? 'bg-indigo-50 border-l-4 border-indigo-500 pl-2' : 'border-l-4 border-transparent pl-3'}`}
-                    >
+                    <button key={idea.id} onClick={() => { setSelectedIdea(idea); setIsEditingLibrary(false); }} className={`w-full text-left p-3 hover:bg-gray-50 transition-all ${selectedIdea?.id === idea.id ? 'bg-indigo-50 border-l-4 border-indigo-500 pl-2' : 'border-l-4 border-transparent pl-3'}`}>
                       <div className={`font-bold text-sm truncate mb-0.5 ${selectedIdea?.id === idea.id ? 'text-indigo-700' : 'text-gray-700'}`}>{idea.prompt}</div>
-                      <div className="text-[10px] text-gray-400 flex justify-between items-center">
-                        <span>{new Date(idea.created_at).toLocaleDateString()}</span>
-                        <span className="bg-gray-100 px-1.5 py-0.5 rounded-full">{idea.response.length} chars</span>
-                      </div>
+                      <div className="text-[10px] text-gray-400 flex justify-between items-center"><span>{new Date(idea.created_at).toLocaleDateString()}</span><span className="bg-gray-100 px-1.5 py-0.5 rounded-full">{idea.response.length} chars</span></div>
                     </button>
                   ))}
                 </div>
@@ -409,8 +514,8 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
           </div>
         )}
 
-        {/* === MAIN EDITOR/PREVIEW PANE === */}
-        <div className="w-full md:w-2/3 bg-gray-100/50 flex flex-col h-1/2 md:h-full overflow-hidden relative border-t md:border-t-0 md:border-l border-gray-200" ref={resultRef}>
+        {/* === RIGHT PANE: EDITOR === */}
+        <div className={`flex flex-col h-1/2 md:h-full overflow-hidden relative border-t md:border-t-0 md:border-l border-gray-200 transition-all duration-300 ${isMaximized ? 'w-full' : 'w-full md:w-2/3'}`} ref={resultRef}>
           
           {(activeTab === 'generate' ? editorContent : selectedIdea) ? (
             <>
@@ -420,23 +525,23 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${activeTab === 'generate' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
                     {activeTab === 'generate' ? 'Preview' : (isEditingLibrary ? 'Editing' : 'Saved')}
                   </span>
-                  {activeTab === 'saved' && <span className="text-xs text-gray-400 hidden sm:inline">| Last edited: {new Date(selectedIdea.created_at).toLocaleDateString()}</span>}
+                  
+                  {/* MAXIMIZE TOGGLE */}
+                  <button 
+                    onClick={() => setIsMaximized(!isMaximized)} 
+                    className="p-1.5 hover:bg-gray-100 rounded text-gray-500 ml-1" 
+                    title={isMaximized ? "Show Prompt" : "Hide Prompt"}
+                  >
+                    {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                  </button>
                 </div>
                 
                 <div className="flex items-center gap-2">
                   {activeTab === 'generate' && (
                     <>
-                      <button 
-                        onClick={copyToClipboard} 
-                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium transition-all ${isCopied ? 'bg-green-100 text-green-700' : 'hover:bg-gray-100 text-gray-600'}`}
-                      >
-                        {isCopied ? <Check size={14}/> : <Copy size={14}/>}
-                        <span className="hidden sm:inline">{isCopied ? 'Copied' : 'Copy'}</span>
-                      </button>
+                      <button onClick={copyToClipboard} className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium transition-all ${isCopied ? 'bg-green-100 text-green-700' : 'hover:bg-gray-100 text-gray-600'}`}>{isCopied ? <Check size={14}/> : <Copy size={14}/>}<span className="hidden sm:inline">{isCopied ? 'Copied' : 'Copy'}</span></button>
                       <div className="w-px h-4 bg-gray-200 mx-1"/>
-                      <Button size="xs" variant="primary" onClick={() => saveMutation.mutate({ party_id: partyId, user_id: user?.id, prompt: prompt || 'Generated Content', response: editorContent, context })} loading={saveMutation.isPending}>
-                        Save to Library
-                      </Button>
+                      <Button size="xs" variant="primary" onClick={() => saveMutation.mutate({ party_id: partyId, user_id: user?.id, prompt: prompt || 'Generated Content', response: editorContent, context: { ...context, location: contextLocation, npc: contextNpc } })} loading={saveMutation.isPending}>Save to Library</Button>
                     </>
                   )}
                   
@@ -472,30 +577,16 @@ export function StoryHelperApp({ partyId, initialPartyData = '' }: { partyId: st
                     commands={customCommands}
                     className="h-full border-none"
                     textareaProps={{ placeholder: "Content will appear here..." }}
-                    // Use Custom Renderer for preview
                     previewOptions={{
                       components: {
                         div: ({ children, className }) => {
-                           if (className?.includes('markdown-body')) {
-                             return <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">{children}</div>;
-                           }
+                           if (className?.includes('markdown-body')) return <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">{children}</div>;
                            return <div className={className}>{children}</div>;
                         },
-                        // Pass props to our renderer
-                        code: (props: any) => {
-                            // This is a bit of a hack to let our renderer handle the markdown string directly
-                            // MDEditor usually parses before this. 
-                            // Instead, we rely on `renderPreview` below for the full custom render.
-                            return <code {...props} /> 
-                        }
+                        code: (props: any) => <code {...props} /> 
                       }
                     }}
-                    // CRITICAL: Overwrite the renderPreview to use our component completely
-                    renderPreview={(markdownContent) => (
-                       <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">
-                          <HomebrewRenderer content={markdownContent} />
-                       </div>
-                    )}
+                    renderPreview={(markdownContent) => <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar"><HomebrewRenderer content={markdownContent} /></div>}
                   />
                 ) : (
                   <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">
