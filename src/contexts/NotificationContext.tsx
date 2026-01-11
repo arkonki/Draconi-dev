@@ -2,7 +2,6 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { useAuth } from './AuthContext';
 import { notificationApi, UINotificationState, transformDBToState } from '../lib/api/notifications';
 
-// Define the shape of our Context
 interface NotificationContextType {
   settings: UINotificationState | null;
   isLoading: boolean;
@@ -13,7 +12,6 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
-// Default fallback settings
 const defaultSettings: UINotificationState = {
   email: { newMessage: true, partyInvite: true, sessionScheduled: true, systemUpdates: false },
   desktop: { newMessage: true, partyInvite: true, sessionScheduled: true, diceRolls: true },
@@ -25,33 +23,25 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [settings, setSettings] = useState<UINotificationState>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Audio Refs (Pre-load sounds to avoid lag)
+  // Audio Refs
   const diceAudio = useRef<HTMLAudioElement | null>(null);
   const notifAudio = useRef<HTMLAudioElement | null>(null);
 
+  // Keep a ref to settings to access latest value inside closures/effects without dependency issues
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+
   useEffect(() => {
-    // Initialize Audio Objects
     diceAudio.current = new Audio('/sounds/dice-roll.mp3');
     notifAudio.current = new Audio('/sounds/notification.mp3');
-    
-    // Request Desktop Permission on mount
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
   }, []);
 
-  // Load Settings from DB
   useEffect(() => {
     async function loadSettings() {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
+      if (!user) { setIsLoading(false); return; }
       try {
         const data = await notificationApi.getSettings(user.id);
-        if (data) {
-          setSettings(transformDBToState(data));
-        }
+        if (data) setSettings(transformDBToState(data));
       } catch (error) {
         console.error('Error loading notification settings', error);
       } finally {
@@ -61,75 +51,80 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     loadSettings();
   }, [user]);
 
-  // 1. Logic: Update Settings (Saves to DB + Updates Local State)
   const updateSettings = async (newSettings: UINotificationState) => {
     if (!user) return;
-    // Optimistic update
     setSettings(newSettings);
     await notificationApi.updateSettings(user.id, newSettings);
   };
 
-  // 2. Logic: Play Sound
   const playSound = (type: 'dice' | 'notification') => {
-    if (!settings.sounds.enabled) return; // Master mute
+    const currentSettings = settingsRef.current; // Use Ref for latest state
+    if (!currentSettings.sounds.enabled) return;
 
-    const volume = settings.sounds.volume / 100; // Convert 0-100 to 0.0-1.0
+    const volume = currentSettings.sounds.volume / 100;
 
-    if (type === 'dice' && settings.sounds.diceRolls && diceAudio.current) {
+    if (type === 'dice' && currentSettings.sounds.diceRolls && diceAudio.current) {
       diceAudio.current.volume = volume;
-      diceAudio.current.currentTime = 0; // Reset to start
+      diceAudio.current.currentTime = 0;
       diceAudio.current.play().catch(e => console.warn("Audio play failed", e));
     }
     
-    if (type === 'notification' && settings.sounds.notifications && notifAudio.current) {
+    if (type === 'notification' && currentSettings.sounds.notifications && notifAudio.current) {
       notifAudio.current.volume = volume;
       notifAudio.current.currentTime = 0;
       notifAudio.current.play().catch(e => console.warn("Audio play failed", e));
     }
   };
 
-  // 3. Logic: Desktop Notification (PWA Enhanced)
   const sendDesktopNotification = async (title: string, body: string, type: 'message' | 'invite' | 'session') => {
-    // Check Browser Support
+    const currentSettings = settingsRef.current;
+    
+    // 1. Browser Check
     if (!('Notification' in window)) return;
 
-    // Check Permissions
+    // 2. Permission Check
     let permission = Notification.permission;
     if (permission === 'default') {
       permission = await Notification.requestPermission();
     }
-    if (permission !== 'granted') return;
+    if (permission !== 'granted') {
+      console.warn("Notification permission not granted");
+      return;
+    }
 
-    // Check User Settings
+    // 3. Settings Check
     const shouldSend = 
-      (type === 'message' && settings.desktop.newMessage) ||
-      (type === 'invite' && settings.desktop.partyInvite) ||
-      (type === 'session' && settings.desktop.sessionScheduled);
+      (type === 'message' && currentSettings.desktop.newMessage) ||
+      (type === 'invite' && currentSettings.desktop.partyInvite) ||
+      (type === 'session' && currentSettings.desktop.sessionScheduled);
 
     if (!shouldSend) return;
 
+    // 4. Send Notification (with Fallback)
     try {
-      // Attempt 1: Service Worker (Best for PWA/Mobile)
       if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.ready;
-        
-        // This creates a system notification that works on Android/iOS/Desktop
+        // TIMEOUT RACE: If SW isn't ready in 500ms, use standard notification
+        const registration = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise((_, reject) => setTimeout(() => reject('SW_TIMEOUT'), 500))
+        ]) as ServiceWorkerRegistration;
+
         await registration.showNotification(title, {
           body: body,
-          icon: '/pwa-192x192.png', // Ensure this file exists in public/
-          badge: '/pwa-192x192.png', // Small icon for Android status bar
-          tag: type, // Grouping tag (prevents spamming if multiple come in at once)
-          renotify: true, // Vibrate again even if tag is the same
-          data: { url: window.location.href } // Payload for click handling
+          icon: '/pwa-192x192.png',
+          badge: '/pwa-192x192.png',
+          tag: type,
+          renotify: true,
+          data: { url: window.location.href }
         });
         return;
       }
     } catch (e) {
-      console.warn('Service Worker notification failed, falling back to standard API', e);
+      // Fall through to standard notification
+      if (e !== 'SW_TIMEOUT') console.warn('Service Worker notification failed:', e);
     }
 
-    // Attempt 2: Fallback (Standard Desktop Web API)
-    // This works for localhost or if SW is not ready
+    // Fallback: Standard Web API
     new Notification(title, { 
       body, 
       icon: '/pwa-192x192.png' 

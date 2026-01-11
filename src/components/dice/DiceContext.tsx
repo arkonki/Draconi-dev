@@ -1,7 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { parseDiceString } from '../../lib/dice-utils';
-import { useNotifications } from '../../contexts/NotificationContext';
-// 1. Import API
 import { sendMessage } from '../../lib/api/chat';
 
 // --- Types ---
@@ -58,7 +56,6 @@ interface DiceContextType {
   setBane: (active: boolean) => void;
   addRollToHistory: (entry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => void;
   clearHistory: () => void;
-  // 2. Add function to interface
   shareRollToParty: (partyId: string, userId: string, entry: RollHistoryEntry) => Promise<void>;
 }
 
@@ -67,8 +64,7 @@ const DiceContext = createContext<DiceContextType | undefined>(undefined);
 const MAX_HISTORY = 20; 
 
 export function DiceProvider({ children }: { children: ReactNode }) {
-  const { playSound } = useNotifications();
-
+  
   const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<RollConfig | null>(null);
   const [dicePool, setDicePool] = useState<DiceType[]>([]);
@@ -188,8 +184,8 @@ export function DiceProvider({ children }: { children: ReactNode }) {
     }
   }, [currentConfig, dicePool]);
 
+  // MOVED SOUND OUT OF HERE
   const addRollToHistory = useCallback((entryData: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
-    playSound('dice');
     setRollHistory(prev => {
       const newEntry: RollHistoryEntry = {
         ...entryData,
@@ -202,13 +198,12 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       }
       return updatedHistory;
     });
-  }, [playSound]);
+  }, []);
 
   const clearHistory = useCallback(() => {
     setRollHistory([]);
   }, []);
 
-  // 3. Implement Share Function
   const shareRollToParty = useCallback(async (partyId: string, userId: string, entry: RollHistoryEntry) => {
     let message = `🎲 **${entry.description || 'Dice Roll'}**: `;
     
@@ -243,7 +238,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
       setBane,
       addRollToHistory,
       clearHistory,
-      shareRollToParty, // Export it
+      shareRollToParty,
     }}>
       {children}
     </DiceContext.Provider>

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom'; 
 import { useAuth } from '../../contexts/AuthContext';
 import { useDice, DiceType, DiceRollResult } from './DiceContext';
+// 1. IMPORT NOTIFICATIONS
+import { useNotifications } from '../../contexts/NotificationContext';
 import { 
   Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
   ShieldQuestion, GraduationCap, Zap, Moon, Share 
@@ -26,15 +28,17 @@ function Loader2({ className }: { className?: string }) {
 }
 
 export function DiceRollerModal() {
-  const { id: urlPartyId } = useParams<{ id: string }>(); // ID from URL (Party View)
+  const { id: urlPartyId } = useParams<{ id: string }>(); 
   const { user } = useAuth();
   
-  // 1. Get the current character to check for party membership
+  // 2. GET PLAY SOUND
+  const { playSound } = useNotifications();
+
   const { 
     markSkillThisSession, 
     performRest, 
     setInitiativeForCombatant,
-    currentCharacter 
+    character: currentCharacter 
   } = useCharacterSheetStore();
 
   const { 
@@ -44,8 +48,6 @@ export function DiceRollerModal() {
     shareRollToParty 
   } = useDice();
 
-  // 2. Determine Effective Party ID
-  // Priority: URL (we are looking at a specific party) -> Character's Party (we are looking at a sheet)
   const effectivePartyId = urlPartyId || currentCharacter?.party_id;
 
   const [results, setResults] = useState<DiceRollResult[]>([]);
@@ -57,7 +59,7 @@ export function DiceRollerModal() {
   const [modifierCount, setModifierCount] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
-  const [lastRolledEntry, setLastRolledEntry] = useState<any>(null);
+  const [lastRolledEntry, setLastRolledEntry] = useState<any>(null); 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const rollMode = currentConfig?.rollMode;
@@ -89,6 +91,9 @@ export function DiceRollerModal() {
 
   const handleRoll = useCallback(() => {
     if (dicePool.length === 0) return;
+
+    // 3. TRIGGER SOUND IMMEDIATELY
+    playSound('dice');
 
     setIsRolling(true);
     setResults([]);
@@ -200,7 +205,7 @@ export function DiceRollerModal() {
       }
     }, 60);
 
-  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, rollMode, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll]);
+  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, rollMode, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll, playSound]);
 
   useEffect(() => {
     if (!showDiceRoller) {
@@ -211,10 +216,9 @@ export function DiceRollerModal() {
     }
   }, [showDiceRoller]);
 
-  // 3. Update Share Handler to use effectivePartyId
   const handleShare = async (entry: any) => {
     if (effectivePartyId && user && shareRollToParty) {
-      // Add visual feedback
+      // Visual feedback
       const btn = document.activeElement as HTMLElement;
       if (btn) {
          const originalText = btn.innerText;
@@ -287,7 +291,6 @@ export function DiceRollerModal() {
                       </div>
 
                       {/* HISTORY SHARE BUTTON */}
-                      {/* Check effectivePartyId instead of just URL ID */}
                       {effectivePartyId && (
                         <button 
                           onClick={() => handleShare(entry)}
