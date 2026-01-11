@@ -19,12 +19,13 @@ import {
   nextRound,
 } from '../../lib/api/encounters';
 import { fetchAllMonsters } from '../../lib/api/monsters';
-// IMPORT THE HOOK HERE
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import {
-  PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User, Sword, RefreshCw, Crosshair, Target, Link as LinkIcon
+  PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, 
+  ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User, 
+  Sword, RefreshCw, Crosshair, Target, Link as LinkIcon, Check // <--- Added Check icon
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
@@ -129,17 +130,12 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
 
   const isAttackerMonster = !!attacker.monster_id;
 
-  // DEDUPLICATE TARGETS (Collapse multi-turn monsters into one entry)
   const uniqueTargets = useMemo(() => {
     const seen = new Set<string>();
     return targets.filter(t => {
-      // Players are usually unique by definition of ID
       if (!t.monster_id) return true; 
-
-      // For monsters, group by ID + Base Name (stripping " (Act N)")
       const baseName = t.display_name.replace(/ \(Act \d+\)$/, '');
       const key = `${t.monster_id}:${baseName}`;
-      
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -163,9 +159,7 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
               {sortedTargets.map(t => { 
                 const isFoe = (isAttackerMonster && !t.monster_id) || (!isAttackerMonster && !!t.monster_id); 
                 const isDead = t.current_hp === 0; 
-                // Clean name for display (Remove " (Act 1)")
                 const displayName = t.monster_id ? t.display_name.replace(/ \(Act \d+\)$/, '') : t.display_name;
-                
                 return (
                   <div key={t.id} onClick={() => !isDead && setSelectedTargetId(t.id)} className={`p-3 rounded border flex justify-between items-center cursor-pointer transition-all ${selectedTargetId === t.id ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
                     <div>
@@ -319,6 +313,9 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [temporaryNotes, setTemporaryNotes] = useState('');
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
+  
+  // NEW: State for Toast Feedback
+  const [feedbackToast, setFeedbackToast] = useState<{ id: number; text: string } | null>(null);
 
   const { data: allEncounters, isLoading: loadingEnc } = useQuery<Encounter[]>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
   const { data: allMonsters } = useQuery<MonsterData[]>({ queryKey: ['allMonsters'], queryFn: fetchAllMonsters });
@@ -327,10 +324,8 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const { data: encounterDetails } = useQuery<Encounter | null>({ queryKey: ['encounterDetails', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)), enabled: !!currentEncounterId });
   const { data: combatantsData } = useQuery<EncounterCombatant[]>({ queryKey: ['encounterCombatants', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])), enabled: !!currentEncounterId });
   
-  // ACTIVATE REALTIME HOOK
   useEncounterRealtime(currentEncounterId);
 
-  // DERIVED
   const monstersById = useMemo(() => new Map((allMonsters ?? []).map((m) => [m.id, m] as const)), [allMonsters]);
   const combatants = useMemo(() => (combatantsData?.slice().sort((a, b) => { const ia = a.initiative_roll ?? 1000; const ib = b.initiative_roll ?? 1000; if (ia !== ib) return ia - ib; return (a.display_name ?? '').localeCompare(b.display_name ?? ''); }) || []), [combatantsData]);
   const activeCombatant = useMemo(() => combatants.find(c => c.id === selectedActorId), [combatants, selectedActorId]);
@@ -340,7 +335,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   useEffect(() => { if (!loadingEnc && (!allEncounters || allEncounters.length === 0)) setViewMode('create'); }, [allEncounters, loadingEnc]);
   useEffect(() => { if(encounterDetails) setEditedName(encounterDetails.name); }, [encounterDetails]);
   
-  // Sync editable stats when server data changes
   useEffect(() => { 
     if (!combatants) return; 
     const init: any = {}; 
@@ -354,24 +348,20 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     setEditingStats(init); 
   }, [combatants]);
   
-  // SMART NEXT ACTOR
   useEffect(() => { 
     if (encounterDetails?.status === 'active' && combatants.length > 0) {
       const currentSelected = combatants.find(c => c.id === selectedActorId);
       if (!selectedActorId || (currentSelected && (currentSelected.has_acted || (currentSelected.monster_id && currentSelected.current_hp === 0)))) {
-        // Auto-select next actor: must not have acted, must not be defeated
         const next = combatants.find(c => !c.has_acted && !(c.monster_id && c.current_hp === 0));
         if (next) setSelectedActorId(next.id);
       }
     }
   }, [combatants, encounterDetails, selectedActorId]);
 
-  // CLEANUP SELECTION
   useEffect(() => {
     if (selectedActorId && !combatants.find(c => c.id === selectedActorId)) setSelectedActorId(null);
   }, [combatants, selectedActorId]);
 
-  // MUTATIONS
   const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
   const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allEncounters'] }) });
   const duplicateEncounterMu = useMutation({ mutationFn: ({id, name}:any) => duplicateEncounter(id, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); } });
@@ -382,12 +372,33 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const updateCombatantMu = useMutation({ mutationFn: ({id, updates}:any) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const swapInitiativeMu = useMutation({ mutationFn: swapInitiative, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); setSwapSourceId(null); } });
   const appendLogMu = useMutation({ mutationFn: (entry: any) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
-  
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
   const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
   const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if(combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
 
-  // HANDLERS
+  // HANDLER FOR ADDING MONSTERS WITH FEEDBACK
+  const handleAddMonster = (id: string, count: number, customName: string) => {
+    const m = monstersById.get(id);
+    const ferocity = m?.stats?.FEROCITY || 1;
+    const nameToUse = customName || m?.name || 'Monster';
+
+    for(let i=1; i<=count; i++) { 
+      const base = count > 1 ? `${nameToUse} ${i}` : nameToUse; 
+      for(let f=1; f<=ferocity; f++) { 
+        addMonsterMu.mutate({ 
+          encounterId: currentEncounterId!, 
+          monsterId: id, 
+          customName: ferocity > 1 ? `${base} (Act ${f})` : base, 
+          initiativeRoll: null 
+        }); 
+      } 
+    }
+    
+    // Show Feedback Toast
+    setFeedbackToast({ id: Date.now(), text: `Added ${count}x ${nameToUse}` });
+    setTimeout(() => setFeedbackToast(null), 3000);
+  };
+
   const handleSaveStats = (id: string) => {
     const stats = editingStats[id];
     const c = combatants.find(x => x.id === id);
@@ -398,7 +409,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const updates: any = {};
     let siblings = [c];
 
-    // If monster, find linked siblings (same monster type, different cards)
     if (c.monster_id && combatantsData) {
       siblings = getSiblings(c, combatantsData);
     }
@@ -413,7 +423,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
     
     if (Object.keys(updates).length > 0) {
-      // Update ALL siblings to keep them in sync
       siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
     }
   };
@@ -421,7 +430,6 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
     if (c && c.monster_id && combatantsData) {
-      // If removing a monster, remove ALL cards (siblings) associated with that entity
       const siblings = getSiblings(c, combatantsData);
       siblings.forEach(sib => removeCombatantMu.mutate(sib.id));
     } else {
@@ -449,16 +457,12 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (!activeCombatant) return;
     const target = combatants.find(c => c.id === targetId);
     if (!target) return;
-    
     const newHp = Math.max(0, target.current_hp - dmg);
-    
-    // Use shared handler to ensure synced updates
     const updates: any = { current_hp: newHp };
     let siblings = [target];
     if (target.monster_id && combatantsData) {
       siblings = getSiblings(target, combatantsData);
     }
-
     siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
     appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: target.display_name, damage: dmg });
     setIsAttackModalOpen(false);
@@ -475,6 +479,14 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           {viewMode === 'details' && (<><Button variant="ghost" Icon={PlusCircle} onClick={() => setViewMode('create')}>New</Button><Button onClick={() => setShowEncounterList(true)} Icon={List} variant="secondary">List</Button>{encounterDetails?.status === 'planning' && <Button variant="primary" Icon={Play} onClick={() => startEncounterMu.mutate()}>Start</Button>}{encounterDetails?.status === 'active' && (<><Button variant="primary" Icon={SkipForward} onClick={() => nextRoundMu.mutate()}>Next Round</Button><Button variant="outline" Icon={Square} onClick={() => endEncounterMu.mutate(currentEncounterId!)}>End</Button></>)}</>)}
         </div>
       </header>
+
+      {/* FEEDBACK TOAST */}
+      {feedbackToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-stone-900 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
+          <div className="bg-green-500 rounded-full p-1"><Check size={12} className="text-white" /></div>
+          <span className="font-medium text-sm">{feedbackToast.text}</span>
+        </div>
+      )}
 
       {viewMode === 'create' ? (
          <div className="bg-white p-8 rounded-xl shadow-sm max-w-md mx-auto text-center"><h3 className="text-xl font-bold mb-4">Start a New Encounter</h3><input className="w-full p-3 border rounded-lg mb-4" placeholder="Name" value={newEncounterName} onChange={e => setNewEncounterName(e.target.value)}/><div className="flex justify-center gap-3"><Button variant="primary" onClick={() => createEncounterMu.mutate(newEncounterName)}>Create</Button><Button variant="ghost" onClick={() => setViewMode('details')}>Cancel</Button></div></div>
@@ -497,7 +509,15 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           </div>
         </div>
       )}
-      <AddCombatantsModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} partyMembers={partyMembers} availablePartyMembers={availableParty} allMonsters={allMonsters || []} onAddParty={(id) => addCharacterMu.mutate({ encounterId: currentEncounterId!, characterId: id, initiativeRoll: null })} onAddMonster={(id, count, name) => { const m = monstersById.get(id); const ferocity = m?.stats?.FEROCITY || 1; for(let i=1; i<=count; i++) { const base = count > 1 ? `${name || m?.name} ${i}` : (name || m?.name); for(let f=1; f<=ferocity; f++) { addMonsterMu.mutate({ encounterId: currentEncounterId!, monsterId: id, customName: ferocity > 1 ? `${base} (Act ${f})` : base, initiativeRoll: null }); } } }} />
+      <AddCombatantsModal 
+        isOpen={isAddModalOpen} 
+        onClose={() => setIsAddModalOpen(false)} 
+        partyMembers={partyMembers} 
+        availablePartyMembers={availableParty} 
+        allMonsters={allMonsters || []} 
+        onAddParty={(id) => addCharacterMu.mutate({ encounterId: currentEncounterId!, characterId: id, initiativeRoll: null })} 
+        onAddMonster={handleAddMonster} 
+      />
       <InitiativeDrawModal isOpen={isInitModalOpen} onClose={() => setIsInitModalOpen(false)} combatants={combatants} onApply={handleInitApply} />
       {isAttackModalOpen && activeCombatant && (
         <AttackResolutionModal 

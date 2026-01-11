@@ -1,41 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore'; 
-import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull, Zap } from 'lucide-react';
+import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull, Zap, ChevronDown, Bell } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
+import { useAuth } from '../../contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { PartyChat } from '../party/PartyChat'; // Reuse your chat component
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 
-// --- SUB-COMPONENT: EDITABLE STAT BOX ---
-const StatInput = ({ 
-  value, 
-  max, 
-  icon: Icon, 
-  colorClass, 
-  onChange,
-  disabled 
-}: { 
-  value: number, 
-  max: number, 
-  icon: any, 
-  colorClass: string, 
-  onChange: (val: number) => void,
-  disabled: boolean
-}) => {
+// --- HELPER: Editable Stat Box ---
+const StatInput = ({ value, max, icon: Icon, colorClass, onChange, disabled }: any) => {
   const [localVal, setLocalVal] = useState(String(value));
-
-  useEffect(() => {
-    setLocalVal(String(value));
-  }, [value]);
-
+  useEffect(() => { setLocalVal(String(value)); }, [value]);
   const handleBlur = () => {
     const num = parseInt(localVal);
-    if (!isNaN(num) && num !== value) {
-      onChange(num);
-    } else {
-      setLocalVal(String(value)); // Reset on invalid
-    }
+    if (!isNaN(num) && num !== value) onChange(num);
+    else setLocalVal(String(value));
   };
-
   return (
     <div className="flex items-center bg-white border border-stone-200 rounded overflow-hidden shadow-sm h-7">
       <div className={`px-1.5 h-full flex items-center justify-center bg-stone-50 border-r border-stone-200`}>
@@ -50,23 +32,17 @@ const StatInput = ({
         onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         disabled={disabled}
       />
-      <div className="px-1.5 h-full flex items-center justify-center text-[10px] text-stone-400 bg-stone-50 border-l border-stone-200">
-        /{max}
-      </div>
+      <div className="px-1.5 h-full flex items-center justify-center text-[10px] text-stone-400 bg-stone-50 border-l border-stone-200">/{max}</div>
     </div>
   );
 };
 
-// --- SUB-COMPONENT: PLAYER COMBATANT CARD ---
+// --- HELPER: Combatant Card ---
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
-  
-  // Local state for initiative input
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
 
-  useEffect(() => {
-    setInitiativeValue(combatant.initiative_roll?.toString() ?? '');
-  }, [combatant.initiative_roll]);
+  useEffect(() => { setInitiativeValue(combatant.initiative_roll?.toString() ?? ''); }, [combatant.initiative_roll]);
 
   const handleSetInitiative = () => {
     const initiative = parseInt(initiativeValue, 10);
@@ -81,9 +57,6 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const isMonster = !isPlayer;
   const isDefeated = isMonster && combatant.current_hp === 0;
   const isDying = isPlayer && combatant.current_hp === 0;
-
-  // Permissions: I can edit myself, or I can edit monsters (if table rules allow players to track monster dmg)
-  // For safety, let's say I can only fully edit myself, but initiative/flip is open.
   const canEditStats = isMyCharacter; 
 
   let borderClass = isPlayer ? 'border-teal-600 bg-teal-50' : 'border-orange-700 bg-orange-50';
@@ -92,81 +65,30 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   
   return (
     <div className={`relative p-3 rounded-lg border-l-4 shadow-sm transition-all ${borderClass}`}>
-      {isDefeated && (
-        <div className="absolute inset-0 flex items-center justify-center z-0 opacity-20">
-          <span className="text-3xl font-black uppercase -rotate-12 text-black">Defeated</span>
-        </div>
-      )}
-
-      {/* HEADER: Name & Initiative */}
+      {isDefeated && <div className="absolute inset-0 flex items-center justify-center z-0 opacity-20"><span className="text-3xl font-black uppercase -rotate-12 text-black">Defeated</span></div>}
       <div className="relative z-10 flex justify-between items-start mb-2">
         <div className="flex-grow">
-          <p className={`font-bold leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>
-            {combatant.display_name}
-          </p>
+          <p className={`font-bold leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>{combatant.display_name}</p>
           {isDying && <span className="text-xs font-bold text-red-600 flex items-center gap-1"><Skull size={12}/> DYING</span>}
         </div>
-
-        {/* INITIATIVE BOX */}
         <div className="flex items-center gap-2 ml-2">
           {(!combatant.initiative_roll || isMyCharacter) && !isDefeated ? (
              <div className="flex items-center gap-1">
-               <input 
-                 type="number" 
-                 value={initiativeValue} 
-                 onChange={(e) => setInitiativeValue(e.target.value)} 
-                 placeholder="#" 
-                 className="w-8 px-1 py-0.5 text-center border rounded text-sm font-bold" 
-                 min="1" max="10" 
-                 disabled={isSaving} 
-               />
-               {!combatant.initiative_roll && (
-                 <Button onClick={handleSetInitiative} size="xs" variant="secondary" disabled={isSaving}>Set</Button>
-               )}
+               <input type="number" value={initiativeValue} onChange={(e) => setInitiativeValue(e.target.value)} placeholder="#" className="w-8 px-1 py-0.5 text-center border rounded text-sm font-bold" min="1" max="10" disabled={isSaving} />
+               {!combatant.initiative_roll && <Button onClick={handleSetInitiative} size="xs" variant="secondary" disabled={isSaving}>Set</Button>}
              </div>
           ) : (
-             <div className="w-8 h-8 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-lg shadow-sm">
-               {combatant.initiative_roll}
-             </div>
+             <div className="w-8 h-8 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-lg shadow-sm">{combatant.initiative_roll}</div>
           )}
         </div>
       </div>
-
-      {/* STATS ROW (HP & WP) */}
       <div className="relative z-10 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {/* HP INPUT */}
-          <StatInput 
-            value={combatant.current_hp || 0} 
-            max={combatant.max_hp || 10} 
-            icon={Heart} 
-            colorClass="text-red-600"
-            disabled={!canEditStats || isSaving}
-            onChange={(val) => updateCombatant(combatant.id, { current_hp: val })}
-          />
-
-          {/* WP INPUT (Only for players/NPCs with WP) */}
-          {(isPlayer || (combatant.max_wp || 0) > 0) && (
-            <StatInput 
-              value={combatant.current_wp || 0} 
-              max={combatant.max_wp || 10} 
-              icon={Zap} 
-              colorClass="text-blue-600"
-              disabled={!canEditStats || isSaving}
-              onChange={(val) => updateCombatant(combatant.id, { current_wp: val })}
-            />
-          )}
+          <StatInput value={combatant.current_hp || 0} max={combatant.max_hp || 10} icon={Heart} colorClass="text-red-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_hp: val })} />
+          {(isPlayer || (combatant.max_wp || 0) > 0) && <StatInput value={combatant.current_wp || 0} max={combatant.max_wp || 10} icon={Zap} colorClass="text-blue-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_wp: val })} />}
         </div>
-
-        {/* ACTION BUTTON */}
         {(isMyCharacter || !isPlayer) && !isDefeated && (
-          <Button 
-            onClick={() => updateCombatant(combatant.id, { has_acted: !combatant.has_acted })} 
-            size="xs" 
-            variant={hasActed ? "ghost" : "outline"}
-            className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"}
-            title="End Turn"
-          >
+          <Button onClick={() => updateCombatant(combatant.id, { has_acted: !combatant.has_acted })} size="xs" variant={hasActed ? "ghost" : "outline"} className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"} title="End Turn">
             {hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}
           </Button>
         )}
@@ -177,121 +99,196 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
 
 // --- MAIN COMPONENT ---
 export function EncounterChatView() {
-  const {
-    character,
-    activeEncounter,
-    encounterCombatants,
-    isLoadingEncounter,
-    fetchActiveEncounter,
-  } = useCharacterSheetStore();
+  const { user } = useAuth();
+  const { character, activeEncounter, encounterCombatants, isLoadingEncounter, fetchActiveEncounter } = useCharacterSheetStore();
 
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'combat' | 'chat'>('combat');
+  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // 1. LISTEN FOR PARTY EVENTS (Status Changes)
+  // 1. Fetch User's Parties
+  const { data: myParties = [] } = useQuery({
+    queryKey: ['myParties', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data } = await supabase.from('party_members').select('parties(id, name, members:party_members(user_id, name))').eq('user_id', user.id);
+      // Flatten structure
+      return data?.map((item: any) => ({
+        id: item.parties.id,
+        name: item.parties.name,
+        members: item.parties.members // Pass members for avatar logic in Chat
+      })) || [];
+    },
+    enabled: !!user
+  });
+
+  // 2. Set Default Party (Current Character's Party)
+  useEffect(() => {
+    if (character?.party_id) {
+      setSelectedPartyId(character.party_id);
+    } else if (myParties.length > 0 && !selectedPartyId) {
+      setSelectedPartyId(myParties[0].id);
+    }
+  }, [character?.party_id, myParties]);
+
+  // 3. Listen for Chat Messages (Unread Badge)
+  useEffect(() => {
+    if (!selectedPartyId) return;
+
+    const channel = supabase.channel(`global-chat-monitor`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          const msg = payload.new as any;
+          // If message is for one of my parties
+          const isRelevant = myParties.some(p => p.id === msg.party_id);
+          
+          if (isRelevant) {
+             // If closed OR if open but on wrong tab/party
+             if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== msg.party_id)) {
+                setUnreadCount(prev => prev + 1);
+             }
+          }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [myParties, isOpen, activeTab, selectedPartyId]);
+
+  // Clear unread when opening chat
+  useEffect(() => {
+    if (isOpen && activeTab === 'chat') {
+      setUnreadCount(0);
+    }
+  }, [isOpen, activeTab]);
+
+  // 4. Listen for Encounter Updates (Standard Logic)
   useEffect(() => {
     if (!character?.party_id || !character?.id) return;
-    
-    // Initial fetch
     fetchActiveEncounter(character.party_id, character.id);
-
-    const channel = supabase.channel(`party-monitor-${character.party_id}`)
-      .on(
-        'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'encounters', 
-          filter: `party_id=eq.${character.party_id}` 
-        },
-        () => {
-          if (character.party_id && character.id) {
-             fetchActiveEncounter(character.party_id, character.id);
-          }
-        }
-      )
-      .subscribe();
-
+    const channel = supabase.channel(`encounter-updates`).on('postgres_changes', { event: '*', schema: 'public', table: 'encounters' }, () => {
+       if (character.party_id && character.id) fetchActiveEncounter(character.party_id, character.id);
+    }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [character?.party_id, character?.id, fetchActiveEncounter]);
+  }, [character?.party_id, character?.id]);
 
-  // 2. LISTEN FOR COMBATANT CHANGES
   useEffect(() => {
-    if (!activeEncounter?.id || !character?.party_id || !character?.id) return;
-
-    const channel = supabase.channel(`combat-monitor-${activeEncounter.id}`)
-      .on(
-        'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'encounter_combatants', 
-          filter: `encounter_id=eq.${activeEncounter.id}` 
-        },
-        () => {
-           fetchActiveEncounter(character.party_id!, character.id!);
-        }
-      )
-      .subscribe();
-
+    if (!activeEncounter?.id) return;
+    const channel = supabase.channel(`combatant-updates`).on('postgres_changes', { event: '*', schema: 'public', table: 'encounter_combatants' }, () => {
+       if (character?.party_id && character?.id) fetchActiveEncounter(character.party_id, character.id);
+    }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeEncounter?.id, character?.party_id, character?.id, fetchActiveEncounter]);
+  }, [activeEncounter?.id]);
 
-  if (!character) return null;
+  if (!character && myParties.length === 0) return null;
 
   const isInActiveEncounter = activeEncounter?.status === 'active';
-  
-  const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => {
-    const ia = a.initiative_roll ?? 1000;
-    const ib = b.initiative_roll ?? 1000;
-    if (ia !== ib) return ia - ib;
-    return (a.display_name ?? '').localeCompare(b.display_name ?? '');
-  });
+  const currentParty = myParties.find(p => p.id === selectedPartyId);
+  const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => (a.initiative_roll ?? 1000) - (b.initiative_roll ?? 1000));
 
   return (
     <>
+      {/* --- FLOATING TOGGLE BUTTON --- */}
       <button 
-        className={`fixed bottom-4 right-4 p-4 rounded-full shadow-lg text-white transition-all duration-200 z-40 hover:scale-105 ${isInActiveEncounter ? 'bg-red-700 hover:bg-red-800 ring-2 ring-red-400 animate-pulse-slow' : 'bg-blue-600 hover:bg-blue-700'}`} 
+        className={`fixed bottom-4 right-4 p-4 rounded-full shadow-lg text-white transition-all duration-200 z-40 hover:scale-105 ${isInActiveEncounter ? 'bg-red-700 hover:bg-red-800 ring-2 ring-red-400' : 'bg-indigo-600 hover:bg-indigo-700'}`} 
         onClick={() => setIsOpen(!isOpen)}
       >
-        {isInActiveEncounter ? <Dices size={24} /> : <MessageSquare size={24} />}
+        <div className="relative">
+          {isInActiveEncounter ? <Dices size={24} /> : <MessageSquare size={24} />}
+          {unreadCount > 0 && (
+            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-white animate-bounce">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </div>
       </button>
 
+      {/* --- MODAL DRAWER --- */}
       {isOpen && (
-        <div className="fixed inset-0 bg-black/60 flex justify-end z-30 backdrop-blur-sm" onClick={() => setIsOpen(false)}>
-          <div className="bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/60 flex justify-end z-30 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsOpen(false)}>
+          <div className="bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300 transform transition-transform animate-in slide-in-from-right duration-300" onClick={(e) => e.stopPropagation()}>
             
-            <div className="flex justify-between items-center p-4 bg-stone-800 text-white shadow-md">
-              <div>
-                <h2 className="text-lg font-bold font-serif tracking-wide">{isInActiveEncounter ? 'Combat' : 'Party Chat'}</h2>
-                {isInActiveEncounter && <span className="text-xs text-green-400 uppercase font-bold">Round {activeEncounter.current_round}</span>}
+            {/* Header */}
+            <div className="p-3 bg-stone-800 text-white shadow-md flex-shrink-0">
+              <div className="flex justify-between items-center mb-3">
+                
+                {/* Party Selector (If multiple) */}
+                {myParties.length > 1 ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger>
+                      <button className="flex items-center gap-2 font-bold font-serif text-lg hover:text-stone-300 transition-colors">
+                        {currentParty?.name || 'Select Party'} <ChevronDown size={14} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-48 bg-stone-700 text-white border-stone-600">
+                      {myParties.map(p => (
+                        <DropdownMenuItem key={p.id} onSelect={() => setSelectedPartyId(p.id)} className="hover:bg-stone-600 focus:bg-stone-600 cursor-pointer">
+                          {p.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <h2 className="text-lg font-bold font-serif tracking-wide truncate pr-4">{currentParty?.name || 'Party View'}</h2>
+                )}
+
+                <button onClick={() => setIsOpen(false)} className="text-stone-400 hover:text-white"><X size={24} /></button>
               </div>
-              <button onClick={() => setIsOpen(false)} className="text-stone-400 hover:text-white"><X size={24} /></button>
+
+              {/* Tabs */}
+              <div className="flex bg-stone-900/50 rounded p-1 gap-1">
+                <button 
+                  onClick={() => setActiveTab('combat')}
+                  className={`flex-1 py-1.5 text-xs font-bold uppercase tracking-wider rounded transition-all ${activeTab === 'combat' ? 'bg-stone-600 text-white shadow' : 'text-stone-400 hover:text-stone-200'}`}
+                >
+                  Combat {isInActiveEncounter && <span className="ml-1 text-red-400">●</span>}
+                </button>
+                <button 
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex-1 py-1.5 text-xs font-bold uppercase tracking-wider rounded transition-all relative ${activeTab === 'chat' ? 'bg-indigo-600 text-white shadow' : 'text-stone-400 hover:text-stone-200'}`}
+                >
+                  Chat
+                  {unreadCount > 0 && <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full"></span>}
+                </button>
+              </div>
             </div>
 
-            <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/parchment-bg.png')] bg-repeat">
-              {isLoadingEncounter && !activeEncounter ? (
-                <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-stone-500" /></div>
-              ) : activeEncounter ? (
-                <div className="space-y-4">
-                  <div className="bg-white p-3 rounded shadow-sm border border-stone-200">
-                     <h3 className="font-bold text-lg text-stone-800">{activeEncounter.name}</h3>
-                     <p className="text-xs text-stone-500">{activeEncounter.description}</p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-end border-b border-stone-300 pb-1">
-                      <h4 className="font-bold text-stone-600 uppercase text-xs tracking-wider">Initiative Track</h4>
+            {/* CONTENT AREA */}
+            <div className="flex-grow overflow-hidden flex flex-col relative bg-[#f5f5f0]">
+              
+              {/* --- TAB 1: COMBAT --- */}
+              {activeTab === 'combat' && (
+                <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/parchment-bg.png')] bg-repeat">
+                  {isLoadingEncounter && !activeEncounter ? (
+                    <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-stone-500" /></div>
+                  ) : activeEncounter ? (
+                    <div className="space-y-4">
+                      <div className="bg-white p-3 rounded shadow-sm border border-stone-200">
+                         <h3 className="font-bold text-lg text-stone-800">{activeEncounter.name}</h3>
+                         <p className="text-xs text-stone-500">{activeEncounter.description}</p>
+                         <div className="mt-2 text-xs font-bold text-stone-400 uppercase tracking-widest text-right">Round {activeEncounter.current_round}</div>
+                      </div>
+                      
+                      <div className="space-y-2 pb-20">
+                        {sortedCombatants.length > 0 ? (
+                          sortedCombatants.map(c => <CombatantCard key={c.id} combatant={c} />)
+                        ) : <p className="text-sm text-stone-500 italic text-center py-4">No combatants.</p>}
+                      </div>
                     </div>
-                    
-                    {sortedCombatants.length > 0 ? (
-                      sortedCombatants.map(combatant => <CombatantCard key={combatant.id} combatant={combatant} />)
-                    ) : (
-                      <p className="text-sm text-stone-500 italic text-center py-4">The battlefield is empty.</p>
-                    )}
-                  </div>
+                  ) : (
+                     <div className="h-full flex flex-col items-center justify-center text-stone-400">
+                       <ShieldAlert className="w-12 h-12 mb-2 opacity-20" />
+                       <p className="italic">No active combat.</p>
+                     </div>
+                  )}
                 </div>
-              ) : (
-                 <div className="text-stone-500 text-center mt-10 italic">The party is resting.</div>
+              )}
+
+              {/* --- TAB 2: CHAT --- */}
+              {activeTab === 'chat' && selectedPartyId && (
+                 <div className="h-full flex flex-col">
+                    {/* We pass the party members from our fetch so avatars work */}
+                    <PartyChat partyId={selectedPartyId} members={currentParty?.members || []} />
+                 </div>
               )}
             </div>
           </div>
