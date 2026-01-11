@@ -1,4 +1,4 @@
- import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 import { clientsClaim } from 'workbox-core';
 import { registerRoute } from 'workbox-routing';
 import { CacheFirst } from 'workbox-strategies';
@@ -8,7 +8,12 @@ import { ExpirationPlugin } from 'workbox-expiration';
 // 1. Standard PWA cleanup and precaching (handled by the plugin)
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
-self.skipWaiting();
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 clientsClaim();
 
 // 2. Google Fonts Caching (Migrated from your vite config)

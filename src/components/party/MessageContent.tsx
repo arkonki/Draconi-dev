@@ -1,4 +1,4 @@
- import React from 'react';
+import React from 'react';
 
 // Regex patterns
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
