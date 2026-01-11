@@ -25,7 +25,7 @@ import { Button } from '../shared/Button';
 import {
   PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward, 
   ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User, 
-  Sword, RefreshCw, Crosshair, Target, Link as LinkIcon, Check // <--- Added Check icon
+  Sword, RefreshCw, Crosshair, Target, Link as LinkIcon, Check, Hourglass, AlertCircle
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
@@ -117,6 +117,65 @@ function LogEntry({ entry }: { entry: any }) {
 function CombatLogView({ log }: { log: any[] }) { 
   if (!log || log.length === 0) { return <p className="text-sm text-gray-500 mt-2 px-1">No events have been logged yet.</p>; } 
   return (<div className="space-y-1 divide-y divide-gray-100">{log.slice().reverse().map((entry, index) => (<LogEntry key={index} entry={entry} />))}</div>); 
+}
+
+// --- MODAL: WAIT / SWAP TURN ---
+interface WaitTurnModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  currentActor: EncounterCombatant;
+  allCombatants: EncounterCombatant[];
+  onSwap: (targetId: string) => void;
+}
+
+function WaitTurnModal({ isOpen, onClose, currentActor, allCombatants, onSwap }: WaitTurnModalProps) {
+  if (!isOpen) return null;
+
+  const candidates = allCombatants
+    .filter(c => c.id !== currentActor.id && !c.has_acted && (c.current_hp > 0 || c.monster_id))
+    .sort((a, b) => (a.initiative_roll || 0) - (b.initiative_roll || 0));
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-stone-200 flex flex-col max-h-[80vh]">
+        <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center">
+          <h3 className="text-lg font-bold font-serif flex items-center gap-2"><Hourglass className="w-5 h-5"/> Wait & Swap Initiative</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24}/></button>
+        </div>
+        <div className="p-4 bg-stone-50 overflow-y-auto">
+          <p className="text-sm text-stone-600 mb-4">Select a creature who has not acted yet. You will swap Initiative Cards with them.</p>
+          
+          {candidates.length === 0 ? (
+            <div className="text-center py-6 text-stone-400 italic">No valid targets available. Everyone else has acted.</div>
+          ) : (
+            <div className="space-y-2">
+              {candidates.map(c => (
+                <button 
+                  key={c.id} 
+                  onClick={() => onSwap(c.id)}
+                  className="w-full flex items-center justify-between p-3 bg-white border border-stone-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 hover:shadow-sm transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-10 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold shadow-sm group-hover:border-purple-600 group-hover:text-purple-700">
+                      {c.initiative_roll}
+                    </div>
+                    <div className="text-left">
+                      <span className="block font-bold text-stone-800 group-hover:text-purple-900">{c.display_name}</span>
+                      <span className="text-[10px] uppercase font-bold text-stone-400">{c.monster_id ? 'Monster' : 'Player'}</span>
+                    </div>
+                  </div>
+                  <ArrowUpDown className="text-stone-300 group-hover:text-purple-500" size={18} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-3 border-t bg-white flex justify-end">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // --- MODAL: ATTACK RESOLUTION ---
@@ -228,13 +287,25 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
   );
 }
 
-function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal }: { combatant: EncounterCombatant, monsterData?: MonsterData, currentAttack?: MonsterAttack | null, onRollAttack: () => void, onEndTurn: () => void, onOpenAttackModal: () => void }) {
+function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onWait }: { 
+  combatant: EncounterCombatant, 
+  monsterData?: MonsterData, 
+  currentAttack?: MonsterAttack | null, 
+  onRollAttack: () => void, 
+  onEndTurn: () => void, 
+  onOpenAttackModal: () => void,
+  onWait: () => void 
+}) {
   const isMonster = !!combatant.monster_id;
   return (
     <div className="bg-white rounded-xl shadow-lg border-2 border-blue-500 overflow-hidden mb-6 relative animate-in fade-in slide-in-from-top-2">
       <div className="bg-blue-600 text-white px-4 py-2 flex justify-between items-center">
         <div className="flex items-center gap-2"><div className="bg-white text-blue-800 font-bold font-serif w-8 h-8 flex items-center justify-center rounded shadow">{combatant.initiative_roll ?? '-'}</div><div><h3 className="font-bold text-lg leading-none">{combatant.display_name}</h3><span className="text-xs text-blue-100 uppercase tracking-wider font-semibold">Current Turn</span></div></div>
-        <Button size="sm" variant="secondary" onClick={onEndTurn} Icon={RotateCcw} title="End turn and automatically flip next card">End Turn (Flip)</Button>
+        <div className="flex gap-2">
+          {/* NEW: Wait Button */}
+          <Button size="sm" variant="secondary" onClick={onWait} Icon={Hourglass} title="Swap Initiative (Wait)">Wait</Button>
+          <Button size="sm" variant="secondary" onClick={onEndTurn} Icon={RotateCcw} title="End turn and automatically flip next card">End Turn</Button>
+        </div>
       </div>
       <div className="p-4">
         {isMonster && monsterData ? (
@@ -305,6 +376,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isInitModalOpen, setIsInitModalOpen] = useState(false);
   const [isAttackModalOpen, setIsAttackModalOpen] = useState(false);
+  const [isWaitModalOpen, setIsWaitModalOpen] = useState(false); // NEW: Wait Modal State
   const [showEncounterList, setShowEncounterList] = useState(false);
   const [isEditingEncounter, setIsEditingEncounter] = useState(false);
   const [editedName, setEditedName] = useState('');
@@ -313,9 +385,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [temporaryNotes, setTemporaryNotes] = useState('');
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
-  
-  // NEW: State for Toast Feedback
-  const [feedbackToast, setFeedbackToast] = useState<{ id: number; text: string } | null>(null);
+  const [feedbackToast, setFeedbackToast] = useState<{ id: number; text: string, type?: 'success' | 'error' } | null>(null);
 
   const { data: allEncounters, isLoading: loadingEnc } = useQuery<Encounter[]>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
   const { data: allMonsters } = useQuery<MonsterData[]>({ queryKey: ['allMonsters'], queryFn: fetchAllMonsters });
@@ -348,19 +418,34 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     setEditingStats(init); 
   }, [combatants]);
   
-  useEffect(() => { 
-    if (encounterDetails?.status === 'active' && combatants.length > 0) {
-      const currentSelected = combatants.find(c => c.id === selectedActorId);
-      if (!selectedActorId || (currentSelected && (currentSelected.has_acted || (currentSelected.monster_id && currentSelected.current_hp === 0)))) {
-        const next = combatants.find(c => !c.has_acted && !(c.monster_id && c.current_hp === 0));
-        if (next) setSelectedActorId(next.id);
-      }
-    }
-  }, [combatants, encounterDetails, selectedActorId]);
-
+  // FIX: ROBUST AUTO-SELECTION
   useEffect(() => {
-    if (selectedActorId && !combatants.find(c => c.id === selectedActorId)) setSelectedActorId(null);
-  }, [combatants, selectedActorId]);
+    if (encounterDetails?.status !== 'active') return;
+
+    // 1. Find the correct "Next Up" actor (Lowest init, not acted, alive)
+    const nextUp = combatants.find(c => !c.has_acted && !(c.monster_id && c.current_hp === 0));
+
+    if (nextUp) {
+      // 2. Determine current selection state
+      const current = combatants.find(c => c.id === selectedActorId);
+      
+      // 3. Logic to switch
+      const shouldSwitch = 
+        !selectedActorId || 
+        !current || 
+        current.has_acted || // Current just finished turn
+        (current.monster_id && current.current_hp === 0) || // Current died
+        // CRITICAL: If current selection is valid but has HIGHER init than nextUp (e.g. after swap), switch to nextUp
+        (current.initiative_roll ?? 99) > (nextUp.initiative_roll ?? 99);
+
+      if (shouldSwitch) {
+         setSelectedActorId(nextUp.id);
+      }
+    } else {
+      // End of round (everyone acted)
+      setSelectedActorId(null);
+    }
+  }, [combatants, encounterDetails?.status, selectedActorId]);
 
   const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
   const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allEncounters'] }) });
@@ -370,31 +455,37 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const updateCombatantMu = useMutation({ mutationFn: ({id, updates}:any) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  const swapInitiativeMu = useMutation({ mutationFn: swapInitiative, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); setSwapSourceId(null); } });
+  
+  // FIX: Explicitly handle object destructuring for mutation
+  const swapInitiativeMu = useMutation({ 
+    mutationFn: (vars: {id1: string, id2: string}) => swapInitiative(vars), 
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); 
+      setSwapSourceId(null);
+      setFeedbackToast({ id: Date.now(), text: 'Initiative Swapped!', type: 'success' });
+      setTimeout(() => setFeedbackToast(null), 3000);
+    },
+    onError: () => {
+      setFeedbackToast({ id: Date.now(), text: 'Failed to swap.', type: 'error' });
+      setTimeout(() => setFeedbackToast(null), 3000);
+    }
+  });
+  
   const appendLogMu = useMutation({ mutationFn: (entry: any) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
   const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
   const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if(combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
 
-  // HANDLER FOR ADDING MONSTERS WITH FEEDBACK
   const handleAddMonster = (id: string, count: number, customName: string) => {
     const m = monstersById.get(id);
     const ferocity = m?.stats?.FEROCITY || 1;
     const nameToUse = customName || m?.name || 'Monster';
-
     for(let i=1; i<=count; i++) { 
       const base = count > 1 ? `${nameToUse} ${i}` : nameToUse; 
       for(let f=1; f<=ferocity; f++) { 
-        addMonsterMu.mutate({ 
-          encounterId: currentEncounterId!, 
-          monsterId: id, 
-          customName: ferocity > 1 ? `${base} (Act ${f})` : base, 
-          initiativeRoll: null 
-        }); 
+        addMonsterMu.mutate({ encounterId: currentEncounterId!, monsterId: id, customName: ferocity > 1 ? `${base} (Act ${f})` : base, initiativeRoll: null }); 
       } 
     }
-    
-    // Show Feedback Toast
     setFeedbackToast({ id: Date.now(), text: `Added ${count}x ${nameToUse}` });
     setTimeout(() => setFeedbackToast(null), 3000);
   };
@@ -403,48 +494,24 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const stats = editingStats[id];
     const c = combatants.find(x => x.id === id);
     if (!stats || !c) return;
-    
-    const nh = parseInt(stats.current_hp);
-    const nw = parseInt(stats.current_wp);
-    const updates: any = {};
-    let siblings = [c];
-
-    if (c.monster_id && combatantsData) {
-      siblings = getSiblings(c, combatantsData);
-    }
-
-    if (!isNaN(nh) && nh !== c.current_hp) {
-      updates.current_hp = nh;
-      appendLogMu.mutate({ type: 'hp_change', ts: Date.now(), who: id, name: c.display_name, delta: nh - (c.current_hp || 0) });
-    }
-    if (!isNaN(nw) && nw !== c.current_wp) {
-       updates.current_wp = nw;
-       appendLogMu.mutate({ type: 'wp_change', ts: Date.now(), who: id, name: c.display_name, delta: nw - (c.current_wp || 0) });
-    }
-    
-    if (Object.keys(updates).length > 0) {
-      siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
-    }
+    const nh = parseInt(stats.current_hp); const nw = parseInt(stats.current_wp);
+    const updates: any = {}; let siblings = [c];
+    if (c.monster_id && combatantsData) siblings = getSiblings(c, combatantsData);
+    if (!isNaN(nh) && nh !== c.current_hp) { updates.current_hp = nh; appendLogMu.mutate({ type: 'hp_change', ts: Date.now(), who: id, name: c.display_name, delta: nh - (c.current_hp || 0) }); }
+    if (!isNaN(nw) && nw !== c.current_wp) { updates.current_wp = nw; appendLogMu.mutate({ type: 'wp_change', ts: Date.now(), who: id, name: c.display_name, delta: nw - (c.current_wp || 0) }); }
+    if (Object.keys(updates).length > 0) siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
   };
   
   const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
-    if (c && c.monster_id && combatantsData) {
-      const siblings = getSiblings(c, combatantsData);
-      siblings.forEach(sib => removeCombatantMu.mutate(sib.id));
-    } else {
-      removeCombatantMu.mutate(id);
-    }
+    if (c && c.monster_id && combatantsData) { const siblings = getSiblings(c, combatantsData); siblings.forEach(sib => removeCombatantMu.mutate(sib.id)); } else { removeCombatantMu.mutate(id); }
   };
 
   const handleRollMonsterAttack = (id: string, m: MonsterData) => {
     if (!m.attacks?.length) return;
     const roll = Math.floor(Math.random() * 6) + 1;
     const attack = m.attacks.find(a => a.roll_values.split(',').includes(String(roll)));
-    if (attack) {
-      setCurrentMonsterAttacks(p => ({ ...p, [id]: attack }));
-      appendLogMu.mutate({ type: 'monster_attack', ts: Date.now(), who: id, name: m.name, roll, attack: { name: attack.name } });
-    }
+    if (attack) { setCurrentMonsterAttacks(p => ({ ...p, [id]: attack })); appendLogMu.mutate({ type: 'monster_attack', ts: Date.now(), who: id, name: m.name, roll, attack: { name: attack.name } }); }
   };
 
   const handleInitApply = async (updates: {id:string, initiative_roll:number}[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { ...u, has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
@@ -460,13 +527,17 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const newHp = Math.max(0, target.current_hp - dmg);
     const updates: any = { current_hp: newHp };
     let siblings = [target];
-    if (target.monster_id && combatantsData) {
-      siblings = getSiblings(target, combatantsData);
-    }
+    if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
     siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
     appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: target.display_name, damage: dmg });
     setIsAttackModalOpen(false);
   };
+
+  const handleWaitConfirm = (targetId: string) => {
+    if (!activeCombatant) return;
+    swapInitiativeMu.mutate({ id1: activeCombatant.id, id2: targetId });
+    setIsWaitModalOpen(false);
+  }
 
   if (!isDM) return <div className="p-8 text-center text-stone-500">Only the DM can manage encounters.</div>;
   if (loadingEnc) return <LoadingSpinner />;
@@ -480,10 +551,11 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         </div>
       </header>
 
-      {/* FEEDBACK TOAST */}
       {feedbackToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-stone-900 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
-          <div className="bg-green-500 rounded-full p-1"><Check size={12} className="text-white" /></div>
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 fade-in ${feedbackToast.type === 'error' ? 'bg-red-600' : 'bg-stone-900'}`}>
+          <div className={`${feedbackToast.type === 'error' ? 'bg-red-800' : 'bg-green-500'} rounded-full p-1`}>
+             {feedbackToast.type === 'error' ? <AlertCircle size={12} className="text-white"/> : <Check size={12} className="text-white" />}
+          </div>
           <span className="font-medium text-sm">{feedbackToast.text}</span>
         </div>
       )}
@@ -501,7 +573,17 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           <div className="lg:col-span-2 space-y-4">
             {swapSourceId && (<div className="bg-purple-600 text-white p-3 rounded-lg shadow-md flex justify-between items-center animate-pulse"><span className="font-bold flex items-center gap-2"><ArrowUpDown/> Select swap target...</span><Button size="sm" variant="secondary" onClick={() => setSwapSourceId(null)}>Cancel</Button></div>)}
             {isEditingEncounter && (<div className="bg-white p-4 rounded-xl shadow mb-4 border border-blue-200"><h4 className="font-bold mb-2">Edit Details</h4><input className="w-full mb-2 p-2 border rounded" value={editedName} onChange={e => setEditedName(e.target.value)}/><div className="flex gap-2"><Button size="sm" onClick={() => updateEncounterMu.mutate({id: currentEncounterId, updates: {name: editedName}})}>Save</Button><Button size="sm" variant="ghost" onClick={() => setIsEditingEncounter(false)}>Cancel</Button></div></div>)}
-            {encounterDetails.status === 'active' && activeCombatant && (<ActiveCombatantSpotlight combatant={activeCombatant} monsterData={activeCombatantMonsterData || undefined} currentAttack={currentMonsterAttacks[activeCombatant.id]} onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData)} onEndTurn={() => handleFlip(activeCombatant.id, false)} onOpenAttackModal={() => setIsAttackModalOpen(true)} />)}
+            {encounterDetails.status === 'active' && activeCombatant && (
+              <ActiveCombatantSpotlight 
+                combatant={activeCombatant} 
+                monsterData={activeCombatantMonsterData || undefined} 
+                currentAttack={currentMonsterAttacks[activeCombatant.id]} 
+                onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData)} 
+                onEndTurn={() => handleFlip(activeCombatant.id, false)} 
+                onOpenAttackModal={() => setIsAttackModalOpen(true)}
+                onWait={() => setIsWaitModalOpen(true)} 
+              />
+            )}
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{encounterDetails.status === 'active' && <Button size="sm" variant="outline" Icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}<Button size="sm" variant="outline" Icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button></div></div>
               <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id) => swapSourceId ? swapInitiativeMu.mutate({id1: swapSourceId, id2: id}) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v:any) => setEditingStats(prev => ({...prev, [c.id]: v}))} isDM={isDM} />))}</div>
@@ -527,6 +609,16 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           targets={combatants.filter(c => c.id !== activeCombatant.id)} 
           attackName={activeCombatant.monster_id ? currentMonsterAttacks[activeCombatant.id]?.name : undefined} 
           onConfirm={handleAttackConfirm} 
+        />
+      )}
+      {/* NEW: WAIT MODAL */}
+      {isWaitModalOpen && activeCombatant && (
+        <WaitTurnModal 
+          isOpen={isWaitModalOpen} 
+          onClose={() => setIsWaitModalOpen(false)} 
+          currentActor={activeCombatant} 
+          allCombatants={combatants} 
+          onSwap={handleWaitConfirm} 
         />
       )}
       {showEncounterList && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl space-y-4 max-h-[80vh] flex flex-col"><div className="flex items-center justify-between"><h3 className="text-xl font-semibold">All Encounters</h3><Button variant="ghost" size="sm" onClick={() => setShowEncounterList(false)} Icon={XCircle}>Close</Button></div><div className="overflow-y-auto space-y-2 border-t pt-4">{(allEncounters ?? []).map(enc => (<div key={enc.id} className={`flex items-center justify-between p-3 rounded-md ${currentEncounterId === enc.id ? 'bg-blue-100' : 'bg-gray-50'}`}><div><p className="font-semibold">{enc.name}</p><p className="text-sm text-gray-600 capitalize">Status: {enc.status}</p></div><div className="flex items-center gap-2"><Button size="sm" onClick={() => setSelectedEncounterId(enc.id)} disabled={currentEncounterId === enc.id}>Select</Button><Button size="sm" variant="outline" Icon={Copy} onClick={() => duplicateEncounterMu.mutate({id: enc.id, name: enc.name})}>Copy</Button><Button size="sm" variant="danger" Icon={Trash2} onClick={() => deleteEncounterMu.mutate(enc.id)}>Del</Button></div></div>))}</div></div></div>)}

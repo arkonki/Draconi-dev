@@ -154,8 +154,6 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
 // --- LOGGING ---
 
 export async function appendEncounterLog(encounterId: string, entry: any): Promise<void> {
-  // Fallback: If RPC fails, we could fetch->update JSON manually.
-  // Requires SQL Function: append_to_log
   const { error } = await supabase.rpc('append_to_log', {
     p_encounter_id: encounterId,
     p_log_entry: entry,
@@ -172,7 +170,6 @@ export const endEncounter = (id: string) => updateEncounter(id, { status: 'compl
 
 export const nextRound = async (id: string) => {
   // Requires SQL Function: advance_encounter_round
-  // This must reset 'has_acted' to false and increment 'current_round'
   const { error } = await supabase.rpc('advance_encounter_round', {
     p_encounter_id: id
   });
@@ -203,11 +200,36 @@ export async function rollInitiativeForCombatants(encounterId: string, combatant
   return data;
 }
 
-export async function swapInitiative(combatantId1: string, combatantId2: string): Promise<any> {
-  const { data, error } = await supabase.rpc('swap_combatant_initiative', {
-    p_combatant_id_1: combatantId1,
-    p_combatant_id_2: combatantId2
-  });
-  if (error) throw error;
-  return data;
+// --- UPDATED SWAP FUNCTION ---
+export async function swapInitiative({ id1, id2 }: { id1: string; id2: string }) {
+  // 1. Get current values first
+  const { data: c1, error: e1 } = await supabase
+    .from('encounter_combatants')
+    .select('initiative_roll')
+    .eq('id', id1)
+    .single();
+
+  const { data: c2, error: e2 } = await supabase
+    .from('encounter_combatants')
+    .select('initiative_roll')
+    .eq('id', id2)
+    .single();
+
+  if (e1 || e2 || !c1 || !c2) {
+    console.error("Fetch failed for swap", e1, e2);
+    throw new Error('Failed to fetch combatants for swap');
+  }
+
+  // 2. Perform Swap
+  const { error: updateError1 } = await supabase
+    .from('encounter_combatants')
+    .update({ initiative_roll: c2.initiative_roll })
+    .eq('id', id1);
+
+  const { error: updateError2 } = await supabase
+    .from('encounter_combatants')
+    .update({ initiative_roll: c1.initiative_roll })
+    .eq('id', id2);
+
+  if (updateError1 || updateError2) throw new Error('Failed to swap initiative');
 }
