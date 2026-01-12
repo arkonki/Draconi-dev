@@ -174,10 +174,21 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
     return { capacity, load, isEncumbered: load > capacity };
 };
 
+// FIX: Ensure we don't accidentally merge non-stackable items (like weapons/armor) if they have unique IDs
+// But we DO want to stack commodities (torches, rations).
 const mergeIntoInventory = (inventory: InventoryItem[], itemToMerge: InventoryItem): InventoryItem[] => {
+    // 1. Identify if item is stackable
+    // Simple logic: if it has durability or specific stats (like separate IDs for custom items), don't stack.
+    // However, for general store logic, we usually stack by name.
+    
     const existingItemIndex = inventory.findIndex(item => item.name === itemToMerge.name);
     let newInventory = [...inventory];
-    if (existingItemIndex > -1) { newInventory[existingItemIndex].quantity += itemToMerge.quantity; } else { newInventory.push({ ...itemToMerge, id: itemToMerge.id || generateId() }); }
+    
+    if (existingItemIndex > -1) { 
+        newInventory[existingItemIndex].quantity += itemToMerge.quantity; 
+    } else { 
+        newInventory.push({ ...itemToMerge, id: itemToMerge.id || generateId() }); 
+    }
     return newInventory;
 };
 
@@ -258,7 +269,9 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
 };
 
 const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: any, label: string, item?: string | InventoryItem | EquippedWeapon, onUnequip: () => void, subItems?: React.ReactNode }) => {
+    // Determine the name safely. For EquippedWeapon, it's just .name
     const name = typeof item === 'string' ? item : item?.name;
+    
     return (
         <div className={`relative flex flex-col p-2 rounded-lg border transition-all ${name ? 'bg-white border-indigo-200 shadow-sm' : 'bg-gray-50 border-gray-200 border-dashed'}`}>
             <div className="flex items-center gap-2 mb-1">
@@ -377,28 +390,46 @@ export function InventoryModal({ onClose }: any) {
       handleUpdateEquipment({ ...character.equipment, inventory: newInventory });
       setIsForageModalOpen(false);
   };
+  
   const handleBuyItem = (item: GameItem) => {
       const itemCost = parseCost(item.cost);
       if (!itemCost) return;
       const { success, newMoney } = subtractCost(character.equipment!.money!, itemCost);
       if (!success) return;
       const { name, quantity } = parsePackName(item.name, item.quantity);
+      // Ensure we add a brand new item if it's unique equipment
       const newItem = { name, quantity, weight: item.weight, id: generateId() };
       const newInventory = mergeIntoInventory(character.equipment!.inventory!, newItem);
       handleUpdateEquipment({ ...character.equipment, inventory: newInventory, money: newMoney });
   };
+
   const handleEquipItem = (itemToEquip: InventoryItem) => {
       const itemDetails = getItemData(itemToEquip); if (!itemDetails) return;
+      
       let newEquipment = structuredClone(character.equipment!);
       let inventory = newEquipment.inventory;
+      
       const invItemIndex = inventory.findIndex((i: InventoryItem) => i.id === itemToEquip.id);
       if (invItemIndex === -1) return;
+      
+      // Remove ONE count of the item from inventory
       const itemToMove = { ...inventory[invItemIndex], quantity: 1 };
-      if (inventory[invItemIndex].quantity > 1) inventory[invItemIndex].quantity -= 1;
-      else inventory.splice(invItemIndex, 1);
+      
+      if (inventory[invItemIndex].quantity > 1) {
+         inventory[invItemIndex].quantity -= 1;
+      } else {
+         inventory.splice(invItemIndex, 1);
+      }
+      
       const { category, name } = itemDetails;
+      
       if (category === 'CLOTHES') {
-          if (newEquipment.equipped.wornClothes.includes(name)) { newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
+          if (newEquipment.equipped.wornClothes.includes(name)) { 
+             // Already wearing -> put back in bag
+             newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); 
+             handleUpdateEquipment(newEquipment); 
+             return; 
+          }
           newEquipment.equipped.wornClothes.push(name);
       } else if (DEFAULT_EQUIPPABLE_CATEGORIES.includes(category!)) {
           const lowerName = name.toLowerCase();
@@ -406,22 +437,49 @@ export function InventoryModal({ onClose }: any) {
           const isHelmet = category === 'ARMOR & HELMETS' && !isShield && (lowerName.includes('helm') || lowerName.includes('hat') || lowerName.includes('cap') || lowerName.includes('coif'));
           const isArmor = category === 'ARMOR & HELMETS' && !isShield && !isHelmet;
           const isWeapon = category === 'MELEE WEAPONS' || category === 'RANGED WEAPONS' || isShield;
+          
           if (isWeapon) {
-              if (newEquipment.equipped.weapons.length >= 3) { newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
-              newEquipment.equipped.weapons.push({ name: itemDetails.name, grip: itemDetails.grip, range: itemDetails.range, damage: itemDetails.damage, durability: itemDetails.durability, features: itemDetails.features });
+              if (newEquipment.equipped.weapons.length >= 3) { 
+                 // Slots full -> return to inventory
+                 newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); 
+                 handleUpdateEquipment(newEquipment); 
+                 return; 
+              }
+              newEquipment.equipped.weapons.push({ 
+                 name: itemDetails.name, 
+                 grip: itemDetails.grip, 
+                 range: itemDetails.range, 
+                 damage: itemDetails.damage, 
+                 durability: itemDetails.durability, 
+                 features: itemDetails.features 
+              });
           } else if (isArmor) {
-              if (newEquipment.equipped.armor) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.armor, quantity: 1, id: generateId() });
+              // Swap Logic: If armor already equipped, move OLD armor to inventory
+              if (newEquipment.equipped.armor) {
+                 inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.armor, quantity: 1, id: generateId() });
+              }
               newEquipment.equipped.armor = name;
           } else if (isHelmet) {
-              if (newEquipment.equipped.helmet) inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.helmet, quantity: 1, id: generateId() });
+              if (newEquipment.equipped.helmet) {
+                 inventory = mergeIntoInventory(inventory, { name: newEquipment.equipped.helmet, quantity: 1, id: generateId() });
+              }
               newEquipment.equipped.helmet = name;
           }
-      } else if (category === 'ANIMALS') { newEquipment.equipped.animals.push(itemToMove);
+      } else if (category === 'ANIMALS') { 
+          newEquipment.equipped.animals.push(itemToMove);
       } else if (category === 'CONTAINERS') {
-          if(name.toLowerCase().includes('backpack') && newEquipment.equipped.containers.some((c:InventoryItem) => c?.name?.toLowerCase().includes('backpack'))) { newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
+          if(name.toLowerCase().includes('backpack') && newEquipment.equipped.containers.some((c:InventoryItem) => c?.name?.toLowerCase().includes('backpack'))) { 
+             newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); 
+             handleUpdateEquipment(newEquipment); 
+             return; 
+          }
           if(name.toLowerCase().includes('saddle bag')){
               const animalWithSpace = newEquipment.equipped.animals.find((a:InventoryItem) => newEquipment.equipped.containers.filter((c:InventoryItem) => c.equippedOn === a.id).length < 2);
-              if(!animalWithSpace) { newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); handleUpdateEquipment(newEquipment); return; }
+              if(!animalWithSpace) { 
+                 newEquipment.inventory = mergeIntoInventory(inventory, itemToMove); 
+                 handleUpdateEquipment(newEquipment); 
+                 return; 
+              }
               itemToMove.equippedOn = animalWithSpace.id;
           }
           newEquipment.equipped.containers.push(itemToMove);
@@ -429,53 +487,76 @@ export function InventoryModal({ onClose }: any) {
       newEquipment.inventory = inventory;
       handleUpdateEquipment(newEquipment);
   };
+
   const handleUnequipItem = (itemName: string, type: 'armor' | 'helmet' | 'weapon' | 'clothing' | 'animal' | 'container', itemId?: string, itemIndex?: number) => {
       let newEquipment = structuredClone(character.equipment!);
       let itemToReturn: InventoryItem | null = { id: itemId || generateId(), name: itemName, quantity: 1 };
-      if (type === 'armor' || type === 'helmet') { newEquipment.equipped[type] = undefined; } 
-      else {
+      
+      if (type === 'armor' || type === 'helmet') { 
+          newEquipment.equipped[type] = undefined; 
+      } else {
           const arrKey = type === 'clothing' ? 'wornClothes' : (type + 's' as 'weapons' | 'animals' | 'containers');
           const arr = newEquipment.equipped[arrKey];
           let findIndex = -1;
-          if (itemIndex !== undefined && (type === 'weapon' || type === 'clothing')) { findIndex = itemIndex; } 
-          else if(itemId) { findIndex = arr.findIndex((i: any) => i.id === itemId); } 
-          else { findIndex = arr.findIndex((i: any) => (i.name || i) === itemName); }
+          
+          if (itemIndex !== undefined && (type === 'weapon' || type === 'clothing')) { 
+             findIndex = itemIndex; 
+          } else if(itemId) { 
+             findIndex = arr.findIndex((i: any) => i.id === itemId); 
+          } else { 
+             findIndex = arr.findIndex((i: any) => (i.name || i) === itemName); 
+          }
+          
           if (findIndex > -1) { 
               const [removed] = arr.splice(findIndex, 1);
+              // For weapons/clothing stored as strings, we recreate object. For objects, we strip equippedOn.
               itemToReturn = (typeof removed === 'string') ? itemToReturn : { ...removed, quantity: 1, equippedOn: undefined };
+              
               if (type === 'animal' && itemId) {
                   newEquipment.equipped.containers = newEquipment.equipped.containers.filter((c: InventoryItem) => {
-                      if (c.equippedOn === itemId) { newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, c); return false; }
+                      if (c.equippedOn === itemId) { 
+                         newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, c); 
+                         return false; 
+                      }
                       return true;
                   });
               }
           }
       }
+      // CRITICAL: Ensure we move the unequipped item back to inventory safely
       newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, itemToReturn!);
       handleUpdateEquipment(newEquipment);
   };
+
   const handleUseItem = (itemToUse: InventoryItem) => {
       let newEquipment = structuredClone(character.equipment!);
       const invItemIndex = newEquipment.inventory.findIndex((i: InventoryItem) => i.id === itemToUse.id);
       if(invItemIndex === -1) return;
-      if (newEquipment.inventory[invItemIndex].quantity > 1) { newEquipment.inventory[invItemIndex].quantity -= 1; } 
-      else { newEquipment.inventory.splice(invItemIndex, 1); }
+      if (newEquipment.inventory[invItemIndex].quantity > 1) { 
+         newEquipment.inventory[invItemIndex].quantity -= 1; 
+      } else { 
+         newEquipment.inventory.splice(invItemIndex, 1); 
+      }
       handleUpdateEquipment(newEquipment);
   };
+
   const handleDropItem = (itemToDrop: InventoryItem) => { setItemToDelete(itemToDrop); };
   const confirmDropItem = () => { if (itemToDelete) { handleUseItem(itemToDelete); setItemToDelete(null); } };
+
+  // --- RENDERERS ---
 
   const renderLoadout = () => {
       const eq = character.equipment?.equipped;
       if(!eq) return null;
       const clothes = eq.wornClothes || [];
       const backpack = eq.containers?.find(c => c.name.toLowerCase().includes('backpack'));
+      
       return (
           <div className="bg-slate-50 border-b p-4">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
                   <LoadoutSlot icon={Shield} label="Body" item={eq.armor} onUnequip={() => handleUnequipItem(eq.armor!, 'armor')} />
                   <LoadoutSlot icon={Shield} label="Head" item={eq.helmet} onUnequip={() => handleUnequipItem(eq.helmet!, 'helmet')} />
-                  {[0, 1, 2].map(idx => (<LoadoutSlot key={idx} icon={Sword} label={`Hand ${idx+1}`} item={eq.weapons[idx]} onUnequip={() => handleUnequipItem(eq.weapons[idx].name, 'weapon', undefined, idx)} />))}
+                  {[0, 1, 2].map(idx => (<LoadoutSlot key={idx} icon={Sword} label={`Hand ${idx+1}`} item={eq.weapons[idx]} onUnequip={() => handleUnequipItem(eq.weapons[idx]?.name, 'weapon', undefined, idx)} />))}
               </div>
               <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                    {backpack && (<div className="flex items-center gap-2 px-2 py-1 bg-white border rounded text-xs"><Backpack size={12} className="text-orange-500"/> <span>{backpack.name}</span><button onClick={() => handleUnequipItem(backpack.name, 'container', backpack.id)} className="text-gray-400 hover:text-red-500"><X size={12}/></button></div>)}
