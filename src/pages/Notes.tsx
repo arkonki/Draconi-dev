@@ -3,7 +3,7 @@ import {
   Plus, Book, Search, Filter, Edit2, Trash2, Save, X, ChevronDown, 
   StickyNote, AlertCircle, User, Users, FileText, ArrowLeft,
   Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, 
-  Table as TableIcon, Eye, EyeOff, Quote, Code
+  Table as TableIcon, Eye, EyeOff, Quote, Code, Maximize2, Minimize2 // <--- Added Icons
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,6 +45,9 @@ export function Notes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  
+  // 1. Full Screen State
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Editor State
   const [showPreview, setShowPreview] = useState(false);
@@ -83,11 +86,7 @@ export function Notes() {
   };
 
   const handleInsertTable = () => {
-    const tableTemplate = `
-| Header 1 | Header 2 |
-| -------- | -------- |
-| Cell 1   | Cell 2   |
-`;
+    const tableTemplate = `\n| Header 1 | Header 2 |\n| -------- | -------- |\n| Cell 1   | Cell 2   |\n`;
     insertMarkdown(tableTemplate);
   };
 
@@ -105,6 +104,7 @@ export function Notes() {
     resetForm();
     setViewState('create');
     setSelectedNote(null);
+    setIsFullScreen(false); // Reset focus mode on new action
   };
 
   const handleOpenEdit = (note: Note) => {
@@ -121,15 +121,19 @@ export function Notes() {
   const handleCloseForm = () => {
     setViewState('view');
     resetForm();
-    // If cancelling creation, go back to list (null selection)
     if (viewState === 'create') setSelectedNote(null);
   };
 
-  // Helper for mobile back button
   const handleBackToList = () => {
     setSelectedNote(null);
     setViewState('view');
+    setIsFullScreen(false);
   };
+
+  // 2. Auto-exit full screen if deselected
+  useEffect(() => {
+    if (!selectedNote && viewState === 'view') setIsFullScreen(false);
+  }, [selectedNote, viewState]);
 
   // --- DATA LOADING ---
   const loadData = useCallback(async () => {
@@ -146,11 +150,7 @@ export function Notes() {
         setParties(prts || []);
       }
 
-      let query = supabase.from('notes').select(`
-        *,
-        character:characters(name),
-        party:parties(name)
-      `).eq('user_id', user.id);
+      let query = supabase.from('notes').select(`*, character:characters(name), party:parties(name)`).eq('user_id', user.id);
       
       const { data: notesData, error: notesError } = await query.order('created_at', { ascending: false });
       if (notesError) throw notesError;
@@ -223,7 +223,7 @@ export function Notes() {
       await loadData();
       if (selectedNote?.id === id) {
         setSelectedNote(null);
-        setViewState('view'); // Return to list view
+        setViewState('view');
       }
     } catch (err) {
       setError("Failed to delete note.");
@@ -245,18 +245,18 @@ export function Notes() {
 
   if (loading && notes.length === 0) return <div className="h-96 flex justify-center items-center"><LoadingSpinner/></div>;
 
-  // Helper boolean to determine if we are showing a specific note/form
   const isDetailView = selectedNote !== null || viewState === 'create';
 
   return (
-    // Layout: Flex column on mobile, Row on desktop
-    <div className="flex flex-col md:flex-row h-[calc(100vh-100px)] bg-white border rounded-xl overflow-hidden shadow-sm relative">
+    // Layout: Full height, removed margins on mobile
+    <div className="flex flex-col md:flex-row h-[calc(100vh-4rem)] md:h-[calc(100vh-6rem)] bg-white md:border md:rounded-xl overflow-hidden shadow-sm relative -mx-4 md:mx-0">
       
       {/* LEFT SIDEBAR (List) */}
-      {/* Logic: Hidden on mobile if detail view is active. Always visible on desktop. */}
+      {/* Logic: Hidden on mobile if detail view. Hidden on desktop if Full Screen. */}
       <div className={`
-        ${isDetailView ? 'hidden md:flex' : 'flex'}
-        w-full md:w-1/3 lg:w-1/4 border-r border-gray-200 flex-col bg-gray-50 h-full
+        ${isDetailView ? 'hidden' : 'flex'}
+        md:${isFullScreen ? 'hidden' : 'flex'}
+        w-full md:w-1/3 lg:w-1/4 border-r border-gray-200 flex-col bg-gray-50 h-full transition-all duration-300
       `}>
         
         {/* Header */}
@@ -282,7 +282,7 @@ export function Notes() {
             <div className="relative">
                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"/>
                <select 
-                 className="w-full pl-9 pr-8 py-1.5 text-sm border rounded-md appearance-none bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                 className="w-full pl-9 pr-8 py-1.5 text-sm border rounded-md appearance-none bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
                  value={filterType}
                  onChange={e => setFilterType(e.target.value as any)}
                >
@@ -329,7 +329,6 @@ export function Notes() {
       </div>
 
       {/* RIGHT MAIN CONTENT (Detail/Edit) */}
-      {/* Logic: Hidden on mobile if NO note/form is active. Always visible on desktop. */}
       <div className={`
         ${!isDetailView ? 'hidden md:flex' : 'flex'}
         flex-1 bg-white p-4 md:p-6 overflow-y-auto w-full h-full
@@ -339,7 +338,6 @@ export function Notes() {
            // FORM VIEW
            <div className="max-w-2xl mx-auto w-full animate-in fade-in slide-in-from-bottom-2">
               <div className="flex items-center gap-3 mb-6 pb-2 border-b">
-                 {/* Mobile Back Button */}
                  <button onClick={handleBackToList} className="md:hidden p-1 -ml-1 text-gray-500 hover:bg-gray-100 rounded-full">
                     <ArrowLeft size={20} />
                  </button>
@@ -398,7 +396,6 @@ export function Notes() {
                     </div>
                     
                     <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all flex flex-col h-[40vh] md:h-96">
-                      {/* TOOLBAR */}
                       {!showPreview && (
                         <div className="flex items-center gap-1 p-2 bg-gray-50 border-b border-gray-200 overflow-x-auto shrink-0">
                            <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
@@ -416,7 +413,6 @@ export function Notes() {
                         </div>
                       )}
 
-                      {/* TEXTAREA OR PREVIEW */}
                       {showPreview ? (
                         <div className="p-4 flex-1 overflow-y-auto prose prose-sm max-w-none bg-gray-50/50">
                            <MarkdownRenderer content={content || '*No content*'} />
@@ -445,7 +441,6 @@ export function Notes() {
            <div className="max-w-3xl mx-auto w-full animate-in fade-in duration-200">
               <div className="flex justify-between items-start mb-6 border-b pb-4 sticky top-0 bg-white z-10 pt-2">
                  <div className="flex items-start gap-3 overflow-hidden">
-                    {/* Mobile Back Button */}
                     <button onClick={handleBackToList} className="md:hidden p-1.5 mt-1 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full flex-shrink-0">
                        <ArrowLeft size={20} />
                     </button>
@@ -458,7 +453,19 @@ export function Notes() {
                         </div>
                     </div>
                  </div>
-                 <div className="flex gap-1 md:gap-2 flex-shrink-0 ml-2">
+                 <div className="flex gap-1 md:gap-2 flex-shrink-0 ml-2 items-center">
+                    
+                    {/* 3. Full Screen Toggle Button (Desktop Only) */}
+                    <Button 
+                      variant="ghost" 
+                      size="icon_sm" 
+                      onClick={() => setIsFullScreen(!isFullScreen)}
+                      className="hidden md:flex text-gray-400 hover:text-blue-600"
+                      title={isFullScreen ? "Exit Full Screen" : "Focus Mode"}
+                    >
+                      {isFullScreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                    </Button>
+
                     <Button variant="secondary" size="icon_sm" icon={Edit2} onClick={() => handleOpenEdit(selectedNote!)} title="Edit Note" />
                     <Button variant="danger_outline" size="icon_sm" icon={Trash2} onClick={() => handleDelete(selectedNote!.id)} title="Delete Note" />
                  </div>
