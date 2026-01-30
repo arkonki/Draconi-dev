@@ -23,6 +23,8 @@ export interface InventoryItem {
   category?: string; // 'WEAPON', 'ARMOR', 'LOOT', etc.
   weight?: number;
   cost?: string | number; // Support text like "10 gold" or numbers
+  containerId?: string; // ID of the container this item is inside
+  equippedOn?: string; // ID of the entity (like Animal) this item is equipped on
 }
 
 export interface WeaponEntry {
@@ -39,6 +41,9 @@ export interface EquippedItems {
   helmet?: string; // Name of the equipped helmet
   shield?: string; // Name of the equipped shield
   weapons: WeaponEntry[];
+  wornClothes?: string[];
+  containers?: InventoryItem[];
+  animals?: InventoryItem[];
 }
 
 export interface Equipment {
@@ -63,7 +68,11 @@ export interface GameItem {
   grip?: string;
   durability?: number | string;
   features?: string | string[];
-  
+
+  // Container Logic
+  is_container?: boolean;
+  container_capacity?: number;
+
   // Database specific fields
   created_at?: string;
   updated_at?: string;
@@ -72,9 +81,9 @@ export interface GameItem {
 
 // --- ITEM NOTES & DURABILITY ---
 
-export interface ItemNote { 
-  enhanced?: boolean; 
-  bonus?: string; 
+export interface ItemNote {
+  enhanced?: boolean;
+  bonus?: string;
   broken?: boolean; // Tracks if item is broken via Parry
 }
 
@@ -139,7 +148,7 @@ export function isSkillNameRequirement(obj: any): obj is Record<string, number |
 }
 
 export interface SkillUuidRequirement {
-  skill_id: string; 
+  skill_id: string;
   minimumValue?: number;
 }
 
@@ -175,7 +184,7 @@ export interface CharacterStub {
 export interface Character {
   id: string;
   user_id: string;
-  
+
   // Basic Info
   name: string;
   kin: string;
@@ -185,44 +194,44 @@ export interface Character {
   background?: string;
   notes?: string;
   portrait_url?: string;
-  
+
   // Flaws & Magic
   memento?: string;
   flaw?: string | null;
   magicSchool?: string | null; // ID or Name of primary school
-  
+
   // Stats
   attributes: Attributes;
   max_hp: number;
   current_hp: number;
   max_wp: number;
   current_wp: number;
-  
+
   // Skills & Progression
   skill_levels: SkillLevels;
   trainedSkills: string[]; // List of trained skill names
   marked_skills: string[]; // Skills marked for advancement
-  
+
   // Magic & Abilities
   spells: CharacterSpells;
   heroic_abilities: string[]; // List of ability names
-  
+
   // Inventory
   equipment: Equipment;
   item_notes?: CharacterItemNotes; // JSONB storage for durability/enhancements
-  
+
   // Status
   conditions: Conditions;
   is_rallied: boolean;
   death_rolls_passed: number;
   death_rolls_failed: number;
-  
+
   // Advancement
   experience: number;
   teacher?: Teacher | null;
   reputation: number;
   corruption: number;
-  
+
   // Meta
   created_at: string;
   updated_at: string;

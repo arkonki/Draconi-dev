@@ -2,33 +2,37 @@ import { supabase } from '../supabase';
 
 // Define the Item type based on the 'game_items' table structure
 export interface GameItem {
-  id: string; 
+  id: string;
   name: string;
-  category: string; 
-  cost: string; 
-  supply?: string; 
-  weight: number; 
-  
+  category: string;
+  cost: string;
+  supply?: string;
+  weight: number;
+
   // Description / Rules
-  effect?: string; 
+  effect?: string;
   description?: string;
-  
+
   // Combat Stats
   armor_rating?: number | string;
-  grip?: string; 
+  grip?: string;
   strength_requirement?: number | string;
   range?: string | number;
-  damage?: string; 
+  damage?: string;
   durability?: number | string;
-  features?: string | string[]; 
-  skill?: string; 
-  
+  features?: string | string[];
+  skill?: string;
+
   // Meta
-  is_custom?: boolean; 
-  idx?: number; 
+  is_custom?: boolean;
+  idx?: number;
   created_at?: string;
   updated_at?: string;
-  
+
+  // Container Logic
+  is_container?: boolean;
+  container_capacity?: number;
+
   [key: string]: any;
 }
 
@@ -44,14 +48,14 @@ export async function fetchItems(category?: string | any): Promise<GameItem[]> {
 
   // Sort: Custom items first, then standard items
   const { data, error } = await query
-    .order('is_custom', { ascending: false }) 
+    .order('is_custom', { ascending: false })
     .order('category')
     .order('name');
 
   if (error) {
     console.error('Error fetching game items:', error);
     // Return empty array instead of throwing to prevent UI crashes
-    return []; 
+    return [];
   }
 
   return (data as GameItem[]) || [];
@@ -69,7 +73,7 @@ export async function createGameItem(item: Partial<GameItem>): Promise<GameItem>
     armor_rating: cleanNumber(itemData.armor_rating),
     durability: cleanNumber(itemData.durability),
     strength_requirement: cleanNumber(itemData.strength_requirement),
-    is_custom: true 
+    is_custom: true
   };
 
   const { data, error } = await supabase
@@ -83,12 +87,12 @@ export async function createGameItem(item: Partial<GameItem>): Promise<GameItem>
 }
 
 export async function findItemByName(name: string): Promise<GameItem | null> {
-   if (!name) return null;
+  if (!name) return null;
 
-   const { data, error } = await supabase
+  const { data, error } = await supabase
     .from('game_items')
     .select('*')
-    .ilike('name', name) 
+    .ilike('name', name)
     .maybeSingle();
 
   if (error) return null;

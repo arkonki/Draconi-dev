@@ -6,18 +6,20 @@ import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { useCharacterSheetStore } from '../stores/characterSheetStore';
 import { CharacterSheet } from '../components/character/CharacterSheet';
 import { EncounterChatView } from '../components/party/EncounterChatView';
+import { Breadcrumbs } from '../components/shared/Breadcrumbs';
+import { Home, User } from 'lucide-react';
 
 export function CharacterPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
-  
+
   // Destructure all needed functions and state from the store
-  const { 
-    character, 
-    isLoading, 
-    error, 
-    fetchCharacter, 
-    setCharacter 
+  const {
+    character,
+    isLoading,
+    error,
+    fetchCharacter,
+    setCharacter
   } = useCharacterSheetStore();
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export function CharacterPage() {
       } else {
         // If there's no ID or user, it's correct to clear the store's state
         // to prevent showing data from a previously viewed character.
-        setCharacter(null); 
+        setCharacter(null);
         console.warn("CharacterPage: Character ID or User ID is missing. Cannot load character.");
       }
     };
@@ -74,8 +76,14 @@ export function CharacterPage() {
   }
 
   // Render the character sheet once all checks pass
+  const breadcrumbs = [
+    { label: 'Home', path: '/', icon: Home },
+    { label: character.name, icon: User }
+  ];
+
   return (
     <>
+      <Breadcrumbs items={breadcrumbs} />
       <CharacterSheet />
       <EncounterChatView />
     </>

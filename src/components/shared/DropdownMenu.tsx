@@ -42,8 +42,25 @@ export function DropdownMenu({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function DropdownMenuTrigger({ children }: { children: React.ReactNode }) {
+export function DropdownMenuTrigger({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) {
   const { isOpen, setIsOpen } = useDropdown();
+
+  // If asChild is true, clone the child element and add onClick
+  if (asChild && React.isValidElement(children)) {
+    return React.cloneElement(children as React.ReactElement<any>, {
+      onClick: (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsOpen((prev) => !prev);
+        // Call original onClick if it exists
+        if ((children as any).props?.onClick) {
+          (children as any).props.onClick(e);
+        }
+      },
+      'aria-expanded': isOpen,
+      'aria-haspopup': 'true',
+    });
+  }
+
   return (
     <button
       type="button"
@@ -60,14 +77,14 @@ export function DropdownMenuTrigger({ children }: { children: React.ReactNode })
   );
 }
 
-export function DropdownMenuContent({ children }: { children: React.ReactNode }) {
+export function DropdownMenuContent({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   const { isOpen, setIsOpen } = useDropdown();
 
   if (!isOpen) return null;
 
   return (
     <div
-      className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10"
+      className={`origin-top-right absolute right-0 mt-2 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10 ${className || 'w-56'}`}
       role="menu"
       aria-orientation="vertical"
       aria-labelledby="menu-button"

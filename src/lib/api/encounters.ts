@@ -26,10 +26,10 @@ export async function fetchEncounterDetails(encounterId: string): Promise<Encoun
 export async function fetchEncounterCombatants(encounterId: string): Promise<EncounterCombatant[]> {
   const { data, error } = await supabase
     .from('encounter_combatants')
-    .select('*') 
+    .select('*')
     .eq('encounter_id', encounterId)
     // Primary Sort: Initiative (1 is best, null is worst)
-    .order('initiative_roll', { ascending: true, nullsLast: true }) 
+    .order('initiative_roll', { ascending: true, nullsLast: true })
     // Secondary Sort: Name (for ties)
     .order('display_name', { ascending: true });
 
@@ -48,7 +48,7 @@ export async function fetchLatestEncounterForParty(partyId: string): Promise<Enc
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
-  
+
   // Ignore "No Rows Found" error (PGRST116)
   if (error && error.code !== 'PGRST116') throw error;
   return data;
@@ -60,8 +60,8 @@ export async function fetchActiveEncounterForParty(partyId: string): Promise<Enc
     .select('*')
     .eq('party_id', partyId)
     .eq('status', 'active') // Only finds running battles
-    .maybeSingle(); 
-  
+    .maybeSingle();
+
   if (error) {
     console.error("Error fetching active encounter:", error);
     return null;
@@ -131,7 +131,7 @@ export async function updateEncounter(id: string, updates: Partial<Encounter>): 
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); 
+    .maybeSingle();
 
   if (error) throw error;
   if (!data) throw new Error('Encounter not found or permission denied');
@@ -144,7 +144,7 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
     .update(updates)
     .eq('id', id)
     .select()
-    .maybeSingle(); 
+    .maybeSingle();
 
   if (error) throw error;
   if (!data) throw new Error('Combatant not found or permission denied');
@@ -173,7 +173,7 @@ export const nextRound = async (id: string) => {
   const { error } = await supabase.rpc('advance_encounter_round', {
     p_encounter_id: id
   });
-  
+
   if (error) throw error;
 };
 
@@ -181,7 +181,7 @@ export const nextRound = async (id: string) => {
 
 export async function deleteEncounter(id: string): Promise<void> {
   const { error } = await supabase.from('encounters').delete().eq('id', id);
-  if (error) throw error; 
+  if (error) throw error;
 }
 
 export async function removeCombatant(id: string): Promise<void> {
@@ -202,34 +202,13 @@ export async function rollInitiativeForCombatants(encounterId: string, combatant
 
 // --- UPDATED SWAP FUNCTION ---
 export async function swapInitiative({ id1, id2 }: { id1: string; id2: string }) {
-  // 1. Get current values first
-  const { data: c1, error: e1 } = await supabase
-    .from('encounter_combatants')
-    .select('initiative_roll')
-    .eq('id', id1)
-    .single();
+  const { error } = await supabase.rpc('swap_initiative', {
+    id1,
+    id2
+  });
 
-  const { data: c2, error: e2 } = await supabase
-    .from('encounter_combatants')
-    .select('initiative_roll')
-    .eq('id', id2)
-    .single();
-
-  if (e1 || e2 || !c1 || !c2) {
-    console.error("Fetch failed for swap", e1, e2);
-    throw new Error('Failed to fetch combatants for swap');
+  if (error) {
+    console.error("Swap failed", error);
+    throw new Error('Failed to swap initiative');
   }
-
-  // 2. Perform Swap
-  const { error: updateError1 } = await supabase
-    .from('encounter_combatants')
-    .update({ initiative_roll: c2.initiative_roll })
-    .eq('id', id1);
-
-  const { error: updateError2 } = await supabase
-    .from('encounter_combatants')
-    .update({ initiative_roll: c1.initiative_roll })
-    .eq('id', id2);
-
-  if (updateError1 || updateError2) throw new Error('Failed to swap initiative');
 }

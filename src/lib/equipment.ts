@@ -1,4 +1,4 @@
-import { GameItem, findItemByName as findItemByNameApi } from './api/items'; 
+import { GameItem, findItemByName as findItemByNameApi } from './api/items';
 
 // Keep the findEquipment function using the API call for now
 export async function findEquipment(name: string): Promise<GameItem | null> {
@@ -12,7 +12,7 @@ export function parseCost(costString: string | undefined | null): { gold: number
   const cost = { gold: 0, silver: 0, copper: 0 };
   if (!costString || typeof costString !== 'string') return cost;
 
-  const parts = costString.toLowerCase().split(/,\s*|\s+/); 
+  const parts = costString.toLowerCase().split(/,\s*|\s+/);
 
   for (let i = 0; i < parts.length; i++) {
     const value = parseInt(parts[i]);
@@ -20,17 +20,17 @@ export function parseCost(costString: string | undefined | null): { gold: number
       const unit = parts[i + 1];
       if (unit.startsWith('gold') || unit.startsWith('g')) {
         cost.gold = value;
-        i++; 
+        i++;
       } else if (unit.startsWith('silver') || unit.startsWith('s')) {
         cost.silver = value;
-        i++; 
+        i++;
       } else if (unit.startsWith('copper') || unit.startsWith('c')) {
         cost.copper = value;
-        i++; 
+        i++;
       }
     }
   }
-  return normalizeCurrency(cost); 
+  return normalizeCurrency(cost);
 }
 
 // Format cost object back into a string
@@ -50,15 +50,15 @@ export function formatCost(cost: { gold: number; silver: number; copper: number 
 // ---------------------------------------------------------
 export function normalizeCurrency(money: { gold: number; silver: number; copper: number }): { gold: number; silver: number; copper: number } {
   let { gold, silver, copper } = money;
-  
+
   // 10 Copper -> 1 Silver
-  silver += Math.floor(copper / 10); 
-  copper %= 10; 
-  
+  silver += Math.floor(copper / 10);
+  copper %= 10;
+
   // 10 Silver -> 1 Gold
-  gold += Math.floor(silver / 10); 
-  silver %= 10; 
-  
+  gold += Math.floor(silver / 10);
+  silver %= 10;
+
   return { gold, silver, copper };
 }
 
@@ -82,13 +82,13 @@ export function subtractCost(
   let remainingCopper = totalCurrentCopper - totalItemCopper;
 
   // Convert back to Gold (100 copper = 1 gold)
-  const newGold = Math.floor(remainingCopper / 100); 
+  const newGold = Math.floor(remainingCopper / 100);
   remainingCopper %= 100;
-  
+
   // Convert remainder to Silver (10 copper = 1 silver)
   const newSilver = Math.floor(remainingCopper / 10);
   remainingCopper %= 10;
-  
+
   const newCopper = remainingCopper;
 
   return { success: true, newMoney: { gold: newGold, silver: newSilver, copper: newCopper } };

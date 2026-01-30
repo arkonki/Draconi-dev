@@ -87,7 +87,7 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
           {itemData.category === 'ARMOR & HELMETS' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Armor Rating</label>
-              <input type="number" value={itemData.armor_rating || ''} onChange={(e) => onChange('armor_rating', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md"/>
+              <input type="number" value={itemData.armor_rating || ''} onChange={(e) => onChange('armor_rating', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md" />
             </div>
           )}
           {(itemData.category === 'MELEE WEAPONS' || itemData.category === 'RANGED WEAPONS') && (
@@ -101,19 +101,19 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">STR Requirement</label>
-                <input type="number" value={itemData.strength_requirement || ''} onChange={(e) => onChange('strength_requirement', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md"/>
+                <input type="number" value={itemData.strength_requirement || ''} onChange={(e) => onChange('strength_requirement', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Range</label>
-                <input type="text" value={itemData.range || ''} onChange={(e) => onChange('range', e.target.value)} placeholder="Enter range value or STR" className="w-full px-3 py-2 border rounded-md"/>
+                <input type="text" value={itemData.range || ''} onChange={(e) => onChange('range', e.target.value)} placeholder="Enter range value or STR" className="w-full px-3 py-2 border rounded-md" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Damage</label>
-                <input type="text" value={itemData.damage || ''} onChange={(e) => onChange('damage', e.target.value)} placeholder="e.g. D6, D8, 2D8" className="w-full px-3 py-2 border rounded-md"/>
+                <input type="text" value={itemData.damage || ''} onChange={(e) => onChange('damage', e.target.value)} placeholder="e.g. D6, D8, 2D8" className="w-full px-3 py-2 border rounded-md" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Durability</label>
-                <input type="number" value={itemData.durability || ''} onChange={(e) => onChange('durability', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md"/>
+                <input type="number" value={itemData.durability || ''} onChange={(e) => onChange('durability', parseInt(e.target.value))} className="w-full px-3 py-2 border rounded-md" />
               </div>
             </>
           )}
@@ -125,15 +125,15 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
         <label className="block text-sm font-medium text-gray-700 mb-1">Cost</label>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div className="flex">
-            <input type="number" value={cost.gold} onChange={(e) => handleCostChange('gold', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0"/>
+            <input type="number" value={cost.gold} onChange={(e) => handleCostChange('gold', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0" />
             <span className="inline-flex items-center px-3 border border-l-0 rounded-r-md bg-gray-100 text-gray-700">Gold</span>
           </div>
           <div className="flex">
-            <input type="number" value={cost.silver} onChange={(e) => handleCostChange('silver', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0"/>
+            <input type="number" value={cost.silver} onChange={(e) => handleCostChange('silver', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0" />
             <span className="inline-flex items-center px-3 border border-l-0 rounded-r-md bg-gray-100 text-gray-700">Silver</span>
           </div>
           <div className="flex">
-            <input type="number" value={cost.copper} onChange={(e) => handleCostChange('copper', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0"/>
+            <input type="number" value={cost.copper} onChange={(e) => handleCostChange('copper', e.target.value)} className="w-full px-3 py-2 border rounded-l-md" placeholder="0" />
             <span className="inline-flex items-center px-3 border border-l-0 rounded-r-md bg-gray-100 text-gray-700">Copper</span>
           </div>
         </div>
@@ -155,26 +155,26 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
         {/* Weight */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
-          <input type="number" value={itemData.weight || ''} onChange={(e) => onChange('weight', parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.1"/>
+          <input type="number" value={itemData.weight || ''} onChange={(e) => onChange('weight', parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.1" />
         </div>
 
         {/* Quantity / Count */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Count / Uses</label>
-          <input 
-            type="number" 
-            value={itemData.quantity || 1} 
-            onChange={(e) => onChange('quantity', parseInt(e.target.value))} 
-            className="w-full px-3 py-2 border rounded-md" 
-            min="1" 
+          <input
+            type="number"
+            value={itemData.quantity || 1}
+            onChange={(e) => onChange('quantity', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border rounded-md"
+            min="1"
             placeholder="Default 1"
           />
         </div>
       </div>
-      
+
       {/* --- Updated: Item Flags (Equippable / Consumable) --- */}
       <div className="space-y-4 pt-4 border-t">
-        
+
         {/* Equippable Checkbox */}
         <div className="flex items-center">
           <input
@@ -190,19 +190,54 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
         </div>
 
         {itemData.equippable && (
-          <div className="ml-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Encumbrance Bonus
-            </label>
-            <input
-              type="number"
-              value={itemData.encumbrance_modifier || ''}
-              onChange={(e) => onChange('encumbrance_modifier', parseInt(e.target.value) || 0)}
-              className="w-full px-3 py-2 border rounded-md"
-              placeholder="e.g., 2 for a backpack"
-              min="0"
-            />
-             <p className="text-xs text-gray-500 mt-1">Increases carrying capacity by this amount when equipped.</p>
+          <div className="ml-6 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Encumbrance Bonus
+              </label>
+              <input
+                type="number"
+                value={itemData.encumbrance_modifier || ''}
+                onChange={(e) => onChange('encumbrance_modifier', parseInt(e.target.value) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+                placeholder="e.g., 2 for a backpack"
+                min="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">Increases CARRYING CAPACITY (STR/2) by this amount.</p>
+            </div>
+
+            {/* Container Logic */}
+            <div className="pt-2 border-t border-gray-100">
+              <div className="flex items-center">
+                <input
+                  id="is_container"
+                  type="checkbox"
+                  checked={!!itemData.is_container}
+                  onChange={(e) => onChange('is_container', e.target.checked)}
+                  className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                />
+                <label htmlFor="is_container" className="ml-2 block text-sm font-medium text-gray-800">
+                  Is Container? (Has separate storage)
+                </label>
+              </div>
+
+              {itemData.is_container && (
+                <div className="mt-2 ml-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Container Capacity (Slots/Items)
+                  </label>
+                  <input
+                    type="number"
+                    value={itemData.container_capacity || ''}
+                    onChange={(e) => onChange('container_capacity', parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border rounded-md"
+                    placeholder="e.g., 10"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">How many items can be stored inside? (Use 0 for unlimited/weight based logic if implemented)</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -225,7 +260,7 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
       {/* Effect/Description */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Effect/Description</label>
-        <textarea value={itemData.effect || ''} onChange={(e) => onChange('effect', e.target.value.toUpperCase())} rows={3} className="w-full px-3 py-2 border rounded-md"/>
+        <textarea value={itemData.effect || ''} onChange={(e) => onChange('effect', e.target.value.toUpperCase())} rows={3} className="w-full px-3 py-2 border rounded-md" />
       </div>
 
       {/* Features */}

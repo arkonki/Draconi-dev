@@ -25,6 +25,7 @@ export interface Encounter {
   status: 'planning' | 'active' | 'completed';
   current_round: number;
   active_combatant_id: string | null;
+  log?: any[]; // Array of combat events
   created_at: string;
   updated_at: string;
 }

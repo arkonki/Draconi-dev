@@ -13,7 +13,7 @@ const CHARACTER_SELECT_QUERY = `
 export const mapCharacterData = (char: any): Character => {
   const defaultAttributes = { STR: 10, AGL: 10, INT: 10, CON: 10, WIL: 10, CHA: 10 };
   const dbAttributes = char.attributes || {};
-  
+
   const attributes = {
     STR: dbAttributes.STR ?? defaultAttributes.STR,
     AGL: dbAttributes.AGL ?? defaultAttributes.AGL,
@@ -39,7 +39,7 @@ export const mapCharacterData = (char: any): Character => {
 
   // --- PARTY ID LOGIC ---
   // Try direct column first, then fall back to the relationship table
-  let derivedPartyId = char.party_id; 
+  let derivedPartyId = char.party_id;
   if (!derivedPartyId && char.party_members && Array.isArray(char.party_members) && char.party_members.length > 0) {
     derivedPartyId = char.party_members[0].party_id;
   }
@@ -58,7 +58,7 @@ export const mapCharacterData = (char: any): Character => {
     portrait_url: char.portrait_url,
     magicSchool: char.magic_school || null,
     memento: char.memento || '',
-    flaw: char.weak_spot || '', 
+    flaw: char.weak_spot || '',
     attributes: attributes,
     max_hp: max_hp,
     current_hp: char.current_hp ?? max_hp,
@@ -66,15 +66,15 @@ export const mapCharacterData = (char: any): Character => {
     current_wp: char.current_wp ?? max_wp,
     skill_levels: skillLevelsData,
     trainedSkills: char.trained_skills || [],
-    marked_skills: char.marked_skills || [], 
+    marked_skills: char.marked_skills || [],
     spells: char.spells || { known: [] },
-    heroic_abilities: char.heroic_ability || [], 
+    heroic_abilities: char.heroic_ability || [],
     equipment: {
-        inventory: equipmentData.inventory || [],
-        equipped: equipmentData.equipped || { weapons: [] },
-        money: equipmentData.money || { gold: 0, silver: 0, copper: 0 },
+      inventory: equipmentData.inventory || [],
+      equipped: equipmentData.equipped || { weapons: [] },
+      money: equipmentData.money || { gold: 0, silver: 0, copper: 0 },
     },
-    item_notes: char.item_notes || {}, 
+    item_notes: char.item_notes || {},
     conditions: char.conditions || { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false },
     is_rallied: char.is_rallied ?? false,
     death_rolls_passed: char.death_rolls_passed ?? 0,
@@ -85,11 +85,11 @@ export const mapCharacterData = (char: any): Character => {
     corruption: char.corruption ?? 0,
     created_at: char.created_at,
     updated_at: char.updated_at,
-    
+
     party_id: derivedPartyId,
     party_info: char.party_info,
   };
-  
+
   return character;
 };
 
@@ -142,17 +142,17 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
     dbUpdates.heroic_ability = dbUpdates.heroic_abilities;
     delete dbUpdates.heroic_abilities;
   }
-  
+
   if ('trainedSkills' in dbUpdates) {
     dbUpdates.trained_skills = dbUpdates.trainedSkills;
     delete dbUpdates.trainedSkills;
   }
-  
+
   if ('magicSchool' in dbUpdates) {
     if (typeof dbUpdates.magicSchool === 'object' && dbUpdates.magicSchool !== null && 'id' in dbUpdates.magicSchool) {
-        dbUpdates.magic_school = dbUpdates.magicSchool.id;
+      dbUpdates.magic_school = dbUpdates.magicSchool.id;
     } else {
-        dbUpdates.magic_school = dbUpdates.magicSchool;
+      dbUpdates.magic_school = dbUpdates.magicSchool;
     }
     delete dbUpdates.magicSchool;
   }
@@ -172,7 +172,7 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
     .single();
 
   if (error) throw new Error(error.message || 'Failed to update character');
-  
+
   return data ? mapCharacterData(data) : null;
 }
 

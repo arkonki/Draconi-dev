@@ -6,9 +6,9 @@ import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parti
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
-import { 
-  Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass, 
-  MessageSquare
+import {
+  Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
+  MessageSquare, ChevronDown
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
@@ -18,13 +18,15 @@ import { PartyTasks } from '../components/party/PartyTasks';
 import { PartyInventory } from '../components/party/PartyInventory';
 import { PartyEncounterView } from '../components/party/PartyEncounterView';
 import { StoryHelperApp } from '../components/party/StoryHelper';
-import { TimeTrackerView } from '../components/party/TimeTracker'; 
+import { TimeTrackerView } from '../components/party/TimeTracker';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
 import { GMScreen } from '../components/party/GMScreen';
 import { PartyChat } from '../components/party/PartyChat';
 import { supabase } from '../lib/supabase';
+import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
+import { Home } from 'lucide-react';
 
-type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper'; 
+type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper';
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -35,9 +37,9 @@ export function PartyView() {
 
   const [isInviteVisible, setIsInviteVisible] = useState(false);
   const [dialogOpen, setDialogOpen] = useState<'deleteParty' | 'removeMember' | null>(null);
-  const [memberToRemove, setMemberToRemove] = useState<{id: string, name: string} | null>(null);
-  
-  const [activeTab, setActiveTab] = useState<Tab>('members'); 
+  const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
+
+  const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
 
   // 3. Extract noteId from URL
@@ -103,7 +105,7 @@ export function PartyView() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['parties'] }); navigate('/adventure-party'); },
   });
 
-  const handleRemoveMemberClick = (id: string, name: string) => { setMemberToRemove({id, name}); setDialogOpen('removeMember'); };
+  const handleRemoveMemberClick = (id: string, name: string) => { setMemberToRemove({ id, name }); setDialogOpen('removeMember'); };
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
@@ -122,11 +124,11 @@ export function PartyView() {
 
   const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Roster', icon: Users },
-    { id: 'chat', label: 'Chat', icon: MessageSquare }, 
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'notes', label: 'Journal', icon: FileText },
     { id: 'tasks', label: 'Quests', icon: ClipboardList },
     { id: 'inventory', label: 'Stash', icon: Backpack },
-    { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true }, 
+    { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true },
     { id: 'encounter', label: 'Combat', icon: Swords, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
@@ -134,67 +136,157 @@ export function PartyView() {
 
   const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isPartyOwner);
 
+  // Helper function to get tab label
+  const getTabLabel = (tabId: Tab): string => {
+    const tab = allTabs.find(t => t.id === tabId);
+    return tab?.label || tabId;
+  };
+
+  // Build breadcrumbs dynamically
+  const breadcrumbs: BreadcrumbItem[] = [
+    { label: 'Home', path: '/', icon: Home },
+    { label: 'Adventure Party', path: '/adventure-party', icon: Users },
+    { label: party.name }
+  ];
+
+  // Add active tab to breadcrumbs if not on members (default) tab
+  if (activeTab !== 'members') {
+    const tab = allTabs.find(t => t.id === activeTab);
+    if (tab) {
+      breadcrumbs.push({ label: getTabLabel(activeTab), icon: tab.icon });
+    }
+  }
+
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-      
+      <Breadcrumbs items={breadcrumbs} />
       {/* Header Card */}
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden">
         <div className="p-6 md:p-8 bg-gradient-to-r from-white to-gray-50 border-b border-gray-200">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div>
-                <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">{party.name}</h1>
-                <p className="text-gray-500 mt-1 font-medium">A band of {party.members.length} brave adventurers.</p>
-              </div>
-              
-              {isPartyOwner && (
-                <div className="flex items-center gap-2">
-                   <Button 
-                      variant="secondary" 
-                      size="sm" 
-                      icon={UserPlus} 
-                      onClick={() => setIsInviteVisible(!isInviteVisible)}
-                      className={isInviteVisible ? "bg-blue-50 border-blue-200 text-blue-700" : ""}
-                   >
-                      Invite
-                   </Button>
-
-                   <DropdownMenu>
-                    <DropdownMenuTrigger>
-                      <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                        <Trash2 className="w-4 h-4 mr-2" /> Disband Party
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              )}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">{party.name}</h1>
+              <p className="text-gray-500 mt-1 font-medium">A band of {party.members.length} brave adventurers.</p>
             </div>
 
-            {isInviteVisible && isPartyOwner && (
-              <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg animate-in slide-in-from-top-2 fade-in">
-                <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">Invite Link</h3>
-                <div className="flex items-center gap-2">
-                  <div className="flex-grow bg-white border border-blue-200 rounded-md px-3 py-2 text-sm text-gray-600 font-mono truncate">
-                    {joinLink}
-                  </div>
-                  <CopyButton textToCopy={joinLink} />
-                </div>
+            {isPartyOwner && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={UserPlus}
+                  onClick={() => setIsInviteVisible(!isInviteVisible)}
+                  className={isInviteVisible ? "bg-blue-50 border-blue-200 text-blue-700" : ""}
+                >
+                  Invite
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger>
+                    <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                      <Trash2 className="w-4 h-4 mr-2" /> Disband Party
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
+          </div>
+
+          {isInviteVisible && isPartyOwner && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg animate-in slide-in-from-top-2 fade-in">
+              <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">Invite Link</h3>
+              <div className="flex items-center gap-2">
+                <div className="flex-grow bg-white border border-blue-200 rounded-md px-3 py-2 text-sm text-gray-600 font-mono truncate">
+                  {joinLink}
+                </div>
+                <CopyButton textToCopy={joinLink} />
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="border-b border-gray-200 bg-white overflow-x-auto">
-          <nav className="flex px-6 min-w-max">
+        {/* Tab Navigation - Desktop: Horizontal Tabs, Mobile/Tablet: Dropdown */}
+        <div className="border-b border-gray-200 bg-white">
+          {/* Mobile & Tablet Dropdown */}
+          <div className="lg:hidden px-4 py-3">
+            <button
+              type="button"
+              onClick={(e) => {
+                const dropdown = document.getElementById('mobile-tab-menu');
+                if (dropdown) {
+                  const isHidden = dropdown.classList.contains('hidden');
+                  if (isHidden) {
+                    // Position the dropdown below the button
+                    const buttonRect = e.currentTarget.getBoundingClientRect();
+                    dropdown.style.top = `${buttonRect.bottom + 8}px`;
+                    dropdown.style.left = `${buttonRect.left}px`;
+                    dropdown.style.width = `${buttonRect.width}px`;
+                  }
+                  dropdown.classList.toggle('hidden');
+                }
+              }}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const currentTab = allTabs.find(t => t.id === activeTab);
+                  const Icon = currentTab?.icon || Users;
+                  return (
+                    <>
+                      <Icon className="w-5 h-5 text-indigo-600" />
+                      <span className="font-medium text-gray-900">{currentTab?.label || 'Menu'}</span>
+                    </>
+                  );
+                })()}
+              </div>
+              <ChevronDown className="w-5 h-5 text-gray-400" />
+            </button>
+
+            <div
+              id="mobile-tab-menu"
+              className="hidden fixed rounded-md shadow-xl bg-white ring-1 ring-black ring-opacity-5 z-[9999]"
+              style={{ maxHeight: '80vh', overflowY: 'auto' }}
+            >
+              <div className="py-1">
+                {visibleTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      handleTabChange(tab.id);
+                      const dropdown = document.getElementById('mobile-tab-menu');
+                      if (dropdown) dropdown.classList.add('hidden');
+                    }}
+                    className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm transition-colors ${activeTab === tab.id
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                      }`}
+                  >
+                    <tab.icon className="w-4 h-4" />
+                    <span className="flex-1">{tab.label}</span>
+                    {tab.id === 'chat' && unreadCount > 0 && (
+                      <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Horizontal Tabs */}
+          <nav className="hidden lg:flex px-6 min-w-max overflow-x-auto">
             {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => handleTabChange(tab.id)} 
+                onClick={() => handleTabChange(tab.id)}
                 className={`
                   relative group flex items-center gap-2 px-4 py-4 text-sm font-medium border-b-2 transition-all
-                  ${activeTab === tab.id 
-                    ? 'border-indigo-600 text-indigo-600' 
+                  ${activeTab === tab.id
+                    ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
                   }
                 `}
@@ -217,78 +309,78 @@ export function PartyView() {
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl min-h-[500px] overflow-hidden">
         {activeTab === 'members' && (
           <div className="p-6">
-            <PartyMemberList 
-              party={party} 
-              isDM={isPartyOwner} 
+            <PartyMemberList
+              party={party}
+              isDM={isPartyOwner}
               currentUserId={user?.id}
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
           </div>
         )}
-        
+
         {activeTab === 'chat' && (
-           <div className="p-6">
-             <PartyChat partyId={partyId!} members={party.members} />
-           </div>
+          <div className="p-6">
+            <PartyChat partyId={partyId!} members={party.members} />
+          </div>
         )}
-        
+
         {/* 5. Pass noteIdFromUrl to PartyNotes */}
         {activeTab === 'notes' && (
-          <PartyNotes 
-            partyId={partyId!} 
-            isDM={isPartyOwner} 
+          <PartyNotes
+            partyId={partyId!}
+            isDM={isPartyOwner}
             openNoteId={noteIdFromUrl} // <--- Pass the ID
           />
         )}
-        
+
         {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={isPartyOwner} />}
-        
+
         {activeTab === 'inventory' && (
           <div className="p-6">
-             <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />
+            <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />
           </div>
         )}
 
         {activeTab === 'time' && (
-           <div className="p-6">
-             <TimeTrackerView partyId={partyId!} />
-           </div>
+          <div className="p-6">
+            <TimeTrackerView partyId={partyId!} />
+          </div>
         )}
-        
+
         {activeTab === 'encounter' && (
-           <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />
+          <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />
         )}
 
         {activeTab === 'gmScreen' && <GMScreen />}
-        
+
         {activeTab === 'storyhelper' && (
           <div className="p-6">
-             <StoryHelperApp partyId={partyId!} initialPartyData={partyMembersString} />
+            <StoryHelperApp partyId={partyId!} initialPartyData={partyMembersString} />
           </div>
         )}
       </div>
 
-      <ConfirmationDialog 
-        isOpen={dialogOpen === 'removeMember'} 
-        onClose={() => setDialogOpen(null)} 
-        onConfirm={confirmRemoveMember} 
-        title="Remove Member" 
-        description={`Are you sure you want to remove ${memberToRemove?.name} from the party?`} 
-        confirmText="Remove" 
-        isDestructive={true} 
-        isLoading={removeMemberMutation.isPending} 
+      <ConfirmationDialog
+        isOpen={dialogOpen === 'removeMember'}
+        onClose={() => setDialogOpen(null)}
+        onConfirm={confirmRemoveMember}
+        title="Remove Member"
+        description={`Are you sure you want to remove ${memberToRemove?.name} from the party?`}
+        confirmText="Remove"
+        isDestructive={true}
+        isLoading={removeMemberMutation.isPending}
         icon={<UserX className="w-6 h-6 text-red-500" />}
       />
 
-      <ConfirmationDialog 
-        isOpen={dialogOpen === 'deleteParty'} 
-        onClose={() => setDialogOpen(null)} 
-        onConfirm={confirmDeleteParty} 
-        title="Disband Party" 
-        description="Are you sure? This will permanently delete the party and all associated data." 
-        confirmText="Disband Permanently" 
-        isDestructive={true} 
-        isLoading={deletePartyMutation.isPending} 
+      <ConfirmationDialog
+        isOpen={dialogOpen === 'deleteParty'}
+        onClose={() => setDialogOpen(null)}
+        onConfirm={confirmDeleteParty}
+        title="Disband Party"
+        description="Are you sure? This will permanently delete the party and all associated data."
+        confirmText="Disband Permanently"
+        isDestructive={true}
+        isLoading={deletePartyMutation.isPending}
         icon={<ShieldAlert className="w-6 h-6 text-red-500" />}
       />
     </div>
