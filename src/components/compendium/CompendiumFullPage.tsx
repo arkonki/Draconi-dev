@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
-import { 
-  ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag, 
-  Image as ImageIcon, User, Package, Table 
+import {
+  ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag,
+  Image as ImageIcon, User, Package, Table
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { CompendiumEntry } from '../../types/compendium';
 
 import MDEditor, { commands, ICommand } from '@uiw/react-md-editor';
 // Ensure this path matches where you saved the previous file
-import { HomebrewRenderer } from './HomebrewRenderer'; 
+import { HomebrewRenderer } from './HomebrewRenderer';
 // Ensure this path matches where you saved the modal
-import { ImagePickerModal } from './ImagePickerModal'; 
+import { ImagePickerModal } from './ImagePickerModal';
 
 // --- DRAGONBANE TEMPLATES ---
 
@@ -101,23 +101,48 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
     }
   };
 
-  const handleImageInsert = (url: string, width?: string, height?: string) => {
+  const handleImageInsert = (url: string, width?: string, height?: string, alignment: 'none' | 'left' | 'center' | 'right' = 'center') => {
     let imageString = '';
-    
-    if (width || height) {
-      const style = [
-        width ? `width: ${width}` : '',
-        height ? `height: ${height}` : ''
-      ].filter(Boolean).join('; ');
-      
-      imageString = `\n<div align="center">\n  <img src="${url}" style="${style}" alt="Image" />\n</div>\n`;
+
+    // For floated images, we use a container div method which is more responsive and cleaner to wrap text around.
+    if (alignment === 'left' || alignment === 'right') {
+      const containerStyles: string[] = [
+        `float: ${alignment}`,
+        width ? `width: ${width}` : 'width: 40%', // Default to 40% if no width specified for side images
+        alignment === 'left' ? 'margin-right: 1.5rem' : 'margin-left: 1.5rem',
+        'margin-bottom: 1rem',
+        'margin-top: 0.5rem'
+      ];
+
+      // If width is percentage, adding a max-width prevents it from becoming massive on wide screens
+      if (width?.includes('%') || !width) {
+        containerStyles.push('max-width: 450px');
+      }
+
+      const stylesString = containerStyles.join('; ');
+      imageString = `\n<div style="${stylesString}">\n  <img src="${url}" alt="Image" style="width: 100%; object-fit: contain;" />\n</div>\n`;
+
+    } else if (alignment === 'center') {
+      // Center Block
+      const styles = width ? `width: ${width}; max-width: 100%` : 'max-width: 100%';
+      imageString = `\n<div align="center">\n  <img src="${url}" style="${styles}" alt="Image" />\n</div>\n`;
+
     } else {
-      imageString = `\n![Image](${url})\n`;
+      // Inline / None
+      // If dimensions provided, use HTML. Else Markdown.
+      if (width || height) {
+        const styles: string[] = [];
+        if (width) styles.push(`width: ${width}`);
+        if (height) styles.push(`height: ${height}`);
+        imageString = `\n<img src="${url}" style="${styles.join('; ')}" alt="Image" />\n`;
+      } else {
+        imageString = `\n![Image](${url})\n`;
+      }
     }
 
     setEditedEntry(prev => ({
-        ...prev,
-        content: prev.content + imageString
+      ...prev,
+      content: prev.content + imageString
     }));
   };
 
@@ -149,34 +174,34 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col h-screen">
-      
+
       {/* --- HEADER --- */}
       <div className="bg-white border-b border-gray-200 shadow-sm px-6 py-3 flex items-center justify-between shrink-0 h-16">
         <div className="flex items-center gap-4 flex-1">
           <Button variant="ghost" size="icon_sm" onClick={onClose} title="Go Back">
             <ArrowLeft className="w-5 h-5 text-gray-500" />
           </Button>
-          
+
           <div className="h-8 w-px bg-gray-200 mx-2" />
-          
+
           <div className="flex flex-col flex-1 max-w-2xl">
             {/* Title Input */}
-            <input 
-              type="text" 
-              value={editedEntry.title} 
-              onChange={(e) => setEditedEntry({ ...editedEntry, title: e.target.value })} 
+            <input
+              type="text"
+              value={editedEntry.title}
+              onChange={(e) => setEditedEntry({ ...editedEntry, title: e.target.value })}
               className="text-lg font-bold text-gray-900 border-none p-0 focus:ring-0 placeholder-gray-300 bg-transparent w-full leading-tight"
               placeholder="Entry Title..."
               autoFocus={!entry.id}
             />
-            
+
             {/* Category Input */}
             <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
               <Tag size={12} />
-              <input 
-                type="text" 
-                value={editedEntry.category} 
-                onChange={(e) => setEditedEntry({ ...editedEntry, category: e.target.value })} 
+              <input
+                type="text"
+                value={editedEntry.category}
+                onChange={(e) => setEditedEntry({ ...editedEntry, category: e.target.value })}
                 className="border-none p-0 focus:ring-0 text-xs text-indigo-600 font-medium placeholder-indigo-300 bg-transparent w-48"
                 placeholder="Uncategorized"
               />
@@ -209,9 +234,9 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
             }}
             // Render Preview using the Dragonbane-specific HomebrewRenderer
             renderPreview={(markdownContent) => (
-                <div className="h-full overflow-y-auto bg-white p-8 custom-scrollbar">
-                    <HomebrewRenderer content={markdownContent} />
-                </div>
+              <div className="h-full overflow-y-auto bg-white p-8 custom-scrollbar">
+                <HomebrewRenderer content={markdownContent} />
+              </div>
             )}
             commands={[
               commands.bold, commands.italic, commands.title, commands.divider,
@@ -222,8 +247,8 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
                 buttonProps: { 'aria-label': 'Code' }
               }),
               commands.divider,
-              customImageCommand, 
-              commands.link, 
+              customImageCommand,
+              commands.link,
               commands.divider,
               ...blockCommands, // Inject Dragonbane Stat Blocks here
               commands.divider,
@@ -235,7 +260,7 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
 
       {/* --- MODALS --- */}
       {showImagePicker && (
-        <ImagePickerModal 
+        <ImagePickerModal
           onClose={() => setShowImagePicker(false)}
           onSelectImage={handleImageInsert}
         />

@@ -32,35 +32,35 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, maxItems = 4 })
     }
 
     return (
-        <nav aria-label="Breadcrumb" className="mb-4">
-            <ol className="flex items-center space-x-1 text-sm">
+        <nav aria-label="Breadcrumb" className="mb-4 overflow-hidden">
+            <ol className="flex items-center space-x-1 text-sm overflow-x-auto no-scrollbar whitespace-nowrap pb-1">
                 {displayItems.map((item, index) => {
                     const isLast = index === displayItems.length - 1;
                     const Icon = item.icon;
 
                     return (
-                        <li key={index} className="flex items-center">
+                        <li key={index} className="flex items-center flex-shrink-0">
                             {index > 0 && (
-                                <ChevronRight className="w-4 h-4 text-gray-400 mx-1 flex-shrink-0" />
+                                <ChevronRight className="w-3.5 h-3.5 text-gray-400 mx-1 flex-shrink-0" />
                             )}
 
                             {item.path && !isLast ? (
                                 <Link
                                     to={item.path}
-                                    className="flex items-center gap-1.5 text-gray-600 hover:text-indigo-600 transition-colors font-medium hover:underline"
+                                    className="flex items-center gap-1.5 text-gray-600 hover:text-indigo-600 transition-colors font-medium hover:underline px-1 py-0.5 rounded hover:bg-gray-100"
                                 >
-                                    {Icon && <Icon className="w-4 h-4" />}
-                                    <span className="truncate max-w-[200px]">{item.label}</span>
+                                    {Icon && <Icon className="w-3.5 h-3.5 flex-shrink-0" />}
+                                    <span className="truncate max-w-[100px] sm:max-w-[200px]">{item.label}</span>
                                 </Link>
                             ) : (
                                 <span
-                                    className={`flex items-center gap-1.5 ${isLast
-                                            ? 'text-gray-900 font-semibold'
-                                            : 'text-gray-500'
+                                    className={`flex items-center gap-1.5 px-1 py-0.5 ${isLast
+                                        ? 'text-gray-900 font-semibold'
+                                        : 'text-gray-500'
                                         }`}
                                 >
-                                    {Icon && <Icon className="w-4 h-4" />}
-                                    <span className="truncate max-w-[200px]">{item.label}</span>
+                                    {Icon && <Icon className="w-3.5 h-3.5 flex-shrink-0" />}
+                                    <span className="truncate max-w-[120px] sm:max-w-[200px]">{item.label}</span>
                                 </span>
                             )}
                         </li>

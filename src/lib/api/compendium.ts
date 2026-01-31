@@ -61,3 +61,15 @@ export async function fetchBioData(): Promise<BioOptions> {
     flaws: Array.from(allFlaws).sort(),
   };
 }
+
+export async function deleteCompendiumEntry(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('compendium')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting compendium entry:', error);
+    throw new Error(error.message || 'Failed to delete compendium entry');
+  }
+}

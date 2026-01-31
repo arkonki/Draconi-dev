@@ -2,7 +2,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import remarkHomebrewery from '../../lib/remark-homebrewery'; 
+import remarkHomebrewery from '../../lib/remark-homebrewery';
 import { Shield, Skull, Scroll, Flame, Diamond } from 'lucide-react';
 
 interface MarkdownRendererProps { content: string; className?: string; }
@@ -20,6 +20,49 @@ const MonsterBlock = ({ children }: { children: React.ReactNode }) => {
         prose-strong:text-teal-900 prose-strong:font-bold prose-p:my-2 prose-p:text-gray-800 prose-p:leading-6 prose-li:my-0
         [&>table]:my-2 [&>table]:w-full [&>table]:text-[11px] md:[&>table]:text-xs [&>table>tbody>tr>td]:py-1 [&>table>tbody>tr>td]:border-b [&>table>tbody>tr>td]:border-teal-800/10
       ">{children}</div>
+    </div>
+  );
+};
+
+const NPCBlock = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <div className="my-8 md:my-10 border-2 border-teal-700 bg-[#e6e2d3] p-4 md:p-6 shadow-md relative font-serif text-gray-900 rounded-sm w-full max-w-full">
+      {/* Header Badge */}
+      <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-teal-800 text-[#e6e2d3] px-4 py-1 text-xs font-bold uppercase tracking-[0.15em] border border-[#e6e2d3] shadow-md z-10 flex items-center gap-2 rounded-sm whitespace-nowrap">
+        <Skull size={12} className="text-teal-200" />NPC Profile<Skull size={12} className="text-teal-200" />
+      </div>
+
+      <div className="prose prose-sm max-w-none break-words
+        prose-h3:font-serif prose-h3:text-teal-900 prose-h3:text-center prose-h3:text-xl md:prose-h3:text-2xl prose-h3:font-bold prose-h3:uppercase prose-h3:tracking-widest prose-h3:border-b-2 prose-h3:border-teal-800/50 prose-h3:pb-2 prose-h3:mb-4 prose-h3:mt-2
+        prose-strong:text-teal-900 prose-strong:font-bold
+        prose-p:text-gray-900 prose-p:leading-6 prose-p:my-2
+        
+        /* Table Styling for Stats */
+        [&>table]:w-full [&>table]:border-collapse [&>table]:my-4 [&>table]:bg-teal-900/5 [&>table]:rounded-sm [&>table]:table-fixed
+        [&>table>thead>tr>th]:text-teal-900 [&>table>thead>tr>th]:p-2 [&>table>thead>tr>th]:uppercase [&>table>thead>tr>th]:text-[10px] [&>table>thead>tr>th]:tracking-wider
+        [&>table>tbody>tr>td]:p-2 [&>table>tbody>tr>td]:text-center [&>table>tbody>tr>td]:text-sm [&>table>tbody>tr>td]:font-bold [&>table>tbody>tr>td]:border-t [&>table>tbody>tr>td]:border-teal-900/10 [&>table>tbody>tr>td]:break-words
+        
+        /* Stats row background */
+        [&>p>strong]:text-teal-900
+      ">{children}</div>
+
+      {/* Decorative corners */}
+      <div className="absolute top-1 left-1 w-2 h-2 border-l-2 border-t-2 border-teal-800 opacity-50"></div>
+      <div className="absolute top-1 right-1 w-2 h-2 border-r-2 border-t-2 border-teal-800 opacity-50"></div>
+      <div className="absolute bottom-1 left-1 w-2 h-2 border-l-2 border-b-2 border-teal-800 opacity-50"></div>
+      <div className="absolute bottom-1 right-1 w-2 h-2 border-r-2 border-b-2 border-teal-800 opacity-50"></div>
+    </div>
+  );
+};
+
+const ItemBlock = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <div className="my-6 md:my-8 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 p-4 shadow-md rounded-lg relative overflow-hidden break-inside-avoid">
+      <div className="absolute top-0 right-0 p-2 opacity-5"><Diamond size={64} className="text-amber-900" /></div>
+      <div className="prose prose-sm max-w-none
+         prose-h1:font-serif prose-h1:text-amber-900 prose-h1:text-lg prose-h1:border-b prose-h1:border-amber-900/20 prose-h1:pb-1
+         prose-strong:text-amber-800 prose-p:text-amber-950/80
+       ">{children}</div>
     </div>
   );
 };
@@ -59,7 +102,7 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
           p: ({ children }) => <p className="mb-4 text-left md:text-justify leading-6 md:leading-7 text-sm md:text-[15px]">{children}</p>,
           hr: () => (<div className="my-8 md:my-10 flex items-center justify-center gap-4 opacity-60"><div className="h-px w-full bg-gradient-to-l from-teal-800 to-transparent" /><Shield size={16} className="text-teal-800 shrink-0 fill-teal-100 md:w-5 md:h-5" /><div className="h-px w-full bg-gradient-to-r from-teal-800 to-transparent" /></div>),
           blockquote: ({ children }) => (<blockquote className="border-l-4 border-teal-300 pl-4 italic text-gray-600 my-6 bg-gray-50/50 py-2 pr-2 text-sm md:text-base rounded-r-sm">{children}</blockquote>),
-          
+
           // --- TABLES (Optimized for Mobile) ---
           table: ({ children }) => (
             <div className="my-4 w-full block overflow-x-auto max-w-full rounded-sm border border-teal-800/30 shadow-sm bg-white break-inside-avoid">
@@ -73,14 +116,32 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
           th: ({ children }) => <th className="px-1.5 py-2 md:px-4 md:py-2.5 font-bold align-bottom">{children}</th>,
           td: ({ children }) => <td className="px-1.5 py-2 md:px-4 md:py-2 align-top text-gray-700">{children}</td>,
 
-          code({ node, inline, className, children, ...props }) {
+          code({ node, className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const type = match ? match[1] : '';
             const contentString = String(children).replace(/\n$/, '');
-            if (!inline) {
-              if (type === 'monster') return <MonsterBlock><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentString}</ReactMarkdown></MonsterBlock>;
-              if (type === 'spell') return <SpellBlock><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentString}</ReactMarkdown></SpellBlock>;
-              if (type === 'note') return <NoteBlock><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentString}</ReactMarkdown></NoteBlock>;
+            const isInline = !match;
+
+            if (!isInline && match) {
+              const nestedComponents: any = {
+                table: ({ children }: any) => (
+                  <div className="my-2 w-full overflow-x-auto">
+                    <table className="w-full text-left border-collapse">{children}</table>
+                  </div>
+                ),
+                thead: ({ children }: any) => <thead className="border-b border-gray-300/20">{children}</thead>,
+                tbody: ({ children }: any) => <tbody className="align-top">{children}</tbody>,
+                tr: ({ children }: any) => <tr className="border-b border-gray-300/10">{children}</tr>,
+                td: ({ children }: any) => <td className="p-1 align-top">{children}</td>,
+                th: ({ children }: any) => <th className="p-1 font-bold text-[10px] uppercase opacity-70 align-bottom">{children}</th>,
+                p: ({ children }: any) => <p className="mb-2 whitespace-normal break-words">{children}</p>
+              };
+
+              if (type === 'monster') return <MonsterBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></MonsterBlock>;
+              if (type === 'npc') return <NPCBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></NPCBlock>;
+              if (type === 'item') return <ItemBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></ItemBlock>;
+              if (type === 'spell') return <SpellBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></SpellBlock>;
+              if (type === 'note') return <NoteBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></NoteBlock>;
             }
             return <code className={`${className} bg-gray-100 text-teal-800 px-1.5 py-0.5 rounded text-[0.8em] md:text-[0.9em] font-mono border border-gray-200 break-words`} {...props}>{children}</code>;
           },
@@ -88,7 +149,36 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
             const isExternal = href?.startsWith('http');
             return (<a href={href} className="text-teal-700 font-bold hover:text-teal-900 hover:underline transition-colors" target={isExternal ? "_blank" : undefined} rel={isExternal ? "noopener noreferrer" : undefined} {...props}>{children}</a>);
           },
-          img: ({ src, alt }) => (<figure className="my-6 md:my-8 flex flex-col items-center"><img src={src} alt={alt} className="max-w-full h-auto max-h-[500px] object-contain rounded shadow-md border border-stone-200 bg-white p-1" loading="lazy" />{alt && <figcaption className="text-xs text-gray-500 mt-2 italic text-center">{alt}</figcaption>}</figure>)
+          img: (props) => {
+            const { src, alt, style, width, height } = props;
+            const hasCustomStyle = style || width || height;
+
+            if (hasCustomStyle) {
+              return (
+                <img
+                  src={src as string}
+                  alt={alt as string}
+                  style={style}
+                  width={width}
+                  height={height}
+                  className="rounded shadow-sm border border-stone-200 bg-white p-1 max-w-full"
+                  loading="lazy"
+                />
+              );
+            }
+
+            return (
+              <figure className="my-6 md:my-8 flex flex-col items-center break-inside-avoid">
+                <img
+                  src={src as string}
+                  alt={alt as string}
+                  className="max-w-full h-auto max-h-[500px] object-contain rounded shadow-md border border-stone-200 bg-white p-1"
+                  loading="lazy"
+                />
+                {alt && <figcaption className="text-xs text-gray-500 mt-2 italic text-center">{alt}</figcaption>}
+              </figure>
+            );
+          }
         }}
       >
         {content}

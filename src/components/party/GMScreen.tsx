@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { 
-  Shield, Swords, Heart, Map as MapIcon, BookOpen, AlertCircle, 
-  Dices, Award, Gavel, Sparkles, Skull
+import {
+  Shield, Swords, Heart, Map as MapIcon, AlertCircle,
+  Dices, Award, Gavel, Sparkles, Coins
 } from 'lucide-react';
 import { useDice } from '../dice/DiceContext';
+import { BarteringCalculator } from './BarteringCalculator';
 
 // --- TYPES ---
-type SectionType = 'table' | 'text' | 'list' | 'definitions';
+type SectionType = 'table' | 'text' | 'list' | 'definitions' | 'component';
 
 interface Section {
   title: string;
@@ -15,6 +16,7 @@ interface Section {
   headers?: string[];
   rows?: string[][];
   items?: string[] | Record<string, string>;
+  component?: React.ReactNode;
 }
 
 interface ScreenTab {
@@ -36,14 +38,14 @@ const gmScreenData: Record<string, ScreenTab> = {
         type: 'text',
         content: "Both parties roll. If both succeed, the one with the LOWER result wins. If tied, the active party (attacker) wins."
       },
-      { 
-        title: "Pushing the Roll", 
-        type: 'definitions', 
+      {
+        title: "Pushing the Roll",
+        type: 'definitions',
         items: {
           "Condition": "Cannot push if you already have the attribute's condition.",
           "Demon Roll": "Natural 20. Cannot be pushed. Mishap occurs.",
           "Effect": "Take 1 Condition to re-roll. (STR=Exhausted, CON=Sickly, AGL=Dazed, INT=Angry, WIL=Scared, CHA=Disheartened)"
-        } 
+        }
       },
       {
         title: "Movement Rates (Page 27)",
@@ -124,15 +126,15 @@ const gmScreenData: Record<string, ScreenTab> = {
           "Power from Body: If 0 WP, roll random die (e.g. D6). Take that much damage to gain that much WP for one spell."
         ]
       },
-      { 
-        title: "Magical Mishaps (D20)", 
-        type: 'table', 
-        headers: ["D20", "Effect"], 
-        rows: [ 
-          ["1-6", "Condition (1:Dazed, 2:Exhausted, 3:Sickly, 4:Angry, 5:Scared, 6:Disheartened)."], 
-          ["7", "Magic ravages body: Take D6 damage per Power Level."], 
-          ["8", "Drain: Lose D6 WP per Power Level."], 
-          ["9", "Magical Disease (Virulence 3D6)."], 
+      {
+        title: "Magical Mishaps (D20)",
+        type: 'table',
+        headers: ["D20", "Effect"],
+        rows: [
+          ["1-6", "Condition (1:Dazed, 2:Exhausted, 3:Sickly, 4:Angry, 5:Scared, 6:Disheartened)."],
+          ["7", "Magic ravages body: Take D6 damage per Power Level."],
+          ["8", "Drain: Lose D6 WP per Power Level."],
+          ["9", "Magical Disease (Virulence 3D6)."],
           ["10", "Another random spell activates."],
           ["11", "Vomit a frog when lying. Lasts until 1 rolled on D4 daily."],
           ["12", "Gold/Silver touched withers to dust. Lasts until 1 rolled on D4 daily."],
@@ -144,7 +146,7 @@ const gmScreenData: Record<string, ScreenTab> = {
           ["18", "Become 1 age category younger (Attributes change)."],
           ["19", "Become 1 age category older (Attributes change)."],
           ["20", "Attract a Demon! Appears within next shift."]
-        ] 
+        ]
       },
     ]
   },
@@ -192,31 +194,31 @@ const gmScreenData: Record<string, ScreenTab> = {
     title: "Mishaps",
     icon: AlertCircle,
     sections: [
-      { 
-        title: "Melee Demon Roll (D6)", 
-        type: 'table', 
-        headers: ["D6", "Effect (Page 48)"], 
-        rows: [ 
-          ["1", "Drop weapon. Action to pick up."], 
-          ["2", "Expose yourself. Enemy gets Free Attack."], 
-          ["3", "Weapon stuck. STR roll to free (Action)."], 
-          ["4", "Toss weapon D3+3 meters."], 
-          ["5", "Weapon damaged. Bane until repaired."], 
-          ["6", "Hit yourself. Normal damage (no bonus)."] 
-        ] 
+      {
+        title: "Melee Demon Roll (D6)",
+        type: 'table',
+        headers: ["D6", "Effect (Page 48)"],
+        rows: [
+          ["1", "Drop weapon. Action to pick up."],
+          ["2", "Expose yourself. Enemy gets Free Attack."],
+          ["3", "Weapon stuck. STR roll to free (Action)."],
+          ["4", "Toss weapon D3+3 meters."],
+          ["5", "Weapon damaged. Bane until repaired."],
+          ["6", "Hit yourself. Normal damage (no bonus)."]
+        ]
       },
-      { 
-        title: "Ranged Demon Roll (D6)", 
-        type: 'table', 
-        headers: ["D6", "Effect (Page 51)"], 
-        rows: [ 
-          ["1", "Drop weapon. Action to pick up."], 
-          ["2", "Out of ammo. Must reload/gather."], 
-          ["3", "Hit valuable item nearby."], 
-          ["4", "Weapon damaged. Bane until repaired."], 
-          ["5", "Hit friendly target (normal damage)."], 
-          ["6", "Hit yourself (normal damage)."] 
-        ] 
+      {
+        title: "Ranged Demon Roll (D6)",
+        type: 'table',
+        headers: ["D6", "Effect (Page 51)"],
+        rows: [
+          ["1", "Drop weapon. Action to pick up."],
+          ["2", "Out of ammo. Must reload/gather."],
+          ["3", "Hit valuable item nearby."],
+          ["4", "Weapon damaged. Bane until repaired."],
+          ["5", "Hit friendly target (normal damage)."],
+          ["6", "Hit yourself (normal damage)."]
+        ]
       },
       {
         title: "Fear Table (D8)",
@@ -303,6 +305,23 @@ const gmScreenData: Record<string, ScreenTab> = {
       }
     ]
   },
+  bartering: {
+    id: 'bartering',
+    title: "Bartering",
+    icon: Coins,
+    sections: [
+      {
+        title: "Trade Rules",
+        type: 'text',
+        content: "When haggling over the price of something you are buying or selling, roll for BARTERING. If you succeed, the price goes down or up by 20%. If you roll a dragon, the price is halved or doubled. If you roll a demon, you have offended the other party so badly that they refuse the trade."
+      },
+      {
+        title: "Price Calculator",
+        type: 'component',
+        component: <BarteringCalculator />
+      }
+    ]
+  },
   session: {
     id: 'session',
     title: "Session End",
@@ -343,7 +362,7 @@ const TextWithDice = ({ text, bold = false }: { text: string, bold?: boolean }) 
 
   // Matches D6, 2D6, D6+1, 2D8, 1d20, etc. including within parens like (D12)
   const diceRegex = /(\b\d*[dD](?:4|6|8|10|12|20|66|100)(?:\s*[+\-]\s*\d+)?\b)/g;
-  
+
   const parts = text.split(diceRegex);
 
   return (
@@ -360,8 +379,8 @@ const TextWithDice = ({ text, bold = false }: { text: string, bold?: boolean }) 
               }}
               className={`
                 inline-flex items-center justify-center font-bold px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors cursor-pointer select-none
-                ${bold 
-                  ? 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200' 
+                ${bold
+                  ? 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200'
                   : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
                 }
               `}
@@ -388,13 +407,13 @@ const SectionCard = ({ section }: { section: Section }) => (
         <TextWithDice text={section.title} />
       </h3>
     </div>
-    
+
     <div className="p-4 space-y-4 flex-1">
       {/* TEXT CONTENT */}
       {section.type === 'text' && (
         <p className="text-sm text-gray-600 leading-relaxed"><TextWithDice text={section.content || ''} /></p>
       )}
-      
+
       {/* LIST ITEMS */}
       {section.type === 'list' && Array.isArray(section.items) && (
         <ul className="space-y-2">
@@ -446,6 +465,13 @@ const SectionCard = ({ section }: { section: Section }) => (
           </table>
         </div>
       )}
+
+      {/* COMPONENT CONTENT */}
+      {section.type === 'component' && section.component && (
+        <div className="mt-2">
+          {section.component}
+        </div>
+      )}
     </div>
   </div>
 );
@@ -454,13 +480,13 @@ const SectionCard = ({ section }: { section: Section }) => (
 
 export function GMScreen() {
   const [activeTabId, setActiveTabId] = useState<string>('core');
-  
+
   const activeTab = gmScreenData[activeTabId];
   const tabs = Object.values(gmScreenData);
 
   return (
     <div className="bg-gray-50 min-h-[calc(100vh-64px)] flex flex-col font-sans text-gray-800">
-      
+
       {/* Navigation Bar */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm px-4">
         <div className="max-w-7xl mx-auto">
@@ -474,8 +500,8 @@ export function GMScreen() {
                   onClick={() => setActiveTabId(tab.id)}
                   className={`
                     flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all touch-manipulation
-                    ${isActive 
-                      ? 'bg-indigo-600 text-white shadow-md transform scale-105' 
+                    ${isActive
+                      ? 'bg-indigo-600 text-white shadow-md transform scale-105'
                       : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 bg-white border border-gray-200'
                     }
                   `}
@@ -492,7 +518,7 @@ export function GMScreen() {
       {/* Content Area */}
       <div className="flex-1 p-4 md:p-6 overflow-y-auto">
         <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
-          
+
           {/* Header for current tab (Mobile mainly) */}
           <div className="mb-6 flex items-center gap-3 md:hidden">
             <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">

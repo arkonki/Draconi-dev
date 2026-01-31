@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import {
   Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown,
-  Library, ArrowLeft, Share, ChevronLeft, Maximize2, Minimize2 // <--- Added Icons
+  Library, ArrowLeft, Share, ChevronLeft, Maximize2, Minimize2, Trash2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { CompendiumEntry } from '../types/compendium';
@@ -12,7 +12,7 @@ import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { HomebrewRenderer } from '../components/compendium/HomebrewRenderer';
 import { CompendiumFullPage } from '../components/compendium/CompendiumFullPage';
-import { fetchCompendiumEntries } from '../lib/api/compendium';
+import { fetchCompendiumEntries, deleteCompendiumEntry } from '../lib/api/compendium';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { sendMessage } from '../lib/api/chat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
@@ -127,6 +127,22 @@ export function Compendium() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['compendiumEntries'] }); setFullPageEntry(null); },
     onError: (err) => console.error("Save error:", err)
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteCompendiumEntry,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compendiumEntries'] });
+      setSelectedEntry(null);
+    },
+    onError: (err) => console.error("Delete error:", err)
+  });
+
+  const handleDelete = async () => {
+    if (!selectedEntry?.id) return;
+    if (window.confirm("Are you sure you want to delete this entry? This action cannot be undone.")) {
+      await deleteMutation.mutateAsync(selectedEntry.id);
+    }
+  };
 
   const filteredEntries = useMemo(() => {
     const sorted = [...entries].sort((a, b) => a.title.localeCompare(b.title));
@@ -270,7 +286,12 @@ export function Compendium() {
                   })()}
 
                   <Button variant="ghost" size="icon_sm" onClick={() => toggleBookmark(selectedEntry)} className={isBookmarked(selectedEntry.id) ? "text-indigo-600 bg-indigo-50" : "text-gray-400"}>{isBookmarked(selectedEntry.id) ? <Bookmark className="fill-current w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}</Button>
-                  {isAdmin() && (<Button variant="secondary" size="icon_sm" icon={Edit2} onClick={() => setFullPageEntry(selectedEntry)} />)}
+                  {isAdmin() && (
+                    <>
+                      <Button variant="secondary" size="icon_sm" icon={Edit2} onClick={() => setFullPageEntry(selectedEntry)} className="text-gray-600" />
+                      <Button variant="ghost" size="icon_sm" icon={Trash2} onClick={handleDelete} className="text-red-400 hover:text-red-600 hover:bg-red-50" title="Delete Entry" />
+                    </>
+                  )}
                 </div>
               </div>
 
