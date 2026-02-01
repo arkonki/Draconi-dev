@@ -1,19 +1,34 @@
 
+
 import { useState, useEffect } from 'react';
-import { Coins, TrendingDown, TrendingUp, XCircle, Search, ChevronDown, Tag } from 'lucide-react';
+import { Coins, TrendingDown, TrendingUp, XCircle, Search, ChevronDown, Tag, Check } from 'lucide-react';
 import { fetchItems, GameItem } from '../../lib/api/items';
 import { parseCost } from '../../lib/equipment';
 
-export function BarteringCalculator() {
+interface BarteringCalculatorProps {
+    initialCost?: number;
+    initialMode?: 'buying' | 'selling';
+    initialCurrency?: string;
+    onConfirm?: (finalPrice: number, unit: string) => void;
+    confirmLabel?: string;
+}
+
+export function BarteringCalculator({ initialCost, initialMode = 'buying', initialCurrency = 'Coins', onConfirm, confirmLabel = 'Apply Trade' }: BarteringCalculatorProps) {
     const [basePrice, setBasePrice] = useState<number | ''>('');
     const [mode, setMode] = useState<'buying' | 'selling'>('buying');
     const [result, setResult] = useState<'none' | 'success' | 'dragon' | 'demon'>('none');
+
+    // Sync with props
+    useEffect(() => {
+        if (initialCost !== undefined) setBasePrice(initialCost);
+        if (initialMode) setMode(initialMode);
+    }, [initialCost, initialMode]);
 
     // Item Search State
     const [items, setItems] = useState<GameItem[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
-    const [currencyUnit, setCurrencyUnit] = useState<string>('Coins');
+    const [currencyUnit, setCurrencyUnit] = useState<string>(initialCurrency);
 
     // Load items on mount
     useEffect(() => {
@@ -49,6 +64,9 @@ export function BarteringCalculator() {
         }
     };
 
+    // Helper to round to 2 decimals (nearest copper)
+    const roundToTwo = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
+
     const calculatePrice = () => {
         if (typeof basePrice !== 'number') return 0;
 
@@ -70,6 +88,7 @@ export function BarteringCalculator() {
     };
 
     const finalPrice = calculatePrice();
+    const roundedFinal = finalPrice !== null ? roundToTwo(finalPrice) : 0;
 
     return (
         <div className="space-y-4">
@@ -243,12 +262,12 @@ export function BarteringCalculator() {
                         {result === 'demon' ? 'Trade Status' : 'Final Price'}
                     </span>
                     <span className="text-xl font-bold font-mono">
-                        {result === 'demon' ? 'Refused' : Math.round(finalPrice || 0)}
+                        {result === 'demon' ? 'Refused' : roundedFinal}
                     </span>
                     {result !== 'none' && result !== 'demon' && typeof basePrice === 'number' && (
                         <span className="text-xs mt-1 flex items-center gap-1">
                             {finalPrice && finalPrice < basePrice ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                            {Math.abs(Math.round(finalPrice! - basePrice))} ({Math.round(((finalPrice! - basePrice) / basePrice) * 100)}%)
+                            {roundToTwo(Math.abs(finalPrice! - basePrice))} ({Math.round(((finalPrice! - basePrice) / basePrice) * 100)}%)
                         </span>
                     )}
                 </div>
@@ -260,6 +279,21 @@ export function BarteringCalculator() {
                     <XCircle size={24} className="text-red-400" />
                 )}
             </div>
+
+            {onConfirm && finalPrice !== null && result !== 'demon' && (
+                <div className="pt-2">
+                    <button
+                        onClick={() => onConfirm(roundedFinal, currencyUnit)}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-md flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <Check size={18} />
+                        {confirmLabel} ({roundedFinal} {currencyUnit})
+                    </button>
+                    <p className="text-xs text-center text-gray-400 mt-2">
+                        This will remove the selected items and add {roundedFinal} {currencyUnit} to the party stash.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

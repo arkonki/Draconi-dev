@@ -12,9 +12,15 @@ export interface EncounterCombatant {
   status_effects: any[]; // JSONB array
   initiative_roll: number | null;
   is_active_turn: boolean;
-  has_acted: boolean; // Added to match schema fix
+  has_acted: boolean;
   created_at: string;
   updated_at: string;
+  character?: {
+    current_hp: number;
+    max_hp: number;
+    current_wp: number;
+    max_wp: number;
+  };
 }
 
 export interface Encounter {

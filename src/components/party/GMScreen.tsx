@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import {
   Shield, Swords, Heart, Map as MapIcon, AlertCircle,
-  Dices, Award, Gavel, Sparkles, Coins
+  Dices, Award, Gavel, Sparkles, Coins, ChevronDown
 } from 'lucide-react';
-import { useDice } from '../dice/DiceContext';
 import { BarteringCalculator } from './BarteringCalculator';
 
 // --- TYPES ---
@@ -355,47 +354,7 @@ const gmScreenData: Record<string, ScreenTab> = {
   }
 };
 
-// --- HELPER COMPONENT: CLICKABLE DICE TEXT ---
-const TextWithDice = ({ text, bold = false }: { text: string, bold?: boolean }) => {
-  const { toggleDiceRoller } = useDice();
-  if (!text) return null;
-
-  // Matches D6, 2D6, D6+1, 2D8, 1d20, etc. including within parens like (D12)
-  const diceRegex = /(\b\d*[dD](?:4|6|8|10|12|20|66|100)(?:\s*[+\-]\s*\d+)?\b)/g;
-
-  const parts = text.split(diceRegex);
-
-  return (
-    <span className={bold ? "font-bold" : ""}>
-      {parts.map((part, index) => {
-        if (part.match(diceRegex)) {
-          const cleanFormula = part.toLowerCase().replace(/\s/g, '');
-          return (
-            <button
-              key={index}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleDiceRoller?.({ dice: cleanFormula, label: `GM Screen: ${part}` });
-              }}
-              className={`
-                inline-flex items-center justify-center font-bold px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors cursor-pointer select-none
-                ${bold
-                  ? 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200'
-                  : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
-                }
-              `}
-              title={`Roll ${part}`}
-            >
-              <Dices size={10} className="mr-1" />
-              {part}
-            </button>
-          );
-        }
-        return <span key={index}>{part}</span>;
-      })}
-    </span>
-  );
-};
+import { TextWithDice } from '../shared/TextWithDice';
 
 // --- SUB-COMPONENTS ---
 
@@ -480,6 +439,7 @@ const SectionCard = ({ section }: { section: Section }) => (
 
 export function GMScreen() {
   const [activeTabId, setActiveTabId] = useState<string>('core');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const activeTab = gmScreenData[activeTabId];
   const tabs = Object.values(gmScreenData);
@@ -487,31 +447,49 @@ export function GMScreen() {
   return (
     <div className="bg-gray-50 min-h-[calc(100vh-64px)] flex flex-col font-sans text-gray-800">
 
-      {/* Navigation Bar */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm px-4">
-        <div className="max-w-7xl mx-auto">
-          <nav className="flex overflow-x-auto no-scrollbar py-3 gap-2">
-            {tabs.map(tab => {
-              const Icon = tab.icon;
-              const isActive = activeTabId === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTabId(tab.id)}
-                  className={`
-                    flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all touch-manipulation
-                    ${isActive
-                      ? 'bg-indigo-600 text-white shadow-md transform scale-105'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 bg-white border border-gray-200'
-                    }
-                  `}
-                >
-                  <Icon size={18} className={isActive ? 'opacity-100' : 'opacity-70'} />
-                  {tab.title}
-                </button>
-              );
-            })}
-          </nav>
+      {/* Navigation Bar - Dropdown Style */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm px-4 py-3">
+        <div className="max-w-7xl mx-auto relative">
+          <button
+            type="button"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="w-full md:w-auto md:min-w-[300px] flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <activeTab.icon size={20} className="text-indigo-600" />
+              <span className="font-bold text-gray-900">{activeTab.title}</span>
+            </div>
+            <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+              <div className="absolute top-full left-0 right-0 md:w-[300px] mt-2 bg-white rounded-lg shadow-xl ring-1 ring-black ring-opacity-5 z-50 overflow-hidden">
+                <div className="py-1">
+                  {tabs.map(tab => {
+                    const isActive = activeTabId === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => {
+                          setActiveTabId(tab.id);
+                          setIsMenuOpen(false);
+                        }}
+                        className={`w-full text-left flex items-center gap-3 px-4 py-3 text-sm transition-colors border-b border-gray-50 last:border-0 ${isActive
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                          }`}
+                      >
+                        <tab.icon size={18} className={isActive ? 'text-indigo-600' : 'text-gray-400'} />
+                        <span className="font-bold">{tab.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

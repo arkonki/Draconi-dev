@@ -6,9 +6,10 @@ import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parti
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
+import { RandomTableManager } from '../components/tools/RandomTableManager';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
-  MessageSquare, ChevronDown
+  MessageSquare, ChevronDown, Dices, Map
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
@@ -22,11 +23,13 @@ import { TimeTrackerView } from '../components/party/TimeTracker';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
 import { GMScreen } from '../components/party/GMScreen';
 import { PartyChat } from '../components/party/PartyChat';
+import { AtlasView } from '../components/party/AtlasView';
+import { EncounterChatView } from '../components/party/EncounterChatView';
 import { supabase } from '../lib/supabase';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 
-type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'gmScreen' | 'storyhelper';
+type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -36,6 +39,7 @@ export function PartyView() {
   const queryClient = useQueryClient();
 
   const [isInviteVisible, setIsInviteVisible] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false); // Added for custom dropdown
   const [dialogOpen, setDialogOpen] = useState<'deleteParty' | 'removeMember' | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
 
@@ -126,10 +130,12 @@ export function PartyView() {
     { id: 'members', label: 'Roster', icon: Users },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'notes', label: 'Journal', icon: FileText },
+    { id: 'atlas', label: 'Atlas', icon: Map },
     { id: 'tasks', label: 'Quests', icon: ClipboardList },
     { id: 'inventory', label: 'Stash', icon: Backpack },
     { id: 'time', label: 'Time', icon: Hourglass, dmOnly: true },
     { id: 'encounter', label: 'Combat', icon: Swords, dmOnly: true },
+    { id: 'tables', label: 'Roll Tables', icon: Dices, dmOnly: true },
     { id: 'gmScreen', label: 'GM Screen', icon: ShieldAlert, dmOnly: true },
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
@@ -161,7 +167,7 @@ export function PartyView() {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
       <Breadcrumbs items={breadcrumbs} />
       {/* Header Card */}
-      <div className="bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden">
+      <div className="bg-white shadow-sm border border-gray-200 rounded-xl overflow-visible">
         <div className="p-6 md:p-8 bg-gradient-to-r from-white to-gray-50 border-b border-gray-200">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
@@ -182,7 +188,7 @@ export function PartyView() {
                 </Button>
 
                 <DropdownMenu>
-                  <DropdownMenuTrigger>
+                  <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
@@ -208,26 +214,12 @@ export function PartyView() {
           )}
         </div>
 
-        {/* Tab Navigation - Desktop: Horizontal Tabs, Mobile/Tablet: Dropdown */}
-        <div className="border-b border-gray-200 bg-white">
-          {/* Mobile & Tablet Dropdown */}
-          <div className="lg:hidden px-4 py-3">
+        {/* Navigation - Unified Dropdown (Reverted Design) */}
+        <div className="border-b border-gray-200 bg-white relative">
+          <div className="px-4 py-3">
             <button
               type="button"
-              onClick={(e) => {
-                const dropdown = document.getElementById('mobile-tab-menu');
-                if (dropdown) {
-                  const isHidden = dropdown.classList.contains('hidden');
-                  if (isHidden) {
-                    // Position the dropdown below the button
-                    const buttonRect = e.currentTarget.getBoundingClientRect();
-                    dropdown.style.top = `${buttonRect.bottom + 8}px`;
-                    dropdown.style.left = `${buttonRect.left}px`;
-                    dropdown.style.width = `${buttonRect.width}px`;
-                  }
-                  dropdown.classList.toggle('hidden');
-                }
-              }}
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
             >
               <div className="flex items-center gap-2">
@@ -242,67 +234,46 @@ export function PartyView() {
                   );
                 })()}
               </div>
-              <ChevronDown className="w-5 h-5 text-gray-400" />
+              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-
-            <div
-              id="mobile-tab-menu"
-              className="hidden fixed rounded-md shadow-xl bg-white ring-1 ring-black ring-opacity-5 z-[9999]"
-              style={{ maxHeight: '80vh', overflowY: 'auto' }}
-            >
-              <div className="py-1">
-                {visibleTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      handleTabChange(tab.id);
-                      const dropdown = document.getElementById('mobile-tab-menu');
-                      if (dropdown) dropdown.classList.add('hidden');
-                    }}
-                    className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm transition-colors ${activeTab === tab.id
-                      ? 'bg-indigo-50 text-indigo-700'
-                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                      }`}
-                  >
-                    <tab.icon className="w-4 h-4" />
-                    <span className="flex-1">{tab.label}</span>
-                    {tab.id === 'chat' && unreadCount > 0 && (
-                      <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                        {unreadCount}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
-          {/* Desktop Horizontal Tabs */}
-          <nav className="hidden lg:flex px-6 min-w-max overflow-x-auto">
-            {visibleTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id)}
-                className={`
-                  relative group flex items-center gap-2 px-4 py-4 text-sm font-medium border-b-2 transition-all
-                  ${activeTab === tab.id
-                    ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
-                  }
-                `}
-              >
-                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-indigo-600' : 'text-gray-400 group-hover:text-gray-600'}`} />
-                {tab.label}
+          {/* Wrapper for dropdown content to handle absolute positioning */}
+          {isMenuOpen && (
+            <>
+              {/* Backdrop to close on click outside */}
+              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
 
-                {tab.id === 'chat' && unreadCount > 0 && (
-                  <span className="absolute top-3 right-0 flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                  </span>
-                )}
-              </button>
-            ))}
-          </nav>
+              <div
+                className="absolute top-full left-0 right-0 mx-4 mt-1 bg-white rounded-lg shadow-xl ring-1 ring-black ring-opacity-5 z-50 overflow-hidden"
+                style={{ maxHeight: '60vh', overflowY: 'auto' }}
+              >
+                <div className="py-1">
+                  {visibleTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        handleTabChange(tab.id);
+                        setIsMenuOpen(false);
+                      }}
+                      className={`w-full text-left flex items-center gap-3 px-4 py-3 text-sm transition-colors border-b border-gray-50 last:border-0 ${activeTab === tab.id
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                        }`}
+                    >
+                      <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-indigo-600' : 'text-gray-400'}`} />
+                      <span className="flex-1">{tab.label}</span>
+                      {tab.id === 'chat' && unreadCount > 0 && (
+                        <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -311,7 +282,7 @@ export function PartyView() {
           <div className="p-6">
             <PartyMemberList
               party={party}
-              isDM={isPartyOwner}
+              isDM={!!isPartyOwner}
               currentUserId={user?.id}
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
@@ -328,27 +299,40 @@ export function PartyView() {
         {activeTab === 'notes' && (
           <PartyNotes
             partyId={partyId!}
-            isDM={isPartyOwner}
-            openNoteId={noteIdFromUrl} // <--- Pass the ID
+            isDM={!!isPartyOwner}
+            openNoteId={noteIdFromUrl}
           />
         )}
 
-        {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={isPartyOwner} />}
+        {activeTab === 'atlas' && (
+          <div className="p-6">
+            <AtlasView partyId={partyId!} isDM={!!isPartyOwner} />
+          </div>
+        )}
+
+        {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={!!isPartyOwner} />}
 
         {activeTab === 'inventory' && (
           <div className="p-6">
-            <PartyInventory partyId={partyId!} members={party.members} isDM={isPartyOwner} />
+            <PartyInventory partyId={partyId!} members={party.members} isDM={!!isPartyOwner} />
           </div>
         )}
 
         {activeTab === 'time' && (
           <div className="p-6">
-            <TimeTrackerView partyId={partyId!} />
+            <TimeTrackerView partyId={partyId!} onTabChange={handleTabChange} />
           </div>
         )}
 
         {activeTab === 'encounter' && (
-          <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isPartyOwner} />
+          <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={!!isPartyOwner} />
+        )}
+
+        {/* 6. Roll Tables View */}
+        {activeTab === 'tables' && (
+          <div className="p-6">
+            <RandomTableManager partyId={partyId!} />
+          </div>
         )}
 
         {activeTab === 'gmScreen' && <GMScreen />}
@@ -383,6 +367,7 @@ export function PartyView() {
         isLoading={deletePartyMutation.isPending}
         icon={<ShieldAlert className="w-6 h-6 text-red-500" />}
       />
+      {partyId && <EncounterChatView forcedPartyId={partyId} forcedPartyName={party.name} forcedMembers={party.members} />}
     </div>
   );
 }

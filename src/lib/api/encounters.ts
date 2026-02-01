@@ -26,7 +26,7 @@ export async function fetchEncounterDetails(encounterId: string): Promise<Encoun
 export async function fetchEncounterCombatants(encounterId: string): Promise<EncounterCombatant[]> {
   const { data, error } = await supabase
     .from('encounter_combatants')
-    .select('*')
+    .select('*, character:characters(current_hp, max_hp, current_wp, max_wp)')
     .eq('encounter_id', encounterId)
     // Primary Sort: Initiative (1 is best, null is worst)
     .order('initiative_roll', { ascending: true, nullsLast: true })

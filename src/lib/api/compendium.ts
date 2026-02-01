@@ -73,3 +73,17 @@ export async function deleteCompendiumEntry(id: string): Promise<void> {
     throw new Error(error.message || 'Failed to delete compendium entry');
   }
 }
+
+export async function createCompendiumEntry(entry: Omit<CompendiumEntry, 'id' | 'created_at' | 'updated_at'>): Promise<CompendiumEntry> {
+  const { data, error } = await supabase
+    .from('compendium')
+    .insert([entry])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating compendium entry:', error);
+    throw new Error(error.message || 'Failed to create compendium entry');
+  }
+  return data as CompendiumEntry;
+}
