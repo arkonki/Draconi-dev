@@ -163,11 +163,13 @@ function GridAlignmentGuide({ gridType, gridSize, gridRotation, gridColor, mouse
     return null;
 }
 
-function MapDrawingLayer({ drawings, currentPath, width, height }: {
+function MapDrawingLayer({ drawings, currentPath, width, height, isEraser, onDrawingClick }: {
     drawings: MapDrawing[];
     currentPath: { x: number; y: number }[] | null;
     width: number;
     height: number;
+    isEraser?: boolean;
+    onDrawingClick?: (id: string) => void;
 }) {
     return (
         <svg width={width} height={height} className="absolute top-0 left-0 pointer-events-none select-none overflow-visible z-20">
@@ -177,9 +179,17 @@ function MapDrawingLayer({ drawings, currentPath, width, height }: {
                     points={draw.points.map(p => `${p.x},${p.y}`).join(' ')}
                     fill="none"
                     stroke={draw.color}
-                    strokeWidth={draw.thickness}
+                    strokeWidth={draw.thickness + (isEraser ? 4 : 0)} // Increase hit area in eraser mode
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    className={isEraser ? "cursor-crosshair hover:opacity-50 transition-opacity" : ""}
+                    pointerEvents={isEraser ? "visibleStroke" : "none"}
+                    onClick={(e) => {
+                        if (isEraser && onDrawingClick) {
+                            e.stopPropagation();
+                            onDrawingClick(draw.id);
+                        }
+                    }}
                 />
             ))}
             {currentPath && (
@@ -604,7 +614,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         enabled: !!activeMap?.id,
         queryFn: async () => {
             const { data, error } = await (supabase
-                .from('map_pins') as any)
+                .from('party_map_pins') as any)
                 .select('*')
                 .eq('map_id', activeMap!.id);
             if (error) throw error;
@@ -620,7 +630,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         enabled: !!activeMap?.id,
         queryFn: async () => {
             const { data, error } = await (supabase
-                .from('map_drawings') as any)
+                .from('party_map_drawings') as any)
                 .select('*')
                 .eq('map_id', activeMap!.id);
             if (error) throw error;
@@ -694,10 +704,10 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
         const channel = supabase
             .channel(`map-changes-${activeMap.id}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'map_pins', filter: `map_id=eq.${activeMap.id}` }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'party_map_pins', filter: `map_id=eq.${activeMap.id}` }, () => {
                 queryClient.invalidateQueries({ queryKey: ['map-pins', activeMap.id] });
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'map_drawings', filter: `map_id=eq.${activeMap.id}` }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'party_map_drawings', filter: `map_id=eq.${activeMap.id}` }, () => {
                 queryClient.invalidateQueries({ queryKey: ['map-drawings', activeMap.id] });
             })
             .subscribe();
@@ -781,7 +791,10 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 setIsSavingGrid(false);
             }, 1000);
         },
-        onError: () => setIsSavingGrid(false)
+        onError: (err: any) => {
+            console.error("Failed to save map settings:", err);
+            setIsSavingGrid(false);
+        }
     });
 
     useEffect(() => {
@@ -789,7 +802,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
         const timer = setTimeout(() => {
             updateMapGridMutation.mutate(localGrid);
-        }, 1000); // Increased debounce to 1s to reduce write frequency
+        }, 1000);
 
         return () => clearTimeout(timer);
     }, [localGrid, isDM, activeMap?.id]);
@@ -826,7 +839,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 // First, check if any exist (optional debugging)
                 // Then delete ALL of them for this map
                 const { error: deleteError } = await (supabase
-                    .from('map_pins') as any)
+                    .from('party_map_pins') as any)
                     .delete({ count: 'exact' })
                     .eq('map_id', pin.map_id)
                     .eq('type', 'player_start');
@@ -838,7 +851,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             }
 
             const { error } = await (supabase
-                .from('map_pins') as any)
+                .from('party_map_pins') as any)
                 .insert([{ ...pin, note_id: noteId }]);
             if (error) throw error;
         },
@@ -851,7 +864,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         mutationFn: async ({ id, updates, noteId }: { id: string; updates: Partial<MapPinType>; noteId?: string | null }) => {
             // 1. Update Pin
             const { error } = await (supabase
-                .from('map_pins') as any)
+                .from('party_map_pins') as any)
                 .update(updates)
                 .eq('id', id);
             if (error) throw error;
@@ -878,8 +891,21 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const createDrawingMutation = useMutation({
         mutationFn: async (drawing: Partial<MapDrawing>) => {
             const { error } = await (supabase
-                .from('map_drawings') as any)
+                .from('party_map_drawings') as any)
                 .insert([drawing]);
+            if (error) throw error;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['map-drawings', activeMap?.id] });
+        }
+    });
+
+    const deleteDrawingMutation = useMutation({
+        mutationFn: async (id: string) => {
+            const { error } = await (supabase
+                .from('party_map_drawings') as any)
+                .delete()
+                .eq('id', id);
             if (error) throw error;
         },
         onSuccess: () => {
@@ -890,7 +916,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const deletePinMutation = useMutation({
         mutationFn: async (id: string) => {
             const { error } = await (supabase
-                .from('map_pins') as any)
+                .from('party_map_pins') as any)
                 .delete()
                 .eq('id', id);
             if (error) throw error;
@@ -948,7 +974,9 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             // But if we clicked background, maybe we want to pan?
             // Since we handle pin mouse down separately, this is just background click.
         } else if (activeTool === 'draw') {
-            setCurrentPath([{ x: mx, y: my }]);
+            if (drawMode === 'pencil') {
+                setCurrentPath([{ x: mx, y: my }]);
+            }
         } else if (activeTool === 'pin') {
             if (createPinMutation.isPending) return;
 
@@ -1156,6 +1184,15 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
     return (
         <div ref={rootRef} className={`flex flex-col bg-slate-900/5 overflow-hidden border border-gray-200 shadow-sm relative group/app transition-all duration-300 ${isFullscreen ? 'h-screen w-screen rounded-none bg-slate-100' : 'h-[750px] rounded-xl'}`}>
+            {isDM && (
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleFileSelect}
+                />
+            )}
 
             {/* --- MAP CANVAS --- */}
             <div
@@ -1356,6 +1393,15 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
                         <div className="mt-6 pt-4 border-t">
                             <Button
+                                variant="primary"
+                                size="sm"
+                                disabled={isSavingGrid || Object.keys(localGrid).length === 0}
+                                className="w-full py-1.5 text-[10px] mb-2"
+                                onClick={() => updateMapGridMutation.mutate(localGrid)}
+                            >
+                                {isSavingGrid ? 'Saving...' : 'Save Changes'}
+                            </Button>
+                            <Button
                                 variant="outline"
                                 size="sm"
                                 className="w-full py-1.5 text-[10px]"
@@ -1394,7 +1440,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                     ref={imgRef}
                                     src={activeMap.image_url}
                                     alt={activeMap.name}
-                                    className="max-w-none select-none"
+                                    className="max-w-none select-none pointer-events-none"
                                     style={{ minWidth: '100%', minHeight: '100%', objectFit: 'contain' }}
                                     onLoad={handleImageLoad}
                                     draggable={false}
@@ -1417,6 +1463,8 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                             currentPath={currentPath}
                                             width={imageSize.width}
                                             height={imageSize.height}
+                                            isEraser={activeTool === 'draw' && drawMode === 'eraser'}
+                                            onDrawingClick={(id) => deleteDrawingMutation.mutate(id)}
                                         />
                                         <MapPinLayer
                                             pins={pins}
@@ -1535,13 +1583,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
                                         {isDM && (
                                             <div className="p-2 border-t mt-1">
-                                                <input
-                                                    type="file"
-                                                    ref={fileInputRef}
-                                                    className="hidden"
-                                                    accept="image/*"
-                                                    onChange={handleFileSelect}
-                                                />
                                                 <button
                                                     onClick={() => fileInputRef.current?.click()}
                                                     disabled={isUploading}

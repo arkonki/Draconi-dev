@@ -22,7 +22,6 @@ export const MessageContent = ({ content }: { content: string }) => {
                 key={i}
                 partyId={noteMatch[1]}
                 noteId={noteMatch[2]}
-                title="View Linked Note"
                 className="mx-1"
               />
             );
