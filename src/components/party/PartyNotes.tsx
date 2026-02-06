@@ -123,11 +123,11 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
 
       if (fetchError) throw fetchError;
 
-      setNotes(data || []);
+      setNotes((data as any) || []);
 
       // SAFE CATEGORY EXTRACTION
       const uniqueCats = Array.from(new Set(
-        (data || [])
+        ((data as any[]) || [])
           .map(n => n.category || 'Uncategorized') // Handle null category
           .filter(Boolean)
       ));
@@ -175,13 +175,25 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
     try {
       let resultNote: Note | null = null;
       if (viewState === 'edit' && selectedNote) {
-        const { data, error } = await supabase.from('notes').update(notePayload).eq('id', selectedNote.id).select().single();
+        const { data, error } = await (supabase.from('notes') as any).update(notePayload).eq('id', selectedNote.id).select().single();
         if (error) throw error;
-        resultNote = data;
+        resultNote = data as any;
+
+        // Sync changes to Map Pins linked to this note
+        const { error: pinSyncError } = await (supabase.from('party_map_pins') as any)
+          .update({
+            label: notePayload.title,
+            description: notePayload.content
+          })
+          .eq('note_id', selectedNote.id);
+
+        if (pinSyncError) {
+          console.error("Failed to sync map pins:", pinSyncError);
+        }
       } else {
-        const { data, error } = await supabase.from('notes').insert([notePayload]).select().single();
+        const { data, error } = await (supabase.from('notes') as any).insert([notePayload]).select().single();
         if (error) throw error;
-        resultNote = data;
+        resultNote = data as any;
       }
       await loadNotes();
       setViewState('view');
@@ -197,8 +209,18 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   const handleDelete = async (noteId: string) => {
     if (!window.confirm("Are you sure you want to delete this note?")) return;
     try {
+      // 1. Manually delete linked map pins (DB should cascade if configured, but doing safeguards)
+      const { error: pinError } = await (supabase
+        .from('party_map_pins') as any)
+        .delete()
+        .eq('note_id', noteId);
+
+      if (pinError) console.error("Failed to delete associated map pins:", pinError);
+
+      // 2. Delete the note
       const { error } = await supabase.from('notes').delete().eq('id', noteId);
       if (error) throw error;
+
       setSelectedNote(null);
       setViewState('view');
       await loadNotes();

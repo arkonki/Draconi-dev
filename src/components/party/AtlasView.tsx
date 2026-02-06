@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Map as MapIcon, Settings, MousePointer2, Pencil, Move, Upload, Loader2, Trash2, Check, ZoomIn, ZoomOut, Maximize, Minimize, Crosshair, Eraser, ChevronDown, User, StickyNote, MapPin, Flag, Link as LinkIcon, Edit2, Eye } from 'lucide-react';
+import { Map as MapIcon, MousePointer2, Pencil, Upload, Loader2, Trash2, Check, ZoomIn, ZoomOut, Maximize, Minimize, Eraser, ChevronDown, User, StickyNote, MapPin, Flag, Link as LinkIcon, Edit2, Eye } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { supabase } from '../../lib/supabase';
@@ -83,85 +83,7 @@ function GridOverlay({ gridType, gridSize, gridOpacity, gridColor = '#000000', g
     return null;
 }
 
-function GridAlignmentGuide({ gridType, gridSize, gridRotation, gridColor, mousePos }: {
-    gridType: 'none' | 'square' | 'hex';
-    gridSize: number;
-    gridRotation: number;
-    gridColor: string;
-    mousePos: { x: number; y: number } | null;
-}) {
-    if (!mousePos || gridType === 'none') return null;
 
-    const size = gridSize || 50;
-    const color = gridColor || '#4f46e5';
-
-    if (gridType === 'square') {
-        return (
-            <div
-                className="absolute pointer-events-none z-40"
-                style={{
-                    left: mousePos.x,
-                    top: mousePos.y,
-                    transform: `translate(-50%, -50%) rotate(${gridRotation}deg)`,
-                }}
-            >
-                <div
-                    className="grid grid-cols-3 gap-0 border-2 border-dashed border-indigo-500 rounded-sm"
-                    style={{ width: size * 3, height: size * 3 }}
-                >
-                    {[...Array(9)].map((_, i) => (
-                        <div key={i} className="border border-indigo-400/50" style={{ width: size, height: size }} />
-                    ))}
-                </div>
-            </div>
-        );
-    }
-
-    if (gridType === 'hex') {
-        const s = gridSize || 30;
-        const w = s * Math.sqrt(3);
-        const hexPath = `M ${w / 2} 0 L ${w} ${s * 0.5} V ${s * 1.5} L ${w / 2} ${s * 2} L 0 ${s * 1.5} V ${s * 0.5} Z`;
-
-        const offsets = [
-            { dx: 0, dy: 0 },
-            { dx: w / 2, dy: 1.5 * s },
-            { dx: w, dy: 0 },
-            { dx: w / 2, dy: -1.5 * s },
-            { dx: -w / 2, dy: -1.5 * s },
-            { dx: -w, dy: 0 },
-            { dx: -w / 2, dy: 1.5 * s },
-        ];
-
-        return (
-            <svg
-                width={w * 3}
-                height={s * 6}
-                className="absolute pointer-events-none z-40 overflow-visible"
-                style={{
-                    left: mousePos.x,
-                    top: mousePos.y,
-                    transform: `translate(-50%, -50%) rotate(${gridRotation}deg)`,
-                }}
-            >
-                <g transform={`translate(${w}, ${s * 2})`}>
-                    {offsets.map((off, i) => (
-                        <path
-                            key={i}
-                            d={hexPath}
-                            transform={`translate(${off.dx - w / 2}, ${off.dy - s})`}
-                            fill="none"
-                            stroke={color}
-                            strokeWidth="2"
-                            strokeDasharray="4 2"
-                        />
-                    ))}
-                </g>
-            </svg>
-        );
-    }
-
-    return null;
-}
 
 function MapDrawingLayer({ drawings, currentPath, width, height, isEraser, onDrawingClick }: {
     drawings: MapDrawing[];
@@ -519,12 +441,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const [pinType, setPinType] = useState<'location' | 'character' | 'note' | 'player_start'>('location');
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-    const [isCalibrating, setIsCalibrating] = useState(false);
-    const [isMovingGridTool, setIsMovingGridTool] = useState(false);
-    const [isDraggingGrid, setIsDraggingGrid] = useState(false);
-    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-    const [calibrationOrigin, setCalibrationOrigin] = useState<{ x: number, y: number } | null>(null);
-    const [guidePos, setGuidePos] = useState<{ x: number, y: number } | null>(null);
+
 
     // Pin Dragging State
     const [draggedPinId, setDraggedPinId] = useState<string | null>(null);
@@ -540,7 +457,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [pendingFile, setPendingFile] = useState<File | null>(null);
     const [mapName, setMapName] = useState('');
-    const [isGridSettingsOpen, setIsGridSettingsOpen] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -565,6 +481,8 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         document.addEventListener('fullscreenchange', handleFullscreenChange);
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }, []);
+
+
 
 
 
@@ -724,20 +642,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         }
     }, [maps, queryClient, activeMap?.id]);
 
-    // --- Grid Logic ---
-    const [localGrid, setLocalGrid] = useState<Partial<PartyMap>>({});
 
-    // Computed grid for rendering (ActiveMap + Local Overrides)
-    const displayGrid = activeMap ? { ...activeMap, ...localGrid } : localGrid;
-
-    // 2. Clear overrides when switching maps
-    useEffect(() => {
-        // Only clear if we are NOT currently saving. 
-        // If we are saving, the map reference might change due to invalidation, but we want to keep our local state until the save settles.
-        if (!isSavingGrid) {
-            setLocalGrid({});
-        }
-    }, [activeMap?.id]);
 
     // --- Mutations ---
     const setActiveMapMutation = useMutation({
@@ -772,40 +677,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         }
     });
 
-    // 3. Debounced Save
-    // Only save if we have overrides (localGrid has keys)
-    const [isSavingGrid, setIsSavingGrid] = useState(false);
 
-    const updateMapGridMutation = useMutation({
-        mutationFn: async (updates: Partial<PartyMap>) => {
-            if (!activeMap) return;
-            setIsSavingGrid(true);
-            const { error } = await (supabase.from('party_maps') as any).update(updates).eq('id', activeMap.id);
-            if (error) throw error;
-        },
-        onSuccess: () => {
-            // Do NOT invalidate here immediately to avoid UI "jump"
-            // Instead, let the user keep editing with their local state
-            setTimeout(() => {
-                queryClient.invalidateQueries({ queryKey: ['party-maps', partyId] });
-                setIsSavingGrid(false);
-            }, 1000);
-        },
-        onError: (err: any) => {
-            console.error("Failed to save map settings:", err);
-            setIsSavingGrid(false);
-        }
-    });
-
-    useEffect(() => {
-        if (!isDM || !activeMap || Object.keys(localGrid).length === 0) return;
-
-        const timer = setTimeout(() => {
-            updateMapGridMutation.mutate(localGrid);
-        }, 1000);
-
-        return () => clearTimeout(timer);
-    }, [localGrid, isDM, activeMap?.id]);
 
     const createPinMutation = useMutation({
         mutationFn: async (pin: Partial<MapPinType>) => {
@@ -915,14 +787,40 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
     const deletePinMutation = useMutation({
         mutationFn: async (id: string) => {
+            // 1. Fetch pin to check for linked note
+            const { data: pin, error: fetchError } = await (supabase
+                .from('party_map_pins') as any)
+                .select('note_id')
+                .eq('id', id)
+                .single();
+
+            if (fetchError) {
+                console.error("Error fetching pin before delete:", fetchError);
+                // Continue to delete anyway? Best to try.
+            }
+
+            // 2. Delete the Pin
             const { error } = await (supabase
                 .from('party_map_pins') as any)
                 .delete()
                 .eq('id', id);
             if (error) throw error;
+
+            // 3. Delete Linked Note if exists
+            if (pin && pin.note_id) {
+                const { error: noteError } = await supabase
+                    .from('notes')
+                    .delete()
+                    .eq('id', pin.note_id);
+                if (noteError) console.error("Failed to delete linked note:", noteError);
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['map-pins', activeMap?.id] });
+            // Also invalidate notes query if we happen to have it open (e.g. if side panel is Notes)
+            // But Notes view is separate. We can't easily invalidate it from here without the query key match.
+            // The note list query key in PartyNotes is ['party-notes', partyId] (inferred, let's verify)
+            queryClient.invalidateQueries({ queryKey: ['party-notes'] });
             setSelectedPinId(null);
         }
     });
@@ -956,19 +854,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         // Clear selection when clicking map background (if not starting a drag on a pin)
         if (!draggedPinId && selectedPinId) setSelectedPinId(null);
 
-        if (isCalibrating) {
-            const origin = { x: Math.round(mx), y: Math.round(my) };
-            setCalibrationOrigin(origin);
-            setLocalGrid(prev => ({
-                ...prev,
-                grid_offset_x: origin.x,
-                grid_offset_y: origin.y
-            }));
-            setIsDraggingGrid(true);
-        } else if (isMovingGridTool) {
-            setIsDraggingGrid(true);
-            setDragStart({ x: e.clientX, y: e.clientY });
-        } else if (activeTool === 'select') {
+        if (activeTool === 'select') {
             // Pan logic could go here if we implemented panning. 
             // For now 'select' effectively acts as "do nothing but let me drag pins"
             // But if we clicked background, maybe we want to pan?
@@ -999,42 +885,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         const mx = (e.clientX - rect.left) / zoom;
         const my = (e.clientY - rect.top) / zoom;
 
-        setGuidePos({ x: mx, y: my });
-
-        if (isDraggingGrid && isCalibrating && calibrationOrigin) {
-            const dx = mx - calibrationOrigin.x;
-            const dy = my - calibrationOrigin.y;
-
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < 5) return; // Ignore micro-jitters
-
-            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-
-            setLocalGrid(prev => {
-                let size = distance;
-                if ((prev.grid_type || activeMap?.grid_type) === 'hex') {
-                    // For hex, if we drag from top-center vertex to next vertex, dist is 's'.
-                    size = distance;
-                }
-
-                return {
-                    ...prev,
-                    grid_size: Math.round(size),
-                    grid_rotation: Math.round(angle)
-                };
-            });
-        } else if (isDraggingGrid && isMovingGridTool) {
-            const dx = (e.clientX - dragStart.x) / zoom;
-            const dy = (e.clientY - dragStart.y) / zoom;
-
-            setLocalGrid(prev => ({
-                ...prev,
-                grid_offset_x: ((prev.grid_offset_x !== undefined ? prev.grid_offset_x : activeMap?.grid_offset_x) || 0) + dx,
-                grid_offset_y: ((prev.grid_offset_y !== undefined ? prev.grid_offset_y : activeMap?.grid_offset_y) || 0) + dy
-            }));
-
-            setDragStart({ x: e.clientX, y: e.clientY });
-        } else if (activeTool === 'draw' && currentPath) {
+        if (activeTool === 'draw' && currentPath) {
             setCurrentPath(prev => [...(prev || []), { x: mx, y: my }]);
         } else if (draggedPinId && activeTool === 'select') {
             // Optimistic Dragging
@@ -1049,10 +900,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     };
 
     const handleMapMouseUp = () => {
-        if (isDraggingGrid && isCalibrating) {
-            setIsCalibrating(false);
-            setCalibrationOrigin(null);
-        }
+
 
         if (activeTool === 'draw' && currentPath && currentPath.length > 1) {
             createDrawingMutation.mutate({
@@ -1079,8 +927,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     };
 
     const handleMapMouseLeave = () => {
-        setIsDraggingGrid(false);
-        setGuidePos(null);
     };
 
     const handleTouchStart = (e: React.TouchEvent) => {
@@ -1210,208 +1056,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
 
 
-                {isGridSettingsOpen && activeMap && (
-                    <div
-                        className="absolute top-full right-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-2xl p-4 z-[60] animate-in fade-in slide-in-from-top-2"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex justify-between items-center mb-4">
-                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Grid Configuration</h4>
-                            {isSavingGrid && (
-                                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 rounded-full animate-pulse">
-                                    <div className="w-1 h-1 bg-indigo-600 rounded-full" />
-                                    <span className="text-[7px] font-black text-indigo-600 uppercase">Saving...</span>
-                                </div>
-                            )}
-                        </div>
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Type</label>
-                                <div className="grid grid-cols-3 gap-1 p-1 bg-gray-100 rounded-lg">
-                                    {(['none', 'square', 'hex'] as const).map((t) => (
-                                        <button
-                                            key={t}
-                                            onClick={() => setLocalGrid(prev => ({ ...prev, grid_type: t }))}
-                                            className={`px-2 py-1.5 text-[10px] font-bold rounded-md transition-all uppercase ${displayGrid.grid_type === t ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                        >
-                                            {t}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {displayGrid.grid_type !== 'none' && (
-                                <>
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={() => {
-                                                setIsMovingGridTool(!isMovingGridTool);
-                                                if (isCalibrating) setIsCalibrating(false);
-                                            }}
-                                            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border text-[10px] font-bold transition-all ${isMovingGridTool ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                                        >
-                                            <Move size={12} />
-                                            {isMovingGridTool ? 'Moving Grid...' : 'Move Grid'}
-                                        </button>
-                                    </div>
-
-                                    <div>
-                                        <div className="flex justify-between items-center mb-1.5">
-                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Size</label>
-                                            <span className="text-[10px] font-mono text-indigo-600">{displayGrid.grid_size}px</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="5"
-                                            max="1000"
-                                            value={displayGrid.grid_size || 50}
-                                            onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_size: parseInt(e.target.value) }))}
-                                            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                        />
-                                    </div>
-
-                                    <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <Crosshair size={12} className="text-indigo-600" />
-                                                <h5 className="text-[10px] font-bold text-indigo-900 uppercase">Calibration</h5>
-                                            </div>
-                                            {!isCalibrating ? (
-                                                <button
-                                                    onClick={() => {
-                                                        setIsCalibrating(true);
-                                                        setIsMovingGridTool(false);
-                                                    }}
-                                                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 underline"
-                                                >
-                                                    Start
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => { setIsCalibrating(false); }}
-                                                    className="text-[10px] font-bold text-red-600 hover:text-red-700 underline"
-                                                >
-                                                    Stop
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {isCalibrating && (
-                                            <div className="space-y-2">
-                                                <div className={`flex items-center gap-2 p-2 rounded-lg bg-indigo-100 border border-indigo-200`}>
-                                                    <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">!</div>
-                                                    <p className="text-[10px] text-indigo-900 font-bold">Click and Drag on the map to define a single grid cell.</p>
-                                                </div>
-                                                <p className="text-[9px] text-indigo-700/70 px-1 italic">The grid will automatically align to your starting point and scale to your finish point.</p>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <div className="flex justify-between items-center mb-1.5">
-                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Opacity</label>
-                                            <span className="text-[10px] font-mono text-indigo-600">{Math.round((displayGrid.grid_opacity || 0) * 100)}%</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="1"
-                                            step="0.05"
-                                            value={displayGrid.grid_opacity || 0.5}
-                                            onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_opacity: parseFloat(e.target.value) }))}
-                                            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Offset X</label>
-                                            <input
-                                                type="number"
-                                                value={displayGrid.grid_offset_x || 0}
-                                                onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_offset_x: parseInt(e.target.value) }))}
-                                                className="w-full px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded-md font-mono"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Offset Y</label>
-                                            <input
-                                                type="number"
-                                                value={displayGrid.grid_offset_y || 0}
-                                                onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_offset_y: parseInt(e.target.value) }))}
-                                                className="w-full px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded-md font-mono"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <div className="flex justify-between items-center mb-1.5">
-                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Rotation</label>
-                                            <div className="flex gap-2">
-                                                <span className="text-[10px] font-mono text-indigo-600">{displayGrid.grid_rotation || 0}°</span>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); setLocalGrid(prev => ({ ...prev, grid_rotation: ((prev.grid_rotation || 0) + 90) % 360 })); }}
-                                                    className="text-[10px] font-bold text-indigo-600 hover:underline"
-                                                >
-                                                    +90°
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="360"
-                                            step="1"
-                                            value={displayGrid.grid_rotation || 0}
-                                            onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_rotation: parseInt(e.target.value) }))}
-                                            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">Color</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="color"
-                                                value={displayGrid.grid_color || '#000000'}
-                                                onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_color: e.target.value }))}
-                                                className="w-8 h-8 rounded cursor-pointer border-none bg-transparent"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={displayGrid.grid_color || '#000000'}
-                                                onChange={(e) => setLocalGrid(prev => ({ ...prev, grid_color: e.target.value }))}
-                                                className="flex-1 px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded-md font-mono uppercase"
-                                            />
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        <div className="mt-6 pt-4 border-t">
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                disabled={isSavingGrid || Object.keys(localGrid).length === 0}
-                                className="w-full py-1.5 text-[10px] mb-2"
-                                onClick={() => updateMapGridMutation.mutate(localGrid)}
-                            >
-                                {isSavingGrid ? 'Saving...' : 'Save Changes'}
-                            </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full py-1.5 text-[10px]"
-                                onClick={() => setIsGridSettingsOpen(false)}
-                            >
-                                Close Settings
-                            </Button>
-                        </div>
-                    </div>
-                )}
 
 
 
@@ -1430,7 +1075,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                 onMouseUp={handleMapMouseUp}
                                 onMouseLeave={handleMapMouseLeave}
                                 style={{
-                                    cursor: isCalibrating ? 'crosshair' : isMovingGridTool ? 'move' : 'default',
+                                    cursor: 'default',
                                     transform: `scale(${zoom})`,
                                     width: imageSize.width || 'auto',
                                     height: imageSize.height || 'auto'
@@ -1448,13 +1093,13 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                 {imageSize.width > 0 && (
                                     <>
                                         <GridOverlay
-                                            gridType={displayGrid.grid_type as any || 'none'}
-                                            gridSize={displayGrid.grid_size || 50}
-                                            gridOpacity={displayGrid.grid_opacity || 0.5}
-                                            gridColor={displayGrid.grid_color}
-                                            gridOffsetX={displayGrid.grid_offset_x}
-                                            gridOffsetY={displayGrid.grid_offset_y}
-                                            gridRotation={displayGrid.grid_rotation}
+                                            gridType={activeMap.grid_type as any || 'none'}
+                                            gridSize={activeMap.grid_size || 50}
+                                            gridOpacity={activeMap.grid_opacity || 0.5}
+                                            gridColor={activeMap.grid_color}
+                                            gridOffsetX={activeMap.grid_offset_x}
+                                            gridOffsetY={activeMap.grid_offset_y}
+                                            gridRotation={activeMap.grid_rotation}
                                             width={imageSize.width}
                                             height={imageSize.height}
                                         />
@@ -1473,34 +1118,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                             width={imageSize.width}
                                             height={imageSize.height}
                                         />
-                                        {isCalibrating && calibrationOrigin && (
-                                            <div
-                                                className="absolute pointer-events-none z-50 border-t-2 border-indigo-500 origin-left"
-                                                style={{
-                                                    left: calibrationOrigin.x,
-                                                    top: calibrationOrigin.y,
-                                                    width: Math.sqrt(
-                                                        Math.pow((guidePos?.x || 0) - calibrationOrigin.x, 2) +
-                                                        Math.pow((guidePos?.y || 0) - calibrationOrigin.y, 2)
-                                                    ),
-                                                    transform: `rotate(${Math.atan2(
-                                                        (guidePos?.y || 0) - calibrationOrigin.y,
-                                                        (guidePos?.x || 0) - calibrationOrigin.x
-                                                    )}rad)`
-                                                }}
-                                            >
-                                                <div className="absolute right-0 top-0 w-2 h-2 bg-indigo-500 rounded-full -translate-y-1/2 translate-x-1/2 shadow-lg" />
-                                            </div>
-                                        )}
-                                        {isCalibrating && !isDraggingGrid && (
-                                            <GridAlignmentGuide
-                                                gridType={localGrid.grid_type as any || 'none'}
-                                                gridSize={localGrid.grid_size || 50}
-                                                gridRotation={localGrid.grid_rotation || 0}
-                                                gridColor={localGrid.grid_color || '#4f46e5'}
-                                                mousePos={guidePos}
-                                            />
-                                        )}
+
                                     </>
                                 )}
                             </div>
@@ -1531,77 +1149,83 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 {/* Floating Toolkit */}
                 {
                     activeMap && (
+
                         <div
-                            className="absolute top-6 left-1/2 -translate-x-1/2 z-40"
+                            className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm border border-slate-200 shadow-xl rounded-2xl p-1.5 flex items-center gap-1 z-30 animate-in slide-in-from-bottom-6 fade-in duration-500"
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                         >
-                            <div className="bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl rounded-2xl p-1.5 flex items-center gap-1.5">
-                                {/* Legend */}
-                                <button
-                                    onClick={() => setIsLegendOpen(!isLegendOpen)}
-                                    className={`p-2 rounded-xl transition-all ${isLegendOpen ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    title="Toggle Legend"
-                                >
-                                    <MapIcon size={18} />
+                            {/* Legend */}
+                            <button
+                                onClick={() => setIsLegendOpen(!isLegendOpen)}
+                                className={`p-2 rounded-xl transition-all ${isLegendOpen ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
+                                title="Toggle Legend"
+                            >
+                                <MapIcon size={18} />
+                            </button>
+
+                            {/* Map Selector */}
+                            <div className="relative group">
+                                <button className="flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-all min-w-[120px] justify-between">
+                                    <span className="truncate max-w-[100px]">{activeMap?.name || 'Select Map'}</span>
+                                    <ChevronDown size={14} className="text-slate-400" />
                                 </button>
 
-                                {/* Map Selector */}
-                                <div className="relative group">
-                                    <button className="flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-all min-w-[120px] justify-between">
-                                        <span className="truncate max-w-[100px]">{activeMap?.name || 'Select Map'}</span>
-                                        <ChevronDown size={14} className="text-slate-400" />
-                                    </button>
-
-                                    <div className="absolute top-full left-0 mt-2 w-64 bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-xl shadow-2xl py-2 z-50 invisible group-hover:visible transition-all opacity-0 group-hover:opacity-100 origin-top-left animate-in fade-in zoom-in-95">
-                                        {maps.length === 0 ? (
-                                            <div className="px-4 py-3 text-xs text-gray-400 text-center">No maps uploaded yet.</div>
-                                        ) : (
-                                            <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
-                                                <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Your Maps</div>
-                                                {maps.map(map => (
-                                                    <div key={map.id} className="flex items-center justify-between px-3 py-2 hover:bg-indigo-50 cursor-pointer group/item transition-colors">
+                                <div className="absolute bottom-full left-0 mb-2 w-64 bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-xl shadow-2xl py-2 z-50 invisible group-hover:visible transition-all opacity-0 group-hover:opacity-100 origin-bottom-left animate-in fade-in zoom-in-95">
+                                    {maps.length === 0 ? (
+                                        <div className="px-4 py-3 text-xs text-gray-400 text-center">No maps uploaded yet.</div>
+                                    ) : (
+                                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                                            <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Your Maps</div>
+                                            {maps.map(map => (
+                                                <div key={map.id} className="flex items-center justify-between px-3 py-2 hover:bg-indigo-50 cursor-pointer group/item transition-colors">
+                                                    <button
+                                                        onClick={() => setActiveMapMutation.mutate(map.id)}
+                                                        className={`flex-1 text-left text-xs font-medium ${map.id === activeMap?.id ? 'text-indigo-600' : 'text-slate-600'}`}
+                                                    >
+                                                        {map.name}
+                                                    </button>
+                                                    {map.id === activeMap?.id && <Check size={14} className="text-indigo-600" />}
+                                                    {isDM && map.id !== activeMap?.id && (
                                                         <button
-                                                            onClick={() => setActiveMapMutation.mutate(map.id)}
-                                                            className={`flex-1 text-left text-xs font-medium ${map.id === activeMap?.id ? 'text-indigo-600' : 'text-slate-600'}`}
+                                                            onClick={(e) => { e.stopPropagation(); deleteMapMutation.mutate(map); }}
+                                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover/item:opacity-100 transition-all"
                                                         >
-                                                            {map.name}
+                                                            <Trash2 size={12} />
                                                         </button>
-                                                        {map.id === activeMap?.id && <Check size={14} className="text-indigo-600" />}
-                                                        {isDM && map.id !== activeMap?.id && (
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); deleteMapMutation.mutate(map); }}
-                                                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover/item:opacity-100 transition-all"
-                                                            >
-                                                                <Trash2 size={12} />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
 
-                                        {isDM && (
-                                            <div className="p-2 border-t mt-1">
-                                                <button
-                                                    onClick={() => fileInputRef.current?.click()}
-                                                    disabled={isUploading}
-                                                    className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-xs font-bold transition-colors"
-                                                >
-                                                    {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                                                    {isUploading ? 'Uploading...' : 'Upload New Map'}
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
+                                    {isDM && (
+                                        <div className="p-2 border-t mt-1">
+                                            <button
+                                                onClick={() => fileInputRef.current?.click()}
+                                                disabled={isUploading}
+                                                className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-xs font-bold transition-colors"
+                                            >
+                                                {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                                                {isUploading ? 'Uploading...' : 'Upload New Map'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
+                            </div>
 
-                                {isSavingGrid && (
-                                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)]" title="Saving Grid..." />
-                                )}
+                            <div className="w-px h-6 bg-slate-200 mx-0.5" />
 
-                                <div className="w-px h-6 bg-slate-200 mx-0.5" />
 
+
+
+                            <div className="w-px h-6 bg-slate-200 mx-0.5" />
+
+                            <div
+                                className="contents"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                            >
                                 <button
                                     onClick={() => setActiveTool('select')}
                                     className={`p-2 rounded-xl transition-all ${activeTool === 'select' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
@@ -1609,94 +1233,83 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                 >
                                     <MousePointer2 size={18} />
                                 </button>
-
-                                <div className="w-px h-6 bg-slate-200 mx-0.5" />
-
-                                <button
-                                    onClick={() => setActiveTool('draw')}
-                                    className={`p-2 rounded-xl transition-all ${activeTool === 'draw' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    title="Draw Tool"
-                                >
-                                    <Pencil size={18} />
-                                </button>
-
-                                {activeTool === 'draw' && (
-                                    <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-200">
-                                        <button
-                                            onClick={() => setDrawMode('pencil')}
-                                            className={`p-1.5 rounded-lg transition-all ${drawMode === 'pencil' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                        >
-                                            <Pencil size={14} />
-                                        </button>
-                                        <button
-                                            onClick={() => setDrawMode('eraser')}
-                                            className={`p-1.5 rounded-lg transition-all ${drawMode === 'eraser' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                        >
-                                            <Eraser size={14} />
-                                        </button>
-                                    </div>
-                                )}
-
-                                <div className="w-px h-6 bg-slate-200 mx-0.5" />
-
-                                <button
-                                    onClick={() => setActiveTool('pin')}
-                                    className={`p-2 rounded-xl transition-all ${activeTool === 'pin' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    title="Pin Tool"
-                                >
-                                    <MapPin size={18} />
-                                </button>
-
-                                {activeTool === 'pin' && (
-                                    <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-200">
-                                        <button
-                                            onClick={() => setPinType('location')}
-                                            className={`p-1.5 rounded-lg transition-all ${pinType === 'location' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                            title="Location Pin"
-                                        >
-                                            <MapPin size={14} />
-                                        </button>
-                                        <button
-                                            onClick={() => setPinType('character')}
-                                            className={`p-1.5 rounded-lg transition-all ${pinType === 'character' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                            title="Character Token"
-                                        >
-                                            <User size={14} />
-                                        </button>
-                                        <button
-                                            onClick={() => setPinType('note')}
-                                            className={`p-1.5 rounded-lg transition-all ${pinType === 'note' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                            title="Note Pin"
-                                        >
-                                            <StickyNote size={14} />
-                                        </button>
-                                        {isDM && (
-                                            <button
-                                                onClick={() => setPinType('player_start')}
-                                                className={`p-1.5 rounded-lg transition-all ${pinType === 'player_start' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-                                                title="Player Start Location"
-                                            >
-                                                <Flag size={14} />
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-
-                                {isDM && (
-                                    <>
-                                        <div className="w-px h-6 bg-slate-200 mx-0.5" />
-
-                                        <button
-                                            onClick={() => setIsGridSettingsOpen(true)}
-                                            className={`p-2 rounded-xl text-slate-500 hover:bg-slate-100 transition-all ${isGridSettingsOpen ? 'bg-slate-100' : ''}`}
-                                            title="Grid Settings"
-                                        >
-                                            <Settings size={18} />
-                                        </button>
-                                    </>
-                                )}
                             </div>
+
+                            <div className="w-px h-6 bg-slate-200 mx-0.5" />
+
+                            <button
+                                onClick={() => setActiveTool('draw')}
+                                className={`p-2 rounded-xl transition-all ${activeTool === 'draw' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
+                                title="Draw Tool"
+                            >
+                                <Pencil size={18} />
+                            </button>
+
+                            {activeTool === 'draw' && (
+                                <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-200">
+                                    <button
+                                        onClick={() => setDrawMode('pencil')}
+                                        className={`p-1.5 rounded-lg transition-all ${drawMode === 'pencil' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => setDrawMode('eraser')}
+                                        className={`p-1.5 rounded-lg transition-all ${drawMode === 'eraser' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <Eraser size={14} />
+                                    </button>
+                                </div>
+                            )}
+
+                            <div className="w-px h-6 bg-slate-200 mx-0.5" />
+
+                            <button
+                                onClick={() => setActiveTool('pin')}
+                                className={`p-2 rounded-xl transition-all ${activeTool === 'pin' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}
+                                title="Pin Tool"
+                            >
+                                <MapPin size={18} />
+                            </button>
+
+                            {activeTool === 'pin' && (
+                                <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-200">
+                                    <button
+                                        onClick={() => setPinType('location')}
+                                        className={`p-1.5 rounded-lg transition-all ${pinType === 'location' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                        title="Location Pin"
+                                    >
+                                        <MapPin size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => setPinType('character')}
+                                        className={`p-1.5 rounded-lg transition-all ${pinType === 'character' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                        title="Character Token"
+                                    >
+                                        <User size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => setPinType('note')}
+                                        className={`p-1.5 rounded-lg transition-all ${pinType === 'note' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                        title="Note Pin"
+                                    >
+                                        <StickyNote size={14} />
+                                    </button>
+                                    {isDM && (
+                                        <button
+                                            onClick={() => setPinType('player_start')}
+                                            className={`p-1.5 rounded-lg transition-all ${pinType === 'player_start' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                            title="Player Start Location"
+                                        >
+                                            <Flag size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+
                         </div>
+
                     )
                 }
 
@@ -1726,6 +1339,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                         />
                     )
                 }
+
 
                 {/* ZOOM CONTROLS */}
                 {
@@ -1768,7 +1382,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                         </div>
                     )
                 }
-
                 {/* Context Menu */}
                 {
                     contextMenu && (
@@ -1800,13 +1413,8 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                     )
                 }
 
-                <div className="absolute bottom-4 left-4 flex flex-col gap-2 pointer-events-none">
-                    <div className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-[10px] font-mono border border-white/10 flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeMap ? 'bg-green-500' : 'bg-red-500'}`} />
-                        {activeMap ? `COORD: ${Math.round(guidePos?.x || 0)}, ${Math.round(guidePos?.y || 0)}` : 'DISCONNECTED'}
-                    </div>
-                </div>
-            </div>
+
+            </div >
 
             {/* Name Prompt Modal */}
             {
