@@ -84,7 +84,7 @@ export async function signOut() {
 }
 
 // REFRESH SESSION
-export async function refreshSession(): Promise<{ session: Session | null; error: any }> {
+export async function refreshSession(): Promise<{ session: Session | null; error: unknown }> {
   const { data, error } = await supabase.auth.refreshSession();
   return { session: data.session, error };
 }

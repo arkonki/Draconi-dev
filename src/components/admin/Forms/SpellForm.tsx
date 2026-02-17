@@ -4,21 +4,24 @@ import { SpellPrerequisite } from '../../../types/magic';
 
 interface SpellFormProps {
   entry: GameDataEntry; // entry.prerequisite and entry.requirement will be string | null
-  onChange: (field: string, value: any) => void;
+  onChange: (field: string, value: unknown) => void;
   magicSchools?: { id:string; name: string }[];
 }
 
-function isValidPrerequisiteJSON(obj: any): obj is SpellPrerequisite {
+function isValidPrerequisiteJSON(obj: unknown): obj is SpellPrerequisite {
   if (typeof obj !== 'object' || obj === null) return false;
-  if (!obj.type) return false;
+  const prerequisite = obj as Partial<SpellPrerequisite> & { conditions?: unknown[] };
+  if (!prerequisite.type) return false;
 
-  if (obj.type === "logical") {
-    return (obj.operator === "AND" || obj.operator === "OR") && Array.isArray(obj.conditions) && obj.conditions.every(isValidPrerequisiteJSON);
+  if (prerequisite.type === "logical") {
+    return (prerequisite.operator === "AND" || prerequisite.operator === "OR")
+      && Array.isArray(prerequisite.conditions)
+      && prerequisite.conditions.every(isValidPrerequisiteJSON);
   }
-  if (["spell", "school", "skill", "attribute"].includes(obj.type)) {
-    return typeof obj.name === "string";
+  if (["spell", "school", "skill", "attribute"].includes(prerequisite.type)) {
+    return typeof prerequisite.name === "string";
   }
-  if (obj.type === "anySchool") {
+  if (prerequisite.type === "anySchool") {
     return true;
   }
   return false;
@@ -36,7 +39,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
         } else if (typeof entry.prerequisite === 'string') {
           setPrerequisiteInput(JSON.stringify(JSON.parse(entry.prerequisite), null, 2));
         }
-      } catch (e) {
+      } catch {
         setPrerequisiteInput(entry.prerequisite as string);
       }
     } else {
@@ -62,7 +65,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
       } else {
         setPrerequisiteError('Invalid prerequisite JSON structure. Please check the format.');
       }
-    } catch (error) {
+    } catch {
       setPrerequisiteError('Invalid JSON. Please ensure correct JSON syntax.');
     }
   };

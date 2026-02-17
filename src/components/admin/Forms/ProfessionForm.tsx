@@ -22,9 +22,23 @@ interface NewMagicSchoolData {
   base_skills: string[];
 }
 
+interface ProfessionFormEntry {
+  name?: string;
+  description?: string;
+  is_magic?: boolean;
+  associated_skill?: string | null;
+  key_attribute?: string;
+  heroic_ability?: string;
+  magic_school_id?: string | null;
+  skills?: string[];
+  starting_equipment?: string[];
+  equipment_description?: string[];
+  [key: string]: unknown;
+}
+
 interface ProfessionFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
+  entry: ProfessionFormEntry;
+  onChange: (field: string, value: unknown) => void;
 }
 
 // --- Reusable Modal Component for Creating a New Magic School ---

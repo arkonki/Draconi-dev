@@ -1,35 +1,10 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
 import { useNavigate } from 'react-router-dom';
-import { useApp } from './AppContext';
+import { useApp } from './useApp';
 import { signUp as supabaseSignUp, signIn as supabaseSignIn, signOut as supabaseSignOut } from '../lib/auth/auth';
-
-type UserRole = 'player' | 'dm' | 'admin';
-const VALID_ROLES: UserRole[] = ['player', 'dm', 'admin'];
-
-interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  role: UserRole | null;
-  isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, username: string, role: 'player' | 'dm') => Promise<void>;
-  signOut: () => Promise<void>;
-  isAdmin: () => boolean;
-  isDM: () => boolean;
-  isPlayer: () => boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+import { AuthContext, VALID_ROLES, type UserRole } from './AuthContextStore';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -42,16 +17,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUserRole = useCallback(async (userId: string): Promise<UserRole> => {
     try {
+      const { data, error } = await supabase.from('users').select('role').eq('id', userId).single();
+      if (!error) {
+        const tableRole = data?.role;
+        if (tableRole && VALID_ROLES.includes(tableRole as UserRole)) {
+          return tableRole as UserRole;
+        }
+      }
+
       const { data: sessionData } = await supabase.auth.getSession();
       const userMetaDataRole = sessionData?.session?.user?.user_metadata?.role;
       if (userMetaDataRole && VALID_ROLES.includes(userMetaDataRole as UserRole)) {
         return userMetaDataRole as UserRole;
       }
-      const { data, error } = await supabase.from('users').select('role').eq('id', userId).single();
+
       if (error) {
         console.error('Error fetching user role from table:', error.message);
-        return 'player'; // Default on error
       }
+
       const tableRole = data?.role;
       return (tableRole && VALID_ROLES.includes(tableRole as UserRole)) ? (tableRole as UserRole) : 'player';
     } catch (error) {
@@ -96,7 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, fetchUserRole]);
 
-  const handleSignUp = async (email: string, password: string, username: string, role: 'player' | 'dm') => {
+  const handleSignUp = async (
+    email: string,
+    password: string,
+    username: string,
+    role: 'player' | 'dm' = 'player'
+  ) => {
     try {
       setIsAuthenticating(true);
       setGlobalError(null);
@@ -125,6 +113,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setGlobalError(errorMessage);
       throw new Error(errorMessage);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleUpdateUserPassword = async (currentPassword: string, newPassword: string) => {
+    if (!user?.email) {
+      throw new Error('No authenticated user found.');
+    }
+
+    try {
+      setIsAuthenticating(true);
+      setGlobalError(null);
+
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        throw new Error('Current password is incorrect.');
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        throw new Error(updateError.message || 'Failed to update password.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update password.';
+      setGlobalError(message);
+      throw new Error(message);
     } finally {
       setIsAuthenticating(false);
     }
@@ -163,6 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading: combinedIsLoading,
         signIn: handleSignIn,
         signUp: handleSignUp,
+        updateUserPassword: handleUpdateUserPassword,
         signOut: handleSignOut,
         isAdmin,
         isDM,

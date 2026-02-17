@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   Wand2, 
@@ -12,81 +12,23 @@ import {
   Edit2, 
   Trash2 
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { CompendiumEntry, CompendiumTemplate } from '../../types/compendium';
 import { Button } from '../shared/Button';
-import { ArmorHelmetsForm } from './ItemForms/ArmorHelmetsForm';
-import { MeleeWeaponsForm } from './ItemForms/MeleeWeaponsForm';
-import { RangedWeaponsForm } from './ItemForms/RangedWeaponsForm';
-import { ClothesForm } from './ItemForms/ClothesForm';
-import { MusicalInstrumentsForm } from './ItemForms/MusicalInstrumentsForm';
-import { TradeGoodsForm } from './ItemForms/TradeGoodsForm';
-import { StudiesMagicForm } from './ItemForms/StudiesMagicForm';
-import { LightSourcesForm } from './ItemForms/LightSourcesForm';
-import { ToolsForm } from './ItemForms/ToolsForm';
-import { ContainersForm } from './ItemForms/ContainersForm';
-import { MedicineForm } from './ItemForms/MedicineForm';
-import { ServicesForm } from './ItemForms/ServicesForm';
-import { HuntingFishingForm } from './ItemForms/HuntingFishingForm';
-import { MeansOfTravelForm } from './ItemForms/MeansOfTravelForm';
-import { AnimalsForm } from './ItemForms/AnimalsForm';
 import { ItemForm } from './ItemForms/ItemForm';
 
 type DataCategory = 'spells' | 'items' | 'abilities';
 
 interface GameDataEntry {
-  id: string;
+  id?: string;
   name: string;
   description?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
-
-interface ItemFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
-
-const itemCategories = [
-  'ARMOR & HELMETS',
-  'MELEE WEAPONS',
-  'RANGED WEAPONS',
-  'CLOTHES',
-  'MUSICAL INSTRUMENTS',
-  'TRADE GOODS',
-  'STUDIES & MAGIC',
-  'LIGHT SOURCES',
-  'TOOLS',
-  'CONTAINERS',
-  'MEDICINE',
-  'SERVICES',
-  'HUNTING & FISHING',
-  'MEANS OF TRAVEL',
-  'ANIMALS'
-];
-
-const itemFormComponents: Record<string, React.ComponentType<ItemFormProps>> = {
-  'ARMOR & HELMETS': ArmorHelmetsForm,
-  'MELEE WEAPONS': MeleeWeaponsForm,
-  'RANGED WEAPONS': RangedWeaponsForm,
-  'CLOTHES': ClothesForm,
-  'MUSICAL INSTRUMENTS': MusicalInstrumentsForm,
-  'TRADE GOODS': TradeGoodsForm,
-  'STUDIES & MAGIC': StudiesMagicForm,
-  'LIGHT SOURCES': LightSourcesForm,
-  'TOOLS': ToolsForm,
-  'CONTAINERS': ContainersForm,
-  'MEDICINE': MedicineForm,
-  'SERVICES': ServicesForm,
-  'HUNTING & FISHING': HuntingFishingForm,
-  'MEANS OF TRAVEL': MeansOfTravelForm,
-  'ANIMALS': AnimalsForm
-};
 
 export function CompendiumAdmin({ onEntryAdded }: CompendiumAdminProps) {
-  const { user } = useAuth();
+  void onEntryAdded;
   const [activeCategory, setActiveCategory] = useState<DataCategory>('items');
   const [entries, setEntries] = useState<GameDataEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingEntry, setEditingEntry] = useState<GameDataEntry | null>(null);
@@ -198,11 +140,11 @@ export function CompendiumAdmin({ onEntryAdded }: CompendiumAdminProps) {
     }
   };
 
-  const handleItemFieldChange = (field: string, value: any) => {
-    setEditingEntry(prev => ({
+  const handleItemFieldChange = (field: string, value: unknown) => {
+    setEditingEntry(prev => (prev ? {
       ...prev,
       [field]: value
-    }));
+    } : prev));
   };
 
   const renderForm = () => {

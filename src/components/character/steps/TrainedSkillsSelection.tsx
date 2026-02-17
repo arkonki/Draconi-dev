@@ -43,7 +43,6 @@ export function TrainedSkillsSelection() {
   const [step, setStep] = useState<'profession' | 'additional'>('profession');
   const [loadedProfessionSkillNames, setLoadedProfessionSkillNames] = useState<string[]>([]);
   const [loadingProfessionSkills, setLoadingProfessionSkills] = useState(false);
-  const [professionSkillsError, setProfessionSkillsError] = useState<string | null>(null);
   const [allMagicSchools, setAllMagicSchools] = useState<{id: string, name: string}[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(false);
   const [showInfoPane, setShowInfoPane] = useState(true);
@@ -82,12 +81,11 @@ export function TrainedSkillsSelection() {
     async function fetchProfessionSkillNames() {
       if (!character.profession) return;
       setLoadingProfessionSkills(true);
-      setProfessionSkillsError(null);
       try {
         const { data, error } = await supabase.from('professions').select('skills').eq('name', character.profession).single();
         if (error) throw error;
         setLoadedProfessionSkillNames(Array.isArray(data?.skills) ? data.skills.filter((s): s is string => typeof s === 'string') : []);
-      } catch (err) { setProfessionSkillsError(err instanceof Error ? err.message : 'Failed to load skills.'); }
+      } catch (err) { console.error('Failed to load profession skills:', err); }
       finally { setLoadingProfessionSkills(false); }
     }
     fetchProfessionSkillNames();
@@ -148,6 +146,12 @@ export function TrainedSkillsSelection() {
   const handleBackgroundClick = () => {
     setActiveTooltip(null);
   };
+  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      action();
+    }
+  };
 
   // Helper to find description for active tooltip
   const getActiveDescription = () => {
@@ -174,7 +178,19 @@ export function TrainedSkillsSelection() {
     const skillValue = getSkillValue(skill.name, isSelected);
 
     return (
-      <div key={skill.id} onClick={() => !isDisabled && handleSkillSelection(skill.name, type)} className={`flex items-center justify-between p-3 border-b transition-colors ${isDisabled ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+      <div
+        key={skill.id}
+        onClick={() => !isDisabled && handleSkillSelection(skill.name, type)}
+        onKeyDown={(event) => {
+          if (!isDisabled) {
+            handleKeyboardActivate(event, () => handleSkillSelection(skill.name, type));
+          }
+        }}
+        role="button"
+        tabIndex={isDisabled ? -1 : 0}
+        aria-disabled={isDisabled}
+        className={`flex items-center justify-between p-3 border-b transition-colors ${isDisabled ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+      >
         <div className="flex items-center gap-3">
           <CheckCircle2 className={`w-6 h-6 flex-shrink-0 transition-colors ${isSelected ? 'text-blue-600 fill-blue-50' : 'text-gray-300'}`} />
           <div className="flex flex-col">
@@ -212,7 +228,7 @@ export function TrainedSkillsSelection() {
   const canContinueProfession = profSkillsCount === professionSkillLimit; const canContinueAdditional = addSkillsCount === additionalSkillLimit;
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick}>
+    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
       {/* Header and Progress */}
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Select Skills</h3>
@@ -248,7 +264,7 @@ export function TrainedSkillsSelection() {
       </div>
 
       {/* --- List-based Rendering with Separated Skill Categories --- */}
-      <div className="border rounded-lg bg-white shadow-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="border rounded-lg bg-white shadow-sm overflow-hidden" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}>
         {step === 'profession' ? (
           <>
             {professionGeneralSkills.length > 0 && (

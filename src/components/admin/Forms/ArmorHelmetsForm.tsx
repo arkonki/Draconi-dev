@@ -1,10 +1,7 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
-interface ArmorHelmetsFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type ArmorHelmetsFormProps = ItemFormProps;
 
 export function ArmorHelmetsForm({ entry, onChange }: ArmorHelmetsFormProps) {
   return (

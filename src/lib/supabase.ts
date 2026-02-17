@@ -12,17 +12,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const retryConfig = {
   maxRetries: 3,
   retryDelay: 1000,
-  retryCondition: (err: any) => {
+  retryCondition: (err: unknown) => {
+    const errorObj = typeof err === 'object' && err !== null
+      ? (err as { status?: unknown; message?: unknown })
+      : null;
+    const status = typeof errorObj?.status === 'number' ? errorObj.status : undefined;
+    const message = typeof errorObj?.message === 'string' ? errorObj.message : '';
     return (
-      err?.status === 500 || 
-      err?.status === 503 ||
-      err?.status === 504 ||
-      err?.status === 429 ||
-      err?.message?.includes('Database error') ||
-      err?.message?.includes('unexpected_failure') ||
-      err?.message?.includes('schema') ||
-      err?.message?.includes('network') ||
-      err?.message?.includes('timeout')
+      status === 500 || 
+      status === 503 ||
+      status === 504 ||
+      status === 429 ||
+      message.includes('Database error') ||
+      message.includes('unexpected_failure') ||
+      message.includes('schema') ||
+      message.includes('network') ||
+      message.includes('timeout')
     );
   }
 };
@@ -86,7 +91,7 @@ export async function checkSupabaseConnection() {
   });
 
   try {
-    const result = await Promise.race([
+    await Promise.race([
       supabase.auth.getSession(),
       timeout
     ]);

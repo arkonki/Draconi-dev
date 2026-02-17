@@ -148,15 +148,15 @@ export function SessionEndCheatsheet({ members, partyId }: SessionEndCheatsheetP
                  ) : (
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Character</label>
-                        <select className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}>
+                        <label htmlFor="weakness-character-select" className="block text-xs font-bold text-gray-500 uppercase mb-1">Character</label>
+                        <select id="weakness-character-select" className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}>
                           <option value="" disabled>Select character...</option>
                           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">New Flaw</label>
-                        <select className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={selectedNewFlaw} onChange={e => setSelectedNewFlaw(e.target.value)}>
+                        <label htmlFor="weakness-new-flaw-select" className="block text-xs font-bold text-gray-500 uppercase mb-1">New Flaw</label>
+                        <select id="weakness-new-flaw-select" className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={selectedNewFlaw} onChange={e => setSelectedNewFlaw(e.target.value)}>
                           <option value="" disabled>Choose flaw...</option>
                           {flaws.map(f => <option key={f} value={f}>{f}</option>)}
                         </select>
@@ -193,8 +193,8 @@ export function SessionEndCheatsheet({ members, partyId }: SessionEndCheatsheetP
 
                  <div className="flex flex-col md:flex-row gap-4 items-end">
                     <div className="flex-grow w-full">
-                       <label className="block text-xs font-bold text-green-700 uppercase mb-1">Character to Redeem</label>
-                       <select className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-green-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}>
+                       <label htmlFor="redeem-character-select" className="block text-xs font-bold text-green-700 uppercase mb-1">Character to Redeem</label>
+                       <select id="redeem-character-select" className="w-full p-2.5 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-green-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}>
                           <option value="" disabled>Select character...</option>
                           {members.filter(m => m.flaw).map(m => <option key={m.id} value={m.id}>{m.name} (Has Flaw)</option>)}
                        </select>

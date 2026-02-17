@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { User, Key, Copy, Check, AlertCircle, X } from 'lucide-react';
+import { User, Copy, Check, AlertCircle, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 
 interface UserCreationModalProps {
@@ -115,7 +115,7 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
         await navigator.clipboard.writeText(signInLink);
         setLinkCopied(true);
         setTimeout(() => setLinkCopied(false), 2000);
-      } catch (err) {
+      } catch {
         setError('Failed to copy link to clipboard');
       }
     }

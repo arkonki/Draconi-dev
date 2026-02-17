@@ -4,9 +4,8 @@ import { Plus, Trash2 } from 'lucide-react';
 import { BioData } from '../../../types/gameData'; // It's best to use a specific type
 
 interface BioFormProps {
-  // Use a more specific type than 'any' if available
   entry: BioData; 
-  onChange: (field: string, value: any) => void;
+  onChange: (field: string, value: unknown) => void;
 }
 
 // A reusable component for editing a dynamic list of strings.

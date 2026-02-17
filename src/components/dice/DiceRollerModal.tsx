@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom'; 
-import { useAuth } from '../../contexts/AuthContext';
-import { useDice, DiceType, DiceRollResult } from './DiceContext';
+import { useAuth } from '../../contexts/useAuth';
+import { DiceType, DiceRollResult, RollHistoryEntry } from './DiceContext';
+import { useDice } from './useDice';
 // 1. IMPORT NOTIFICATIONS
-import { useNotifications } from '../../contexts/NotificationContext';
+import { useNotifications } from '../../contexts/useNotifications';
 import { 
   Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
   ShieldQuestion, GraduationCap, Zap, Moon, Share 
@@ -59,7 +60,7 @@ export function DiceRollerModal() {
   const [modifierCount, setModifierCount] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
-  const [lastRolledEntry, setLastRolledEntry] = useState<any>(null); 
+  const [lastRolledEntry, setLastRolledEntry] = useState<RollHistoryEntry | null>(null); 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const rollMode = currentConfig?.rollMode;
@@ -104,7 +105,7 @@ export function DiceRollerModal() {
     setLastRolledEntry(null);
 
     const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
-    let currentBoonResults: DiceRollResult[] = [];
+    const currentBoonResults: DiceRollResult[] = [];
     let finalValue: number | string = currentResults.reduce((sum, r) => sum + r.value, 0);
     let numericFinalValue: number = Number(finalValue); 
     let crit = false;
@@ -183,7 +184,7 @@ export function DiceRollerModal() {
             }
         }
 
-        const historyEntryData = {
+        const historyEntryData: Omit<RollHistoryEntry, 'id' | 'timestamp'> = {
           description: currentConfig?.description || `${dicePool.join(', ')} Roll`,
           dicePool: [...dicePool],
           results: currentResults,
@@ -198,7 +199,11 @@ export function DiceRollerModal() {
         };
         
         addRollToHistory(historyEntryData);
-        setLastRolledEntry(historyEntryData);
+        setLastRolledEntry({
+          ...historyEntryData,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+        });
 
         if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
         if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
@@ -216,7 +221,7 @@ export function DiceRollerModal() {
     }
   }, [showDiceRoller]);
 
-  const handleShare = async (entry: any) => {
+  const handleShare = async (entry: RollHistoryEntry) => {
     if (effectivePartyId && user && shareRollToParty) {
       // Visual feedback
       const btn = document.activeElement as HTMLElement;

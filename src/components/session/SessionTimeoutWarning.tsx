@@ -1,6 +1,6 @@
 import React from 'react';
 import { Clock, AlertCircle } from 'lucide-react';
-import { useSessionTimeout } from '../../contexts/SessionTimeoutContext';
+import { useSessionTimeout } from '../../contexts/useSessionTimeout';
 import { Button } from '../shared/Button';
 
 export function SessionTimeoutWarning() {

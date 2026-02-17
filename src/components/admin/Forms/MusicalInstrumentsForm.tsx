@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface MusicalInstrumentsFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type MusicalInstrumentsFormProps = ItemFormProps;
 
 export function MusicalInstrumentsForm({ entry, onChange }: MusicalInstrumentsFormProps) {
   return (

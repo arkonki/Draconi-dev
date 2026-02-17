@@ -1,5 +1,3 @@
-import { CharacterSpells } from "./character"; // Assuming CharacterSpells might be used if spells require other spells by ID eventually
-
 export interface MagicSchool {
   id: string;
   name: string;

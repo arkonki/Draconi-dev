@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Star, Edit2 } from 'lucide-react';
 import { Character } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
@@ -7,11 +7,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
 
-// Define a more specific type for abilities derived from GameItem
-interface HeroicAbility extends GameItem {
-  // Inherits id, name, description (effect), category etc. from GameItem
-  // No extra fields needed if GameItem covers it
-}
+type HeroicAbility = GameItem;
 
 interface HeroicAbilitiesTableProps {
   character: Character;
@@ -33,7 +29,6 @@ async function fetchHeroicAbilitiesData(): Promise<HeroicAbility[]> {
 
 
 export function HeroicAbilitiesTable({ character, onUpdate }: HeroicAbilitiesTableProps) {
-  const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   // Store the names of the abilities being edited
   const [editingAbilityNames, setEditingAbilityNames] = useState<string[]>([]);
@@ -163,6 +158,14 @@ export function HeroicAbilitiesTable({ character, onUpdate }: HeroicAbilitiesTab
               key={ability.id || ability.name} // Use id preferably
               className={`p-3 border rounded-lg transition-colors duration-150 ${isEditing ? 'cursor-pointer hover:bg-gray-50' : ''} ${isSelected && isEditing ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300' : 'border-gray-200'}`}
               onClick={isEditing ? () => handleToggleAbility(ability.name) : undefined}
+              onKeyDown={isEditing ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleToggleAbility(ability.name);
+                }
+              } : undefined}
+              role={isEditing ? 'button' : undefined}
+              tabIndex={isEditing ? 0 : undefined}
             >
               <div className="flex items-center justify-between">
                 <h4 className="font-medium flex items-center gap-1.5">

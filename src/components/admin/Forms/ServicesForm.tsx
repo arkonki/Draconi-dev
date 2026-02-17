@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface ServicesFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type ServicesFormProps = ItemFormProps;
 
 export function ServicesForm({ entry, onChange }: ServicesFormProps) {
   return (

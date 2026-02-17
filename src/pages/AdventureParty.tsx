@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Users, Sword, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { Button } from '../components/shared/Button';
 import { useNavigate } from 'react-router-dom';
 import { Character } from '../types/character';
@@ -19,6 +19,11 @@ export function AdventureParty() {
   const [isCreating, setIsCreating] = useState(false);
   const [newPartyName, setNewPartyName] = useState('');
   const [selectedCharacters, setSelectedCharacters] = useState<string[]>([]);
+  const partyNameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isCreating) partyNameInputRef.current?.focus();
+  }, [isCreating]);
 
   const { data: parties = [], isLoading: isLoadingParties, error: errorParties } = useQuery<Party[], Error>({
     queryKey: ['parties', user?.id, isDM()],
@@ -124,18 +129,18 @@ export function AdventureParty() {
             <div>
               <label htmlFor="partyName" className="block text-sm font-bold text-gray-700 mb-1">Party Name</label>
               <input
+                ref={partyNameInputRef}
                 type="text"
                 id="partyName"
                 value={newPartyName}
                 onChange={(e) => setNewPartyName(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none"
                 placeholder="e.g. The Fellowship of the Ring"
-                autoFocus
               />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">Select Initial Characters (Optional)</label>
+              <p className="block text-sm font-bold text-gray-700 mb-2">Select Initial Characters (Optional)</p>
               {isLoadingChars ? <div className="py-8 flex justify-center"><LoadingSpinner /></div> : 
                errorChars ? <ErrorMessage message={errorChars.message} /> : 
                availableCharacters.length > 0 ? (
@@ -159,6 +164,16 @@ export function AdventureParty() {
                             );
                           }
                         }}
+                        onKeyDown={(event) => {
+                          if ((event.key === 'Enter' || event.key === ' ') && character.id) {
+                            event.preventDefault();
+                            setSelectedCharacters((prev) =>
+                              prev.includes(character.id!) ? prev.filter((id) => id !== character.id) : [...prev, character.id!]
+                            );
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <div className={`p-2 rounded-full ${isSelected ? 'bg-blue-200 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                           <Sword className="w-4 h-4" />
@@ -194,6 +209,14 @@ export function AdventureParty() {
               <div
                 key={party.id}
                 onClick={() => navigate(`/party/${party.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    navigate(`/party/${party.id}`);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 className="bg-white rounded-xl shadow-sm border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer overflow-hidden group"
               >
                 <div className="p-4 md:p-6 border-b border-gray-100 bg-gray-50/50 group-hover:bg-blue-50/30 transition-colors">

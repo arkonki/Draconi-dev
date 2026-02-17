@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, AlertTriangle, CheckCircle, Clock, RefreshCw } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 interface EmailStats {
   totalSent: number;

@@ -1,12 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // 1. Added useSearchParams
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parties';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
-import { RandomTableManager } from '../components/tools/RandomTableManager';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
   MessageSquare, ChevronDown, Dices, Map
@@ -14,22 +13,64 @@ import {
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
-import { PartyNotes } from '../components/party/PartyNotes';
-import { PartyTasks } from '../components/party/PartyTasks';
-import { PartyInventory } from '../components/party/PartyInventory';
-import { PartyEncounterView } from '../components/party/PartyEncounterView';
-import { StoryHelperApp } from '../components/party/StoryHelper';
-import { TimeTrackerView } from '../components/party/TimeTracker';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
-import { GMScreen } from '../components/party/GMScreen';
-import { PartyChat } from '../components/party/PartyChat';
-import { AtlasView } from '../components/party/AtlasView';
 import { EncounterChatView } from '../components/party/EncounterChatView';
 import { supabase } from '../lib/supabase';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 
 type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
+
+const StoryHelperApp = lazy(() =>
+  import('../components/party/StoryHelper').then((module) => ({
+    default: module.StoryHelperApp,
+  }))
+);
+const PartyChat = lazy(() =>
+  import('../components/party/PartyChat').then((module) => ({
+    default: module.PartyChat,
+  }))
+);
+const PartyNotes = lazy(() =>
+  import('../components/party/PartyNotes').then((module) => ({
+    default: module.PartyNotes,
+  }))
+);
+const AtlasView = lazy(() =>
+  import('../components/party/AtlasView').then((module) => ({
+    default: module.AtlasView,
+  }))
+);
+const PartyTasks = lazy(() =>
+  import('../components/party/PartyTasks').then((module) => ({
+    default: module.PartyTasks,
+  }))
+);
+const PartyInventory = lazy(() =>
+  import('../components/party/PartyInventory').then((module) => ({
+    default: module.PartyInventory,
+  }))
+);
+const TimeTrackerView = lazy(() =>
+  import('../components/party/TimeTracker').then((module) => ({
+    default: module.TimeTrackerView,
+  }))
+);
+const PartyEncounterView = lazy(() =>
+  import('../components/party/PartyEncounterView').then((module) => ({
+    default: module.PartyEncounterView,
+  }))
+);
+const RandomTableManager = lazy(() =>
+  import('../components/tools/RandomTableManager').then((module) => ({
+    default: module.RandomTableManager,
+  }))
+);
+const GMScreen = lazy(() =>
+  import('../components/party/GMScreen').then((module) => ({
+    default: module.GMScreen,
+  }))
+);
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -109,18 +150,11 @@ export function PartyView() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['parties'] }); navigate('/adventure-party'); },
   });
 
-  const handleRemoveMemberClick = (id: string, name: string) => { setMemberToRemove({ id, name }); setDialogOpen('removeMember'); };
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
   const isPartyOwner = user && party && user.id === party.created_by && isDM();
   const joinLink = party?.invite_code ? `${window.location.origin}/party/join/${party.invite_code}` : '';
-
-  const partyMembersString = useMemo(() => {
-    return party?.members
-      ? party.members.map((m: any) => `- ${m.name} (${m.kin} ${m.profession})`).join('\n')
-      : '';
-  }, [party]);
 
   if (isLoading) return <div className="flex justify-center items-center h-96"><LoadingSpinner size="lg" /></div>;
   if (error) return <div className="p-8"><ErrorMessage message={error.message} /></div>;
@@ -242,7 +276,12 @@ export function PartyView() {
           {isMenuOpen && (
             <>
               {/* Backdrop to close on click outside */}
-              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+              <button
+                type="button"
+                className="fixed inset-0 z-40"
+                onClick={() => setIsMenuOpen(false)}
+                aria-label="Close menu"
+              />
 
               <div
                 className="absolute top-full left-0 right-0 mx-4 mt-1 bg-white rounded-lg shadow-xl ring-1 ring-black ring-opacity-5 z-50 overflow-hidden"
@@ -278,6 +317,15 @@ export function PartyView() {
       </div>
 
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl min-h-[500px] overflow-hidden">
+        {(() => {
+          const lazyTabFallback = (
+            <div className="p-6 flex items-center justify-center min-h-[220px]">
+              <LoadingSpinner size="lg" />
+            </div>
+          );
+
+          return (
+            <>
         {activeTab === 'members' && (
           <div className="p-6">
             <PartyMemberList
@@ -290,58 +338,91 @@ export function PartyView() {
         )}
 
         {activeTab === 'chat' && (
-          <div className="p-6">
-            <PartyChat partyId={partyId!} members={party.members} />
-          </div>
+          <Suspense fallback={lazyTabFallback}>
+            <div className="p-6">
+              <PartyChat partyId={partyId!} members={party.members} />
+            </div>
+          </Suspense>
         )}
 
         {/* 5. Pass noteIdFromUrl to PartyNotes */}
         {activeTab === 'notes' && (
-          <PartyNotes
-            partyId={partyId!}
-            isDM={!!isPartyOwner}
-            openNoteId={noteIdFromUrl}
-          />
+          <Suspense fallback={lazyTabFallback}>
+            <PartyNotes
+              partyId={partyId!}
+              isDM={!!isPartyOwner}
+              openNoteId={noteIdFromUrl}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'atlas' && (
-          <div className="p-6">
-            <AtlasView partyId={partyId!} isDM={!!isPartyOwner} />
-          </div>
+          <Suspense fallback={lazyTabFallback}>
+            <div className="p-6">
+              <AtlasView partyId={partyId!} isDM={!!isPartyOwner} />
+            </div>
+          </Suspense>
         )}
 
-        {activeTab === 'tasks' && <PartyTasks partyId={partyId!} isDM={!!isPartyOwner} />}
+        {activeTab === 'tasks' && (
+          <Suspense fallback={lazyTabFallback}>
+            <PartyTasks partyId={partyId!} isDM={!!isPartyOwner} />
+          </Suspense>
+        )}
 
         {activeTab === 'inventory' && (
-          <div className="p-6">
-            <PartyInventory partyId={partyId!} members={party.members} isDM={!!isPartyOwner} />
-          </div>
+          <Suspense fallback={lazyTabFallback}>
+            <div className="p-6">
+              <PartyInventory partyId={partyId!} members={party.members} isDM={!!isPartyOwner} />
+            </div>
+          </Suspense>
         )}
 
         {activeTab === 'time' && (
-          <div className="p-6">
-            <TimeTrackerView partyId={partyId!} onTabChange={handleTabChange} />
-          </div>
+          <Suspense fallback={lazyTabFallback}>
+            <div className="p-6">
+              <TimeTrackerView partyId={partyId!} onTabChange={handleTabChange} />
+            </div>
+          </Suspense>
         )}
 
         {activeTab === 'encounter' && (
-          <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={!!isPartyOwner} />
+          <Suspense fallback={lazyTabFallback}>
+            <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={!!isPartyOwner} />
+          </Suspense>
         )}
 
         {/* 6. Roll Tables View */}
         {activeTab === 'tables' && (
-          <div className="p-6">
-            <RandomTableManager partyId={partyId!} />
-          </div>
+          <Suspense fallback={lazyTabFallback}>
+            <div className="p-6">
+              <RandomTableManager partyId={partyId!} />
+            </div>
+          </Suspense>
         )}
 
-        {activeTab === 'gmScreen' && <GMScreen />}
+        {activeTab === 'gmScreen' && (
+          <Suspense fallback={lazyTabFallback}>
+            <GMScreen />
+          </Suspense>
+        )}
 
         {activeTab === 'storyhelper' && (
           <div className="p-6">
-            <StoryHelperApp partyId={partyId!} initialPartyData={partyMembersString} />
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center py-16">
+                  <LoadingSpinner size="lg" />
+                </div>
+              }
+            >
+              <StoryHelperApp partyId={partyId!} />
+            </Suspense>
           </div>
         )}
+            </>
+          );
+        })()}
       </div>
 
       <ConfirmationDialog

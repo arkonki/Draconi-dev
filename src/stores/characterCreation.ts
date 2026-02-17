@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Character, CharacterCreationData } from '../types/character'; // Import CharacterCreationData
+import { CharacterCreationData } from '../types/character'; // Import CharacterCreationData
 
 interface CharacterCreationStore {
   step: number;

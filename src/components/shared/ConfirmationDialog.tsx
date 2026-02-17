@@ -30,14 +30,18 @@ export function ConfirmationDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
       aria-modal="true"
       role="dialog"
     >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black bg-opacity-50"
+        onClick={onClose}
+        aria-label="Close dialog"
+      />
       <div
         className="relative bg-white rounded-xl shadow-2xl w-full max-w-md m-4 p-6"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start space-x-4">
           {icon && (

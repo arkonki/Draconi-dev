@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Character } from '../../types/character';
+import { Character, WeaponEntry } from '../../types/character';
 import { Shield, Heart, Zap, Sword, UserX, Users, ExternalLink, Skull, Minus, Plus } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { removePartyMember } from '../../lib/api/parties';
@@ -34,7 +34,7 @@ const StatBar = ({
   isDM
 }: { 
   label: string, 
-  icon: any, 
+  icon: React.ComponentType<{ className?: string }>, 
   current: number, 
   max: number, 
   colorClass: string, 
@@ -111,20 +111,21 @@ const MemberCard = React.memo(({
 }) => {
   
   const activeConditions = useMemo(() => 
-    Object.entries(member.conditions || {}).filter(([_, active]) => active), 
+    Object.entries(member.conditions || {}).filter(([, active]) => active), 
   [member.conditions]);
   
   const initials = member.name.slice(0, 2).toUpperCase();
 
   const getArmorName = () => {
-    const armor = member.equipment?.equipped?.armor;
+    const armor = member.equipment?.equipped?.armor as unknown;
     if (!armor) return null;
     if (typeof armor === 'string') return armor;
-    return armor.name || null;
+    if (typeof armor === 'object' && 'name' in armor && typeof armor.name === 'string') return armor.name;
+    return null;
   };
 
   const armorName = getArmorName();
-  const weapons = member.equipment?.equipped?.weapons || [];
+  const weapons: WeaponEntry[] = member.equipment?.equipped?.weapons || [];
 
   const Avatar = () => {
     if (member.portrait_url) {
@@ -217,7 +218,7 @@ const MemberCard = React.memo(({
               <div className={`flex items-center gap-2 ${weapons.length === 0 ? 'text-gray-400 italic' : ''}`}>
                  <Sword className="w-4 h-4 shrink-0 opacity-70" />
                  <div className="truncate">
-                    {weapons.length > 0 ? weapons.slice(0, 2).map((w: any) => w.name).join(", ") : "Unarmed"}
+                    {weapons.length > 0 ? weapons.slice(0, 2).map((w) => w.name).join(", ") : "Unarmed"}
                  </div>
               </div>
            </div>
@@ -241,6 +242,7 @@ const MemberCard = React.memo(({
 export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyMemberListProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  void currentUserId;
 
   // --- 1. REAL-TIME SUBSCRIPTION ---
   // This is the core logic. It listens for ANY changes to characters in this party.
@@ -302,9 +304,6 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
       alert('Failed to remove member. Please try again.');
     }
   };
-
-  const isPartyCreator = isDM && currentUserId === party.created_by;
-  const canManageMembers = isPartyCreator;
 
   // --- 3. RENDER ---
 

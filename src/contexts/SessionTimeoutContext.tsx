@@ -1,14 +1,8 @@
 /* @refresh reset */
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { useAuth } from './AuthContext';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useAuth } from './useAuth';
 import { useNavigate } from 'react-router-dom';
-
-interface SessionTimeoutContextType {
-  showWarning: boolean;
-  extendSession: () => void;
-}
-
-const SessionTimeoutContext = createContext<SessionTimeoutContextType | undefined>(undefined);
+import { SessionTimeoutContext } from './SessionTimeoutContextStore';
 
 const TIMEOUT_DURATION = 30 * 60 * 1000; // 30 minutes
 const WARNING_DURATION = 30 * 1000; // 30 seconds
@@ -49,11 +43,9 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
 
   useEffect(() => {
     const events = ['mousedown', 'keydown', 'scroll', 'mousemove', 'click', 'touchstart'];
-    let activityCheckInterval: ReturnType<typeof setInterval>;
-
-    function debounce(func: Function, wait: number) {
-      let timeout: NodeJS.Timeout;
-      return function executedFunction(...args: any[]) {
+    function debounce<T extends (...args: never[]) => void>(func: T, wait: number) {
+      let timeout: ReturnType<typeof setTimeout>;
+      return function executedFunction(...args: Parameters<T>) {
         const later = () => {
           clearTimeout(timeout);
           func(...args);
@@ -73,7 +65,7 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
       document.addEventListener(event, handleActivity);
     });
 
-    activityCheckInterval = window.setInterval(() => {
+    const activityCheckInterval = window.setInterval(() => {
       const inactiveTime = Date.now() - lastActivityRef.current;
       
       if (inactiveTime >= TIMEOUT_DURATION - WARNING_DURATION) {
@@ -105,12 +97,4 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
       {children}
     </SessionTimeoutContext.Provider>
   );
-}
-
-export function useSessionTimeout() {
-  const context = useContext(SessionTimeoutContext);
-  if (context === undefined) {
-    throw new Error('useSessionTimeout must be used within a SessionTimeoutProvider');
-  }
-  return context;
 }

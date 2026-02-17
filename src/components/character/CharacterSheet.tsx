@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
-  Shield, Heart, HelpCircle, Swords, Brain, Zap, Users, Bed, Award, ShieldCheck, HeartPulse, UserCog, Dumbbell, Feather, StickyNote, Plus, Save, Trash2, Minus,
-  Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon, Table as TableIcon, Eye, EyeOff, Quote, Code, Pencil, Calendar, Skull, Package, Sparkles, Book, UserSquare,
+  HelpCircle, Swords, Bed, Award, ShieldCheck, Plus, Trash2, Minus,
+  Bold, Italic, List, Pencil, Package, Sparkles, Book, UserSquare,
   Gem, X, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete
 } from 'lucide-react';
-import { useDice } from '../dice/DiceContext';
 import { SkillsModal } from './modals/SkillsModal';
 import { SpellcastingView } from './SpellcastingView';
 import { InventoryModal } from './InventoryModal';
@@ -21,7 +19,6 @@ import { BioModal } from './modals/BioModal';
 import { PlayerAidModal } from './modals/PlayerAidModal';
 import { supabase } from '../../lib/supabase';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PdfExportButton } from './PdfExportButton'; 
@@ -117,7 +114,17 @@ const StatModificationModal = ({
 
   const isHp = statName === 'HP';
 
-  const NumpadBtn = ({ children, onClick, variant = 'default', className = '' }: any) => {
+  const NumpadBtn = ({
+    children,
+    onClick,
+    variant = 'default',
+    className = '',
+  }: {
+    children: React.ReactNode;
+    onClick: () => void;
+    variant?: 'default' | 'primary' | 'danger' | 'action';
+    className?: string;
+  }) => {
     const baseStyles = "h-14 md:h-16 rounded-lg font-serif text-2xl font-bold transition-all active:scale-95 shadow-sm border-b-4 active:border-b-0 active:translate-y-1";
     const variants = {
       default: "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:border-stone-400",
@@ -126,7 +133,6 @@ const StatModificationModal = ({
       action: "bg-stone-200 text-stone-600 border-stone-300 hover:bg-stone-300"
     };
 
-    // @ts-ignore
     return (
       <button onClick={onClick} className={`${baseStyles} ${variants[variant] || variants.default} ${className}`}>
         {children}
@@ -419,7 +425,17 @@ const AttributeEditModal = ({
   );
 };
 
-const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onClick, isSaving }: any) => {
+interface AttributeCircleProps {
+  name: string;
+  value: number | undefined;
+  conditionKey: string;
+  conditionActive: boolean;
+  onToggle: () => void;
+  onClick: () => void;
+  isSaving: boolean;
+}
+
+const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onClick, isSaving }: AttributeCircleProps) => {
   const displayValue = value ?? 10;
   return (
     <div className="flex flex-col items-center relative group w-full max-w-[120px]"> 
@@ -448,7 +464,7 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
 };
 
 // Character Note Components
-function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) {
+function ToolbarButton({ icon: Icon, label, onClick }: { icon: React.ElementType; label: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} title={label} className="p-1.5 text-stone-600 hover:text-[#1a472a] hover:bg-stone-200 rounded transition-all">
       <Icon size={16} />
@@ -456,19 +472,32 @@ function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: strin
   );
 }
 
+interface CharacterNote {
+  id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+interface EditableCharacterNote {
+  id?: string;
+  title: string;
+  content: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 const CharacterNotesSection = ({ character }: { character: Character }) => {
-  const [notes, setNotes] = useState<{ id: string; title: string; content: string; created_at: string; updated_at?: string; }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeNote, setActiveNote] = useState<any | null>(null);
+  const [notes, setNotes] = useState<CharacterNote[]>([]);
+  const [activeNote, setActiveNote] = useState<EditableCharacterNote | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadNotes = useCallback(async () => {
-    setLoading(true);
     const { data } = await supabase.from('notes').select('*').eq('character_id', character.id).order('created_at', { ascending: false });
     setNotes(data || []);
-    setLoading(false);
   }, [character.id]);
 
   useEffect(() => { loadNotes(); }, [loadNotes]);
@@ -477,7 +506,7 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
     if (!textareaRef.current || !activeNote) return;
     const { selectionStart, selectionEnd, value } = textareaRef.current;
     const newText = value.substring(0, selectionStart) + prefix + value.substring(selectionStart, selectionEnd) + suffix + value.substring(selectionEnd);
-    setActiveNote((prev: any) => ({ ...prev, content: newText }));
+    setActiveNote(prev => (prev ? { ...prev, content: newText } : prev));
   };
 
   const handleSaveNote = async () => {
@@ -500,7 +529,20 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pr-1 custom-scrollbar">
         {notes.length === 0 && <div className="col-span-full text-center py-8 text-stone-400 italic">No notes written yet.</div>}
         {notes.map(note => (
-          <div key={note.id} onClick={() => { setActiveNote(note); setIsEditing(false); }} className="p-3 bg-white border border-stone-200 shadow-sm cursor-pointer hover:border-[#1a472a] hover:shadow-md group flex flex-col justify-between transition-all min-h-[80px] relative">
+          <div
+            key={note.id}
+            onClick={() => { setActiveNote(note); setIsEditing(false); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setActiveNote(note);
+                setIsEditing(false);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            className="p-3 bg-white border border-stone-200 shadow-sm cursor-pointer hover:border-[#1a472a] hover:shadow-md group flex flex-col justify-between transition-all min-h-[80px] relative"
+          >
             <div>
               <div className="font-serif font-bold text-stone-800 line-clamp-1">{note.title}</div>
               <div className="text-[10px] text-stone-400 mt-1">{new Date(note.created_at).toLocaleDateString()}</div>
@@ -560,8 +602,6 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 // --- MAIN SHEET COMPONENT ---
 
 export function CharacterSheet() {
-  const navigate = useNavigate();
-  const { toggleDiceRoller } = useDice();
   const { character, fetchCharacter, adjustStat, toggleCondition, performRest, isLoading, error, isSaving, saveError } = useCharacterSheetStore();
 
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
@@ -611,8 +651,8 @@ export function CharacterSheet() {
   };
 
   // Wrapper for adjustStat to handle the string key requirement
-  const handleStatModify = (stat: string, amount: number) => {
-    adjustStat(stat as any, amount);
+  const handleStatModify = (stat: 'current_hp' | 'current_wp', amount: number) => {
+    adjustStat(stat, amount);
   };
 
   const renderRestModal = () => {
@@ -626,11 +666,16 @@ export function CharacterSheet() {
                 <div className="font-bold text-[#1a472a]">Round Rest (Action)</div>
                 <div className="text-sm text-stone-600">Recover 1d6 WP. No HP.</div>
               </button>
-              <button onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0} className="w-full text-left p-3 hover:bg-[#e8d5b5] border border-stone-300 rounded group disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                <div className="font-bold text-[#1a472a]">Stretch Rest (15 min)</div>
-                <div className="text-sm text-stone-600">Heal 1d6 HP (2d6 w/ Healer), 1d6 WP. Cure 1 Condition.</div>
-                <label className="flex items-center gap-2 mt-2 text-sm pointer-events-auto" onClick={e => e.stopPropagation()}><input type="checkbox" className="accent-[#1a472a] w-4 h-4" checked={healerPresent} onChange={e => setHealerPresent(e.target.checked)}/> Healer Present?</label>
-              </button>
+              <div className="p-3 border border-stone-300 rounded group disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                <button onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0} className="w-full text-left hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  <div className="font-bold text-[#1a472a]">Stretch Rest (15 min)</div>
+                  <div className="text-sm text-stone-600">Heal 1d6 HP (2d6 w/ Healer), 1d6 WP. Cure 1 Condition.</div>
+                </button>
+                <label className="flex items-center gap-2 mt-2 text-sm pointer-events-auto">
+                  <input type="checkbox" className="accent-[#1a472a] w-4 h-4" checked={healerPresent} onChange={e => setHealerPresent(e.target.checked)} />
+                  Healer Present?
+                </label>
+              </div>
               <button onClick={() => handleRest('shift')} className="w-full text-left p-3 hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors">
                 <div className="font-bold text-[#1a472a]">Shift Rest (6 hours)</div>
                 <div className="text-sm text-stone-600">Full Recovery of HP & WP. Heal all conditions.</div>
@@ -684,7 +729,7 @@ export function CharacterSheet() {
           {/* NAME & VITALS ROW */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 items-end">
              <div className="md:col-span-5 border-b-2 border-stone-400 pb-2 text-center md:text-left">
-                <label className="block text-[10px] md:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Character Name</label>
+                <p className="block text-[10px] md:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Character Name</p>
                 <div className="text-3xl md:text-4xl font-serif font-bold text-[#1a472a] leading-none">{character.name}</div>
              </div>
              

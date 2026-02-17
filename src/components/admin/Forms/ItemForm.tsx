@@ -1,14 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Button } from '../../shared/Button';
 import { X } from 'react-feather';
 
-interface ItemFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
+export interface ItemFormEntry {
+  name?: string;
+  category?: string;
+  armor_rating?: number;
+  grip?: string;
+  strength_requirement?: number;
+  range?: string;
+  damage?: string;
+  durability?: number;
+  cost?: string;
+  supply?: string;
+  weight?: number;
+  quantity?: number;
+  equippable?: boolean;
+  encumbrance_modifier?: number;
+  is_container?: boolean;
+  container_capacity?: number;
+  consumable?: boolean;
+  effect?: string;
+  features?: string[];
+  [key: string]: unknown;
+}
+
+export type ItemFormOnChange = (field: string, value: unknown) => void;
+
+export interface ItemFormProps {
+  entry: ItemFormEntry;
+  onChange: ItemFormOnChange;
 }
 
 export function ItemForm({ entry, onChange }: ItemFormProps) {
-  const [itemData, setItemData] = useState(entry);
+  const [itemData, setItemData] = useState<ItemFormEntry>(entry);
   const [cost, setCost] = useState({ gold: 0, silver: 0, copper: 0 });
   const [features, setFeatures] = useState<string[]>([]);
 

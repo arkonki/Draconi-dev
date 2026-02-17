@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { 
-  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical, Image as ImageIcon
+  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical
 } from 'lucide-react';
 import { Button } from '../../shared/Button';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
@@ -59,7 +59,7 @@ const PortraitEditor = ({
       const { data } = supabase.storage.from('images').getPublicUrl(filePath);
       setTempUrl(data.publicUrl);
       setTempPos(50); // Reset position on new image
-    } catch (err: any) {
+    } catch (err) {
       console.error("Upload failed:", err);
       setError("Upload failed. Please try again.");
     } finally {
@@ -89,10 +89,11 @@ const PortraitEditor = ({
         <div className="flex-1 space-y-3">
           {/* Position Slider */}
           <div>
-            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
+            <label htmlFor="portrait-pos" className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
               <MoveVertical size={12} /> Position (Y-Axis)
             </label>
             <input 
+              id="portrait-pos"
               type="range" 
               min="0" 
               max="100" 
@@ -110,8 +111,9 @@ const PortraitEditor = ({
 
           {/* URL Input */}
           <div>
-             <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
+             <label htmlFor="portrait-url" className="text-xs font-bold text-gray-500 uppercase mb-1 block">Image URL</label>
              <input 
+                id="portrait-url"
                 type="text" 
                 value={tempUrl} 
                 onChange={(e) => setTempUrl(e.target.value)}
@@ -183,6 +185,7 @@ export function BioModal({ onClose }: BioModalProps) {
   const [memento, setMemento] = useState('');
   const [flaw, setFlaw] = useState('');
   const [backstory, setBackstory] = useState('');
+  const backstoryTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync state
   const syncStateFromCharacter = () => {
@@ -198,6 +201,9 @@ export function BioModal({ onClose }: BioModalProps) {
   };
 
   useEffect(() => { syncStateFromCharacter(); }, [character]);
+  useEffect(() => {
+    if (isEditingBackstory) backstoryTextareaRef.current?.focus();
+  }, [isEditingBackstory]);
 
   // --- ACTIONS ---
 
@@ -393,11 +399,11 @@ export function BioModal({ onClose }: BioModalProps) {
 
       {isEditingBackstory ? (
         <textarea 
+            ref={backstoryTextareaRef}
             value={backstory} 
             onChange={(e) => setBackstory(e.target.value)} 
             className="flex-grow w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none font-serif text-gray-800 leading-relaxed text-lg bg-gray-50 focus:bg-white transition-colors" 
             placeholder="Write your legend here..." 
-            autoFocus
         />
       ) : (
         <div className="flex-grow bg-gray-50 rounded-xl border border-gray-200 p-6 overflow-y-auto shadow-inner">
@@ -418,8 +424,14 @@ export function BioModal({ onClose }: BioModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4 sm:p-6" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden border border-gray-200" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 flex justify-center items-center z-50 p-4 sm:p-6">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label="Close biography modal"
+      />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden border border-gray-200">
         
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-white z-10">

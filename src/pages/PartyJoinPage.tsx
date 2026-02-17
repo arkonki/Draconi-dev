@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase'; // Ensure this path is correct
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { Users, Check } from 'lucide-react';
 import { Button } from '../components/shared/Button';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
@@ -124,7 +124,8 @@ export function PartyJoinPage() {
             <p className="text-center text-gray-700">Select one of your available characters to join with.</p>
             <div className="space-y-3">
               {characters.map((character) => (
-                <div
+                <button
+                  type="button"
                   key={character.id}
                   onClick={() => setSelectedCharacter(character.id!)}
                   className={`p-4 border rounded-lg cursor-pointer transition-all flex items-center justify-between ${
@@ -144,7 +145,7 @@ export function PartyJoinPage() {
                       <Check className="w-4 h-4 text-white" />
                     </div>
                   )}
-                </div>
+                </button>
               ))}
             </div>
 

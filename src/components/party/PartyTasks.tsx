@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Plus, Trash2, CheckCircle2, Circle, AlertTriangle, ListTodo, CheckSquare, Square, X
@@ -12,7 +12,7 @@ import {
   NewPartyTaskData,
   PartyTaskUpdateData,
 } from '../../lib/api/tasks';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
@@ -100,6 +100,13 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const taskTitleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isFormOpen) {
+      taskTitleInputRef.current?.focus();
+    }
+  }, [isFormOpen]);
 
   // Queries
   const { data: tasks, isLoading, error } = useQuery<PartyTask[], Error>({
@@ -203,7 +210,7 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
           <form onSubmit={handleAddTask} className="space-y-4">
             <div>
               <input
-                autoFocus
+                ref={taskTitleInputRef}
                 type="text"
                 placeholder="Task Title (e.g., 'Investigate the Old Ruins')"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium"

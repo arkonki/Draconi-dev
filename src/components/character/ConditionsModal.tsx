@@ -80,6 +80,14 @@ export function ConditionsModal({ character, onClose, onUpdate }: ConditionsModa
                 key={condition}
                 className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
                 onClick={() => handleConditionToggle(condition as keyof typeof character.conditions)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleConditionToggle(condition as keyof typeof character.conditions);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
               >
                 <div className="flex items-center gap-4">
                   <input

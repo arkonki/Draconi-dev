@@ -19,6 +19,9 @@ interface StorageItem {
   url?: string;
 }
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Unknown error';
+
 export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalProps) {
   const [activeTab, setActiveTab] = useState<'upload' | 'select'>('upload');
 
@@ -62,9 +65,9 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
 
       // Refresh
       loadStoredItems();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error creating folder:", err);
-      alert("Failed to create folder: " + err.message);
+      alert("Failed to create folder: " + getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -101,9 +104,9 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
       onSelectImage(urlData.publicUrl, width, height, alignment);
       onClose();
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Upload failed:", error);
-      alert(error.message || "Failed to upload image.");
+      alert(getErrorMessage(error) || "Failed to upload image.");
     } finally {
       setLoading(false);
     }
@@ -161,7 +164,7 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
 
       setItems(processedItems);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error loading images:", error);
       alert("Could not load images.");
     } finally {
@@ -309,7 +312,8 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {/* Render Folders */}
                     {items.filter(i => i.isFolder).map(folder => (
-                      <div
+                      <button
+                        type="button"
                         key={folder.name}
                         onClick={() => navigateToFolder(folder.name)}
                         className="group flex flex-col items-center justify-center p-4 bg-white border border-gray-200 rounded-lg cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all aspect-square"
@@ -318,12 +322,13 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
                         <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate w-full text-center px-2">
                           {folder.name}
                         </span>
-                      </div>
+                      </button>
                     ))}
 
                     {/* Render Files */}
                     {items.filter(i => !i.isFolder).map(file => (
-                      <div
+                      <button
+                        type="button"
                         key={file.name}
                         onClick={() => setSelectedUrl(file.url || null)}
                         className={`
@@ -352,7 +357,7 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
                             <Check size={12} className="text-white" />
                           </div>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Character } from '../../types/character';
-import { useDice, RollHistoryEntry } from '../dice/DiceContext';
+import { RollHistoryEntry } from '../dice/DiceContext';
+import { useDice } from '../dice/useDice';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { Skull, HeartPulse, ShieldQuestion, CheckCircle, XCircle, Zap, Info, Plus, Minus, Check, HelpCircle, Power } from 'lucide-react';
+import { Skull, HeartPulse, ShieldQuestion, CheckCircle, XCircle, Zap, Info, Plus, Minus, Check } from 'lucide-react';
 import { Button } from '../shared/Button';
 
 interface DeathRollTrackerProps {

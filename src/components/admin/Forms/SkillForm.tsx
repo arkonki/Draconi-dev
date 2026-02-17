@@ -5,7 +5,7 @@ import { GameDataEntry } from '../hooks/useGameData';
 
 interface SkillFormProps {
   entry: Partial<GameDataEntry>; // Use Partial for creation/editing flexibility
-  onChange: (field: string, value: any) => void;
+  onChange: (field: string, value: unknown) => void;
 }
 
 export const SkillForm: React.FC<SkillFormProps> = ({ entry, onChange }) => {

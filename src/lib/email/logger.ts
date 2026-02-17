@@ -22,11 +22,11 @@ if (process.env.NODE_ENV !== 'production') {
   }));
 }
 
-export function logEmailEvent(event: string, data: any) {
+export function logEmailEvent(event: string, data: Record<string, unknown>) {
   logger.info(event, { ...data, timestamp: new Date().toISOString() });
 }
 
-export function logEmailError(error: Error, context: any) {
+export function logEmailError(error: Error, context: Record<string, unknown>) {
   logger.error('Email Error', {
     error: error.message,
     stack: error.stack,

@@ -1,7 +1,12 @@
 import { useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
-import { useNotifications } from '../../contexts/NotificationContext';
+import { useAuth } from '../../contexts/useAuth';
+import { useNotifications } from '../../contexts/useNotifications';
+
+type MessagePayload = {
+  user_id: string;
+  content: string;
+};
 
 export function NotificationController() {
   const { user } = useAuth();
@@ -23,7 +28,7 @@ export function NotificationController() {
           table: 'messages',
         },
         async (payload) => {
-          const newMessage = payload.new as any;
+          const newMessage = payload.new as MessagePayload;
 
           // 1. Don't notify if I sent the message myself
           if (newMessage.user_id === user.id) return;
@@ -95,7 +100,7 @@ export function NotificationController() {
           table: 'party_members', 
           filter: `user_id=eq.${user.id}` // Only listen for invites sent TO ME
         },
-        async (payload) => {
+        async () => {
           // Verify status if your schema uses it (e.g. status === 'pending')
           // const newMemberRow = payload.new as any;
           // if (newMemberRow.status !== 'pending') return;

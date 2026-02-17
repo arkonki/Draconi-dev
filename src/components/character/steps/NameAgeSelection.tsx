@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { User, Calendar, RefreshCw, Sparkles, Info } from 'lucide-react';
 import { Button } from '../../shared/Button';
@@ -57,11 +57,6 @@ const PROFESSION_NICKNAMES: Record<string, string[]> = {
 export function NameAgeSelection() {
   const { character, updateCharacter } = useCharacterCreation();
 
-  const renderModifier = (value: number) => {
-    if (value === 0) return null;
-    return value > 0 ? `+${value}` : value;
-  };
-
   const generateName = () => {
     if (!character.kin) return;
     const names = KIN_NAMES[character.kin] || KIN_NAMES['Human'];
@@ -102,13 +97,14 @@ export function NameAgeSelection() {
         
         {/* Name Input Section */}
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Character Name</label>
+          <label htmlFor="character-name" className="block text-sm font-medium text-gray-700">Character Name</label>
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative rounded-md shadow-sm flex-grow">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <User className="h-5 w-5 text-gray-400" />
               </div>
               <input
+                id="character-name"
                 type="text"
                 value={character.name || ''}
                 onChange={(e) => updateCharacter({ name: e.target.value })}
@@ -146,7 +142,7 @@ export function NameAgeSelection() {
         {/* Age Selection */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-             <label className="block text-sm font-medium text-gray-700">Age Category</label>
+             <span className="block text-sm font-medium text-gray-700">Age Category</span>
              <div className="group relative">
                 <Info className="w-4 h-4 text-gray-400 cursor-help" />
                 <div className="absolute right-0 bottom-full mb-2 w-64 p-2 bg-gray-800 text-white text-xs rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
@@ -161,7 +157,8 @@ export function NameAgeSelection() {
               const isSelected = character.age === age;
               
               return (
-                <div
+                <button
+                  type="button"
                   key={age}
                   className={`relative rounded-lg border p-4 cursor-pointer transition-all ${
                     isSelected
@@ -213,7 +210,7 @@ export function NameAgeSelection() {
                         </div>
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

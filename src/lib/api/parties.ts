@@ -12,6 +12,20 @@ export interface Party {
   members: Character[];
 }
 
+interface PartyMemberJoinRow {
+  characters?: unknown;
+}
+
+interface PartyRow {
+  id: string;
+  name: string;
+  description?: string;
+  created_by: string;
+  created_at: string;
+  invite_code?: string;
+  members?: PartyMemberJoinRow[];
+}
+
 export async function fetchParties(userId: string | undefined, isDM: boolean): Promise<Party[]> {
   if (!userId) {
     return [];
@@ -44,10 +58,10 @@ export async function fetchParties(userId: string | undefined, isDM: boolean): P
     throw new Error(partiesError.message || 'Failed to fetch parties');
   }
 
-  const parties: Party[] = (partiesData || []).map((party: any) => ({
+  const parties: Party[] = ((partiesData || []) as unknown as PartyRow[]).map((party) => ({
     ...party,
     members: (party.members || [])
-      .map((m: any) => m.characters ? mapCharacterData(m.characters) : null)
+      .map((m) => m.characters ? mapCharacterData(m.characters) : null)
       .filter((char): char is Character => !!char),
   }));
 
@@ -142,9 +156,9 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
   }
 
   const party: Party = {
-    ...partyData,
+    ...(partyData as unknown as PartyRow),
     members: (partyData.members || [])
-      .map((m: any) => m.characters ? mapCharacterData(m.characters) : null)
+      .map((m: PartyMemberJoinRow) => m.characters ? mapCharacterData(m.characters) : null)
       .filter((char): char is Character => !!char),
   };
 

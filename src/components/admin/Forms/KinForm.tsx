@@ -1,8 +1,21 @@
 import React from 'react';
 
+interface KinAbility {
+  description?: string;
+  willpower_points?: number;
+}
+
+interface KinFormEntry {
+  name?: string;
+  description?: string;
+  heroic_ability?: string;
+  abilities?: KinAbility[];
+  [key: string]: unknown;
+}
+
 interface KinFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
+  entry: KinFormEntry;
+  onChange: (field: string, value: unknown) => void;
 }
 
 // Changed 'const' to 'export const'
@@ -46,7 +59,7 @@ export const KinForm: React.FC<KinFormProps> = ({ entry, onChange }) => {
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Abilities
         </label>
-        {(entry.abilities || []).map((ability: any, idx: number) => (
+        {(entry.abilities || []).map((ability: KinAbility, idx: number) => (
           <div key={idx} className="flex gap-2 items-center mb-1">
             <input
               type="text"

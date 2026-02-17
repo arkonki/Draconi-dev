@@ -25,7 +25,7 @@ const EditModal: React.FC<EditModalProps> = ({ activeCategory, entry, onClose, o
   }, [entry]);
 
   // Local change handler updates only local state.
-  const handleFieldChange = (field: string, value: any) => {
+  const handleFieldChange = (field: string, value: unknown) => {
     setLocalEntry((prev) => ({ ...prev, [field]: value }));
   };
 

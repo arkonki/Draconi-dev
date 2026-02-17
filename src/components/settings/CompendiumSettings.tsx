@@ -105,6 +105,11 @@ export function CompendiumSettings() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-6">Compendium Settings</h2>
+      {error && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       
       {/* Template Manager Button */}
       <div className="mb-6">

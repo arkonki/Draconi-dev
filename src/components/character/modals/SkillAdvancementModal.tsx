@@ -108,12 +108,20 @@ export function SkillAdvancementModal({ character, onClose, onUpdate }: SkillAdv
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto mb-6">
             {availableSkills.map((skill) => {
               const attribute = Object.entries(skillGroups)
-                .find(([_, skills]) => skills.includes(skill))?.[0];
+                .find(([, skills]) => skills.includes(skill))?.[0];
 
               return (
                 <div
                   key={skill}
                   onClick={() => setSelectedSkill(skill)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedSkill(skill);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   className={`p-4 border rounded-lg cursor-pointer transition-all ${
                     selectedSkill === skill
                       ? 'border-blue-500 bg-blue-50'

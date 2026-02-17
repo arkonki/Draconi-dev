@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag,
-  Image as ImageIcon, User, Package, Table
+  Image as ImageIcon, User, Package
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { CompendiumEntry } from '../../types/compendium';
@@ -89,6 +89,13 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
   const [editedEntry, setEditedEntry] = useState(entry);
   const [loading, setLoading] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!entry.id) {
+      titleInputRef.current?.focus();
+    }
+  }, [entry.id]);
 
   // --- Actions ---
 
@@ -187,12 +194,12 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
           <div className="flex flex-col flex-1 max-w-2xl">
             {/* Title Input */}
             <input
+              ref={titleInputRef}
               type="text"
               value={editedEntry.title}
               onChange={(e) => setEditedEntry({ ...editedEntry, title: e.target.value })}
               className="text-lg font-bold text-gray-900 border-none p-0 focus:ring-0 placeholder-gray-300 bg-transparent w-full leading-tight"
               placeholder="Entry Title..."
-              autoFocus={!entry.id}
             />
 
             {/* Category Input */}

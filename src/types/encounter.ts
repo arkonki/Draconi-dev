@@ -9,7 +9,7 @@ export interface EncounterCombatant {
   max_hp: number;
   current_wp: number | null;
   max_wp: number | null;
-  status_effects: any[]; // JSONB array
+  status_effects: unknown[]; // JSONB array
   initiative_roll: number | null;
   is_active_turn: boolean;
   has_acted: boolean;
@@ -31,7 +31,7 @@ export interface Encounter {
   status: 'planning' | 'active' | 'completed';
   current_round: number;
   active_combatant_id: string | null;
-  log?: any[]; // Array of combat events
+  log?: unknown[]; // Array of combat events
   created_at: string;
   updated_at: string;
 }

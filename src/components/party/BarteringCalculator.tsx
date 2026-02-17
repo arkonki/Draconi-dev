@@ -94,12 +94,13 @@ export function BarteringCalculator({ initialCost, initialMode = 'buying', initi
         <div className="space-y-4">
             {/* Search Bar */}
             <div className="relative z-20">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-1">Item Lookup (Optional)</label>
+                <label htmlFor="barter-item-lookup" className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-1">Item Lookup (Optional)</label>
                 <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Search size={14} className="text-gray-400" />
                     </div>
                     <input
+                        id="barter-item-lookup"
                         type="text"
                         value={searchQuery}
                         onFocus={() => setIsSearchOpen(true)}
@@ -146,13 +147,14 @@ export function BarteringCalculator({ initialCost, initialMode = 'buying', initi
 
             {/* Input: Base Price */}
             <div className="space-y-1">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Base Price & Unit</label>
+                <label htmlFor="barter-base-price" className="text-xs font-bold text-gray-500 uppercase tracking-wide">Base Price & Unit</label>
                 <div className="flex gap-2 items-center">
                     <div className="relative flex-1">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Tag size={16} className="text-gray-400" />
                         </div>
                         <input
+                            id="barter-base-price"
                             type="number"
                             min="0"
                             step="0.01"
@@ -213,7 +215,7 @@ export function BarteringCalculator({ initialCost, initialMode = 'buying', initi
 
             {/* Input: Roll Result */}
             <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-2">Bartering Roll</label>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-2">Bartering Roll</p>
                 <div className="grid grid-cols-3 gap-2">
                     <button
                         onClick={() => setResult(result === 'success' ? 'none' : 'success')}

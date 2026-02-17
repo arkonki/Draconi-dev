@@ -153,7 +153,7 @@ export async function updateCombatant(id: string, updates: Partial<EncounterComb
 
 // --- LOGGING ---
 
-export async function appendEncounterLog(encounterId: string, entry: any): Promise<void> {
+export async function appendEncounterLog(encounterId: string, entry: unknown): Promise<void> {
   const { error } = await supabase.rpc('append_to_log', {
     p_encounter_id: encounterId,
     p_log_entry: entry,
@@ -191,7 +191,7 @@ export async function removeCombatant(id: string): Promise<void> {
 
 // --- COMPLEX ACTIONS ---
 
-export async function rollInitiativeForCombatants(encounterId: string, combatantIds: string[]): Promise<any> {
+export async function rollInitiativeForCombatants(encounterId: string, combatantIds: string[]): Promise<unknown> {
   const { data, error } = await supabase.rpc('roll_initiative_for_combatants', {
     p_encounter_id: encounterId,
     p_combatant_ids: combatantIds

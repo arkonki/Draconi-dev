@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { Shield, AlertCircle, Mail, Lock, User, Eye, EyeOff, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '../components/shared/Button';
 import { registrationSchema } from '../lib/auth/validation';
@@ -49,18 +49,16 @@ export function Register() {
       const validationResult = registrationSchema.safeParse({
         email: formData.email,
         password: formData.password,
+        confirmPassword: formData.confirmPassword,
         username: formData.username,
+        role: 'player',
       });
 
       if (!validationResult.success) {
         throw new Error(validationResult.error.errors[0].message);
       }
 
-      if (formData.password !== formData.confirmPassword) {
-        throw new Error('Passwords do not match');
-      }
-
-      await signUp(formData.email, formData.password, formData.username);
+      await signUp(formData.email, formData.password, formData.username, 'player');
       
       navigate('/login', { 
         state: { message: 'Registration successful! Please check your email to verify your account.' }

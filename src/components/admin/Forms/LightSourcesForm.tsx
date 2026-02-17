@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface LightSourcesFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type LightSourcesFormProps = ItemFormProps;
 
 export function LightSourcesForm({ entry, onChange }: LightSourcesFormProps) {
   return (

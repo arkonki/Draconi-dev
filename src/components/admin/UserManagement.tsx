@@ -41,9 +41,10 @@ export function UserManagement() {
       }
       
       setUsers(data as User[] || []); // Ensure data is cast to User[] and handle null
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error fetching users:", err);
-      setError(`Failed to load users: ${err.message || 'Unknown error'}`);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to load users: ${message}`);
       setUsers([]); // Clear users on error
     } finally {
       setLoading(false);

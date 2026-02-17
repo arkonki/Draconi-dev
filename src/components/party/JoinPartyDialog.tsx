@@ -61,15 +61,19 @@ export function JoinPartyDialog({ isOpen, onClose, onJoin }: JoinPartyDialogProp
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity"
+      className="fixed inset-0 z-50 flex items-center justify-center transition-opacity"
       aria-labelledby="join-party-title"
       role="dialog"
       aria-modal="true"
-      onClick={handleClose} // Allow closing by clicking the overlay
     >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black bg-opacity-50"
+        onClick={handleClose}
+        aria-label="Close dialog"
+      />
       <div
         className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md m-4 transform transition-all"
-        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside the dialog
       >
         <div className="flex justify-between items-center mb-4">
           <h2 id="join-party-title" className="text-xl font-bold text-gray-900 flex items-center gap-2">

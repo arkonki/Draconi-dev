@@ -3,6 +3,7 @@ import {
   Shield, Swords, Heart, Map as MapIcon, AlertCircle,
   Dices, Award, Gavel, Sparkles, Coins, ChevronDown
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { BarteringCalculator } from './BarteringCalculator';
 
 // --- TYPES ---
@@ -21,7 +22,7 @@ interface Section {
 interface ScreenTab {
   id: string;
   title: string;
-  icon: any;
+  icon: LucideIcon;
   sections: Section[];
 }
 
@@ -464,7 +465,12 @@ export function GMScreen() {
 
           {isMenuOpen && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+              <button
+                type="button"
+                className="fixed inset-0 z-40"
+                onClick={() => setIsMenuOpen(false)}
+                aria-label="Close menu"
+              />
               <div className="absolute top-full left-0 right-0 md:w-[300px] mt-2 bg-white rounded-lg shadow-xl ring-1 ring-black ring-opacity-5 z-50 overflow-hidden">
                 <div className="py-1">
                   {tabs.map(tab => {

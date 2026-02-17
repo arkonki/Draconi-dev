@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Shield, X, MoreHorizontal, ListChecks } from 'lucide-react';
+import { Plus, AlertCircle, LogIn, Trash2, AlertTriangle, Check, Shield, X, ListChecks } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Character } from '../types/character';
 import { CharacterCard } from '../components/character/CharacterCard';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { CharacterCreationWizard } from '../components/character/CharacterCreationWizard';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
@@ -159,6 +159,19 @@ export function Characters() {
                   }
                 `}
                 onClick={(e) => handleCardClick(e, character.id!)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    if (isSelectionMode || selectedIds.length > 0) {
+                      if (!isSelectionMode) setIsSelectionMode(true);
+                      toggleSelection(character.id!);
+                    } else {
+                      navigate(`/character/${character.id!}`);
+                    }
+                  }
+                }}
+                role="button"
+                tabIndex={0}
               >
                 {/* Selection Checkbox */}
                 {(isSelectionMode || isSelected) && (

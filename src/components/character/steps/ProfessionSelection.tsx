@@ -24,7 +24,6 @@ export function ProfessionSelection() {
   const [heroicAbilities, setHeroicAbilities] = useState<HeroicAbility[]>([]);
   const [selectedHeroicAbility, setSelectedHeroicAbility] = useState<HeroicAbility | null>(null);
   const [haLoading, setHaLoading] = useState<boolean>(false);
-  const [haError, setHaError] = useState<string | null>(null);
   
   // Mobile View State
   const [isMobileDetailView, setIsMobileDetailView] = useState(false);
@@ -61,12 +60,10 @@ export function ProfessionSelection() {
         }
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [character.profession, professionList]); 
 
   const fetchHeroicAbilities = async (professionName: string, preselectAbilityName?: string | null) => {
      setHaLoading(true);
-     setHaError(null);
      try {
        const data = await fetchHeroicAbilitiesByProfession(professionName);
        const abilities = data as HeroicAbility[];
@@ -88,8 +85,7 @@ export function ProfessionSelection() {
            setSelectedHeroicAbility(null);
            updateCharacter({ professionHeroicAbilityName: null }); // Clear store to block next step
        }
-     } catch (err) {
-       setHaError(err instanceof Error ? err.message : 'Failed to load heroic abilities');
+     } catch {
        setHeroicAbilities([]);
        setSelectedHeroicAbility(null);
      } finally {
@@ -133,7 +129,7 @@ export function ProfessionSelection() {
     return magicSchools.find(ms => ms.id === schoolId)?.name ?? `ID: ${schoolId}`; 
   };
 
-  const handleInfoClick = (e: React.MouseEvent, id: string, text: string) => {
+  const handleInfoClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (activeTooltip === id) {
       setActiveTooltip(null);
@@ -147,8 +143,14 @@ export function ProfessionSelection() {
       setActiveTooltip(id);
     }
   };
+  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      action();
+    }
+  };
 
-  const renderStringList = (items: string[] | null | undefined, title: string): React.ReactNode => {
+  const renderStringList = (items: string[] | null | undefined): React.ReactNode => {
     if (!Array.isArray(items) || items.length === 0) return <p className="text-sm text-gray-500 italic">None</p>;
     const validItems = items.filter(item => typeof item === 'string');
     if (validItems.length === 0) return <p className="text-sm text-gray-500 italic">None</p>;
@@ -168,7 +170,7 @@ export function ProfessionSelection() {
   if (errorProfessions || errorSchools) return <ErrorMessage message="Failed to load professions." />;
 
   return (
-    <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6" onClick={() => setActiveTooltip(null)}>
+    <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6" onClick={() => setActiveTooltip(null)} onKeyDown={(event) => handleKeyboardActivate(event, () => setActiveTooltip(null))} role="button" tabIndex={0}>
       
       {/* Left Column: List */}
       <div className={`w-full md:w-1/3 flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden h-full ${isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
@@ -266,6 +268,9 @@ export function ProfessionSelection() {
                         <div
                         key={ability.id}
                         onClick={() => handleHeroicAbilitySelect(ability)}
+                        onKeyDown={(event) => handleKeyboardActivate(event, () => handleHeroicAbilitySelect(ability))}
+                        role="button"
+                        tabIndex={0}
                         className={`relative p-4 rounded-lg border cursor-pointer transition-all ${
                             selectedHeroicAbility?.id === ability.id 
                             ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' 

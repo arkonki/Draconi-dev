@@ -44,7 +44,7 @@ export async function testDatabaseConnection(): Promise<ConnectionTestResult> {
     while (retries > 0 && !connected) {
       try {
         // Use rpc call instead of direct table access
-        const { data: connectionTest, error: connectionError } = await supabase
+        const { error: connectionError } = await supabase
           .rpc('test_connection');
 
         if (!connectionError) {
@@ -55,7 +55,7 @@ export async function testDatabaseConnection(): Promise<ConnectionTestResult> {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
-      } catch (err) {
+      } catch {
         retries--;
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -71,7 +71,7 @@ export async function testDatabaseConnection(): Promise<ConnectionTestResult> {
 
     // 2. Test schema access
     const queryStart = performance.now();
-    const { data: schemaTest, error: schemaError } = await supabase
+    const { error: schemaError } = await supabase
       .from('users')
       .select('id, email, role')
       .limit(1);
@@ -82,7 +82,7 @@ export async function testDatabaseConnection(): Promise<ConnectionTestResult> {
     result.details.readPermission = true;
 
     // 3. Test auth schema
-    const { data: authTest, error: authError } = await supabase.auth.getSession();
+    const { error: authError } = await supabase.auth.getSession();
     if (authError) throw new Error(`Auth schema access failed: ${authError.message}`);
 
     // All tests passed

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 // 1. Import deleteMessage
 import { getPartyMessages, sendMessage, deleteMessage, Message } from '../../lib/api/chat';
 import { supabase } from '../../lib/supabase';
@@ -9,6 +9,7 @@ import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MessageContent } from './MessageContent';
+import type { Character } from '../../types/character';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -22,7 +23,7 @@ const getAvatarColor = (userId: string) => {
 
 interface PartyChatProps {
   partyId: string;
-  members: any[]; 
+  members: Character[]; 
 }
 
 export function PartyChat({ partyId, members }: PartyChatProps) {
@@ -38,7 +39,7 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [_, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['messages', partyId],
@@ -96,7 +97,7 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
     e.preventDefault();
     if (!newMessage.trim() || !user) return;
     
-    let content = newMessage;
+    const content = newMessage;
     let finalContent = content;
 
     // Poke Logic
@@ -132,7 +133,7 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
     const start = inputRef.current.selectionStart || 0;
     const end = inputRef.current.selectionEnd || 0;
     const currentVal = newMessage;
-    let newVal = wrap 
+    const newVal = wrap 
       ? currentVal.substring(0, start) + text + currentVal.substring(start, end) + text + currentVal.substring(end)
       : currentVal.substring(0, start) + text + currentVal.substring(end);
     setNewMessage(newVal);

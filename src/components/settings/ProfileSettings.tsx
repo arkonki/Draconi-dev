@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { User as AuthUser } from '@supabase/supabase-js';
 import { User as UserIcon, Mail, Save, AlertCircle, CheckCircle, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { Button } from '../shared/Button';
@@ -8,7 +8,7 @@ import { getUserProfile, updateUserProfile, updateUserAuthEmail, UserProfile, Us
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 
 export function ProfileSettings() {
-  const { user: authUser, session } = useAuth();
+  const { user: authUser } = useAuth();
   
   // --- STATE ---
   const [profile, setProfile] = useState<UserProfile | null>(null);

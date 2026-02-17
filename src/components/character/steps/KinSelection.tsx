@@ -5,7 +5,7 @@ import { Ability } from '../../../types/character';
 import { fetchKinList, fetchAbilityDetailsByNames, Kin } from '../../../lib/api/kin';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
-import { ChevronRight, ArrowLeft, CheckCircle2, User, Sparkles, Footprints, Info } from 'lucide-react';
+import { ChevronRight, ArrowLeft, CheckCircle2, User, Sparkles, Footprints } from 'lucide-react';
 
 // Helper function to parse the heroic_ability string
 const parseAbilityNames = (abilityString: string | null | undefined): string[] => {

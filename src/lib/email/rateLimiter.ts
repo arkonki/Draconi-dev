@@ -26,7 +26,7 @@ export async function checkRateLimit(userId: string): Promise<void> {
     
     // Then check user-specific rate limit
     await userRateLimiter.consume(userId);
-  } catch (error) {
+  } catch {
     throw new EmailRateLimitError(
       'Rate limit exceeded. Please try again later.'
     );

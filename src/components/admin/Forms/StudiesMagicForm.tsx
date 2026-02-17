@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface StudiesMagicFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type StudiesMagicFormProps = ItemFormProps;
 
 export function StudiesMagicForm({ entry, onChange }: StudiesMagicFormProps) {
   return (

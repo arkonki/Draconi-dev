@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Swords, Heart, Map, X, Wand2, HelpCircle, Skull, Info } from 'lucide-react';
+import { Swords, Heart, Map, X, Wand2, HelpCircle, Info } from 'lucide-react';
 
 // --- DATA STRUCTURE ---
 const aidData = {
@@ -207,8 +207,14 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[90]" onClick={onClose}>
-      <div className="bg-white rounded-xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 flex items-center justify-center p-4 z-[90]">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label="Close player aid"
+      />
+      <div className="relative bg-white rounded-xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200">
         
         {/* Compact Header */}
         <div className="bg-white px-4 py-3 border-b flex justify-between items-center shrink-0">

@@ -33,11 +33,11 @@ export interface GameItem {
   is_container?: boolean;
   container_capacity?: number;
 
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // --- UPDATED FETCH FUNCTION ---
-export async function fetchItems(category?: string | any): Promise<GameItem[]> {
+export async function fetchItems(category?: string): Promise<GameItem[]> {
   let query = supabase.from('game_items').select('*');
 
   // SAFETY CHECK: React Query passes an object context by default.
@@ -63,9 +63,12 @@ export async function fetchItems(category?: string | any): Promise<GameItem[]> {
 
 // Function to create a NEW custom item
 export async function createGameItem(item: Partial<GameItem>): Promise<GameItem> {
-  const { id, created_at, updated_at, ...itemData } = item;
+  const itemData = { ...item };
+  delete itemData.id;
+  delete itemData.created_at;
+  delete itemData.updated_at;
 
-  const cleanNumber = (val: any) => (val === '' || val === undefined || val === null ? null : Number(val));
+  const cleanNumber = (val: unknown) => (val === '' || val === undefined || val === null ? null : Number(val));
 
   const payload = {
     ...itemData,

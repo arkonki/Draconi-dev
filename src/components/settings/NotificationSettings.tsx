@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, LampDesk as Desktop, Save, Volume2, Check, X, FlaskConical } from 'lucide-react';
 import { Button } from '../shared/Button';
-import { useNotifications } from '../../contexts/NotificationContext'; 
+import { useNotifications } from '../../contexts/useNotifications'; 
 
 const formatLabel = (key: string) => {
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
@@ -85,7 +85,7 @@ export function NotificationSettings() {
       // Play a sound to confirm volume settings
       if (localSettings.sounds.enabled) playSound('notification');
       setTimeout(() => setMessage(null), 3000);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Failed to save changes.' });
     } finally {
       setIsSaving(false);
@@ -214,7 +214,7 @@ export function NotificationSettings() {
                   label="Dice Rolls"
                   description="Sound when 3D dice are rolling"
                   checked={localSettings.sounds.diceRolls}
-                  onChange={(e) => setLocalSettings({
+                  onChange={() => setLocalSettings({
                     ...localSettings,
                     sounds: { ...localSettings.sounds, diceRolls: !localSettings.sounds.diceRolls }
                   })}
@@ -224,7 +224,7 @@ export function NotificationSettings() {
                   label="System Alerts"
                   description="Sound for chat messages and invites"
                   checked={localSettings.sounds.notifications}
-                  onChange={(e) => setLocalSettings({
+                  onChange={() => setLocalSettings({
                     ...localSettings,
                     sounds: { ...localSettings.sounds, notifications: !localSettings.sounds.notifications }
                   })}

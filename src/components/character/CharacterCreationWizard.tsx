@@ -8,7 +8,7 @@ import { MagicSelection } from './steps/MagicSelection';
 import { TrainedSkillsSelection } from './steps/TrainedSkillsSelection';
 import { GearSelection } from './steps/GearSelection';
 import { AppearanceSelection } from './steps/AppearanceSelection';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { supabase } from '../../lib/supabase';
 import { Save, AlertCircle, Info, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -71,9 +71,10 @@ export function CharacterCreationWizard() {
   const canProceed = () => {
     switch (step) {
       case 0: return !!character.kin && character.kinAbilityNames !== undefined && character.kinAbilityNames.length > 0;
-      case 1:
+      case 1: {
         const isMage = character.magicSchool !== null && character.magicSchool !== undefined;
         return !!character.profession && (isMage || character.professionHeroicAbilityName !== undefined);
+      }
       case 2: return !!character.name && character.name.trim().length > 0 && !!character.age;
       case 3: return character.attributes && Object.values(character.attributes).every(value => value > 0);
       case 4: 
@@ -146,7 +147,7 @@ export function CharacterCreationWizard() {
         let quantity = 1;
 
         if (typeof item === 'string') {
-            const quantityRegex = /(?:(\d+)\s*x\s+)|(?:x\s*(\d+))|(?:[(\[]x?(\d+)[)\]])|^(\d+)\s+/;
+            const quantityRegex = /(?:(\d+)\s*x\s+)|(?:x\s*(\d+))|(?:[([]x?(\d+)[)\]])|^(\d+)\s+/;
             const match = item.match(quantityRegex);
             
             if (match) {

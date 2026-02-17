@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ErrorLogger from '../lib/errors/ErrorLogger';
-import { useApp } from '../contexts/AppContext';
+import { useApp } from '../contexts/useApp';
 
 export function useErrorHandler() {
   const navigate = useNavigate();

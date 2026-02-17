@@ -1,13 +1,13 @@
 import React from 'react';
 import { Dices } from 'lucide-react';
-import { useDice } from '../dice/DiceContext';
+import { useDice } from '../dice/useDice';
 
 export const TextWithDice = ({ text, bold = false, contextLabel }: { text: string, bold?: boolean, contextLabel?: string }) => {
     const { toggleDiceRoller } = useDice();
     if (!text) return null;
 
     // Matches D6, 2D6, D6+1, 2D8, 1d20, etc. including within parens like (D12)
-    const diceRegex = /(\b\d*[dD](?:4|6|8|10|12|20|66|100)(?:\s*[+\-]\s*\d+)?\b)/g;
+    const diceRegex = /(\b\d*[dD](?:4|6|8|10|12|20|66|100)(?:\s*[+-]\s*\d+)?\b)/g;
 
     const parts = text.split(diceRegex);
 

@@ -2,14 +2,6 @@ import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Plus, Save, X } from 'lucide-react';
 
-
-interface CompendiumEntry {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-}
-
 interface CompendiumAdminProps {
   onEntryAdded: () => void;
 }

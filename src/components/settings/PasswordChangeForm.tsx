@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { Button } from '../shared/Button';
 import { Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { passwordChangeSchema } from '../../lib/auth/validation'; 

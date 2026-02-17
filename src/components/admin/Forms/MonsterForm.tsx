@@ -11,7 +11,7 @@ import { PlusCircle, Trash2 } from 'lucide-react';
 
 interface MonsterFormProps {
   entry: MonsterData;
-  onChange: (field: string, value: any) => void;
+  onChange: (field: string, value: unknown) => void;
 }
 
 const createEmptyStats = (): MonsterStats => ({
@@ -67,7 +67,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
   }, [entry]);
 
   const handleInputChange = useCallback(
-    (field: keyof MonsterData, value: any) => {
+    (field: keyof MonsterData, value: MonsterData[keyof MonsterData]) => {
       const updatedData = { ...monsterData, [field]: value };
       setMonsterData(updatedData);
       onChange(field, value);
@@ -76,7 +76,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
   );
 
   const handleStatsChange = useCallback(
-    (field: keyof MonsterStats, value: any) => {
+    (field: keyof MonsterStats, value: MonsterStats[keyof MonsterStats]) => {
       const newStats = { ...monsterData.stats, [field]: value };
       handleInputChange('stats', newStats);
     },
@@ -89,7 +89,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
   }, [monsterData.attacks, handleInputChange]);
 
   const updateAttack = useCallback(
-    (index: number, field: keyof MonsterAttackEntry, value: any) => {
+    (index: number, field: keyof MonsterAttackEntry, value: MonsterAttackEntry[keyof MonsterAttackEntry]) => {
       const newAttacks = [...monsterData.attacks];
       newAttacks[index] = { ...newAttacks[index], [field]: value };
       handleInputChange('attacks', newAttacks);
@@ -122,7 +122,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
       attackIndex: number,
       effectIndex: number,
       field: keyof MonsterEffectEntry,
-      value: any
+      value: MonsterEffectEntry[keyof MonsterEffectEntry]
     ) => {
       const newAttacks = [...monsterData.attacks];
       if (newAttacks[attackIndex].effects) {

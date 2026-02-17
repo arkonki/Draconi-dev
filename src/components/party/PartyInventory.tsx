@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   Package, Search, ArrowRight, ArrowLeft, Plus, Trash2, X, Users, History, Pencil, Save, AlertCircle, Shield, Sword, Coins
@@ -81,6 +81,16 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
     damage: '', armor_rating: '', grip: '', range: '', durability: '', features: ''
   });
   const [customQty, setCustomQty] = useState(1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const customNameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isCustomizing) {
+      customNameInputRef.current?.focus();
+    } else {
+      searchInputRef.current?.focus();
+    }
+  }, [isCustomizing]);
 
   const filteredItems = useMemo(() => {
     if (!searchTerm.trim()) return [];
@@ -99,7 +109,8 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
 
   const handleStartCustomizing = (baseItem?: GameItem) => {
     if (baseItem) {
-      const { id, ...rest } = baseItem;
+      const rest = { ...baseItem };
+      delete rest.id;
       setCustomForm({ ...rest });
     } else {
       setCustomForm({
@@ -155,30 +166,30 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
               <div className="absolute inset-0 z-10 bg-white flex flex-col animate-in slide-in-from-left-4 duration-200">
                 <div className="p-3 border-b flex items-center gap-2 bg-indigo-50 text-indigo-900"><button onClick={() => setIsCustomizing(false)}><ArrowLeft size={18} /></button><span className="font-bold text-sm">Create New Item</span></div>
                 <div className="p-4 flex-grow overflow-y-auto space-y-4">
-                  <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Name</label><input type="text" className="w-full p-2 border rounded font-medium" value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} autoFocus /></div>
+                  <div><label htmlFor="loot-custom-name" className="block text-xs font-bold text-gray-500 uppercase mb-1">Name</label><input id="loot-custom-name" ref={customNameInputRef} type="text" className="w-full p-2 border rounded font-medium" value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} /></div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Category</label><input type="text" className="w-full p-2 border rounded text-sm uppercase" value={customForm.category} onChange={e => setCustomForm({ ...customForm, category: e.target.value })} placeholder="LOOT, WEAPON..." /></div>
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cost</label><input type="text" className="w-full p-2 border rounded text-sm" value={customForm.cost} onChange={e => setCustomForm({ ...customForm, cost: e.target.value })} /></div>
+                    <div><label htmlFor="loot-custom-category" className="block text-xs font-bold text-gray-500 uppercase mb-1">Category</label><input id="loot-custom-category" type="text" className="w-full p-2 border rounded text-sm uppercase" value={customForm.category} onChange={e => setCustomForm({ ...customForm, category: e.target.value })} placeholder="LOOT, WEAPON..." /></div>
+                    <div><label htmlFor="loot-custom-cost" className="block text-xs font-bold text-gray-500 uppercase mb-1">Cost</label><input id="loot-custom-cost" type="text" className="w-full p-2 border rounded text-sm" value={customForm.cost} onChange={e => setCustomForm({ ...customForm, cost: e.target.value })} /></div>
                   </div>
                   {isWeapon(customForm.category || '') && (
                     <div className="bg-red-50 p-3 rounded border border-red-100 space-y-3">
                       <div className="flex items-center gap-2 text-red-800 text-xs font-bold uppercase"><Sword size={12} /> Weapon Stats</div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div><label className="block text-xs font-semibold text-red-700">Damage</label><input className="w-full p-1 border rounded text-sm" value={customForm.damage} onChange={e => setCustomForm({ ...customForm, damage: e.target.value })} /></div>
-                        <div><label className="block text-xs font-semibold text-red-700">Grip</label><input className="w-full p-1 border rounded text-sm" value={customForm.grip} onChange={e => setCustomForm({ ...customForm, grip: e.target.value })} /></div>
-                        <div><label className="block text-xs font-semibold text-red-700">Durability</label><input className="w-full p-1 border rounded text-sm" value={customForm.durability} onChange={e => setCustomForm({ ...customForm, durability: e.target.value })} /></div>
-                        <div><label className="block text-xs font-semibold text-red-700">Range</label><input className="w-full p-1 border rounded text-sm" value={customForm.range} onChange={e => setCustomForm({ ...customForm, range: e.target.value })} /></div>
+                        <div><label htmlFor="loot-custom-damage" className="block text-xs font-semibold text-red-700">Damage</label><input id="loot-custom-damage" className="w-full p-1 border rounded text-sm" value={customForm.damage} onChange={e => setCustomForm({ ...customForm, damage: e.target.value })} /></div>
+                        <div><label htmlFor="loot-custom-grip" className="block text-xs font-semibold text-red-700">Grip</label><input id="loot-custom-grip" className="w-full p-1 border rounded text-sm" value={customForm.grip} onChange={e => setCustomForm({ ...customForm, grip: e.target.value })} /></div>
+                        <div><label htmlFor="loot-custom-durability" className="block text-xs font-semibold text-red-700">Durability</label><input id="loot-custom-durability" className="w-full p-1 border rounded text-sm" value={customForm.durability} onChange={e => setCustomForm({ ...customForm, durability: e.target.value })} /></div>
+                        <div><label htmlFor="loot-custom-range" className="block text-xs font-semibold text-red-700">Range</label><input id="loot-custom-range" className="w-full p-1 border rounded text-sm" value={customForm.range} onChange={e => setCustomForm({ ...customForm, range: e.target.value })} /></div>
                       </div>
                     </div>
                   )}
                   {isArmor(customForm.category || '') && (
-                    <div className="bg-blue-50 p-3 rounded border border-blue-100"><label className="block text-xs font-semibold text-blue-700 mb-1"><Shield size={12} className="inline mr-1" />Armor Rating</label><input type="number" className="w-full p-1.5 border border-blue-200 rounded text-sm" value={customForm.armor_rating} onChange={e => setCustomForm({ ...customForm, armor_rating: e.target.value })} /></div>
+                    <div className="bg-blue-50 p-3 rounded border border-blue-100"><label htmlFor="loot-custom-armor-rating" className="block text-xs font-semibold text-blue-700 mb-1"><Shield size={12} className="inline mr-1" />Armor Rating</label><input id="loot-custom-armor-rating" type="number" className="w-full p-1.5 border border-blue-200 rounded text-sm" value={customForm.armor_rating} onChange={e => setCustomForm({ ...customForm, armor_rating: e.target.value })} /></div>
                   )}
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Weight</label><input type="number" step="0.1" className="w-full p-2 border rounded text-sm" value={customForm.weight} onChange={e => setCustomForm({ ...customForm, weight: parseFloat(e.target.value) })} /></div>
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Quantity</label><input type="number" min="1" className="w-full p-2 border rounded text-sm" value={customQty} onChange={e => setCustomQty(parseInt(e.target.value))} /></div>
+                    <div><label htmlFor="loot-custom-weight" className="block text-xs font-bold text-gray-500 uppercase mb-1">Weight</label><input id="loot-custom-weight" type="number" step="0.1" className="w-full p-2 border rounded text-sm" value={customForm.weight} onChange={e => setCustomForm({ ...customForm, weight: parseFloat(e.target.value) })} /></div>
+                    <div><label htmlFor="loot-custom-quantity" className="block text-xs font-bold text-gray-500 uppercase mb-1">Quantity</label><input id="loot-custom-quantity" type="number" min="1" className="w-full p-2 border rounded text-sm" value={customQty} onChange={e => setCustomQty(parseInt(e.target.value))} /></div>
                   </div>
-                  <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Effect / Description</label><textarea className="w-full p-2 border rounded text-sm h-20" value={customForm.effect} onChange={e => setCustomForm({ ...customForm, effect: e.target.value })} /></div>
+                  <div><label htmlFor="loot-custom-effect" className="block text-xs font-bold text-gray-500 uppercase mb-1">Effect / Description</label><textarea id="loot-custom-effect" className="w-full p-2 border rounded text-sm h-20" value={customForm.effect} onChange={e => setCustomForm({ ...customForm, effect: e.target.value })} /></div>
                 </div>
                 <div className="p-4 border-t bg-gray-50 flex justify-end gap-2">
                   <Button variant="ghost" onClick={() => setIsCustomizing(false)}>Cancel</Button>
@@ -188,7 +199,7 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
             ) : (
               <>
                 <div className="p-4 border-b space-y-3">
-                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input autoFocus type="text" placeholder="Search database..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm outline-none" /></div>
+                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input ref={searchInputRef} type="text" placeholder="Search database..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm outline-none" /></div>
                   <Button variant="secondary" size="sm" icon={Plus} className="w-full justify-center" onClick={() => handleStartCustomizing()}>Create New Custom Item</Button>
                 </div>
                 <div className="flex-grow overflow-y-auto p-2 space-y-1 bg-gray-50/50">
@@ -286,7 +297,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   // --- REAL-TIME & DATA LOADING ---
   useEffect(() => {
     loadData();
-    const subscription = (supabase as any).channel(`party_inv_${partyId}`)
+    const subscription = supabase.channel(`party_inv_${partyId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'party_inventory', filter: `party_id=eq.${partyId}` }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(subscription); };
@@ -295,11 +306,11 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   async function loadData() {
     try {
       const [invRes, logRes] = await Promise.all([
-        (supabase.from('party_inventory') as any).select('*').eq('party_id', partyId),
-        (supabase.from('party_inventory_log') as any).select('*').eq('party_id', partyId).order('timestamp', { ascending: false }).limit(50)
+        supabase.from('party_inventory').select('*').eq('party_id', partyId),
+        supabase.from('party_inventory_log').select('*').eq('party_id', partyId).order('timestamp', { ascending: false }).limit(50)
       ]);
-      setInventory((invRes.data || []) as any);
-      setTransactionLog((logRes.data || []) as any);
+      setInventory((invRes.data || []));
+      setTransactionLog((logRes.data || []));
     } catch (err) { console.error('Failed to sync inventory.', err); } finally { setLoading(false); }
   }
 
@@ -308,7 +319,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     try {
       // setError(null);
       for (const { item, quantity } of loot) {
-        let description = item.effect || item.description || '';
+        const description = item.effect || item.description || '';
 
         // FIX: Check for exact match (Name AND Description) to determine stacking
         const existing = inventory.find(i =>
@@ -317,11 +328,11 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
         );
 
         if (existing) {
-          await (supabase.from('party_inventory') as any).insert([{
+          await supabase.from('party_inventory').insert([{
             party_id: partyId, name: item.name, quantity, category: item.category, description
           }]);
         }
-        await (supabase.from('party_inventory_log') as any).insert([{ party_id: partyId, item_name: item.name, quantity, from_type: 'party', from_id: 'DM', to_type: 'party', to_id: partyId }]);
+        await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: item.name, quantity, from_type: 'party', from_id: 'DM', to_type: 'party', to_id: partyId }]);
       }
       await loadData();
     } catch (err) { console.error('Failed to assign loot.', err); }
@@ -337,14 +348,14 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     setSelectedItemIds([]);
 
     try {
-      const { error } = await (supabase.from('party_inventory') as any).delete().in('id', selectedItemIds);
+      const { error } = await supabase.from('party_inventory').delete().in('id', selectedItemIds);
       if (error) throw error;
 
       const logs = itemsToDelete.map(item => ({
         party_id: partyId, item_name: item.name, quantity: item.quantity,
         from_type: 'party', from_id: partyId, to_type: 'void', to_id: 'destroyed'
       }));
-      await (supabase.from('party_inventory_log') as any).insert(logs as any);
+      await supabase.from('party_inventory_log').insert(logs);
 
     } catch (err) {
       console.error('Failed to delete items.', err);
@@ -381,21 +392,21 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     if (!selectedItemIds.length) return;
 
     const itemsToSell = inventory.filter(i => selectedItemIds.includes(i.id));
-    let targetName = unit === 'Coins' ? 'Gold' : unit;
+    const targetName = unit === 'Coins' ? 'Gold' : unit;
 
     try {
       // 1. Delete Sold Items
-      await (supabase.from('party_inventory') as any).delete().in('id', selectedItemIds);
+      await supabase.from('party_inventory').delete().in('id', selectedItemIds);
 
       // 2. Add Currency
       const existing = inventory.find(i => normalizeName(i.name) === normalizeName(targetName));
 
       if (existing) {
-        await (supabase.from('party_inventory') as any).update({ quantity: existing.quantity + finalPrice } as any).eq('id', existing.id);
+        await supabase.from('party_inventory').update({ quantity: existing.quantity + finalPrice }).eq('id', existing.id);
       } else {
-        await (supabase.from('party_inventory') as any).insert([{
+        await supabase.from('party_inventory').insert([{
           party_id: partyId, name: targetName, quantity: finalPrice, category: 'CURRENCY', description: `${targetName} coins`
-        }] as any);
+        }]);
       }
 
       // 3. Logs
@@ -408,9 +419,9 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       logs.push({
         party_id: partyId, item_name: targetName, quantity: finalPrice,
         from_type: 'character', from_id: 'merchant', to_type: 'party', to_id: partyId
-      } as any);
+      });
 
-      await (supabase.from('party_inventory_log') as any).insert(logs as any);
+      await supabase.from('party_inventory_log').insert(logs);
 
       setIsSellModalOpen(false);
       setSelectedItemIds([]);
@@ -436,15 +447,15 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
         const qty = Math.min(transferQuantities[itemId] || 1, inventory.find(i => i.id === itemId)?.quantity || 0);
         if (qty <= 0) continue;
 
-        const { data: rawItem } = await (supabase.from('party_inventory') as any).select('*').eq('id', itemId).single();
+        const { data: rawItem } = await supabase.from('party_inventory').select('*').eq('id', itemId).single();
         const partyItem = rawItem as unknown as PartyInventoryTableItem;
         if (!partyItem) continue;
 
         // 1. Decrement Party Inv
         if (partyItem.quantity > qty) {
-          await (supabase.from('party_inventory') as any).update({ quantity: partyItem.quantity - qty } as any).eq('id', partyItem.id);
+          await supabase.from('party_inventory').update({ quantity: partyItem.quantity - qty }).eq('id', partyItem.id);
         } else {
-          await (supabase.from('party_inventory') as any).delete().eq('id', partyItem.id);
+          await supabase.from('party_inventory').delete().eq('id', partyItem.id);
         }
 
         // 2. Add to Character Inv or Money
@@ -452,7 +463,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
           const key = getCurrencyKey(partyItem.name);
           const money = { ...(character.equipment?.money || { gold: 0, silver: 0, copper: 0 }) };
           money[key] = (money[key] || 0) + qty;
-          await (supabase.from('characters') as any).update({ equipment: { ...character.equipment, money } } as any).eq('id', character.id);
+          await supabase.from('characters').update({ equipment: { ...character.equipment, money } }).eq('id', character.id);
         } else {
           const currentInv = character.equipment?.inventory || [];
           const existingIdx = currentInv.findIndex(i =>
@@ -474,9 +485,9 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
               description: partyItem.description || baseDetails?.effect || ''
             });
           }
-          await (supabase.from('characters') as any).update({ equipment: { ...character.equipment, inventory: newInv } } as any).eq('id', character.id);
+          await supabase.from('characters').update({ equipment: { ...character.equipment, inventory: newInv } }).eq('id', character.id);
         }
-        await (supabase.from('party_inventory_log') as any).insert([{ party_id: partyId, item_name: partyItem.name, quantity: qty, from_type: 'party', from_id: partyId, to_type: 'character', to_id: character.id } as any]);
+        await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: partyItem.name, quantity: qty, from_type: 'party', from_id: partyId, to_type: 'character', to_id: character.id }]);
       }
 
       // FIX: Force refresh of character data in other components
@@ -516,7 +527,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       }
 
       // Update Character DB
-      await (supabase.from('characters') as any).update({ equipment: { ...character.equipment, inventory: currentInv } } as any).eq('id', character.id);
+      await supabase.from('characters').update({ equipment: { ...character.equipment, inventory: currentInv } }).eq('id', character.id);
 
       // Add to Party DB
       // Stack if Name AND Description match
@@ -526,19 +537,19 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       );
 
       if (existingPartyItem) {
-        await (supabase.from('party_inventory') as any).update({ quantity: existingPartyItem.quantity + 1 } as any).eq('id', existingPartyItem.id);
+        await supabase.from('party_inventory').update({ quantity: existingPartyItem.quantity + 1 }).eq('id', existingPartyItem.id);
       } else {
         const details = allItems.find(d => normalizeName(d.name) === normalizeName(charItem.name));
-        await (supabase.from('party_inventory') as any).insert([{
+        await supabase.from('party_inventory').insert([{
           party_id: partyId,
           name: charItem.name,
           quantity: 1,
           category: charItem.category || details?.category || 'LOOT',
           description: charItem.description || details?.effect || ''
-        }] as any);
+        }]);
       }
 
-      await (supabase.from('party_inventory_log') as any).insert([{ party_id: partyId, item_name: charItem.name, quantity: 1, from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId }]);
+      await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: charItem.name, quantity: 1, from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId }]);
 
       // FIX: Refresh UI
       queryClient.invalidateQueries({ queryKey: ['character', character.id] });
@@ -555,23 +566,23 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       const money = { ...(character.equipment?.money || { gold: 0, silver: 0, copper: 0 }) };
       money[type] -= amount;
 
-      await (supabase.from('characters') as any).update({ equipment: { ...character.equipment, money } } as any).eq('id', character.id);
+      await supabase.from('characters').update({ equipment: { ...character.equipment, money } }).eq('id', character.id);
 
       const targetName = type.charAt(0).toUpperCase() + type.slice(1);
       const existing = inventory.find(i => normalizeName(i.name) === normalizeName(targetName));
 
       if (existing) {
-        await (supabase.from('party_inventory') as any).update({ quantity: existing.quantity + amount } as any).eq('id', existing.id);
+        await supabase.from('party_inventory').update({ quantity: existing.quantity + amount }).eq('id', existing.id);
       } else {
-        await (supabase.from('party_inventory') as any).insert([{
+        await supabase.from('party_inventory').insert([{
           party_id: partyId, name: targetName, quantity: amount, category: 'CURRENCY', description: `${targetName} coins`
-        }] as any);
+        }]);
       }
 
-      await (supabase.from('party_inventory_log') as any).insert([{
+      await supabase.from('party_inventory_log').insert([{
         party_id: partyId, item_name: targetName, quantity: amount,
         from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId
-      }] as any);
+      }]);
 
       queryClient.invalidateQueries({ queryKey: ['character', character.id] });
       loadData();
@@ -593,7 +604,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     try {
       // 1. Delete all currency items
       const idsToDelete = currencyItems.map(i => i.id);
-      await (supabase.from('party_inventory') as any).delete().in('id', idsToDelete);
+      await supabase.from('party_inventory').delete().in('id', idsToDelete);
 
       // 2. Add as Gold (rounded)
       const finalGold = Math.floor(totalInGold);
@@ -603,19 +614,19 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       if (finalGold > 0) {
         const existingGold = inventory.find(i => normalizeName(i.name) === 'gold');
         if (existingGold && !idsToDelete.includes(existingGold.id)) {
-          await (supabase.from('party_inventory') as any).update({ quantity: existingGold.quantity + finalGold }).eq('id', existingGold.id);
+          await supabase.from('party_inventory').update({ quantity: existingGold.quantity + finalGold }).eq('id', existingGold.id);
         } else {
-          await (supabase.from('party_inventory') as any).insert([{ party_id: partyId, name: 'Gold', quantity: finalGold, category: 'CURRENCY', description: 'Gold coins' }]);
+          await supabase.from('party_inventory').insert([{ party_id: partyId, name: 'Gold', quantity: finalGold, category: 'CURRENCY', description: 'Gold coins' }]);
         }
       }
 
       // We could add remaining silver/copper back, but the user said "all coins are converted to gold"
       // Let's keep the leftovers as silver/copper so no value is lost.
       if (remainingSilver > 0) {
-        await (supabase.from('party_inventory') as any).insert([{ party_id: partyId, name: 'Silver', quantity: remainingSilver, category: 'CURRENCY', description: 'Silver coins' }]);
+        await supabase.from('party_inventory').insert([{ party_id: partyId, name: 'Silver', quantity: remainingSilver, category: 'CURRENCY', description: 'Silver coins' }]);
       }
       if (remainingCopper > 0) {
-        await (supabase.from('party_inventory') as any).insert([{ party_id: partyId, name: 'Copper', quantity: remainingCopper, category: 'CURRENCY', description: 'Copper coins' }]);
+        await supabase.from('party_inventory').insert([{ party_id: partyId, name: 'Copper', quantity: remainingCopper, category: 'CURRENCY', description: 'Copper coins' }]);
       }
 
       await loadData();
@@ -679,13 +690,13 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/30">
             {loading && inventory.length === 0 ? <LoadingSpinner /> : filteredInventory.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-gray-400"><Package size={48} className="opacity-20 mb-2" /><p>Stash is empty or no match.</p></div> : filteredInventory.map(item => (
-              <div key={item.id} onClick={() => toggleItemSelection(item.id)} className={`p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIds.includes(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
+              <button type="button" key={item.id} onClick={() => toggleItemSelection(item.id)} className={`w-full p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIds.includes(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIds.includes(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
                   <div><p className={`font-medium text-sm ${selectedItemIds.includes(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>{item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}</div>
                 </div>
                 {item.description && <div className="hidden group-hover:block max-w-xs text-xs text-gray-500 truncate ml-4">{item.description}</div>}
-              </div>
+              </button>
             ))
             }
           </div>
@@ -717,8 +728,8 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
                 Close
               </Button>
             )}
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Transfer Partner</label>
-            <select className="w-full p-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}><option value="">Select Character...</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+            <label htmlFor="party-transfer-partner" className="block text-xs font-bold text-gray-500 uppercase mb-2">Transfer Partner</label>
+            <select id="party-transfer-partner" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none" value={selectedCharacterId} onChange={e => setSelectedCharacterId(e.target.value)}><option value="">Select Character...</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
           </div>
           {selectedCharacter ? (
             <div className="flex-1 flex flex-col gap-4 overflow-hidden">

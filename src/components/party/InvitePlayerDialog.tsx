@@ -35,13 +35,15 @@ export function InvitePlayerDialog({ isOpen, onClose, inviteCode }: InvitePlayer
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black bg-opacity-50"
+        onClick={onClose}
+        aria-label="Close dialog"
+      />
       <div
         className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md m-4"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">

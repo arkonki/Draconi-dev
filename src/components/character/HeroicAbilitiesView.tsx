@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useCharacterSheetStore, HeroicAbility } from '../../stores/characterSheetStore';
 import { isSkillNameRequirement } from '../../types/character';
-import { Star, Zap, X, ShieldCheck, Info, Sparkles } from 'lucide-react';
+import { Zap, X, ShieldCheck, Info, Sparkles } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
@@ -18,7 +18,12 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
   return (
     <div className="fixed inset-0 z-[60] overflow-hidden pointer-events-none">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto transition-opacity" onClick={onClose} />
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto transition-opacity"
+        onClick={onClose}
+        aria-label="Close heroic ability details"
+      />
       
       {/* Pane */}
       <div className="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
@@ -88,8 +93,9 @@ export function HeroicAbilitiesView() {
       try {
         await updateCharacterData({ current_wp: currentWP - cost });
         setActiveStatusMessage(`Used ${ability.name} for ${cost} WP.`);
-      } catch (updateError: any) {
-        setActivationError(`Failed to update WP: ${updateError.message}`);
+      } catch (updateError) {
+        const message = updateError instanceof Error ? updateError.message : 'Unknown error';
+        setActivationError(`Failed to update WP: ${message}`);
       }
     } else {
       setActivationError(`Not enough WP. Need ${cost}, have ${currentWP}`);
@@ -131,6 +137,14 @@ export function HeroicAbilitiesView() {
             <div 
               key={ability.id} 
               onClick={() => setInfoPaneAbility(ability)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setInfoPaneAbility(ability);
+                }
+              }}
+              role="button"
+              tabIndex={0}
               className="relative flex flex-col justify-between p-4 bg-white rounded-xl border border-stone-200 shadow-sm hover:border-orange-300 hover:shadow-md transition-all cursor-pointer group overflow-hidden"
             >
               <div className="flex justify-between items-start mb-3">
@@ -144,9 +158,12 @@ export function HeroicAbilitiesView() {
                 {ability.description}
               </p>
               
-              <div className="mt-auto pt-3 border-t border-stone-100 flex justify-end" onClick={e => e.stopPropagation()}>
+              <div className="mt-auto pt-3 border-t border-stone-100 flex justify-end">
                  <Button 
-                    onClick={() => handleActivate(ability)} 
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleActivate(ability);
+                    }} 
                     disabled={!canAfford || isSaving} 
                     loading={isSaving} 
                     size="xs"

@@ -18,7 +18,7 @@ export async function fetchRandomTables(partyId: string): Promise<RandomTable[]>
 export async function createRandomTable(table: Omit<RandomTable, 'id' | 'created_at' | 'updated_at'>): Promise<RandomTable> {
     const { data, error } = await supabase
         .from('random_tables')
-        .insert(table as any)
+        .insert(table)
         .select()
         .single();
 
@@ -29,7 +29,7 @@ export async function createRandomTable(table: Omit<RandomTable, 'id' | 'created
 export async function updateRandomTable(id: string, updates: Partial<RandomTable>): Promise<RandomTable> {
     const { data, error } = await supabase
         .from('random_tables')
-        .update(updates as any)
+        .update(updates)
         .eq('id', id)
         .select()
         .single();

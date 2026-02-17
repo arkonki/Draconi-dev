@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { Sparkles, AlertCircle, Info, Filter, Loader, CheckCircle2 } from 'lucide-react';
+import { Sparkles, AlertCircle, Info, Loader, CheckCircle2 } from 'lucide-react';
 import { useMagicSpells } from '../../../hooks/useMagicSpells';
 import { DBSpell } from '../../../hooks/useSpells';
 
@@ -162,6 +162,12 @@ export function MagicSelection() {
   const handleBackgroundClick = () => {
     setActiveTooltip(null);
   };
+  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      action();
+    }
+  };
   
   const renderSpellRow = (spell: DBSpell, type: 'trick' | 'spell') => {
     const isSelected = (type === 'trick' ? selectedTricks : selectedSpells).includes(spell.name);
@@ -175,6 +181,14 @@ export function MagicSelection() {
       <div 
         key={spell.id} 
         onClick={() => !isDisabled && handleSpellSelection(spell.name, type)} 
+        onKeyDown={(event) => {
+          if (!isDisabled) {
+            handleKeyboardActivate(event, () => handleSpellSelection(spell.name, type));
+          }
+        }}
+        role="button"
+        tabIndex={isDisabled ? -1 : 0}
+        aria-disabled={isDisabled}
         className={`flex items-center justify-between p-3 border-b transition-colors last:border-b-0 
           ${isDisabled ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'cursor-pointer'} 
           ${isSelected ? `bg-${highlightColor}-50` : 'hover:bg-gray-50'}`}
@@ -215,7 +229,7 @@ export function MagicSelection() {
   };
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick}>
+    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
       <div className="prose">
         <h3 className="text-xl font-bold mb-2">Select Magic</h3>
         <p className="text-gray-600 text-sm">
@@ -233,7 +247,7 @@ export function MagicSelection() {
                {selectedTricks.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick}>
+          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
             {filteredTricks.map((trick) => renderSpellRow(trick, 'trick'))}
           </div>
         </div>
@@ -246,7 +260,7 @@ export function MagicSelection() {
                 <div className="relative">
                   <select 
                     value={filter} 
-                    onChange={(e) => setFilter(e.target.value as any)} 
+                    onChange={(e) => setFilter(e.target.value as 'all' | 'general' | 'school')} 
                     className="text-xs py-1 pl-2 pr-6 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
                     onClick={(e) => e.stopPropagation()} // Prevent closing tooltip when changing filter
                   >
@@ -260,7 +274,7 @@ export function MagicSelection() {
                {selectedSpells.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick}>
+          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
             {filteredSpells.length > 0 ? (
               filteredSpells.map((spell) => renderSpellRow(spell, 'spell'))
             ) : (
@@ -295,6 +309,9 @@ export function MagicSelection() {
           style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
           className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[100] animate-in fade-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()} // Prevent clicking the tooltip itself from closing it
+          onKeyDown={(event) => handleKeyboardActivate(event, () => {})}
+          role="button"
+          tabIndex={0}
         >
           <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
           {getActiveDescription() || "No description available."}

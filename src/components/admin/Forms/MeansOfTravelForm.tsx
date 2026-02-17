@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface MeansOfTravelFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type MeansOfTravelFormProps = ItemFormProps;
 
 export function MeansOfTravelForm({ entry, onChange }: MeansOfTravelFormProps) {
   return (

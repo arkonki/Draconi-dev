@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { Package, AlertCircle, Info, CheckCircle2, Backpack, Dice4, Spline, X, Coins, Utensils, Swords } from 'lucide-react';
+import { Package, Info, CheckCircle2, Backpack, Dice4, Spline, X, Coins, Utensils, Swords } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { Button } from '../../shared/Button';
 import { GameItem, fetchItems } from '../../../lib/api/items';
-import { normalizeCurrency, formatCost } from '../../../lib/equipment';
+import { normalizeCurrency } from '../../../lib/equipment';
+import { Money } from '../../../types/character';
 
 interface EquipmentOption {
   option: number;
@@ -100,7 +101,7 @@ export function GearSelection() {
           );
           setAvailableOptions(options);
         }
-      } catch (err) {
+      } catch {
         setErrorOptions('Failed to load equipment options.');
       } finally {
         setLoadingOptions(false);
@@ -181,6 +182,12 @@ export function GearSelection() {
   const handleBackgroundClick = () => {
     setActiveTooltip(null);
   };
+  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      action();
+    }
+  };
 
   const getActiveItemDetails = () => {
     if (!activeTooltip) return null;
@@ -247,7 +254,7 @@ export function GearSelection() {
     finalizeSelection(finalItems, calculatedMoney);
   };
 
-  const finalizeSelection = (items: string[], money: any) => {
+  const finalizeSelection = (items: string[], money: Money) => {
     updateCharacter({
       startingEquipment: { option: selectedOption!, items: items },
       equipment: {
@@ -311,7 +318,7 @@ export function GearSelection() {
   if (!character.profession) return <div className="p-6 text-center"><p className="text-gray-600">Please select a profession first.</p></div>;
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick}>
+    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Starting Equipment</h3>
         <p className="text-gray-600 text-sm">
@@ -355,6 +362,11 @@ export function GearSelection() {
           <div 
             key={option.option} 
             onClick={(e) => { e.stopPropagation(); handleOptionSelect(option.option); }} 
+            onKeyDown={(event) => {
+              handleKeyboardActivate(event, () => handleOptionSelect(option.option));
+            }}
+            role="button"
+            tabIndex={0}
             className={`
                 relative p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 flex flex-col
                 ${selectedOption === option.option 
@@ -407,11 +419,12 @@ export function GearSelection() {
                           {/* RENDER CONTENT: Either Select Box or Text */}
                           <div className="flex-1 flex items-center gap-2 min-w-0">
                               {hasChoice && selectedOption === option.option ? (
-                                  <div onClick={(e) => e.stopPropagation()} className="flex-1">
+                                  <div className="flex-1">
                                       <select 
                                         className="w-full text-xs p-1 border rounded border-purple-300 bg-white focus:ring-2 focus:ring-purple-200 outline-none"
                                         value={itemChoices[`${option.option}-${index}`] || item.split(' or ')[0].trim()}
                                         onChange={(e) => handleChoiceChange(option.option, index, e.target.value)}
+                                        onClick={(event) => event.stopPropagation()}
                                       >
                                           {item.split(' or ').map(choice => (
                                               <option key={choice} value={choice.trim()}>{choice.trim()}</option>

@@ -1,22 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { useAuth } from './AuthContext';
+import React, { useEffect, useState, useRef } from 'react';
+import { useAuth } from './useAuth';
 import { notificationApi, UINotificationState, transformDBToState } from '../lib/api/notifications';
-
-interface NotificationContextType {
-  settings: UINotificationState | null;
-  isLoading: boolean;
-  updateSettings: (newSettings: UINotificationState) => Promise<void>;
-  playSound: (type: 'dice' | 'notification') => void;
-  sendDesktopNotification: (title: string, body: string, type: 'message' | 'invite' | 'session') => Promise<void>;
-}
-
-const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
-
-const defaultSettings: UINotificationState = {
-  email: { newMessage: true, partyInvite: true, sessionScheduled: true, systemUpdates: false },
-  desktop: { newMessage: true, partyInvite: true, sessionScheduled: true, diceRolls: true },
-  sounds: { enabled: true, volume: 80, diceRolls: true, notifications: true }
-};
+import { NotificationContext, defaultSettings } from './NotificationContextStore';
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -137,11 +122,3 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     </NotificationContext.Provider>
   );
 }
-
-export const useNotifications = () => {
-  const context = useContext(NotificationContext);
-  if (context === undefined) {
-    throw new Error('useNotifications must be used within a NotificationProvider');
-  }
-  return context;
-};

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saveStoryIdea, getStoryIdeasForParty, deleteStoryIdea, updateStoryIdea } from '../../lib/api/storyIdeas';
+import type { StoryIdea } from '../../lib/api/storyIdeas';
 import { supabase } from '../../lib/supabase';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import {
-  Save, Trash2, Sparkles, BookOpen, Search, Edit, X, KeyRound,
+  Trash2, Sparkles, BookOpen, Search, Edit, X, KeyRound,
   Settings, Wand2, ChevronRight, ChevronDown, Bot,
   Shield, StickyNote, Copy, Check, RefreshCw, Eraser,
   Users, Maximize2, Minimize2, Eye, EyeOff
@@ -24,7 +25,24 @@ const QUICK_PROMPTS = [
   { label: 'Encounter', icon: SwordIcon, prompt: 'Design a combat encounter for the party involving terrain hazards and enemy tactics.' },
 ];
 
-function SwordIcon(props: any) { return <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /><line x1="13" y1="19" x2="19" y2="13" /><line x1="16" y1="16" x2="20" y2="20" /><line x1="19" y1="21" x2="21" y2="19" /></svg>; }
+function SwordIcon(props: React.SVGProps<SVGSVGElement>) { return <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /><line x1="13" y1="19" x2="19" y2="13" /><line x1="16" y1="16" x2="20" y2="20" /><line x1="19" y1="21" x2="21" y2="19" /></svg>; }
+
+interface PartyCharacter {
+  id: string;
+  name: string;
+  kin: string;
+  profession: string;
+  appearance?: string | null;
+  weak_spot?: string | null;
+  current_hp?: number | null;
+  max_hp?: number | null;
+  current_wp?: number | null;
+  max_wp?: number | null;
+}
+
+interface PartyCharacterRow {
+  character: PartyCharacter | null;
+}
 
 const monsterTemplate = `\`\`\`monster
 ### Monster Name
@@ -159,7 +177,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
   const [loading, setLoading] = useState(false);
 
   // Library State
-  const [selectedIdea, setSelectedIdea] = useState<any>(null);
+  const [selectedIdea, setSelectedIdea] = useState<StoryIdea | null>(null);
   const [isEditingLibrary, setIsEditingLibrary] = useState(false);
 
   // -- DATA FETCHING --
@@ -177,14 +195,17 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
         .eq('party_id', partyId);
 
       if (error) throw error;
-      return data.map((d: any) => d.character).filter(Boolean);
+      const rows = (data ?? []) as unknown as PartyCharacterRow[];
+      return rows
+        .map((row) => row.character)
+        .filter((character): character is PartyCharacter => Boolean(character));
     },
     enabled: !!partyId
   });
 
   useEffect(() => {
     if (partyCharacters.length > 0 && selectedCharIds.size === 0) {
-      setSelectedCharIds(new Set(partyCharacters.map((c: any) => c.id)));
+      setSelectedCharIds(new Set(partyCharacters.map((c) => c.id)));
     }
   }, [partyCharacters.length]);
 
@@ -239,10 +260,10 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
   };
 
   const buildCharacterContextString = () => {
-    const selectedChars = partyCharacters.filter((c: any) => selectedCharIds.has(c.id));
+    const selectedChars = partyCharacters.filter((c) => selectedCharIds.has(c.id));
     if (selectedChars.length === 0) return "No specific party members.";
 
-    return selectedChars.map((c: any) => {
+    return selectedChars.map((c) => {
       let details = `- ${c.name} (${c.kin} ${c.profession})`;
       if (includeCharDesc) {
         if (c.appearance) details += `. Appearance: ${c.appearance}`;
@@ -311,9 +332,10 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || 'No response.';
       setResponse(content);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setResponse(`Error: ${err.message}. Please check your API key.`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setResponse(`Error: ${errorMessage}. Please check your API key.`);
     } finally {
       setLoading(false);
     }
@@ -331,7 +353,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const filteredIdeas = savedIdeas?.filter((i: any) => i.prompt.toLowerCase().includes(searchTerm.toLowerCase())) || [];
+  const filteredIdeas = savedIdeas?.filter((idea) => idea.prompt.toLowerCase().includes(searchTerm.toLowerCase())) || [];
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[calc(100vh-100px)]">
@@ -357,10 +379,11 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
         {/* Fix: Changed to flex-col on mobile to prevent squashing */}
         <div className="max-w-2xl mx-auto flex flex-col sm:flex-row sm:items-end gap-3">
           <div className="flex-1 w-full">
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">OpenRouter API Key</label>
+            <label htmlFor="story-helper-api-key" className="block text-xs font-bold text-gray-500 uppercase mb-1">OpenRouter API Key</label>
             <div className="relative">
               <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
+                id="story-helper-api-key"
                 type="password"
                 value={tempApiKey}
                 onChange={e => setTempApiKey(e.target.value)}
@@ -398,10 +421,11 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                   {/* Prompt Box */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-xs font-bold text-gray-500 uppercase">Prompt</label>
+                      <label htmlFor="story-helper-prompt" className="text-xs font-bold text-gray-500 uppercase">Prompt</label>
                       {prompt && <button onClick={() => setPrompt('')} className="text-[10px] text-gray-400 hover:text-red-500 flex items-center gap-1"><Eraser size={10} /> Clear</button>}
                     </div>
                     <textarea
+                      id="story-helper-prompt"
                       className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none shadow-sm transition-shadow focus:shadow-md"
                       rows={4}
                       placeholder="Describe what you need..."
@@ -443,13 +467,13 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
 
                         {/* 1. Character Selector */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><Users size={10} /> Party Members</label>
+                          <p className="block text-[10px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><Users size={10} /> Party Members</p>
                           {partyCharacters.length === 0 ? (
                             <div className="text-xs text-gray-400 italic">No characters found in party.</div>
                           ) : (
                             <div className="space-y-2">
                               <div className="max-h-24 overflow-y-auto border rounded p-1 space-y-1 bg-gray-50">
-                                {partyCharacters.map((c: any) => (
+                                {partyCharacters.map((c) => (
                                   <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-white rounded cursor-pointer">
                                     <input
                                       type="checkbox"
@@ -478,8 +502,9 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
 
                         {/* 2. Text Inputs */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Location / Setting</label>
+                          <label htmlFor="story-helper-location" className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Location / Setting</label>
                           <input
+                            id="story-helper-location"
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
                             value={contextLocation}
                             onChange={e => setContextLocation(e.target.value)}
@@ -487,8 +512,9 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Involved NPCs</label>
+                          <label htmlFor="story-helper-npcs" className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Involved NPCs</label>
                           <input
+                            id="story-helper-npcs"
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
                             value={contextNpc}
                             onChange={e => setContextNpc(e.target.value)}
@@ -528,7 +554,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
             <div className="flex-grow overflow-y-auto custom-scrollbar">
               {isLoadingIdeas ? <div className="flex justify-center py-8"><LoadingSpinner size="sm" /></div> : filteredIdeas.length === 0 ? <div className="p-8 text-center"><BookOpen size={32} className="mx-auto text-gray-200 mb-2" /><p className="text-gray-400 text-xs">No saved items found.</p></div> : (
                 <div className="divide-y divide-gray-50">
-                  {filteredIdeas.map((idea: any) => (
+                  {filteredIdeas.map((idea) => (
                     <button key={idea.id} onClick={() => { setSelectedIdea(idea); setIsEditingLibrary(false); }} className={`w-full text-left p-3 hover:bg-gray-50 transition-all ${selectedIdea?.id === idea.id ? 'bg-indigo-50 border-l-4 border-indigo-500 pl-2' : 'border-l-4 border-transparent pl-3'}`}>
                       <div className={`font-bold text-sm truncate mb-0.5 ${selectedIdea?.id === idea.id ? 'text-indigo-700' : 'text-gray-700'}`}>{idea.prompt}</div>
                       <div className="text-[10px] text-gray-400 flex justify-between items-center"><span>{new Date(idea.created_at).toLocaleDateString()}</span><span className="bg-gray-100 px-1.5 py-0.5 rounded-full">{idea.response.length} chars</span></div>
@@ -609,7 +635,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                           if (className?.includes('markdown-body')) return <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">{children}</div>;
                           return <div className={className}>{children}</div>;
                         },
-                        code: (props: any) => <code {...props} />
+                        code: (props: React.ComponentPropsWithoutRef<'code'>) => <code {...props} />
                       }
                     }}
                     renderPreview={(markdownContent) => <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar"><HomebrewRenderer content={markdownContent} /></div>}

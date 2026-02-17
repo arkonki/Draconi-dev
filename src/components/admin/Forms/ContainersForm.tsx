@@ -1,10 +1,7 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
-interface ContainersFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type ContainersFormProps = ItemFormProps;
 
 export function ContainersForm({ entry, onChange }: ContainersFormProps) {
   return (

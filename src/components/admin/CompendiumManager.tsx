@@ -1,20 +1,11 @@
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Save, X, Edit2, Trash2, AlertCircle, Eye, Code } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { Save, Eye, Code } from 'lucide-react';
+import { useAuth } from '../../contexts/useAuth';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
-
-interface CompendiumEntry {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  created_by: string;
-}
 
 export function CompendiumManager() {
   const { user } = useAuth();
-  const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -58,7 +49,6 @@ export function CompendiumManager() {
       setTitle('');
       setContent('');
       setCategory('');
-      setIsCreating(false);
       setIsEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save entry');
@@ -67,6 +57,7 @@ export function CompendiumManager() {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -131,13 +122,12 @@ export function CompendiumManager() {
         </div>
 
         <div className="flex justify-end gap-4">
-          <button
-            type="button"
-            onClick={() => {
-              setIsCreating(false);
-              setIsEditing(null);
-              setTitle('');
-              setContent('');
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditing(null);
+                  setTitle('');
+                  setContent('');
               setCategory('');
               setPreviewMode(false);
             }}

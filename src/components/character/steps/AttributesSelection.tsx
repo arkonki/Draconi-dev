@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { Dices, RefreshCw, AlertCircle, HelpCircle, Heart, Zap, Footprints, Swords } from 'lucide-react';
+import { Dices, RefreshCw, HelpCircle, Heart, Zap, Footprints } from 'lucide-react';
 import { Button } from '../../shared/Button';
 
 interface AttributeScore {
@@ -91,6 +91,11 @@ export function AttributesSelection() {
   const [isRolling, setIsRolling] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<string | null>(null);
   const [modalValue, setModalValue] = useState<string>('');
+  const modalInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingAttribute) modalInputRef.current?.focus();
+  }, [editingAttribute]);
 
   const getAgeModifier = (attr: string) => {
     if (!character.age) return 0;
@@ -139,8 +144,11 @@ export function AttributesSelection() {
     setAttributes(newAttributesWithChances);
     
     // Update Global Store
-    const simpleRolledObj = Object.entries(rolled).reduce((acc, [k, v]) => ({...acc, [k]: {value: v}}), {});
-    syncCharacter(simpleRolledObj as any);
+    const simpleRolledObj = Object.entries(rolled).reduce<Record<string, { value: number }>>(
+      (acc, [k, v]) => ({ ...acc, [k]: { value: v } }),
+      {}
+    );
+    syncCharacter(simpleRolledObj);
 
     setIsRolling(false);
   };
@@ -325,18 +333,24 @@ export function AttributesSelection() {
 
       {/* Modals */}
       {editingAttribute && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm" onClick={handleCloseModal}>
-          <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-xs animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            onClick={handleCloseModal}
+            aria-label="Close attribute editor"
+          />
+          <div className="relative bg-white p-6 rounded-lg shadow-xl w-full max-w-xs animate-in zoom-in-95">
             <h3 className="text-lg font-bold mb-4 text-center">Set {editingAttribute} Score</h3>
             <form onSubmit={handleModalSubmit}>
               <input
+                ref={modalInputRef}
                 type="number"
                 min="3"
                 max="18"
                 value={modalValue}
                 onChange={(e) => setModalValue(e.target.value)}
                 className="w-full px-3 py-3 border border-gray-300 rounded-md text-2xl font-bold text-center focus:ring-2 focus:ring-blue-500 outline-none"
-                autoFocus
               />
               <div className="mt-6 flex gap-2">
                 <Button type="button" variant="ghost" onClick={handleCloseModal} className="flex-1">Cancel</Button>

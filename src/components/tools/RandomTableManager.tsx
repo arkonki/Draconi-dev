@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchRandomTables, createRandomTable, updateRandomTable, deleteRandomTable } from '../../lib/api/randomTables';
 import { RandomTable, RandomTableRow } from '../../types/randomTable';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { Plus, Trash2, Edit3, Save, X, Dices, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, Edit3, Save, X, Dices } from 'lucide-react';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 
 interface RandomTableManagerProps {
@@ -144,10 +144,12 @@ export function RandomTableManager({ partyId }: RandomTableManagerProps) {
     );
 }
 
-function TableEditor({ initialData, partyId, onSave, onCancel }: { initialData?: RandomTable, partyId: string, onSave: (data: any) => void, onCancel: () => void }) {
+type RandomTableEditorPayload = Omit<RandomTable, 'id' | 'created_at' | 'updated_at'>;
+
+function TableEditor({ initialData, partyId, onSave, onCancel }: { initialData?: RandomTable, partyId: string, onSave: (data: RandomTableEditorPayload) => void, onCancel: () => void }) {
     const [name, setName] = useState(initialData?.name || '');
     const [category, setCategory] = useState(initialData?.category || 'General');
-    const [dieType, setDieType] = useState<string>(initialData?.die_type || 'd6');
+    const [dieType, setDieType] = useState<RandomTable['die_type']>(initialData?.die_type || 'd6');
     const [rows, setRows] = useState<RandomTableRow[]>(initialData?.rows || [{ min: 1, max: 1, result: '' }]);
 
     const handleAddRow = () => {
@@ -184,16 +186,16 @@ function TableEditor({ initialData, partyId, onSave, onCancel }: { initialData?:
         <div className="bg-white p-4 rounded-xl shadow-lg border-2 border-indigo-100">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div className="md:col-span-1">
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Table Name</label>
-                    <input className="w-full p-2 border rounded-md" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Forest Encounters" />
+                    <label htmlFor="random-table-name" className="block text-xs font-bold text-stone-500 uppercase mb-1">Table Name</label>
+                    <input id="random-table-name" className="w-full p-2 border rounded-md" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Forest Encounters" />
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Category</label>
-                    <input className="w-full p-2 border rounded-md" value={category} onChange={e => setCategory(e.target.value)} placeholder="e.g. Forest" />
+                    <label htmlFor="random-table-category" className="block text-xs font-bold text-stone-500 uppercase mb-1">Category</label>
+                    <input id="random-table-category" className="w-full p-2 border rounded-md" value={category} onChange={e => setCategory(e.target.value)} placeholder="e.g. Forest" />
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Die Type</label>
-                    <select className="w-full p-2 border rounded-md" value={dieType} onChange={e => setDieType(e.target.value)}>
+                    <label htmlFor="random-table-die-type" className="block text-xs font-bold text-stone-500 uppercase mb-1">Die Type</label>
+                    <select id="random-table-die-type" className="w-full p-2 border rounded-md" value={dieType} onChange={e => setDieType(e.target.value as RandomTable['die_type'])}>
                         {DIE_TYPES.map(d => <option key={d} value={d}>{d.toUpperCase()}</option>)}
                     </select>
                 </div>

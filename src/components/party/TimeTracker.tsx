@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { TimeTracker, TimeMarker } from '../../types/timeTracker';
+import type { LucideIcon } from 'lucide-react';
 import { fetchRandomTables } from '../../lib/api/randomTables';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 // import { RandomTableManager } from '../tools/RandomTableManager';
@@ -24,7 +25,7 @@ const SHIFTS = [
   { id: 4, label: 'Night', sub: '(19-24)', icon: Moon, hours: [19, 20, 21, 22, 23, 24] },
 ];
 
-const MARKER_TYPES: { value: TimeMarker; label: string; icon: any; color: string; bg: string }[] = [
+const MARKER_TYPES: { value: TimeMarker; label: string; icon: LucideIcon; color: string; bg: string }[] = [
   { value: null, label: 'Empty', icon: Square, color: 'text-gray-300', bg: 'bg-white' },
   { value: 'X', label: 'Passed', icon: X, color: 'text-gray-500', bg: 'bg-gray-100' },
   { value: 'R', label: 'Round Rest', icon: Circle, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -33,9 +34,17 @@ const MARKER_TYPES: { value: TimeMarker; label: string; icon: any; color: string
   { value: 'L', label: 'Lantern', icon: Flame, color: 'text-yellow-600', bg: 'bg-yellow-50' },
 ];
 
+const createDefaultGridState = (): TimeTracker['grid_state'] => {
+  const defaultState: TimeTracker['grid_state'] = {};
+  for (let i = 1; i <= 24; i++) {
+    defaultState[i] = { stretches: [null, null, null, null], notes: '' };
+  }
+  return defaultState;
+};
+
 // --- COMPONENT ---
 
-export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: any) => void }) {
+export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: string) => void }) {
   const [tracker, setTracker] = useState<TimeTracker | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeShift, setActiveShift] = useState(1);
@@ -59,23 +68,23 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
   // Fetch or Create Tracker
   useEffect(() => {
     const fetchTracker = async () => {
-      const { data, error } = await (supabase
-        .from('time_trackers') as any)
+      const { data, error } = await supabase
+        .from('time_trackers')
         .select('*')
         .eq('party_id', partyId)
         .maybeSingle();
 
       if (data) {
-        setTracker(data as unknown as TimeTracker);
-        setActiveShift((data as any).current_shift || 1);
+        const existingTracker = data as unknown as TimeTracker;
+        setTracker(existingTracker);
+        setActiveShift(existingTracker.current_shift || 1);
         setLoading(false);
       } else if (!error) {
-        const defaultState: any = {};
-        for (let i = 1; i <= 24; i++) defaultState[i] = { stretches: [null, null, null, null], notes: '' };
+        const defaultState = createDefaultGridState();
 
-        const { data: newData } = await (supabase
-          .from('time_trackers') as any)
-          .insert({ party_id: partyId, grid_state: defaultState } as any)
+        const { data: newData } = await supabase
+          .from('time_trackers')
+          .insert({ party_id: partyId, grid_state: defaultState })
           .select()
           .single();
 
@@ -88,7 +97,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
 
   const saveTracker = async (newTracker: TimeTracker) => {
     setTracker(newTracker);
-    await (supabase.from('time_trackers') as any).update({
+    await supabase.from('time_trackers').update({
       grid_state: newTracker.grid_state,
       current_day: newTracker.current_day,
       current_shift: activeShift
@@ -125,8 +134,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
     const newDay = Math.max(1, tracker.current_day + delta);
 
     if (window.confirm(delta > 0 ? "Start a new day? This will clear the time grid." : "Go back a day? (Grid will reset)")) {
-      const defaultState: any = {};
-      for (let i = 1; i <= 24; i++) defaultState[i] = { stretches: [null, null, null, null], notes: '' };
+      const defaultState = createDefaultGridState();
       saveTracker({ ...tracker, current_day: newDay, current_shift: 1, grid_state: defaultState });
       setActiveShift(1);
     }
@@ -236,8 +244,9 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
             <div key={hour} className={`bg-white border rounded-xl overflow-hidden transition-all ${isExpanded ? 'border-indigo-300 shadow-md' : 'border-gray-200 shadow-sm'}`}>
 
               {/* Summary Row */}
-              <div
-                className="flex items-center p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+              <button
+                type="button"
+                className="w-full flex items-center p-3 cursor-pointer hover:bg-gray-50 transition-colors"
                 onClick={() => setExpandedHour(isExpanded ? null : hour)}
               >
                 <div className="flex items-center gap-3 w-24 flex-shrink-0">
@@ -271,7 +280,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
                   )}
                   {isExpanded ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
                 </div>
-              </div>
+              </button>
 
               {/* Detailed View */}
               {isExpanded && (

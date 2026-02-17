@@ -105,7 +105,7 @@ export async function updateTask(taskId: string, updates: PartyTaskUpdateData): 
     throw new Error('Task ID is required to update a task.');
   }
 
-  const updatePayload: { [key: string]: any } = { ...updates };
+  const updatePayload: Record<string, unknown> = { ...updates };
 
   // If status is being updated, manage completed_at accordingly
   if (updates.status) {

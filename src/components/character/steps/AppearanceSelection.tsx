@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { User, Ruler, Palette, Sparkles, Save, AlertCircle, Info, Dices, CheckCircle2, ToggleLeft, ToggleRight, Shirt, HeartCrack, Gem, Eye } from 'lucide-react';
+import { User, Ruler, Palette, Sparkles, Save, AlertCircle, Dices, CheckCircle2, ToggleLeft, ToggleRight, Shirt, HeartCrack, Gem, Eye } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchBioData } from '../../../lib/api/compendium';
 import { Button } from '../../shared/Button';
-import { LoadingSpinner } from '../../shared/LoadingSpinner';
 
 // --- OPTIONS LISTS ---
 const heightOptions = ['Diminutive', 'Short', 'Below Average', 'Average', 'Above Average', 'Tall', 'Towering'];
@@ -39,7 +38,7 @@ interface InputModes {
 const SelectOrManualInput = ({
   label, icon: Icon, placeholder, options, value, onChange, mode, onModeChange, onRandomize, isLoading = false, rows = 2,
 }: {
-  label: string; icon?: any; placeholder: string; options: string[]; value: string; onChange: (value: string) => void;
+  label: string; icon?: React.ElementType; placeholder: string; options: string[]; value: string; onChange: (value: string) => void;
   mode: 'manual' | 'select'; onModeChange: (mode: 'manual' | 'select') => void; onRandomize: () => void;
   isLoading?: boolean; rows?: number;
 }) => {
@@ -208,15 +207,15 @@ export function AppearanceSelection() {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Height</label>
-                    <select value={appearance.height} onChange={(e) => handleAppearanceChange('height', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-height" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Height</label>
+                    <select id="appearance-height" value={appearance.height} onChange={(e) => handleAppearanceChange('height', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {heightOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Build</label>
-                    <select value={appearance.build} onChange={(e) => handleAppearanceChange('build', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-build" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Build</label>
+                    <select id="appearance-build" value={appearance.build} onChange={(e) => handleAppearanceChange('build', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {buildOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
@@ -233,29 +232,29 @@ export function AppearanceSelection() {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Hair Color</label>
-                    <select value={appearance.hairColor} onChange={(e) => handleAppearanceChange('hairColor', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-hair-color" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Hair Color</label>
+                    <select id="appearance-hair-color" value={appearance.hairColor} onChange={(e) => handleAppearanceChange('hairColor', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {[...hairColorOptions, ...unusualHairColorOptions].map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Hair Style</label>
-                    <select value={appearance.hairStyle} onChange={(e) => handleAppearanceChange('hairStyle', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-hair-style" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Hair Style</label>
+                    <select id="appearance-hair-style" value={appearance.hairStyle} onChange={(e) => handleAppearanceChange('hairStyle', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {hairStyleOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Eye Color</label>
-                    <select value={appearance.eyeColor} onChange={(e) => handleAppearanceChange('eyeColor', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-eye-color" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Eye Color</label>
+                    <select id="appearance-eye-color" value={appearance.eyeColor} onChange={(e) => handleAppearanceChange('eyeColor', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {[...eyeColorOptions, ...unusualEyeColorOptions].map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Skin Tone</label>
-                    <select value={appearance.skinTone} onChange={(e) => handleAppearanceChange('skinTone', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    <label htmlFor="appearance-skin-tone" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Skin Tone</label>
+                    <select id="appearance-skin-tone" value={appearance.skinTone} onChange={(e) => handleAppearanceChange('skinTone', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">Select...</option>
                         {skinToneOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>

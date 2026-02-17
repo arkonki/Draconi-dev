@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronRight, Home } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
 export interface BreadcrumbItem {
     label: string;
@@ -69,66 +69,4 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, maxItems = 4 })
             </ol>
         </nav>
     );
-};
-
-/**
- * Hook to generate breadcrumbs based on current route and context
- */
-export const useBreadcrumbs = (
-    entityName?: string,
-    entityType?: 'character' | 'party' | 'tab',
-    parentPath?: string
-): BreadcrumbItem[] => {
-    const location = useLocation();
-    const path = location.pathname;
-
-    const breadcrumbs: BreadcrumbItem[] = [
-        { label: 'Home', path: '/', icon: Home }
-    ];
-
-    // Character pages
-    if (path.startsWith('/character/')) {
-        breadcrumbs.push({
-            label: entityName || 'Character',
-            path: entityType === 'character' ? undefined : path
-        });
-    }
-
-    // Compendium
-    else if (path.startsWith('/compendium')) {
-        breadcrumbs.push({ label: 'Compendium', path: '/compendium' });
-    }
-
-    // Party list
-    else if (path === '/adventure-party') {
-        breadcrumbs.push({ label: 'Adventure Party' });
-    }
-
-    // Party detail
-    else if (path.startsWith('/party/') && !path.includes('/join/')) {
-        breadcrumbs.push({ label: 'Adventure Party', path: '/adventure-party' });
-        if (entityName) {
-            breadcrumbs.push({ label: entityName, path: parentPath });
-        }
-
-        // Add tab if specified
-        if (entityType === 'tab' && parentPath) {
-            const tabName = location.hash ? location.hash.substring(1) : '';
-            if (tabName) {
-                breadcrumbs.push({ label: tabName });
-            }
-        }
-    }
-
-    // Notes
-    else if (path === '/notes') {
-        breadcrumbs.push({ label: 'Notes' });
-    }
-
-    // Settings
-    else if (path === '/settings') {
-        breadcrumbs.push({ label: 'Settings' });
-    }
-
-    return breadcrumbs;
 };

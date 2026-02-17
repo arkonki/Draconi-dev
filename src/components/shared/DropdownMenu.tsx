@@ -44,17 +44,21 @@ export function DropdownMenu({ children }: { children: React.ReactNode }) {
 
 export function DropdownMenuTrigger({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) {
   const { isOpen, setIsOpen } = useDropdown();
+  type TriggerChildProps = {
+    onClick?: (event: React.MouseEvent<HTMLElement>) => void;
+    'aria-expanded'?: boolean;
+    'aria-haspopup'?: 'true';
+  };
 
   // If asChild is true, clone the child element and add onClick
-  if (asChild && React.isValidElement(children)) {
-    return React.cloneElement(children as React.ReactElement<any>, {
-      onClick: (e: React.MouseEvent) => {
+  if (asChild && React.isValidElement<TriggerChildProps>(children)) {
+    const child = children as React.ReactElement<TriggerChildProps>;
+    return React.cloneElement(child, {
+      onClick: (e: React.MouseEvent<HTMLElement>) => {
         e.stopPropagation();
         setIsOpen((prev) => !prev);
         // Call original onClick if it exists
-        if ((children as any).props?.onClick) {
-          (children as any).props.onClick(e);
-        }
+        child.props.onClick?.(e);
       },
       'aria-expanded': isOpen,
       'aria-haspopup': 'true',
@@ -104,17 +108,16 @@ interface DropdownMenuItemProps {
 
 export function DropdownMenuItem({ onSelect, children, className }: DropdownMenuItemProps) {
   return (
-    <a
-      href="#"
-      onClick={(e) => {
-        e.preventDefault();
+    <button
+      type="button"
+      onClick={() => {
         onSelect();
       }}
       className={`flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 ${className}`}
       role="menuitem"
     >
       {children}
-    </a>
+    </button>
   );
 }
 

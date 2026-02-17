@@ -13,7 +13,6 @@ const getAppVersion = () => {
       ? process.env.COMMIT_REF.substring(0, 7) 
       : 'dev';
     const versionString = `${baseVersion}-${commitHash}`;
-    // eslint-disable-next-line no-console
     console.log(`✅ BUILDING VERSION: ${versionString}`);
     return versionString;
   } catch (e) {
@@ -24,6 +23,24 @@ const getAppVersion = () => {
 
 const appVersion = getAppVersion();
 const buildDate = new Date().toISOString();
+
+const getNodeModulePackageName = (moduleId: string): string | null => {
+  const normalizedPath = moduleId.replace(/\\/g, '/');
+  const marker = '/node_modules/';
+  const markerIndex = normalizedPath.lastIndexOf(marker);
+
+  if (markerIndex === -1) return null;
+
+  const packagePath = normalizedPath.slice(markerIndex + marker.length);
+  const packageParts = packagePath.split('/');
+  if (packageParts.length === 0) return null;
+
+  if (packageParts[0].startsWith('@')) {
+    return packageParts.length > 1 ? `${packageParts[0]}/${packageParts[1]}` : null;
+  }
+
+  return packageParts[0];
+};
 
 export default defineConfig({
   plugins: [
@@ -37,6 +54,10 @@ export default defineConfig({
       // --- FIX: Increase cache limit to 5MB ---
       injectManifest: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
+        globIgnores: [
+          'assets/pdf-*.js',
+          'assets/CharacterSheetPdf-*.js',
+        ],
       },
 
       devOptions: {
@@ -138,12 +159,31 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules')) {
-            // Seperating Supabase helps, but the 'vendor' chunk is still large
-            if (id.includes('@supabase')) {
-              return 'supabase';
-            }
-            return 'vendor';
+          if (!id.includes('node_modules')) return;
+
+          const packageName = getNodeModulePackageName(id);
+          if (!packageName) return;
+
+          if (packageName.startsWith('@supabase/')) return 'supabase';
+
+          if (packageName === 'react' || packageName === 'react-dom' || packageName === 'scheduler') {
+            return 'react-core';
+          }
+
+          if (
+            packageName === '@react-pdf/renderer' ||
+            packageName === '@react-pdf/font' ||
+            packageName === '@react-pdf/layout' ||
+            packageName === '@react-pdf/pdfkit' ||
+            packageName === '@react-pdf/primitives' ||
+            packageName === '@react-pdf/render' ||
+            packageName === '@react-pdf/textkit'
+          ) {
+            return 'pdf';
+          }
+
+          if (packageName === 'lucide-react' || packageName === 'react-feather') {
+            return 'icons';
           }
         },
       },

@@ -6,7 +6,7 @@ import {
   Table as TableIcon, Eye, EyeOff, Quote, Code, Maximize2, Minimize2 // <--- Added Icons
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { MarkdownRenderer } from '../components/shared/MarkdownRenderer';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { Button } from '../components/shared/Button';
@@ -43,7 +43,6 @@ export function Notes() {
   const [viewState, setViewState] = useState<'view' | 'create' | 'edit'>('view');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   // 1. Full Screen State
@@ -140,7 +139,6 @@ export function Notes() {
   const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    setError(null);
 
     try {
       const { data: chars } = await supabase.from('characters').select('id, name').eq('user_id', user.id);
@@ -151,7 +149,7 @@ export function Notes() {
         setParties(prts || []);
       }
 
-      let query = supabase.from('notes').select(`*, character:characters(name), party:parties(name)`).eq('user_id', user.id);
+      const query = supabase.from('notes').select(`*, character:characters(name), party:parties(name)`).eq('user_id', user.id);
 
       const { data: notesData, error: notesError } = await query.order('created_at', { ascending: false });
       if (notesError) throw notesError;
@@ -159,7 +157,6 @@ export function Notes() {
 
     } catch (err) {
       console.error("Load error:", err);
-      setError("Failed to load notes.");
     } finally {
       setLoading(false);
     }
@@ -212,7 +209,7 @@ export function Notes() {
       handleCloseForm();
       if (result) setSelectedNote(result);
 
-    } catch (err) {
+    } catch {
       setFormError('Failed to save note.');
     }
   };
@@ -227,7 +224,7 @@ export function Notes() {
         setViewState('view');
       }
     } catch (err) {
-      setError("Failed to delete note.");
+      console.error('Failed to delete note:', err);
     }
   };
 
@@ -294,7 +291,7 @@ export function Notes() {
               <select
                 className="w-full pl-9 pr-8 py-1.5 text-sm border rounded-md appearance-none bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
                 value={filterType}
-                onChange={e => setFilterType(e.target.value as any)}
+                onChange={e => setFilterType(e.target.value as 'all' | 'personal' | 'character' | 'party')}
               >
                 <option value="all">All Notes</option>
                 <option value="personal">Personal</option>
@@ -315,7 +312,8 @@ export function Notes() {
             </div>
           ) : (
             filteredNotes.map(note => (
-              <div
+              <button
+                type="button"
                 key={note.id}
                 onClick={() => { setSelectedNote(note); setViewState('view'); }}
                 className={`
@@ -332,7 +330,7 @@ export function Notes() {
                   {note.party && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-50 text-green-700 text-[10px] font-medium border border-green-100"><Users size={10} /> {note.party.name}</span>}
                   {!note.character && !note.party && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium border border-gray-200"><FileText size={10} /> Personal</span>}
                 </div>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -359,14 +357,15 @@ export function Notes() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Title</label>
-                <input className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={title} onChange={e => setTitle(e.target.value)} placeholder="Note Title" />
+                <label htmlFor="note-title" className="block text-sm font-bold text-gray-700 mb-1">Title</label>
+                <input id="note-title" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={title} onChange={e => setTitle(e.target.value)} placeholder="Note Title" />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Character Link (Opt)</label>
+                  <label htmlFor="note-character-link" className="block text-sm font-bold text-gray-700 mb-1">Character Link (Opt)</label>
                   <select
+                    id="note-character-link"
                     className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
                     value={selectedCharacter}
                     onChange={e => { setSelectedCharacter(e.target.value); if (e.target.value) setSelectedParty(''); }}
@@ -378,8 +377,9 @@ export function Notes() {
                 </div>
                 {isDM() && (
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Party Link (Opt)</label>
+                    <label htmlFor="note-party-link" className="block text-sm font-bold text-gray-700 mb-1">Party Link (Opt)</label>
                     <select
+                      id="note-party-link"
                       className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
                       value={selectedParty}
                       onChange={e => { setSelectedParty(e.target.value); if (e.target.value) setSelectedCharacter(''); }}
@@ -395,7 +395,7 @@ export function Notes() {
               {/* MARKDOWN EDITOR */}
               <div>
                 <div className="flex justify-between items-end mb-1">
-                  <label className="block text-sm font-bold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
+                  <label htmlFor="note-content" className="block text-sm font-bold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
                   <button
                     type="button"
                     onClick={() => setShowPreview(!showPreview)}
@@ -429,6 +429,7 @@ export function Notes() {
                     </div>
                   ) : (
                     <textarea
+                      id="note-content"
                       ref={textareaRef}
                       className="w-full p-3 flex-1 font-mono text-sm outline-none resize-none bg-white"
                       value={content}
@@ -519,7 +520,7 @@ export function Notes() {
 }
 
 // Small helper component for the toolbar buttons
-function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) {
+function ToolbarButton({ icon: Icon, label, onClick }: { icon: React.ElementType; label: string; onClick: () => void }) {
   return (
     <button
       type="button"

@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
-import { pdf } from '@react-pdf/renderer';
+import { useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Character } from '../../types/character';
-import { DragonbanePdfDocument } from './CharacterSheetPdf';
 import { fetchItems, GameItem } from '../../lib/api/items';
 
 export const PdfExportButton = ({ character }: { character: Character }) => {
@@ -19,8 +17,15 @@ export const PdfExportButton = ({ character }: { character: Character }) => {
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
-      // Pass 'allItems' to the document
-      const blob = await pdf(<DragonbanePdfDocument character={character} allItems={allItems} />).toBlob();
+      // Load heavy PDF modules only when export is requested.
+      const [{ pdf }, { DragonbanePdfDocument }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('./CharacterSheetPdf'),
+      ]);
+
+      const blob = await pdf(
+        <DragonbanePdfDocument character={character} allItems={allItems} />
+      ).toBlob();
       
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');

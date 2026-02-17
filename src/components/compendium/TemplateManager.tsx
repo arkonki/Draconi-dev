@@ -68,10 +68,11 @@ export function TemplateManager({
           {editingTemplate ? (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="template-name" className="block text-sm font-medium text-gray-700 mb-1">
                   Template Name
                 </label>
                 <input
+                  id="template-name"
                   type="text"
                   value={editingTemplate.name}
                   onChange={(e) => setEditingTemplate({
@@ -83,10 +84,11 @@ export function TemplateManager({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="template-category" className="block text-sm font-medium text-gray-700 mb-1">
                   Category
                 </label>
                 <input
+                  id="template-category"
                   type="text"
                   value={editingTemplate.category}
                   onChange={(e) => setEditingTemplate({
@@ -98,10 +100,11 @@ export function TemplateManager({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="template-description" className="block text-sm font-medium text-gray-700 mb-1">
                   Description
                 </label>
                 <input
+                  id="template-description"
                   type="text"
                   value={editingTemplate.description}
                   onChange={(e) => setEditingTemplate({
@@ -113,10 +116,11 @@ export function TemplateManager({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="template-content" className="block text-sm font-medium text-gray-700 mb-1">
                   Content
                 </label>
                 <textarea
+                  id="template-content"
                   value={editingTemplate.content}
                   onChange={(e) => setEditingTemplate({
                     ...editingTemplate,

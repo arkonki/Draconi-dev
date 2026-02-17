@@ -7,6 +7,7 @@ export interface EmailTemplate {
 }
 
 export function getWelcomeEmail(user: User): EmailTemplate {
+  void user;
   return {
     subject: 'Welcome to DragonBane Character Manager',
     text: `Welcome to DragonBane Character Manager!\n\nThank you for joining us. You can now create and manage your characters, join parties, and keep track of your adventures.\n\nEnjoy your journey!`,

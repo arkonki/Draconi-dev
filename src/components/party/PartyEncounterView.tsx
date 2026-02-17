@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAllEncountersForParty,
@@ -24,20 +24,34 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import {
   PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward,
-  ArrowUpDown, Copy, List, ArrowLeft, RotateCcw, ShieldAlert, Skull, Dices, Search, User,
+  ArrowUpDown, Copy, List, RotateCcw, ShieldAlert, Skull, Dices, Search, User,
   Sword, Swords, RefreshCw, Crosshair, Target, Link as LinkIcon, Check, Hourglass, AlertCircle
 } from 'lucide-react';
-import { useDice } from '../dice/DiceContext';
+import { useDice } from '../dice/useDice';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
 
 // --- TYPES ---
-export interface MonsterStats { HP?: number; SIZE?: string; ARMOR?: number; FEROCITY?: number; MOVEMENT?: number;[key: string]: any; }
-export interface MonsterAttack { name: string; effects: any[]; description: string; roll_values: string; }
+export interface MonsterStats { HP?: number; SIZE?: string; ARMOR?: number; FEROCITY?: number; MOVEMENT?: number;[key: string]: unknown; }
+export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values: string; }
 export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
 interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
 interface EditableCombatantStats { current_hp: string; current_wp: string; initiative_roll?: string; }
 interface AttackDescriptionRendererProps { description: string; attackName: string; }
+interface CombatLogEntry {
+  type: string;
+  ts: number;
+  round?: number;
+  name?: string;
+  delta?: number;
+  attack?: { name?: string };
+  roll?: number;
+  attacker?: string;
+  target?: string;
+  damage?: number;
+  message?: string;
+}
+interface InitiativeUpdate { id: string; initiative_roll: number; }
 
 // --- HELPER: SYNC LOGIC ---
 const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombatant[]) => {
@@ -51,7 +65,7 @@ const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombata
 
 // --- UTILS ---
 const generateDeck = (totalNeeded: number, manualValues: number[]): number[] => {
-  let deck: number[] = [];
+  const deck: number[] = [];
   const decksCount = Math.ceil(Math.max(totalNeeded, 1) / 10);
   for (let d = 0; d < decksCount; d++) { for (let i = 1; i <= 10; i++) deck.push(i); }
   manualValues.forEach(val => { const index = deck.indexOf(val); if (index > -1) deck.splice(index, 1); });
@@ -98,15 +112,31 @@ function MarkdownDiceRenderer({ text, contextLabel }: { text: string; contextLab
   })}</div>);
 }
 
-function LogEntry({ entry }: { entry: any }) {
+function LogEntry({ entry }: { entry: CombatLogEntry }) {
   const formatTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (entry.type === 'round_advanced') return <div className="flex items-center justify-center gap-2 my-2"><div className="h-px bg-stone-300 w-10"></div><span className="font-serif font-bold text-stone-600 text-xs uppercase tracking-widest">Round {entry.round}</span><div className="h-px bg-stone-300 w-10"></div></div>;
   let content = null;
   switch (entry.type) {
     case 'turn_start': content = <span className="text-stone-600">Turn started: <strong>{entry.name}</strong></span>; break;
     case 'turn_end': content = <span className="text-stone-400 italic">Turn ended: {entry.name}</span>; break;
-    case 'hp_change': const isDamage = entry.delta < 0; content = (<span className={isDamage ? 'text-red-700' : 'text-green-700'}><strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(entry.delta)} DMG` : `healed ${entry.delta} HP`}</span>); break;
-    case 'wp_change': const isSpend = entry.delta < 0; content = (<span className="text-blue-700"><strong>{entry.name}</strong> {isSpend ? `spent ${Math.abs(entry.delta)} WP` : `recovered ${entry.delta} WP`}</span>); break;
+    case 'hp_change': {
+      const isDamage = entry.delta < 0;
+      content = (
+        <span className={isDamage ? 'text-red-700' : 'text-green-700'}>
+          <strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(entry.delta)} DMG` : `healed ${entry.delta} HP`}
+        </span>
+      );
+      break;
+    }
+    case 'wp_change': {
+      const isSpend = entry.delta < 0;
+      content = (
+        <span className="text-blue-700">
+          <strong>{entry.name}</strong> {isSpend ? `spent ${Math.abs(entry.delta)} WP` : `recovered ${entry.delta} WP`}
+        </span>
+      );
+      break;
+    }
     case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}</div></div>); break;
     case 'attack_resolve': content = (<span className="text-stone-700"><Crosshair size={12} className="inline mr-1" /><strong>{entry.attacker}</strong> dealt {entry.damage} damage to <strong>{entry.target}</strong></span>); break;
     default: content = <span>{entry.message || JSON.stringify(entry)}</span>;
@@ -114,7 +144,7 @@ function LogEntry({ entry }: { entry: any }) {
   return (<div className="flex gap-2 text-sm py-1 border-b border-stone-100 last:border-0"><time className="text-xs text-stone-300 font-mono mt-0.5 w-10 shrink-0">{formatTime(entry.ts)}</time><div className="flex-grow">{content}</div></div>);
 }
 
-function CombatLogView({ log }: { log: any[] }) {
+function CombatLogView({ log }: { log: CombatLogEntry[] }) {
   if (!log || log.length === 0) { return <p className="text-sm text-gray-500 mt-2 px-1">No events have been logged yet.</p>; }
   return (<div className="space-y-1 divide-y divide-gray-100">{log.slice().reverse().map((entry, index) => (<LogEntry key={index} entry={entry} />))}</div>);
 }
@@ -184,6 +214,13 @@ interface AttackResolutionModalProps { isOpen: boolean; onClose: () => void; att
 function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, onConfirm }: AttackResolutionModalProps) {
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [damage, setDamage] = useState<string>('');
+  const damageInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      damageInputRef.current?.focus();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -220,18 +257,18 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
                 const isDead = t.current_hp === 0;
                 const displayName = t.monster_id ? t.display_name.replace(/ \(Act \d+\)$/, '') : t.display_name;
                 return (
-                  <div key={t.id} onClick={() => !isDead && setSelectedTargetId(t.id)} className={`p-3 rounded border flex justify-between items-center cursor-pointer transition-all ${selectedTargetId === t.id ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
+                  <button type="button" key={t.id} onClick={() => !isDead && setSelectedTargetId(t.id)} className={`w-full p-3 rounded border flex justify-between items-center cursor-pointer transition-all text-left ${selectedTargetId === t.id ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
                     <div>
                       <span className={`font-bold ${isFoe ? 'text-red-700' : 'text-blue-700'}`}>{displayName}</span>
                       <div className="text-xs text-stone-500">{isFoe ? 'Enemy' : 'Ally'} • HP: {t.current_hp}/{t.max_hp}</div>
                     </div>
                     {selectedTargetId === t.id && <Target className="text-red-600 w-5 h-5 animate-pulse" />}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
-          <div><h4 className="text-xs font-bold text-stone-500 uppercase mb-2">Damage Amount</h4><div className="flex gap-2"><input type="number" autoFocus placeholder="0" className="flex-grow p-3 text-lg font-bold border rounded shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={damage} onChange={(e) => setDamage(e.target.value)} /></div><p className="text-xs text-stone-400 mt-1">Enter negative number to heal.</p></div>
+          <div><h4 className="text-xs font-bold text-stone-500 uppercase mb-2">Damage Amount</h4><div className="flex gap-2"><input ref={damageInputRef} type="number" placeholder="0" className="flex-grow p-3 text-lg font-bold border rounded shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={damage} onChange={(e) => setDamage(e.target.value)} /></div><p className="text-xs text-stone-400 mt-1">Enter negative number to heal.</p></div>
         </div>
         <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" icon={Sword} disabled={!selectedTargetId || !damage} onClick={() => selectedTargetId && onConfirm(selectedTargetId, parseInt(damage))}>Apply</Button></div>
       </div>
@@ -239,15 +276,42 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
   );
 }
 
-function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: any) {
+interface InitiativeDrawModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  combatants: EncounterCombatant[];
+  onApply: (updates: InitiativeUpdate[]) => void;
+}
+
+function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: InitiativeDrawModalProps) {
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
-  useEffect(() => { if (isOpen) { const init: any = {}; combatants.forEach((c: any) => { if (c.initiative_roll) init[c.id] = String(c.initiative_roll); }); setManualValues(init); } }, [isOpen, combatants]);
+  useEffect(() => {
+    if (isOpen) {
+      const init: Record<string, string> = {};
+      combatants.forEach((c) => {
+        if (c.initiative_roll) init[c.id] = String(c.initiative_roll);
+      });
+      setManualValues(init);
+    }
+  }, [isOpen, combatants]);
   const handleDraw = () => {
-    const updates: any[] = []; const taken: any[] = [];
-    combatants.forEach((c: any) => { const val = parseInt(manualValues[c.id]); if (!isNaN(val)) { taken.push(val); updates.push({ id: c.id, initiative_roll: val }); } });
+    const updates: InitiativeUpdate[] = [];
+    const taken: number[] = [];
+    combatants.forEach((c) => {
+      const val = parseInt(manualValues[c.id]);
+      if (!isNaN(val)) {
+        taken.push(val);
+        updates.push({ id: c.id, initiative_roll: val });
+      }
+    });
     if (combatants.length - updates.length > 0) {
       const deck = generateDeck(combatants.length, taken);
-      combatants.forEach((c: any) => { if (!updates.find(u => u.id === c.id)) { const card = deck.pop(); if (card) updates.push({ id: c.id, initiative_roll: card }); } });
+      combatants.forEach((c) => {
+        if (!updates.find((u) => u.id === c.id)) {
+          const card = deck.pop();
+          if (card) updates.push({ id: c.id, initiative_roll: card });
+        }
+      });
     }
     onApply(updates);
   };
@@ -257,29 +321,46 @@ function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: any) {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg h-[80vh] flex flex-col overflow-hidden border border-stone-200">
         <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Dices className="w-5 h-5" /> Draw Initiative</h3><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24} /></button></div>
         <div className="p-3 bg-blue-50 text-blue-900 text-sm border-b border-blue-100">Enter manual values for characters keeping their card (e.g. <strong>Veteran</strong> talent). Leave blank to draw from deck.</div>
-        <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-2">{combatants.map((c: any) => (<div key={c.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><span className="font-bold text-stone-800">{c.display_name}</span><input type="number" min="1" max="10" placeholder="Auto" className={`w-20 px-2 py-1 text-center border rounded font-mono font-bold ${manualValues[c.id] ? 'bg-yellow-50 border-yellow-400 text-yellow-900' : 'bg-white'}`} value={manualValues[c.id] || ''} onChange={(e) => setManualValues(prev => ({ ...prev, [c.id]: e.target.value }))} /></div>))}</div>
+        <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-2">{combatants.map((c) => (<div key={c.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><span className="font-bold text-stone-800">{c.display_name}</span><input type="number" min="1" max="10" placeholder="Auto" className={`w-20 px-2 py-1 text-center border rounded font-mono font-bold ${manualValues[c.id] ? 'bg-yellow-50 border-yellow-400 text-yellow-900' : 'bg-white'}`} value={manualValues[c.id] || ''} onChange={(e) => setManualValues(prev => ({ ...prev, [c.id]: e.target.value }))} /></div>))}</div>
         <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={Dices} onClick={handleDraw}>Draw & Apply</Button></div>
       </div>
     </div>
   );
 }
 
-function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonsters, onAddParty, onAddMonster }: any) {
+interface AddCombatantsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  partyMembers?: Character[];
+  availablePartyMembers: Character[];
+  allMonsters: MonsterData[];
+  onAddParty: (characterId: string) => void;
+  onAddMonster: (monsterId: string, count: number, customName: string) => void;
+}
+
+function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonsters, onAddParty, onAddMonster }: AddCombatantsModalProps) {
   const [tab, setTab] = useState<'party' | 'monsters'>('party');
   const [monsterSearch, setMonsterSearch] = useState('');
   const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
   const [monsterCount, setMonsterCount] = useState(1);
   const [monsterCustomName, setMonsterCustomName] = useState('');
+  const monsterSearchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen && tab === 'monsters') {
+      monsterSearchInputRef.current?.focus();
+    }
+  }, [isOpen, tab]);
   if (!isOpen) return null;
-  const filteredMonsters = allMonsters ? allMonsters.filter((m: any) => m.name.toLowerCase().includes(monsterSearch.toLowerCase()) || (m.category && m.category.toLowerCase().includes(monsterSearch.toLowerCase()))).slice(0, 20) : [];
+  const filteredMonsters = allMonsters ? allMonsters.filter((m) => m.name.toLowerCase().includes(monsterSearch.toLowerCase()) || (m.category && m.category.toLowerCase().includes(monsterSearch.toLowerCase()))).slice(0, 20) : [];
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden border border-stone-200">
         <div className="p-4 border-b bg-stone-50 flex justify-between items-center"><h3 className="text-xl font-bold font-serif text-stone-800">Add Combatants</h3><button onClick={onClose} className="text-stone-400 hover:text-stone-600"><XCircle size={24} /></button></div>
         <div className="flex border-b"><button className={`flex-1 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${tab === 'party' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`} onClick={() => setTab('party')}>Party Members</button><button className={`flex-1 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${tab === 'monsters' ? 'bg-white border-b-2 border-orange-600 text-orange-600' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`} onClick={() => setTab('monsters')}>Monsters & NPCs</button></div>
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50/50">
-          {tab === 'party' && (<div className="space-y-2">{availablePartyMembers.length === 0 ? <p className="text-center text-stone-400 py-8 italic">All party members added.</p> : availablePartyMembers.map((char: any) => (<div key={char.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700"><User size={16} /></div><span className="font-bold text-stone-800">{char.name}</span></div><Button size="sm" onClick={() => onAddParty(char.id)} icon={PlusCircle}>Add</Button></div>))}</div>)}
-          {tab === 'monsters' && (<div className="flex flex-col h-full gap-4"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" /><input type="text" placeholder="Search monsters..." className="w-full pl-9 pr-4 py-2 border rounded shadow-sm focus:ring-2 focus:ring-orange-500 outline-none" value={monsterSearch} onChange={(e) => setMonsterSearch(e.target.value)} autoFocus /></div><div className="flex-grow overflow-hidden flex flex-col md:flex-row gap-4"><div className="flex-1 overflow-y-auto border rounded bg-white divide-y">{filteredMonsters.map((m: any) => (<div key={m.id} className={`p-3 cursor-pointer hover:bg-orange-50 ${selectedMonsterId === m.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`} onClick={() => setSelectedMonsterId(m.id)}><p className="font-bold text-sm">{m.name}</p><p className="text-[10px] text-stone-500">{m.category}</p></div>))}</div>{selectedMonsterId && (<div className="w-full md:w-64 bg-white p-4 border rounded shadow-sm flex flex-col gap-3 flex-shrink-0 h-fit"><h4 className="font-bold text-stone-800 border-b pb-2">{allMonsters.find((m: any) => m.id === selectedMonsterId)?.name}</h4><div><label className="text-[10px] font-bold text-stone-500 uppercase">Count</label><input type="number" min="1" className="w-full p-1.5 border rounded text-sm" value={monsterCount} onChange={(e) => setMonsterCount(Math.max(1, parseInt(e.target.value) || 1))} /></div><div><label className="text-[10px] font-bold text-stone-500 uppercase">Name (Opt)</label><input type="text" placeholder="e.g. Boss" className="w-full p-1.5 border rounded text-sm" value={monsterCustomName} onChange={(e) => setMonsterCustomName(e.target.value)} /></div><Button className="w-full mt-2" onClick={() => { onAddMonster(selectedMonsterId, monsterCount, monsterCustomName); setMonsterCount(1); setMonsterCustomName(''); }} icon={PlusCircle}>Add to Fight</Button></div>)}</div></div>)}
+          {tab === 'party' && (<div className="space-y-2">{availablePartyMembers.length === 0 ? <p className="text-center text-stone-400 py-8 italic">All party members added.</p> : availablePartyMembers.map((char) => (<div key={char.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700"><User size={16} /></div><span className="font-bold text-stone-800">{char.name}</span></div><Button size="sm" onClick={() => onAddParty(char.id)} icon={PlusCircle}>Add</Button></div>))}</div>)}
+          {tab === 'monsters' && (<div className="flex flex-col h-full gap-4"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" /><input ref={monsterSearchInputRef} type="text" placeholder="Search monsters..." className="w-full pl-9 pr-4 py-2 border rounded shadow-sm focus:ring-2 focus:ring-orange-500 outline-none" value={monsterSearch} onChange={(e) => setMonsterSearch(e.target.value)} /></div><div className="flex-grow overflow-hidden flex flex-col md:flex-row gap-4"><div className="flex-1 overflow-y-auto border rounded bg-white divide-y">{filteredMonsters.map((m) => (<button type="button" key={m.id} className={`w-full p-3 cursor-pointer hover:bg-orange-50 text-left ${selectedMonsterId === m.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`} onClick={() => setSelectedMonsterId(m.id)}><p className="font-bold text-sm">{m.name}</p><p className="text-[10px] text-stone-500">{m.category}</p></button>))}</div>{selectedMonsterId && (<div className="w-full md:w-64 bg-white p-4 border rounded shadow-sm flex flex-col gap-3 flex-shrink-0 h-fit"><h4 className="font-bold text-stone-800 border-b pb-2">{allMonsters.find((m) => m.id === selectedMonsterId)?.name}</h4><div><label htmlFor="encounter-monster-count" className="text-[10px] font-bold text-stone-500 uppercase">Count</label><input id="encounter-monster-count" type="number" min="1" className="w-full p-1.5 border rounded text-sm" value={monsterCount} onChange={(e) => setMonsterCount(Math.max(1, parseInt(e.target.value) || 1))} /></div><div><label htmlFor="encounter-monster-name" className="text-[10px] font-bold text-stone-500 uppercase">Name (Opt)</label><input id="encounter-monster-name" type="text" placeholder="e.g. Boss" className="w-full p-1.5 border rounded text-sm" value={monsterCustomName} onChange={(e) => setMonsterCustomName(e.target.value)} /></div><Button className="w-full mt-2" onClick={() => { onAddMonster(selectedMonsterId, monsterCount, monsterCustomName); setMonsterCount(1); setMonsterCustomName(''); }} icon={PlusCircle}>Add to Fight</Button></div>)}</div></div>)}
         </div>
         <div className="p-3 border-t bg-stone-50 flex justify-end"><Button onClick={onClose} variant="secondary">Done</Button></div>
       </div>
@@ -330,7 +411,24 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
   );
 }
 
-function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative }: any) {
+interface DragonbaneCombatantCardProps {
+  combatant: EncounterCombatant;
+  isSelected: boolean;
+  isSwapSource: boolean;
+  onSelect: (id: string) => void;
+  onSwapRequest: (id: string) => void;
+  onFlipCard: (id: string, current: boolean) => void;
+  onSaveStats: (id: string) => void;
+  statsState: EditableCombatantStats;
+  setStatsState: (value: EditableCombatantStats) => void;
+  monsterData?: MonsterData;
+  onRemove: (id: string) => void;
+  isDM: boolean;
+  myCharacterId: string | null;
+  onSetInitiative: (id: string, val: number) => void;
+}
+
+function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
   const initValue = combatant.initiative_roll ?? '-';
@@ -358,17 +456,18 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
   const showWp = !isMonster || maxWp > 0;
 
   return (
-    <div className={`relative flex items-center gap-3 p-2 pr-3 rounded-lg border shadow-sm transition-all cursor-pointer overflow-hidden ${isDefeated ? 'bg-stone-200 border-stone-400 opacity-80' : hasActed ? 'bg-stone-100 border-stone-200 opacity-60 grayscale' : isSelected ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-stone-200 hover:border-stone-300 hover:shadow-md'} ${isSwapSource ? 'ring-2 ring-purple-500 bg-purple-50 animate-pulse' : ''}`} onClick={() => onSelect(combatant.id)}>
+    <div className={`relative flex items-center gap-3 p-2 pr-3 rounded-lg border shadow-sm transition-all cursor-pointer overflow-hidden ${isDefeated ? 'bg-stone-200 border-stone-400 opacity-80' : hasActed ? 'bg-stone-100 border-stone-200 opacity-60 grayscale' : isSelected ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-stone-200 hover:border-stone-300 hover:shadow-md'} ${isSwapSource ? 'ring-2 ring-purple-500 bg-purple-50 animate-pulse' : ''}`} onClick={() => onSelect(combatant.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(combatant.id); } }} role="button" tabIndex={0}>
       {isDefeated && (<div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden"><span className="text-stone-400/20 font-black text-4xl uppercase -rotate-12 select-none">Defeated</span></div>)}
 
       {/* Initiative Box */}
-      <div
+      <button
+        type="button"
         onClick={handleInitClick}
         title={canEdit ? "Click to set Initiative" : "Initiative"}
         className={`relative z-10 flex-shrink-0 w-10 h-14 rounded flex items-center justify-center shadow-sm border transition-colors ${isDefeated ? 'bg-red-100 border-red-300 text-red-800' : hasActed ? 'bg-stone-200 border-stone-300 text-stone-400' : 'bg-white border-stone-800 text-stone-900'} ${canEdit ? 'hover:bg-blue-50 cursor-pointer' : ''}`}
       >
         <span className="font-serif font-bold text-xl">{initValue}</span>
-      </div>
+      </button>
 
       <div className="relative z-10 flex-grow min-w-0">
         <div className="flex justify-between items-start mb-1">
@@ -381,7 +480,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-2" onPointerDownCapture={e => e.stopPropagation()}>
             <div className={`flex items-center bg-white border border-stone-200 rounded overflow-hidden shadow-sm ${combatant.current_hp === 0 ? 'ring-2 ring-red-500 border-red-500' : ''}`}><div className={`px-1.5 py-1 ${combatant.current_hp === 0 ? 'bg-red-100' : 'bg-stone-50'} border-r border-stone-200`}><Heart className={`w-3 h-3 ${combatant.current_hp === 0 ? 'text-red-500' : 'text-red-600'}`} /></div><input type="number" className="w-10 px-1 py-0.5 text-xs text-center font-bold outline-none focus:bg-blue-50" disabled={!canEdit} value={hpVal} onChange={(e) => setStatsState({ ...statsState, current_hp: e.target.value })} onBlur={() => onSaveStats(combatant.id)} /><div className="px-1.5 py-0.5 text-[10px] text-stone-400 bg-stone-50 border-l border-stone-200">/{combatant.max_hp}</div></div>
             {showWp && (
               <div className="flex items-center bg-white border border-stone-200 rounded overflow-hidden shadow-sm"><div className="px-1.5 py-1 bg-stone-50 border-r border-stone-200"><Zap className="w-3 h-3 text-blue-600" /></div><input type="number" className="w-10 px-1 py-0.5 text-xs text-center font-bold outline-none focus:bg-blue-50" disabled={!canEdit} value={wpVal} onChange={(e) => setStatsState({ ...statsState, current_wp: e.target.value })} onBlur={() => onSaveStats(combatant.id)} />{maxWp > 0 && <div className="px-1.5 py-0.5 text-[10px] text-stone-400 bg-stone-50 border-l border-stone-200">/{maxWp}</div>}</div>
@@ -391,7 +490,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
         <div className="flex items-center justify-between mt-2 h-6">
           {isDying && (<div className="flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded border border-red-100"><Skull size={10} className="text-red-500" /><span className="text-[10px] font-bold text-red-700 uppercase">Dying</span></div>)}
           {isDefeated && (<div className="flex items-center gap-1 px-2 py-0.5 rounded bg-stone-700 text-white"><Skull size={10} /><span className="text-[10px] font-bold uppercase">Defeated</span></div>)}
-          <div className={`flex items-center gap-1 transition-opacity ${hasActed ? 'opacity-50 hover:opacity-100' : ''}`} onClick={e => e.stopPropagation()}>
+          <div className={`flex items-center gap-1 transition-opacity ${hasActed ? 'opacity-50 hover:opacity-100' : ''}`} onPointerDownCapture={e => e.stopPropagation()}>
             {!hasActed && !isDefeated && (<button className={`p-1 rounded transition-colors ${isSwapSource ? 'bg-purple-600 text-white' : 'text-stone-400 hover:text-purple-600 hover:bg-purple-50'}`} title="Swap Initiative (Wait)" onClick={() => onSwapRequest(combatant.id)}><ArrowUpDown size={14} /></button>)}
             {!isDefeated && <button className={`p-1 rounded transition-colors ${hasActed ? 'text-stone-400 hover:bg-stone-200' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800'}`} title={hasActed ? "Unflip Card" : "Flip Card (End Turn/Reaction)"} onClick={() => onFlipCard(combatant.id, hasActed)}>{hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}</button>}
             {isDM && (<button className={`p-1 rounded transition-colors flex items-center gap-1 ${isDefeated ? 'bg-red-600 text-white hover:bg-red-700 px-2 shadow-sm' : 'text-stone-300 hover:text-red-600 hover:bg-red-50'}`} onClick={() => onRemove(combatant.id)} title="Remove from Encounter"><Trash2 size={14} />{isDefeated && <span className="text-[10px] font-bold uppercase">Remove Corpse</span>}</button>)}
@@ -404,7 +503,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
 
 // --- MAIN PAGE COMPONENT ---
 
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 // ...
 
@@ -416,7 +515,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   // Determine current user's character ID from the party members list
   const myCharacterId = useMemo(() => {
     if (!user || !partyMembers) return null;
-    return partyMembers.find((m: any) => m.user_id === user.id)?.id;
+    return partyMembers.find((m) => m.user_id === user.id)?.id;
   }, [user, partyMembers]);
 
   const handleSetInitiativeSingle = (id: string, val: number) => {
@@ -474,7 +573,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   useEffect(() => {
     if (!combatants) return;
-    const init: any = {};
+    const init: Record<string, EditableCombatantStats> = {};
     combatants.forEach(c => {
       const maxWp = c.max_wp || c.character?.max_wp || 0;
       init[c.id] = {
@@ -517,12 +616,12 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
   const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allEncounters'] }) });
-  const duplicateEncounterMu = useMutation({ mutationFn: ({ id, name }: any) => duplicateEncounter(id, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); } });
-  const updateEncounterMu = useMutation({ mutationFn: ({ id, updates }: any) => updateEncounter(id, updates), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }); setIsEditingEncounter(false); } });
+  const duplicateEncounterMu = useMutation({ mutationFn: ({ id, name }: { id: string; name: string }) => duplicateEncounter(id, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); } });
+  const updateEncounterMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<Encounter> }) => updateEncounter(id, updates), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }); setIsEditingEncounter(false); } });
   const addCharacterMu = useMutation({ mutationFn: addCharacterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
   const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  const updateCombatantMu = useMutation({ mutationFn: ({ id, updates }: any) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
+  const updateCombatantMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<EncounterCombatant> }) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
 
   // FIX: Explicitly handle object destructuring for mutation
   const swapInitiativeMu = useMutation({
@@ -539,7 +638,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   });
 
-  const appendLogMu = useMutation({ mutationFn: (entry: any) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
+  const appendLogMu = useMutation({ mutationFn: (entry: CombatLogEntry) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
   const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
   const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
@@ -563,7 +662,8 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const c = combatants.find(x => x.id === id);
     if (!stats || !c) return;
     const nh = parseInt(stats.current_hp); const nw = parseInt(stats.current_wp);
-    const updates: any = {}; let siblings = [c];
+    const updates: Partial<EncounterCombatant> = {};
+    let siblings = [c];
     if (c.monster_id && combatantsData) siblings = getSiblings(c, combatantsData);
     if (!isNaN(nh) && nh !== c.current_hp) { updates.current_hp = nh; appendLogMu.mutate({ type: 'hp_change', ts: Date.now(), who: id, name: c.display_name, delta: nh - (c.current_hp || 0) }); }
     if (!isNaN(nw) && nw !== c.current_wp) { updates.current_wp = nw; appendLogMu.mutate({ type: 'wp_change', ts: Date.now(), who: id, name: c.display_name, delta: nw - (c.current_wp || 0) }); }
@@ -595,7 +695,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     const target = combatants.find(c => c.id === targetId);
     if (!target) return;
     const newHp = Math.max(0, target.current_hp - dmg);
-    const updates: any = { current_hp: newHp };
+    const updates: Partial<EncounterCombatant> = { current_hp: newHp };
     let siblings = [target];
     if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
     siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
@@ -662,7 +762,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-4 lg:col-span-1 h-fit lg:sticky lg:top-24">
-            <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden"><div className="p-3 bg-stone-50 border-b border-stone-200"><h4 className="font-bold text-stone-600 text-sm uppercase">Combat Log</h4></div><div className="h-64 lg:h-[calc(100vh-300px)] overflow-y-auto p-3 bg-white"><CombatLogView log={encounterDetails.log || []} /></div></div>
+            <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden"><div className="p-3 bg-stone-50 border-b border-stone-200"><h4 className="font-bold text-stone-600 text-sm uppercase">Combat Log</h4></div><div className="h-64 lg:h-[calc(100vh-300px)] overflow-y-auto p-3 bg-white"><CombatLogView log={(encounterDetails.log as CombatLogEntry[] | undefined) || []} /></div></div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200"><textarea className="w-full text-sm p-2 border rounded bg-yellow-50/50 min-h-[100px]" placeholder={isDM ? "DM Notes..." : "Encounter Notes"} disabled={!isDM} value={temporaryNotes} onChange={e => setTemporaryNotes(e.target.value)} />{isDM && <div className="mt-2 flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setIsEditingEncounter(true)} icon={Edit3}>Edit Encounter</Button></div>}</div>
           </div>
           <div className="lg:col-span-2 space-y-4">
@@ -683,7 +783,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: any) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} />))}</div>
             </div>
           </div>
         </div>

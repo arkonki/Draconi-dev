@@ -6,9 +6,10 @@ import {
   Bold, Italic, List, ListOrdered, Heading1, Link as LinkIcon,
   Table as TableIcon, Eye, EyeOff, Quote, Code, Bell
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { sendMessage } from '../../lib/api/chat';
 
@@ -43,6 +44,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   const [category, setCategory] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -52,6 +54,12 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+
+  useEffect(() => {
+    if (viewState === 'create' || viewState === 'edit') {
+      titleInputRef.current?.focus();
+    }
+  }, [viewState]);
 
   // --- EDITOR HELPERS ---
   const insertMarkdown = (prefix: string, suffix: string = '') => {
@@ -123,11 +131,12 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
 
       if (fetchError) throw fetchError;
 
-      setNotes((data as any) || []);
+      const fetchedNotes = (data ?? []) as unknown as Note[];
+      setNotes(fetchedNotes);
 
       // SAFE CATEGORY EXTRACTION
       const uniqueCats = Array.from(new Set(
-        ((data as any[]) || [])
+        fetchedNotes
           .map(n => n.category || 'Uncategorized') // Handle null category
           .filter(Boolean)
       ));
@@ -175,12 +184,12 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
     try {
       let resultNote: Note | null = null;
       if (viewState === 'edit' && selectedNote) {
-        const { data, error } = await (supabase.from('notes') as any).update(notePayload).eq('id', selectedNote.id).select().single();
+        const { data, error } = await supabase.from('notes').update(notePayload).eq('id', selectedNote.id).select().single();
         if (error) throw error;
-        resultNote = data as any;
+        resultNote = data as unknown as Note;
 
         // Sync changes to Map Pins linked to this note
-        const { error: pinSyncError } = await (supabase.from('party_map_pins') as any)
+        const { error: pinSyncError } = await supabase.from('party_map_pins')
           .update({
             label: notePayload.title,
             description: notePayload.content
@@ -191,9 +200,9 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
           console.error("Failed to sync map pins:", pinSyncError);
         }
       } else {
-        const { data, error } = await (supabase.from('notes') as any).insert([notePayload]).select().single();
+        const { data, error } = await supabase.from('notes').insert([notePayload]).select().single();
         if (error) throw error;
-        resultNote = data as any;
+        resultNote = data as unknown as Note;
       }
       await loadNotes();
       setViewState('view');
@@ -210,8 +219,8 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
     if (!window.confirm("Are you sure you want to delete this note?")) return;
     try {
       // 1. Manually delete linked map pins (DB should cascade if configured, but doing safeguards)
-      const { error: pinError } = await (supabase
-        .from('party_map_pins') as any)
+      const { error: pinError } = await supabase
+        .from('party_map_pins')
         .delete()
         .eq('note_id', noteId);
 
@@ -315,10 +324,11 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
               const catLabel = note.category || 'Uncategorized';
 
               return (
-                <div
+                <button
+                  type="button"
                   key={note.id}
                   onClick={() => { setSelectedNote(note); setViewState('view'); }}
-                  className={`p-3 rounded-lg cursor-pointer border transition-all group relative ${selectedNote?.id === note.id ? 'bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500 z-10' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}
+                  className={`w-full text-left p-3 rounded-lg cursor-pointer border transition-all group relative ${selectedNote?.id === note.id ? 'bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500 z-10' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}
                 >
                   <div className="flex justify-between items-start mb-1">
                     <h3 className={`font-semibold text-sm truncate pr-2 ${selectedNote?.id === note.id ? 'text-indigo-700' : 'text-gray-800'}`}>{note.title}</h3>
@@ -329,7 +339,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
                       <Tag size={10} /> {catLabel}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })
           )}
@@ -352,12 +362,12 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Title</label>
-                  <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. The Goblin King's Weakness" autoFocus />
+                  <label htmlFor="party-note-title" className="block text-sm font-semibold text-gray-700 mb-1.5">Title</label>
+                  <input id="party-note-title" ref={titleInputRef} type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. The Goblin King's Weakness" />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Category</label>
-                  <input type="text" list="categories" value={category} onChange={e => setCategory(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Lore" />
+                  <label htmlFor="party-note-category" className="block text-sm font-semibold text-gray-700 mb-1.5">Category</label>
+                  <input id="party-note-category" type="text" list="categories" value={category} onChange={e => setCategory(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Lore" />
                   <datalist id="categories">{categories.map(c => <option key={c} value={c} />)}</datalist>
                 </div>
               </div>
@@ -365,7 +375,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
               {/* EDITOR */}
               <div>
                 <div className="flex justify-between items-end mb-1.5">
-                  <label className="block text-sm font-semibold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
+                  <label htmlFor="party-note-content" className="block text-sm font-semibold text-gray-700">Content <span className="text-xs font-normal text-gray-400">(Markdown)</span></label>
                   <button type="button" onClick={() => setShowPreview(!showPreview)} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
                     {showPreview ? <><EyeOff size={14} /> Edit</> : <><Eye size={14} /> Preview</>}
                   </button>
@@ -393,6 +403,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
                     </div>
                   ) : (
                     <textarea
+                      id="party-note-content"
                       ref={textareaRef}
                       value={content}
                       onChange={e => setContent(e.target.value)}
@@ -415,7 +426,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
           <div className="max-w-4xl mx-auto animate-in fade-in duration-300">
             <div className="flex flex-wrap justify-between items-start gap-4 mb-8 pb-6 border-b border-gray-100">
               <div>
-                <div className="md:hidden mb-2 text-indigo-600 font-medium text-sm cursor-pointer" onClick={() => setSelectedNote(null)}>← Back to List</div>
+                <button type="button" className="md:hidden mb-2 text-indigo-600 font-medium text-sm cursor-pointer" onClick={() => setSelectedNote(null)}>← Back to List</button>
                 <h1 className="text-3xl font-bold text-gray-900 mb-3">{selectedNote.title}</h1>
                 <div className="flex flex-wrap gap-3 items-center text-sm">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-medium border border-indigo-100">
@@ -458,7 +469,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   );
 }
 
-function ToolbarButton({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) {
+function ToolbarButton({ icon: Icon, label, onClick }: { icon: LucideIcon, label: string, onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} title={label} className="p-1.5 text-gray-600 hover:text-indigo-600 hover:bg-white hover:shadow-sm rounded transition-all">
       <Icon size={16} />

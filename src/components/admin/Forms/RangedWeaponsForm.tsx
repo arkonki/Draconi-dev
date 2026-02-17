@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface RangedWeaponsFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type RangedWeaponsFormProps = ItemFormProps;
 
 export function RangedWeaponsForm({ entry, onChange }: RangedWeaponsFormProps) {
   return (

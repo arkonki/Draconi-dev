@@ -1,5 +1,4 @@
 import { supabase } from '../supabase';
-import { User } from '@supabase/supabase-js';
 
 // Define the structure of the user profile data from the public.users table
 export interface UserProfile {

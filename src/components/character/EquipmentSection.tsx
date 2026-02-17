@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Shield, Sword, Dices, Star, X, Save, Hammer, Crosshair, AlertCircle, AlertTriangle } from 'lucide-react';
-import { Character, AttributeName, DiceType, InventoryItem } from '../../types/character';
+import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { ErrorMessage } from '../shared/ErrorMessage';
-import { useDice } from '../dice/DiceContext';
+import { useDice } from '../dice/useDice';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 
@@ -31,7 +30,7 @@ const getConditionForAttribute = (attr: AttributeName): keyof Character['conditi
   return { 'STR': 'exhausted', 'CON': 'sickly', 'AGL': 'dazed', 'INT': 'angry', 'WIL': 'scared', 'CHA': 'disheartened' }[attr] as keyof Character['conditions']; 
 };
 
-const parseSkillLevels = (skillLevelsData: any): Record<string, number> => { 
+const parseSkillLevels = (skillLevelsData: unknown): Record<string, number> => { 
   if (typeof skillLevelsData === 'object' && skillLevelsData !== null) { return skillLevelsData; } 
   return {}; 
 };
@@ -56,7 +55,7 @@ interface ItemNote { enhanced?: boolean; bonus?: string; broken?: boolean; }
 type ItemCategory = 'armor' | 'weapon';
 
 // --- MODAL COMPONENT ---
-const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: any) => void; }) => {
+const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: Character['item_notes']) => void; }) => {
   const [isEnhanced, setIsEnhanced] = useState(false);
   const [bonusText, setBonusText] = useState('');
   const [isBroken, setIsBroken] = useState(false);
@@ -93,10 +92,10 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
              <h4 className="font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><AlertTriangle size={14} className={isBroken ? 'text-red-600' : 'text-stone-400'}/>Condition & Durability</h4>
              <div className="flex items-center justify-between">
                 <label htmlFor={uniqueId} className="text-sm font-bold text-stone-700 cursor-pointer select-none">Is the item broken?<span className="block text-[10px] font-normal text-stone-500 mt-0.5">{"Happens if Parry Damage > Durability"} ({item.durability || 'N/A'})</span></label>  
-                <label htmlFor={uniqueId} className="relative inline-flex items-center cursor-pointer">
+                <div className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" id={uniqueId} checked={isBroken} onChange={(e) => setIsBroken(e.target.checked)} className="peer sr-only" />
                     <div className="w-11 h-6 bg-stone-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 shadow-inner"></div>
-                </label>
+                </div>
              </div>
           </div>
           <div className="space-y-4 bg-white p-4 border border-stone-200 rounded-sm">
@@ -117,7 +116,7 @@ export function EquipmentSection({ character }: { character: Character }) {
   const { toggleDiceRoller } = useDice();
   const { updateCharacterData } = useCharacterSheetStore();
   const [editingItem, setEditingItem] = useState<{ item: GameItem; category: ItemCategory } | null>(null);
-  const { data: allItems = [], isLoading, error } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const { data: allItems = [], isLoading } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
 
   // --- SMART ITEM LOOKUP ---
   const resolveItem = (itemName: string | undefined): GameItem | undefined => {
@@ -128,7 +127,7 @@ export function EquipmentSection({ character }: { character: Character }) {
     const staticItem = allItems.find(i => i.name.toLowerCase().trim() === lowerName);
 
     if (invItem && staticItem) {
-        return { ...staticItem, ...invItem } as any as GameItem;
+        return { ...staticItem, ...invItem } as GameItem;
     }
     
     if (invItem) {
@@ -139,7 +138,7 @@ export function EquipmentSection({ character }: { character: Character }) {
             cost: (invItem.cost as string) || '0',
             weight: invItem.weight || 0,
             ...invItem 
-        } as any as GameItem;
+        } as GameItem;
     }
 
     return staticItem;
@@ -154,7 +153,6 @@ export function EquipmentSection({ character }: { character: Character }) {
   const isItemEnhanced = (item: GameItem | undefined, category: ItemCategory) => getNoteForItem(item, category)?.enhanced || false;
 
   const calculateTotalArmor = () => {
-    let total = 0;
     const armor = resolveItem(character.equipment?.equipped?.armor);
     const helmet = resolveItem(character.equipment?.equipped?.helmet);
     
@@ -178,7 +176,7 @@ export function EquipmentSection({ character }: { character: Character }) {
   const handleDamageRoll = (weaponName: string, damageDiceString: string) => {
     const weaponDetails = resolveItem(weaponName);
     const note = getNoteForItem(weaponDetails, 'weapon');
-    let dicePool: DiceType[] = []; let formulaParts: string[] = [];
+    const dicePool: DiceType[] = []; const formulaParts: string[] = [];
     
     // 1. Base Damage
     const baseMatch = damageDiceString?.match(/(\d+)?d(\d+)/i);
@@ -222,7 +220,7 @@ export function EquipmentSection({ character }: { character: Character }) {
     toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `Attack: ${weaponName} (${skillName})`, requiresBane: isAffected, skillName });
   };
   
-  const handleSaveNotes = async (notes: any) => {
+  const handleSaveNotes = async (notes: Character['item_notes']) => {
     try { await updateCharacterData({ item_notes: notes }); } catch (error) { console.error(error); }
   };
 

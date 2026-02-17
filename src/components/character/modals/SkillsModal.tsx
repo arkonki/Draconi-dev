@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { X, Info, CheckSquare, Target, Swords, GraduationCap, Sparkles, BookOpen, ShieldAlert } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
-import { useDice } from '../../dice/DiceContext';
+import { useDice } from '../../dice/useDice';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { supabase } from '../../../lib/supabase';
@@ -126,6 +126,12 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   };
   
   const handleBackgroundClick = () => { setActiveTooltip(null); };
+  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      action();
+    }
+  };
   
   const handleMarkSkill = (e: React.ChangeEvent<HTMLInputElement>, skillName: string) => {
     e.stopPropagation();
@@ -162,10 +168,13 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
             }
         `}
         onClick={() => handleSkillClick(skill.name, skillValue, isAffected)}
+        onKeyDown={(event) => handleKeyboardActivate(event, () => handleSkillClick(skill.name, skillValue, isAffected))}
+        role="button"
+        tabIndex={0}
       >
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="relative flex items-center justify-center w-6 h-6 shrink-0" onClick={(e) => e.stopPropagation()}>
-             <input type="checkbox" checked={isMarked} onChange={(e) => handleMarkSkill(e, skill.name)} className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-indigo-600 checked:border-indigo-600 focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400 cursor-pointer transition-colors" title="Mark for advancement"/>
+          <div className="relative flex items-center justify-center w-6 h-6 shrink-0">
+             <input type="checkbox" checked={isMarked} onClick={(event) => event.stopPropagation()} onChange={(e) => handleMarkSkill(e, skill.name)} className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-indigo-600 checked:border-indigo-600 focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400 cursor-pointer transition-colors" title="Mark for advancement"/>
              <CheckSquare size={14} className="absolute text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" strokeWidth={3} />
           </div>
 
@@ -206,19 +215,19 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const filteredSecondary = filterSkills(secondarySkills);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={handleBackgroundClick}>
-      <div className="bg-gray-50 rounded-2xl max-w-5xl w-full h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 bg-white border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0" onClick={handleBackgroundClick}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+      <div className="bg-gray-50 rounded-2xl max-w-5xl w-full h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}>
+        <div className="px-6 py-4 bg-white border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
           <div><h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Target className="text-indigo-600" />Skill Checks</h2><p className="text-sm text-gray-500 mt-1">Select a skill to roll. Target number is your Skill Level.</p></div>
           <div className="flex items-center gap-3">
              <div className="relative hidden md:block"><input type="text" placeholder="Search skills..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-3 pr-8 py-1.5 text-sm bg-gray-100 border-transparent rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all w-48"/></div>
              <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
           </div>
         </div>
-        <div className="bg-indigo-50/50 px-6 py-2 border-b border-indigo-100 flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-indigo-800" onClick={handleBackgroundClick}><CheckSquare size={14} /><span>Rolled a 1 (Dragon) or 20 (Demon)? Check the box to mark for advancement.</span></div>
+        <div className="bg-indigo-50/50 px-6 py-2 border-b border-indigo-100 flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-indigo-800" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}><CheckSquare size={14} /><span>Rolled a 1 (Dragon) or 20 (Demon)? Check the box to mark for advancement.</span></div>
         
         {isLoadingInfo ? <div className="flex-grow flex items-center justify-center"><LoadingSpinner size="lg" /></div> : (
-          <div className="flex-grow overflow-y-auto p-6 custom-scrollbar" onClick={handleBackgroundClick}>
+          <div className="flex-grow overflow-y-auto p-6 custom-scrollbar" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {(filteredGeneral.length > 0) && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><BookOpen size={16} /> General</h3><div className="space-y-2">{filteredGeneral.map(renderSkillRow)}</div></div>)}
               {(filteredWeapon.length > 0 || filteredSecondary.length > 0) && (<div className="space-y-8 lg:col-span-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8">{filteredWeapon.length > 0 && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><Swords size={16} /> Weapons</h3><div className="space-y-2">{filteredWeapon.map(renderSkillRow)}</div></div>)}{filteredSecondary.length > 0 && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><Sparkles size={16} /> Magic & Secondary</h3><div className="space-y-2">{filteredSecondary.map(renderSkillRow)}</div></div>)}</div></div>)}
@@ -226,7 +235,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
             </div>
           </div>
         )}
-        {activeTooltip && tooltipPosition && (<div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[70] animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />{skillInfo[activeTooltip]?.description || "No description available."}</div>)}
+        {activeTooltip && tooltipPosition && (<div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[70] animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}><div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />{skillInfo[activeTooltip]?.description || "No description available."}</div>)}
       </div>
     </div>
   );

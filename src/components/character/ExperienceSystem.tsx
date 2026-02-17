@@ -100,6 +100,14 @@ export function ExperienceSystem({ character, onUpdate }: ExperienceSystemProps)
               <div
                 key={skill}
                 onClick={() => handleSkillToggle(skill)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleSkillToggle(skill);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 className={`flex items-center gap-2 p-2 rounded cursor-pointer ${
                   selectedSkills.includes(skill)
                     ? 'bg-blue-50 border-blue-200'

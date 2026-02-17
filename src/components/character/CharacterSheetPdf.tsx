@@ -1,6 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Svg, Path } from '@react-pdf/renderer';
-import { Character } from '../../types/character';
+import { AttributeName, Character } from '../../types/character';
 import { GameItem } from '../../lib/api/items'; // Ensure this type is imported
 import { calculateMovement } from '../../lib/movement';
 
@@ -67,7 +67,7 @@ const HelmetIcon = () => (
   </Svg>
 );
 
-const SkillRow = ({ name, value, isTrained, attribute }: any) => (
+const SkillRow = ({ name, value, isTrained, attribute }: { name: string; value: number; isTrained: boolean | undefined; attribute: string }) => (
   <View style={styles.skillRow}>
     <Text>{name} <Text style={{ fontSize: 6, color: '#888' }}>({attribute})</Text></Text>
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -100,7 +100,7 @@ export const DragonbanePdfDocument = ({ character, allItems }: { character: Char
   
   const secondarySkills = Object.keys(character.skill_levels || {}).filter(skill => ![...coreSkillsList, ...weaponSkillsList].includes(skill)).sort();
 
-  const getSkillValue = (name: string) => character.skill_levels?.[name] || getBaseChance(character.attributes?.[skillAttributeMap[name] as any] || 10);
+  const getSkillValue = (name: string) => character.skill_levels?.[name] || getBaseChance(character.attributes?.[skillAttributeMap[name] as AttributeName] || 10);
   const isTrained = (name: string) => character.trained_skills?.includes(name);
 
   // --- EQUIPMENT & ARMOR LOOKUP ---
@@ -141,14 +141,13 @@ export const DragonbanePdfDocument = ({ character, allItems }: { character: Char
 
         {/* ATTRIBUTES */}
         <View style={styles.attributesContainer}>
-          {['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'].map((attr) => {
-             const map: any = { STR: 'EXHAUSTED', CON: 'SICKLY', AGL: 'DAZED', INT: 'ANGRY', WIL: 'SCARED', CHA: 'DISHEARTENED' };
-             const condKey = map[attr].toLowerCase();
+          {(['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'] as const).map((attr) => {
+             const map: Record<AttributeName, string> = { STR: 'EXHAUSTED', CON: 'SICKLY', AGL: 'DAZED', INT: 'ANGRY', WIL: 'SCARED', CHA: 'DISHEARTENED' };
              // Just empty checkboxes for printing
              return (
               <View key={attr} style={styles.attrGroup}>
                 <Text style={styles.attrLabel}>{attr}</Text>
-                <View style={styles.attrCircle}><Text style={styles.attrValue}>{character.attributes?.[attr as any]}</Text></View>
+                <View style={styles.attrCircle}><Text style={styles.attrValue}>{character.attributes?.[attr]}</Text></View>
                 <Text style={styles.conditionBox}>[  ] {map[attr]}</Text>
               </View>
              );

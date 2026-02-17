@@ -1,17 +1,15 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import {
   Book, Search, Plus, Edit2, Bookmark, BookmarkPlus, ChevronRight, ChevronDown,
   Library, ArrowLeft, Share, ChevronLeft, Maximize2, Minimize2, Trash2
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { CompendiumEntry } from '../types/compendium';
 import { Button } from '../components/shared/Button';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
-import { HomebrewRenderer } from '../components/compendium/HomebrewRenderer';
-import { CompendiumFullPage } from '../components/compendium/CompendiumFullPage';
 import { fetchCompendiumEntries, deleteCompendiumEntry } from '../lib/api/compendium';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { sendMessage } from '../lib/api/chat';
@@ -28,6 +26,25 @@ interface PartySummary {
   id: string;
   name: string;
 }
+
+const CompendiumFullPage = lazy(() =>
+  import('../components/compendium/CompendiumFullPage').then((module) => ({
+    default: module.CompendiumFullPage,
+  }))
+);
+const HomebrewRenderer = lazy(() =>
+  import('../components/compendium/HomebrewRenderer').then((module) => ({
+    default: module.HomebrewRenderer,
+  }))
+);
+
+const getPreviewText = (content: string): string =>
+  content
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[`#>*_|]/g, ' ')
+    .replace(/[()[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 export function Compendium() {
   const { user, isAdmin } = useAuth();
@@ -58,7 +75,9 @@ export function Compendium() {
       if (!user) return [];
       const { data, error } = await supabase.from('party_members').select('parties(id, name)').eq('user_id', user.id);
       if (error) { console.error('Error fetching parties', error); return []; }
-      return data.map((item: any) => item.parties).filter(Boolean);
+      return data
+        .map((item: { parties: PartySummary | null }) => item.parties)
+        .filter((party): party is PartySummary => Boolean(party));
     },
     enabled: !!user
   });
@@ -96,7 +115,11 @@ export function Compendium() {
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => {
       const next = new Set(prev);
-      next.has(category) ? next.delete(category) : next.add(category);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
       return next;
     });
   };
@@ -194,9 +217,13 @@ export function Compendium() {
       `}>
           <div className="p-3 border-b border-gray-200 bg-white sticky top-0 z-10">
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer hover:text-indigo-600 transition-colors" onClick={() => setSelectedEntry(null)}>
+              <button
+                type="button"
+                className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer hover:text-indigo-600 transition-colors"
+                onClick={() => setSelectedEntry(null)}
+              >
                 <Library className="w-5 h-5" /><span>Compendium</span>
-              </div>
+              </button>
               {isAdmin() && (<Button variant="ghost" size="icon_sm" onClick={handleNewEntry} title="Create New Entry"><Plus className="w-5 h-5 text-indigo-600" /></Button>)}
             </div>
             <div className="relative">
@@ -296,7 +323,15 @@ export function Compendium() {
               </div>
 
               <div className="p-2 md:p-4 w-full max-w-full overflow-x-hidden">
-                <HomebrewRenderer content={selectedEntry.content} />
+                <Suspense
+                  fallback={
+                    <div className="flex justify-center py-10">
+                      <LoadingSpinner size="lg" />
+                    </div>
+                  }
+                >
+                  <HomebrewRenderer content={selectedEntry.content} />
+                </Suspense>
               </div>
 
               <div className="mt-auto p-2 md:p-4 border-t border-gray-50 text-center text-gray-400 text-xs pb-4">Entry Title: {selectedEntry.title}</div>
@@ -317,13 +352,27 @@ export function Compendium() {
               {bookmarkedEntries.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
                   {bookmarkedEntries.map(bookmark => (
-                    <div key={bookmark.id} onClick={() => setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark)} className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden">
+                    <div
+                      key={bookmark.id}
+                      onClick={() => setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedEntry(entries.find(e => e.id === bookmark.id) || bookmark);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group relative overflow-hidden"
+                    >
                       <div className="flex justify-between items-start mb-2 relative z-10 bg-white">
                         <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2 text-sm md:text-base">{bookmark.title}</h3>
                         <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded shrink-0">{bookmark.category}</span>
                       </div>
                       <div className="relative h-20 md:h-24 overflow-hidden text-xs text-gray-500">
-                        <div className="origin-top-left transform scale-90 w-[110%]"><HomebrewRenderer content={bookmark.preview} /></div>
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          {getPreviewText(bookmark.preview).slice(0, 260)}
+                        </p>
                         <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
                       </div>
                       <div className="mt-2 flex items-center text-xs text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-4 z-20 bg-white pl-2">Read Entry <ChevronRight size={14} className="ml-1" /></div>
@@ -337,7 +386,23 @@ export function Compendium() {
           )}
         </div>
 
-        {fullPageEntry && <CompendiumFullPage entry={fullPageEntry} onClose={() => setFullPageEntry(null)} onSave={async (e) => { await saveMutation.mutateAsync(e); }} />}
+        {fullPageEntry && (
+          <Suspense
+            fallback={
+              <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
+                <LoadingSpinner size="lg" />
+              </div>
+            }
+          >
+            <CompendiumFullPage
+              entry={fullPageEntry}
+              onClose={() => setFullPageEntry(null)}
+              onSave={async (e) => {
+                await saveMutation.mutateAsync(e);
+              }}
+            />
+          </Suspense>
+        )}
       </div>
     </>
   );

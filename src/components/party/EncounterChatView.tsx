@@ -4,14 +4,24 @@ import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull,
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
-import { useAuth } from '../../contexts/AuthContext';
+import type { Character } from '../../types/character';
+import { useAuth } from '../../contexts/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { PartyChat } from '../party/PartyChat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 import { fetchParties } from '../../lib/api/parties';
 
 // --- HELPER: Editable Stat Box ---
-const StatInput = ({ value, max, icon: Icon, colorClass, onChange, disabled }: any) => {
+interface StatInputProps {
+  value: number;
+  max: number;
+  icon: React.ComponentType<{ className?: string }>;
+  colorClass: string;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}
+
+const StatInput = ({ value, max, icon: Icon, colorClass, onChange, disabled }: StatInputProps) => {
   const [localVal, setLocalVal] = useState(String(value));
   useEffect(() => { setLocalVal(String(value)); }, [value]);
   const handleBlur = () => {
@@ -103,7 +113,17 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
 };
 
 // --- MAIN COMPONENT ---
-export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMembers }: { forcedPartyId?: string, forcedPartyName?: string, forcedMembers?: any[] }) {
+interface PartySummary {
+  id: string;
+  name: string;
+  members: Character[];
+}
+
+interface IncomingMessage {
+  party_id?: string;
+}
+
+export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMembers }: { forcedPartyId?: string, forcedPartyName?: string, forcedMembers?: Character[] }) {
   const { user } = useAuth();
   const { character, activeEncounter, encounterCombatants, isLoadingEncounter, fetchActiveEncounter } = useCharacterSheetStore();
 
@@ -115,7 +135,7 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
   // ...
 
   // 1. Fetch User's Parties (Both DM and Player)
-  const { data: myParties = [] } = useQuery({
+  const { data: myParties = [] } = useQuery<PartySummary[]>({
     queryKey: ['myParties', user?.id],
     queryFn: async () => {
       if (!user) return [];
@@ -160,11 +180,13 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
 
     const channel = supabase.channel(`global-chat-monitor`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const msg = payload.new as any;
-        const isRelevant = (myParties.some(p => p.id === msg.party_id)) || (forcedPartyId === msg.party_id);
+        const msg = payload.new as IncomingMessage;
+        const messagePartyId = msg.party_id;
+        const isRelevant = typeof messagePartyId === 'string' &&
+          ((myParties.some(p => p.id === messagePartyId)) || (forcedPartyId === messagePartyId));
 
         if (isRelevant) {
-          if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== msg.party_id)) {
+          if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== messagePartyId)) {
             setUnreadCount(prev => prev + 1);
           }
         }
@@ -258,8 +280,14 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
       {/* --- MODAL DRAWER --- */}
       {/* Changed: Z-index 100 to ensure it is always on top */}
       {isOpen && (
-        <div className="fixed inset-0 bg-black/60 flex justify-end z-[100] backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsOpen(false)}>
-          <div className="bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300 transform transition-transform animate-in slide-in-from-right duration-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 flex justify-end z-[100] backdrop-blur-sm animate-in fade-in duration-200">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setIsOpen(false)}
+            aria-label="Close encounter chat drawer"
+          />
+          <div className="relative bg-stone-100 w-full max-w-sm h-full shadow-2xl flex flex-col border-l border-stone-300 transform transition-transform animate-in slide-in-from-right duration-300">
 
             {/* Header */}
             <div className="p-3 bg-stone-800 text-white shadow-md flex-shrink-0">
@@ -310,7 +338,7 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
 
               {/* --- TAB 1: COMBAT --- */}
               {activeTab === 'combat' && (
-                <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/parchment-bg.png')] bg-repeat">
+                <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/assets/dragonbane-sheet-bg.jpg')] bg-repeat">
                   {isLoadingEncounter && !activeEncounter ? (
                     <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-stone-500" /></div>
                   ) : activeEncounter ? (

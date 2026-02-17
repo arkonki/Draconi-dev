@@ -15,7 +15,7 @@ export function CharacterCard({ character }: CharacterCardProps) {
     return 'text-gray-500 bg-gray-50 border-gray-100';
   };
 
-  const StatBadge = ({ icon: Icon, value, label }: { icon: any, value: number, label: string }) => (
+  const StatBadge = ({ icon: Icon, value, label }: { icon: React.ElementType; value: number; label: string }) => (
     <div className={`flex flex-col items-center justify-center p-1.5 rounded-lg border ${getAttributeColor(value)} transition-colors`}>
       <Icon className="w-3.5 h-3.5 mb-0.5 opacity-70" />
       <span className="text-xs font-bold leading-none">{value}</span>

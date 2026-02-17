@@ -1,13 +1,10 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface MedicineFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type MedicineFormProps = ItemFormProps;
 
-export function MedicineForm({ entry, onChange }: MedicineFormFormProps) {
+export function MedicineForm({ entry, onChange }: MedicineFormProps) {
   return (
     <ItemForm
       entry={{

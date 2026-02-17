@@ -1,15 +1,26 @@
 // Keep existing imports and code...
       import { useState, useEffect, useCallback } from 'react';
       import { supabase } from '../lib/supabase';
-      import { Ability, Kin, Profession, Skill, SkillRequirement } from '../types/character';
       import { MonsterData } from '../types/bestiary'; // Import MonsterData
 
       export type DataCategory = 'spells' | 'items' | 'abilities' | 'kin' | 'profession' | 'skills' | 'monsters'; // Added 'monsters'
 
       // Make GameDataEntry a union of all possible types
       export type GameDataEntry =
-        | { id?: string; name: string; description?: string; [key: string]: any } // Base structure
+        | { id?: string; name: string; description?: string; [key: string]: unknown } // Base structure
         | MonsterData; // Add other specific types if they don't fit the base
+
+      const getErrorMeta = (err: unknown): { message?: string; details?: string; code?: string } => {
+        if (typeof err === 'object' && err !== null) {
+          const errorLike = err as { message?: unknown; details?: unknown; code?: unknown };
+          return {
+            message: typeof errorLike.message === 'string' ? errorLike.message : undefined,
+            details: typeof errorLike.details === 'string' ? errorLike.details : undefined,
+            code: typeof errorLike.code === 'string' ? errorLike.code : undefined,
+          };
+        }
+        return {};
+      };
 
 
       export function useGameData(initialCategory: DataCategory) {
@@ -65,7 +76,7 @@
             }
 
             const formattedData: GameDataEntry[] = (data || []).map(item => {
-              let processedItem = { ...item };
+              const processedItem = { ...item };
               if (category === 'spells') {
                 processedItem.magic_schools = item.magic_schools?.name;
               }
@@ -81,11 +92,12 @@
             console.log(`[useGameData] Loaded ${formattedData.length} entries for ${category} from ${tableName}`);
             setEntries(formattedData);
 
-          } catch (err: any) {
+          } catch (err: unknown) {
             const contextName = tableName || category;
             console.error(`[useGameData] Error in loadEntries for ${contextName}:`, err);
-            const errorMessage = err?.message || `Failed to load ${contextName}`;
-            const errorDetails = err?.details ? `: ${err.details}` : '';
+            const { message, details } = getErrorMeta(err);
+            const errorMessage = message || `Failed to load ${contextName}`;
+            const errorDetails = details ? `: ${details}` : '';
             setError(`${errorMessage}${errorDetails}`);
             setEntries([]);
           } finally {
@@ -106,7 +118,7 @@
 
             tableName = getTableName(category);
             const { id, ...dataToSaveAny } = editingEntry;
-            let dataToSave = { ...dataToSaveAny }; // Make a mutable copy
+            const dataToSave = { ...dataToSaveAny }; // Make a mutable copy
 
             if (!dataToSave.name || String(dataToSave.name).trim() === '') {
                 throw new Error(`Cannot save ${category} without a name.`);
@@ -148,11 +160,15 @@
 
               // Remove temporary client-side IDs from attacks and effects before saving
               if (Array.isArray(dataToSave.attacks)) {
-                dataToSave.attacks = dataToSave.attacks.map((attack: any) => {
-                  const { id: attackId, effects, ...restOfAttack } = attack;
+                dataToSave.attacks = dataToSave.attacks.map((attack) => {
+                  const attackRecord = attack as Record<string, unknown> & { id?: string; effects?: unknown[] };
+                  const { effects, ...restOfAttack } = attackRecord;
+                  delete (restOfAttack as { id?: string }).id;
                   if (Array.isArray(effects)) {
-                    restOfAttack.effects = effects.map((effect: any) => {
-                      const { id: effectId, ...restOfEffect } = effect;
+                    restOfAttack.effects = effects.map((effect) => {
+                      const effectRecord = effect as Record<string, unknown> & { id?: string };
+                      const { id: _discardId, ...restOfEffect } = effectRecord;
+                      void _discardId;
                       return restOfEffect;
                     });
                   }
@@ -172,7 +188,6 @@
 
             console.log(`[useGameData] Saving entry to ${tableName} (ID: ${id || 'new'}):`, dataToSave);
 
-            let error: any = null;
             let savedData: GameDataEntry | null = null;
 
             if (id) {
@@ -182,7 +197,7 @@
                 .eq('id', id)
                 .select()
                 .single();
-              error = updateError;
+              if (updateError) throw updateError;
               savedData = updateData as GameDataEntry;
             } else {
               const { data: insertData, error: insertError } = await supabase
@@ -190,31 +205,27 @@
                 .insert([dataToSave])
                 .select()
                 .single();
-               error = insertError;
+               if (insertError) throw insertError;
                savedData = insertData as GameDataEntry;
-            }
-
-            if (error) {
-                console.error(`[useGameData] Supabase Save Error (${tableName}):`, error);
-                throw error;
             }
 
             if (!savedData) {
               console.warn(`[useGameData] Save operation for ${category} (ID: ${id || 'new'}) did not return data. Using input data for callback.`);
               // Fallback: use the data we sent, but it won't have DB-generated fields like created_at or a new ID.
               // This situation should ideally not happen if .select().single() is used correctly.
-              onSuccess({ ...editingEntry, id: id || (savedData as any)?.id }); // Try to use returned ID if available
+              onSuccess(id ? { ...editingEntry, id } : { ...editingEntry });
             } else {
               console.log(`[useGameData] Save operation successful for ${category} (ID: ${savedData.id})`);
               onSuccess(savedData);
             }
             await loadEntries(category);
 
-          } catch (err: any) {
+          } catch (err: unknown) {
             const contextName = tableName || category;
-            const errorMessage = err?.message || (typeof err === 'string' ? err : 'An unexpected error occurred during save.');
-            const errorDetails = err?.details ? ` (Details: ${err.details})` : '';
-            const errorCode = err?.code ? ` (Code: ${err.code})` : '';
+            const { message, details, code } = getErrorMeta(err);
+            const errorMessage = message || (typeof err === 'string' ? err : 'An unexpected error occurred during save.');
+            const errorDetails = details ? ` (Details: ${details})` : '';
+            const errorCode = code ? ` (Code: ${code})` : '';
             const fullErrorMessage = `Error saving ${contextName}: ${errorMessage}${errorDetails}${errorCode}`;
 
             console.error(`[useGameData] Error in handleSave for ${contextName}:`, err);
@@ -251,11 +262,12 @@
             console.log(`[useGameData] Delete successful for ID: ${id} in ${category}`);
             await loadEntries(category);
 
-          } catch (err: any) {
+          } catch (err: unknown) {
             const contextName = tableName || category;
-            const errorMessage = err?.message || 'An unexpected error occurred during deletion.';
-            const errorDetails = err?.details ? ` (Details: ${err.details})` : '';
-            const errorCode = err?.code ? ` (Code: ${err.code})` : '';
+            const { message, details, code } = getErrorMeta(err);
+            const errorMessage = message || 'An unexpected error occurred during deletion.';
+            const errorDetails = details ? ` (Details: ${details})` : '';
+            const errorCode = code ? ` (Code: ${code})` : '';
             const fullErrorMessage = `Error deleting ${contextName}: ${errorMessage}${errorDetails}${errorCode}`;
 
             console.error(`[useGameData] Error in handleDelete for ${contextName}:`, err);

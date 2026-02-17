@@ -1,13 +1,6 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { useState } from 'react';
 import { AlertCircle, X, AlertTriangle } from 'lucide-react';
-
-interface AppContextType {
-  setGlobalError: (error: string | null) => void;
-  setGlobalLoading: (loading: boolean) => void;
-  setGlobalWarning: (warning: string | null) => void;
-}
-
-const AppContext = createContext<AppContextType | undefined>(undefined);
+import { AppContext } from './AppContextStore';
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -65,12 +58,4 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AppContext.Provider>
   );
-}
-
-export function useApp() {
-  const context = useContext(AppContext);
-  if (context === undefined) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
 }

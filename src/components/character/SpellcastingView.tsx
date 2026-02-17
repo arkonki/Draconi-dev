@@ -1,12 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Spell as DetailedSpell } from '../../types/magic';
 import { Character, AttributeName, DiceType } from '../../types/character';
-import { Sparkles, Dices, BookOpen, Wand2, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, Calendar, AlertCircle, X, Info } from 'lucide-react';
-import { Button } from '../shared/Button';
+import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X } from 'lucide-react';
 import { useSpells } from '../../hooks/useSpells';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { useDice } from '../dice/DiceContext';
+import { useDice } from '../dice/useDice';
 
 // --- CONFIGURATION ---
 const requirementExplanations: Record<string, string> = {
@@ -61,7 +60,12 @@ const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onCl
 
   return (
     <div className="fixed inset-0 z-[60] overflow-hidden pointer-events-none">
-      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto" onClick={onClose} />
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto"
+        onClick={onClose}
+        aria-label="Close spell details"
+      />
       <div className="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
         
         {/* Header */}
@@ -163,7 +167,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 
   const { toggleDiceRoller } = useDice();
   const { character, updateCharacterData, isSaving, setActiveStatusMessage } = useCharacterSheetStore();
-  const { learnedSpells, characterSchoolName, loading: spellsLoading, error: spellsError } = useSpells(character?.id);
+  const { learnedSpells, loading: spellsLoading } = useSpells(character?.id);
 
   // Logic
   const intValue = character?.attributes?.INT ?? 10;
@@ -284,7 +288,11 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
         </div>
 
         {/* Main Info */}
-        <div className="flex-grow min-w-0 cursor-pointer" onClick={() => setInfoPaneSpell(spell)}>
+        <button
+          type="button"
+          className="flex-grow min-w-0 cursor-pointer text-left bg-transparent"
+          onClick={() => setInfoPaneSpell(spell)}
+        >
           <div className="flex items-center gap-2 mb-1">
              <h3 className="font-bold text-stone-800 group-hover:text-indigo-700 transition-colors truncate">{spell.name}</h3>
              {isReactionSpell && <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 rounded">Reaction</span>}
@@ -301,7 +309,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                 </span>
             )}
           </div>
-        </div>
+        </button>
 
         {/* Actions */}
         <div className="mt-3 sm:mt-0 flex items-center gap-3 sm:border-l sm:border-stone-200 sm:pl-4">
@@ -354,7 +362,12 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <button
+        type="button"
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label="Close spellbook"
+      />
       
       <div className="relative bg-white w-full max-w-4xl h-[85vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border border-stone-200 animate-in zoom-in-95 duration-200">
          

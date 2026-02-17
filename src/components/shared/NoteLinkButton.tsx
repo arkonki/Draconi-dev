@@ -12,7 +12,7 @@ interface NoteLinkButtonProps {
 
 export function NoteLinkButton({ noteId, partyId, title: initialTitle, className = '' }: NoteLinkButtonProps) {
     const navigate = useNavigate();
-    const [_, setSearchParams] = useSearchParams();
+    const [, setSearchParams] = useSearchParams();
 
     // Fetch note title if not provided
     const { data: fetchedTitle, isLoading } = useQuery({

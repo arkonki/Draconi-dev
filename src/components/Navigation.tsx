@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { useDice } from './dice/DiceContext';
+import { useAuth } from '../contexts/useAuth';
+import { useDice } from './dice/useDice';
 import {
   Users,
   Book,

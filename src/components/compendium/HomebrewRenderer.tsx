@@ -6,6 +6,12 @@ import remarkHomebrewery from '../../lib/remark-homebrewery';
 import { Shield, Skull, Scroll, Flame, Diamond } from 'lucide-react';
 
 interface MarkdownRendererProps { content: string; className?: string; }
+type MarkdownChildrenProps = { children?: React.ReactNode };
+type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & {
+  className?: string;
+  children?: React.ReactNode;
+  inline?: boolean;
+};
 
 // --- Custom Component Blocks ---
 
@@ -116,25 +122,25 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
           th: ({ children }) => <th className="px-1.5 py-2 md:px-4 md:py-2.5 font-bold align-bottom">{children}</th>,
           td: ({ children }) => <td className="px-1.5 py-2 md:px-4 md:py-2 align-top text-gray-700">{children}</td>,
 
-          code({ node, className, children, ...props }: any) {
+          code({ className, children, ...props }: MarkdownCodeProps) {
             const match = /language-(\w+)/.exec(className || '');
             const type = match ? match[1] : '';
             const contentString = String(children).replace(/\n$/, '');
             const isInline = !match;
 
             if (!isInline && match) {
-              const nestedComponents: any = {
-                table: ({ children }: any) => (
+              const nestedComponents: Record<string, ({ children }: MarkdownChildrenProps) => React.JSX.Element> = {
+                table: ({ children }) => (
                   <div className="my-2 w-full overflow-x-auto">
                     <table className="w-full text-left border-collapse">{children}</table>
                   </div>
                 ),
-                thead: ({ children }: any) => <thead className="border-b border-gray-300/20">{children}</thead>,
-                tbody: ({ children }: any) => <tbody className="align-top">{children}</tbody>,
-                tr: ({ children }: any) => <tr className="border-b border-gray-300/10">{children}</tr>,
-                td: ({ children }: any) => <td className="p-1 align-top">{children}</td>,
-                th: ({ children }: any) => <th className="p-1 font-bold text-[10px] uppercase opacity-70 align-bottom">{children}</th>,
-                p: ({ children }: any) => <p className="mb-2 whitespace-normal break-words">{children}</p>
+                thead: ({ children }) => <thead className="border-b border-gray-300/20">{children}</thead>,
+                tbody: ({ children }) => <tbody className="align-top">{children}</tbody>,
+                tr: ({ children }) => <tr className="border-b border-gray-300/10">{children}</tr>,
+                td: ({ children }) => <td className="p-1 align-top">{children}</td>,
+                th: ({ children }) => <th className="p-1 font-bold text-[10px] uppercase opacity-70 align-bottom">{children}</th>,
+                p: ({ children }) => <p className="mb-2 whitespace-normal break-words">{children}</p>
               };
 
               if (type === 'monster') return <MonsterBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></MonsterBlock>;

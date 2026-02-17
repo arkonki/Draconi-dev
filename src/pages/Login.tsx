@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 import { AlertCircle, Mail, Lock, LogIn } from 'lucide-react';
 import { loginSchema } from '../lib/auth/validation';
 import { Button } from '../components/shared/Button';
@@ -39,14 +39,6 @@ export function Login() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-
-  const clearForm = () => {
-    setEmail('');
-    setPassword('');
-    setError(null);
-    setSuccessMessage(null);
-    setValidationErrors({});
-  }
 
   const handleLoginSubmit = async () => {
     const validationResult = loginSchema.safeParse({ email: email.trim(), password });
@@ -203,7 +195,16 @@ export function Login() {
           </Button>
         </form>
         
-        {/* Removed the "Don't have an account?" toggle link */}
+        <div className="text-center text-sm text-gray-600">
+          <span>Don&apos;t have an account? </span>
+          <button
+            type="button"
+            onClick={() => navigate('/register')}
+            className="font-semibold text-indigo-600 hover:text-indigo-500 transition-colors"
+          >
+            Create one
+          </button>
+        </div>
       </div>
     </div>
   );

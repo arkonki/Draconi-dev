@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Save, Beaker, AlertCircle } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
 
 interface SmtpConfig {
   host: string;
@@ -24,7 +23,6 @@ interface EmailTemplates {
 }
 
 export function SmtpSettings() {
-  const { user } = useAuth();
   const [config, setConfig] = useState<SmtpConfig>({
     host: '',
     port: 465,

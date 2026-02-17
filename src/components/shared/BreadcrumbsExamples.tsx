@@ -3,11 +3,13 @@
 // ============================================
 // 1. CHARACTER PAGE (CharacterPage.tsx)
 // ============================================
-import { Breadcrumbs, useBreadcrumbs } from '../components/shared/Breadcrumbs';
+import { Breadcrumbs } from '../components/shared/Breadcrumbs';
+import { useBreadcrumbs } from '../components/shared/useBreadcrumbs';
 
 // Inside your CharacterPage component:
 export function CharacterPage() {
     const { id } = useParams();
+    void id;
     // ... existing code ...
 
     const breadcrumbs = useBreadcrumbs(character?.name, 'character');
@@ -53,6 +55,8 @@ import { Home, Book } from 'lucide-react';
 // Inside your Compendium component:
 export function Compendium() {
     const [activeTab, setActiveTab] = useState('items');
+    void activeTab;
+    void setActiveTab;
 
     const breadcrumbs = [
         { label: 'Home', path: '/', icon: Home },
@@ -93,3 +97,4 @@ const breadcrumbs = [
     { label: party?.name || 'Party', path: `/party/${partyId}` },
     activeTab !== 'members' ? { label: getTabLabel(activeTab) } : null
 ].filter(Boolean) as BreadcrumbItem[];
+void breadcrumbs;

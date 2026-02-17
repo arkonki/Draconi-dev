@@ -1,26 +1,53 @@
-import React from 'react';
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Navigation } from './components/Navigation';
-import { Characters } from './pages/Characters';
-import { CharacterPage } from './pages/CharacterPage';
-import { Compendium } from './pages/Compendium';
-import { AdventureParty } from './pages/AdventureParty';
-import { Notes } from './pages/Notes';
-import { Settings } from './pages/Settings';
-import { Login } from './pages/Login';
-import { DiceRollerModal } from './components/dice/DiceRollerModal';
-import { PrivateRoute } from './components/auth/PrivateRoute';
-import { PartyView } from './pages/PartyView';
-import { PartyJoinPage } from './pages/PartyJoinPage';
+import { LoadingSpinner } from './components/shared/LoadingSpinner';
 
-// --- 1. IMPORT THE COMPONENT ---
-// Make sure this line exists and is not commented out.
-import { EncounterChatView } from './components/party/EncounterChatView';
-
-
-
+const Navigation = lazy(() =>
+  import('./components/Navigation').then((module) => ({ default: module.Navigation }))
+);
+const Characters = lazy(() =>
+  import('./pages/Characters').then((module) => ({ default: module.Characters }))
+);
+const CharacterPage = lazy(() =>
+  import('./pages/CharacterPage').then((module) => ({ default: module.CharacterPage }))
+);
+const Compendium = lazy(() =>
+  import('./pages/Compendium').then((module) => ({ default: module.Compendium }))
+);
+const AdventureParty = lazy(() =>
+  import('./pages/AdventureParty').then((module) => ({ default: module.AdventureParty }))
+);
+const Notes = lazy(() => import('./pages/Notes').then((module) => ({ default: module.Notes })));
+const Settings = lazy(() =>
+  import('./pages/Settings').then((module) => ({ default: module.Settings }))
+);
+const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
+const Register = lazy(() =>
+  import('./pages/Register').then((module) => ({ default: module.Register }))
+);
+const DiceRollerModal = lazy(() =>
+  import('./components/dice/DiceRollerModal').then((module) => ({ default: module.DiceRollerModal }))
+);
+const PrivateRoute = lazy(() =>
+  import('./components/auth/PrivateRoute').then((module) => ({ default: module.PrivateRoute }))
+);
+const PartyView = lazy(() =>
+  import('./pages/PartyView').then((module) => ({ default: module.PartyView }))
+);
+const PartyJoinPage = lazy(() =>
+  import('./pages/PartyJoinPage').then((module) => ({ default: module.PartyJoinPage }))
+);
+const EncounterChatView = lazy(() =>
+  import('./components/party/EncounterChatView').then((module) => ({ default: module.EncounterChatView }))
+);
 
 export function AppRoutes() {
+  const loadingFallback = (
+    <div className="flex justify-center items-center h-64">
+      <LoadingSpinner size="lg" />
+    </div>
+  );
+
   return (
     <>
       <a
@@ -30,46 +57,40 @@ export function AppRoutes() {
         Skip to main content
       </a>
 
-      <Routes>
-        {/* Login route is outside the main layout */}
-        <Route path="/login" element={<Login />} />
+      <Suspense fallback={loadingFallback}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
-        {/* All other routes are protected and use the main layout */}
-        <Route
-          path="*"
-          element={
-            <PrivateRoute>
-              <>
-                <Navigation />
-                <main id="main-content" className="container mx-auto px-4 py-8">
-                  {/* Nested Routes for authenticated pages */}
-                  <Routes>
-                    <Route path="/" element={<Characters />} />
-                    <Route path="/character/:id" element={<CharacterPage />} />
-                    <Route path="/compendium" element={<Compendium />} />
-                    <Route path="/adventure-party" element={<AdventureParty />} />
-                    <Route path="/party/:id" element={<PartyView />} />
-                    <Route path="/party/join/:inviteCode" element={<PartyJoinPage />} />
-                    <Route path="/notes" element={<Notes />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </main>
-                
-                {/* 
-                  Global components available on all authenticated pages.
-                  These float on top of the <main> content.
-                */}
-                <DiceRollerModal />
+          <Route
+            path="*"
+            element={
+              <PrivateRoute>
+                <>
+                  <Navigation />
+                  <main id="main-content" className="container mx-auto px-4 py-8">
+                    {/* Nested Routes for authenticated pages */}
+                    <Routes>
+                      <Route path="/" element={<Characters />} />
+                      <Route path="/character/:id" element={<CharacterPage />} />
+                      <Route path="/compendium" element={<Compendium />} />
+                      <Route path="/adventure-party" element={<AdventureParty />} />
+                      <Route path="/party/:id" element={<PartyView />} />
+                      <Route path="/party/join/:inviteCode" element={<PartyJoinPage />} />
+                      <Route path="/notes" element={<Notes />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </main>
 
-                {/* --- 2. ADD THE COMPONENT HERE --- */}
-                {/* This is the line that makes the component exist on the page. */}
-                <EncounterChatView />
-              </>
-            </PrivateRoute>
-          }
-        />
-      </Routes>
+                  <DiceRollerModal />
+                  <EncounterChatView />
+                </>
+              </PrivateRoute>
+            }
+          />
+        </Routes>
+      </Suspense>
     </>
   );
 }

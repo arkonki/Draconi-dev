@@ -1,24 +1,6 @@
 // src/contexts/ThemeProvider.tsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-type Theme = 'light' | 'dark' | 'system';
-type FontSize = 'small' | 'medium' | 'large';
-
-interface ThemeProviderState {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  fontSize: FontSize;
-  setFontSize: (size: FontSize) => void;
-}
-
-const initialState: ThemeProviderState = {
-  theme: 'system',
-  setTheme: () => null,
-  fontSize: 'medium',
-  setFontSize: () => null,
-};
-
-const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
+import React, { useState, useEffect } from 'react';
+import { ThemeProviderContext, type Theme, type FontSize } from './ThemeContextStore';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Use state, but initialize from localStorage or default to 'system'
@@ -80,12 +62,3 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     </ThemeProviderContext.Provider>
   );
 }
-
-// Custom hook to easily consume the context
-export const useTheme = () => {
-  const context = useContext(ThemeProviderContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-};

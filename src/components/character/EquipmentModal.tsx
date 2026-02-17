@@ -7,7 +7,7 @@ import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
-import { useDice } from '../dice/DiceContext'; // Import Dice Context
+import { useDice } from '../dice/useDice'; // Import Dice Context
 
 interface EquipmentModalProps {
   character: Character;

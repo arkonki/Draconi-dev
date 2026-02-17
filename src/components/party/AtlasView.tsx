@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Map as MapIcon, MousePointer2, Pencil, Upload, Loader2, Trash2, Check, ZoomIn, ZoomOut, Maximize, Minimize, Eraser, ChevronDown, User, StickyNote, MapPin, Flag, Link as LinkIcon, Edit2, Eye } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { supabase } from '../../lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PartyMap, MapPin as MapPinType, MapDrawing } from '../../types/atlas';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 interface AtlasViewProps {
     partyId: string;
@@ -142,7 +143,8 @@ function MapPinLayer({ pins, onPinClick, onPinMouseDown, width, height }: {
             style={{ width, height }}
         >
             {pins.map((pin) => (
-                <div
+                <button
+                    type="button"
                     key={pin.id}
                     className="absolute pointer-events-auto cursor-pointer group"
                     style={{
@@ -178,7 +180,7 @@ function MapPinLayer({ pins, onPinClick, onPinMouseDown, width, height }: {
                             </div>
                         )}
                     </div>
-                </div>
+                </button>
             ))}
         </div>
     );
@@ -194,6 +196,13 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
 }) {
     const [linkCopied, setLinkCopied] = React.useState(false);
     const [isEditingDesc, setIsEditingDesc] = React.useState(false);
+    const descriptionInputRef = React.useRef<HTMLTextAreaElement>(null);
+
+    React.useEffect(() => {
+        if (isEditingDesc) {
+            descriptionInputRef.current?.focus();
+        }
+    }, [isEditingDesc]);
 
     const handleCopyLink = () => {
         if (!pin.note_id) return;
@@ -205,7 +214,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
     };
     return (
         <div
-            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDownCapture={(e) => e.stopPropagation()}
             className="absolute top-0 right-0 w-80 h-full bg-white border-l shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300"
         >
             <div className="p-4 border-b flex justify-between items-center bg-gray-50">
@@ -223,8 +232,9 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
             <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Label</label>
+                        <label htmlFor={`pin-label-${pin.id}`} className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Label</label>
                         <input
+                            id={`pin-label-${pin.id}`}
                             type="text"
                             defaultValue={pin.label || ''}
                             onBlur={(e) => {
@@ -241,7 +251,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
 
                     <div>
                         <div className="flex justify-between items-center mb-1.5">
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Lore / Notes</label>
+                            <p className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Lore / Notes</p>
                             <div className="flex items-center gap-2">
                                 {pin.note_id && (
                                     <Button
@@ -267,6 +277,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
 
                         {isEditingDesc ? (
                             <textarea
+                                ref={descriptionInputRef}
                                 defaultValue={pin.description || ''}
                                 onBlur={(e) => {
                                     if (e.target.value !== pin.description) {
@@ -279,10 +290,10 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
                                 placeholder="Add details, lore, or reminders..."
                                 readOnly={!isDM && pin.type === 'location'}
                                 key={pin.id + '_desc_edit'}
-                                autoFocus
                             />
                         ) : (
-                            <div
+                            <button
+                                type="button"
                                 onClick={() => isDM && setIsEditingDesc(true)}
                                 className={`min-h-[100px] p-1 rounded-lg transition-all ${isDM ? 'cursor-pointer hover:bg-gray-50/50' : ''}`}
                             >
@@ -291,13 +302,13 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
                                 ) : (
                                     <p className="text-sm text-gray-400 italic p-3">No description yet.</p>
                                 )}
-                            </div>
+                            </button>
                         )}
                     </div>
 
                     {isDM && (
                         <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Type</label>
+                            <p className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Type</p>
                             <div className="grid grid-cols-3 gap-1">
                                 {(['location', 'character', 'note'] as const).map((t) => (
                                     <button
@@ -334,7 +345,7 @@ function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin:
     const characters = pins.filter(p => p.type === 'character');
     const notes = pins.filter(p => p.type === 'note');
 
-    const PinList = ({ items, title, icon: Icon, color }: { items: MapPinType[], title: string, icon: any, color: string }) => (
+    const PinList = ({ items, title, icon: Icon, color }: { items: MapPinType[], title: string, icon: LucideIcon, color: string }) => (
         items.length > 0 && (
             <div className="space-y-2">
                 <div className="flex items-center gap-2 px-1">
@@ -398,7 +409,6 @@ function MapContextMenu({ x, y, onSelectTool, onClose }: {
             className="fixed z-[100] w-48 bg-white/95 backdrop-blur-md border border-slate-200 shadow-2xl rounded-xl p-1.5 animate-in fade-in zoom-in-95 duration-100"
             style={{ left: x, top: y }}
             onContextMenu={(e) => e.preventDefault()}
-            onClick={(e) => e.stopPropagation()}
         >
             <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest px-2 py-1 mb-1 border-b border-slate-100/50">Quick Tools</div>
             <div className="space-y-0.5">
@@ -460,6 +470,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const mapNameInputRef = useRef<HTMLInputElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -481,6 +492,12 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         document.addEventListener('fullscreenchange', handleFullscreenChange);
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }, []);
+
+    useEffect(() => {
+        if (pendingFile) {
+            mapNameInputRef.current?.focus();
+        }
+    }, [pendingFile]);
 
 
 
@@ -515,7 +532,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         queryKey: ['party-maps', partyId],
         queryFn: async () => {
             const { data, error } = await (supabase
-                .from('party_maps') as any)
+                .from('party_maps'))
                 .select('*')
                 .eq('party_id', partyId)
                 .order('created_at', { ascending: false });
@@ -532,7 +549,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         enabled: !!activeMap?.id,
         queryFn: async () => {
             const { data, error } = await (supabase
-                .from('party_map_pins') as any)
+                .from('party_map_pins'))
                 .select('*')
                 .eq('map_id', activeMap!.id);
             if (error) throw error;
@@ -548,7 +565,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         enabled: !!activeMap?.id,
         queryFn: async () => {
             const { data, error } = await (supabase
-                .from('party_map_drawings') as any)
+                .from('party_map_drawings'))
                 .select('*')
                 .eq('map_id', activeMap!.id);
             if (error) throw error;
@@ -648,9 +665,9 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const setActiveMapMutation = useMutation({
         mutationFn: async (mapId: string) => {
             // First, set all maps of this party to inactive
-            await (supabase.from('party_maps') as any).update({ is_active: false } as any).eq('party_id', partyId);
+            await supabase.from('party_maps').update({ is_active: false }).eq('party_id', partyId);
             // Then set the selected one to active
-            const { error } = await (supabase.from('party_maps') as any).update({ is_active: true } as any).eq('id', mapId);
+            const { error } = await supabase.from('party_maps').update({ is_active: true }).eq('id', mapId);
             if (error) throw error;
         },
         onSuccess: () => {
@@ -669,7 +686,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             }
 
             // 2. Delete from DB
-            const { error } = await (supabase.from('party_maps') as any).delete().eq('id', map.id);
+            const { error } = await supabase.from('party_maps').delete().eq('id', map.id);
             if (error) throw error;
         },
         onSuccess: () => {
@@ -686,7 +703,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             // Auto-create Party Note for 'note' type pins
             if (pin.type === 'note' && user) {
                 const { data: note, error: noteError } = await (supabase
-                    .from('notes') as any)
+                    .from('notes'))
                     .insert([{
                         title: pin.label || 'New Map Note',
                         content: pin.description || '',
@@ -711,7 +728,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 // First, check if any exist (optional debugging)
                 // Then delete ALL of them for this map
                 const { error: deleteError } = await (supabase
-                    .from('party_map_pins') as any)
+                    .from('party_map_pins'))
                     .delete({ count: 'exact' })
                     .eq('map_id', pin.map_id)
                     .eq('type', 'player_start');
@@ -723,7 +740,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             }
 
             const { error } = await (supabase
-                .from('party_map_pins') as any)
+                .from('party_map_pins'))
                 .insert([{ ...pin, note_id: noteId }]);
             if (error) throw error;
         },
@@ -736,19 +753,19 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         mutationFn: async ({ id, updates, noteId }: { id: string; updates: Partial<MapPinType>; noteId?: string | null }) => {
             // 1. Update Pin
             const { error } = await (supabase
-                .from('party_map_pins') as any)
+                .from('party_map_pins'))
                 .update(updates)
                 .eq('id', id);
             if (error) throw error;
 
             // 2. Sync Linked Note
             if (noteId && (updates.label !== undefined || updates.description !== undefined)) {
-                const noteUpdates: any = { updated_at: new Date().toISOString() };
+                const noteUpdates: { updated_at: string; title?: string; content?: string } = { updated_at: new Date().toISOString() };
                 if (updates.label !== undefined) noteUpdates.title = updates.label;
                 if (updates.description !== undefined) noteUpdates.content = updates.description;
 
                 const { error: noteError } = await (supabase
-                    .from('notes') as any)
+                    .from('notes'))
                     .update(noteUpdates)
                     .eq('id', noteId);
 
@@ -763,7 +780,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const createDrawingMutation = useMutation({
         mutationFn: async (drawing: Partial<MapDrawing>) => {
             const { error } = await (supabase
-                .from('party_map_drawings') as any)
+                .from('party_map_drawings'))
                 .insert([drawing]);
             if (error) throw error;
         },
@@ -775,7 +792,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const deleteDrawingMutation = useMutation({
         mutationFn: async (id: string) => {
             const { error } = await (supabase
-                .from('party_map_drawings') as any)
+                .from('party_map_drawings'))
                 .delete()
                 .eq('id', id);
             if (error) throw error;
@@ -789,7 +806,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         mutationFn: async (id: string) => {
             // 1. Fetch pin to check for linked note
             const { data: pin, error: fetchError } = await (supabase
-                .from('party_map_pins') as any)
+                .from('party_map_pins'))
                 .select('note_id')
                 .eq('id', id)
                 .single();
@@ -801,7 +818,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
             // 2. Delete the Pin
             const { error } = await (supabase
-                .from('party_map_pins') as any)
+                .from('party_map_pins'))
                 .delete()
                 .eq('id', id);
             if (error) throw error;
@@ -1004,12 +1021,12 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 .getPublicUrl(filePath);
 
             // 4. Create DB Entry
-            const { error: dbError } = await (supabase.from('party_maps') as any).insert([{
+            const { error: dbError } = await supabase.from('party_maps').insert([{
                 party_id: partyId,
                 name: mapName.trim(),
                 image_url: publicUrl,
                 is_active: true
-            } as any]);
+            }]);
 
             if (dbError) throw dbError;
 
@@ -1017,9 +1034,10 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             await queryClient.invalidateQueries({ queryKey: ['party-maps', partyId] });
             setPendingFile(null);
             setMapName('');
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Upload failed:', err);
-            setUploadError(err.message || 'Failed to upload map.');
+            const message = err instanceof Error ? err.message : 'Failed to upload map.';
+            setUploadError(message);
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1044,6 +1062,9 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             <div
                 ref={containerRef}
                 className="flex-1 relative overflow-hidden bg-slate-100 cursor-crosshair select-none"
+                role="button"
+                aria-label="Atlas map canvas"
+                tabIndex={0}
                 onContextMenu={handleContextMenu}
                 onMouseDown={handleMapMouseDown}
                 onMouseMove={handleMapMouseMove}
@@ -1070,10 +1091,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                         >
                             <div
                                 className="shadow-2xl origin-top-left absolute top-0 left-0"
-                                onMouseDown={handleMapMouseDown}
-                                onMouseMove={handleMapMouseMove}
-                                onMouseUp={handleMapMouseUp}
-                                onMouseLeave={handleMapMouseLeave}
                                 style={{
                                     cursor: 'default',
                                     transform: `scale(${zoom})`,
@@ -1093,7 +1110,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                 {imageSize.width > 0 && (
                                     <>
                                         <GridOverlay
-                                            gridType={activeMap.grid_type as any || 'none'}
+                                            gridType={activeMap.grid_type || 'none'}
                                             gridSize={activeMap.grid_size || 50}
                                             gridOpacity={activeMap.grid_opacity || 0.5}
                                             gridColor={activeMap.grid_color}
@@ -1152,8 +1169,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
                         <div
                             className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm border border-slate-200 shadow-xl rounded-2xl p-1.5 flex items-center gap-1 z-30 animate-in slide-in-from-bottom-6 fade-in duration-500"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
+                            onPointerDownCapture={(e) => e.stopPropagation()}
                         >
                             {/* Legend */}
                             <button
@@ -1223,8 +1239,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
                             <div
                                 className="contents"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={(e) => e.stopPropagation()}
+                                onPointerDownCapture={(e) => e.stopPropagation()}
                             >
                                 <button
                                     onClick={() => setActiveTool('select')}
@@ -1439,9 +1454,10 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Map Title</label>
+                                        <label htmlFor="atlas-map-title" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Map Title</label>
                                         <input
-                                            autoFocus
+                                            id="atlas-map-title"
+                                            ref={mapNameInputRef}
                                             type="text"
                                             value={mapName}
                                             onChange={(e) => setMapName(e.target.value)}

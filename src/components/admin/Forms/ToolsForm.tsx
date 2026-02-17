@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface ToolsFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type ToolsFormProps = ItemFormProps;
 
 export function ToolsForm({ entry, onChange }: ToolsFormProps) {
   return (

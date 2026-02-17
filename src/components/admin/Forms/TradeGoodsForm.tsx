@@ -1,11 +1,8 @@
 import React from 'react';
-import ItemForm from './ItemForm';
+import { ItemForm, type ItemFormProps } from './ItemForm';
 
 
-interface TradeGoodsFormProps {
-  entry: any;
-  onChange: (field: string, value: any) => void;
-}
+type TradeGoodsFormProps = ItemFormProps;
 
 export function TradeGoodsForm({ entry, onChange }: TradeGoodsFormProps) {
   return (

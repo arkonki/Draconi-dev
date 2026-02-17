@@ -28,8 +28,45 @@ const CATEGORIES = [
     { id: 'bio', label: 'Bio Options', icon: BookUser },
 ];
 
+interface MagicSchool {
+    id: string;
+    name: string;
+}
+
+interface DataRow {
+    id?: string;
+    name?: string;
+    description?: string;
+    category?: string;
+    school_id?: string | null;
+    rank?: number;
+    willpower_cost?: number | null;
+    requirement?: unknown;
+    key_attribute?: string;
+    typical_profession?: string;
+    skills?: string[];
+    attribute?: string | null;
+    stats?: {
+        HP?: number;
+        ARMOR?: number;
+        SIZE?: string;
+        [key: string]: unknown;
+    };
+    appearance?: unknown[];
+    mementos?: unknown[];
+    flaws?: unknown[];
+    [key: string]: unknown;
+}
+
+interface TableColumn {
+    header: string;
+    accessor: (entry: DataRow) => React.ReactNode;
+    className?: string;
+    titleAccessor?: (entry: DataRow) => string;
+}
+
 // --- HELPER FUNCTIONS ---
-const formatAbilityRequirement = (requirement: any) => {
+const formatAbilityRequirement = (requirement: unknown) => {
     try {
         if (isSkillNameRequirement(requirement)) {
             const skills = Object.entries(requirement);
@@ -43,7 +80,8 @@ const formatAbilityRequirement = (requirement: any) => {
             const keys = Object.keys(requirement);
             if (keys.length > 0) {
                 if (/^[0-9a-fA-F]{8}-/.test(keys[0])) return `${keys.length} skill(s) (Legacy UUIDs)`;
-                if (keys.length === 1 && typeof requirement[keys[0]] === 'object') return `Requirement: ${keys[0]} (Invalid Format)`;
+                const requirementObj = requirement as Record<string, unknown>;
+                if (keys.length === 1 && typeof requirementObj[keys[0]] === 'object') return `Requirement: ${keys[0]} (Invalid Format)`;
                 return `${keys.length} requirement(s) (Unknown format)`;
             }
         }
@@ -56,22 +94,27 @@ const formatAbilityRequirement = (requirement: any) => {
 
 // --- CUSTOM HOOK ---
 const useGameDataManagement = () => {
-    const [editingEntry, setEditingEntry] = useState<any>(null);
+    const [editingEntry, setEditingEntry] = useState<DataRow | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [saveError, setSaveError] = useState<string | null>(null);
     const [selectedSubCategory, setSelectedSubCategory] = useState('');
     const [itemCategories, setItemCategories] = useState<string[]>([]);
-    const [magicSchools, setMagicSchools] = useState<any[]>([]);
+    const [magicSchools, setMagicSchools] = useState<MagicSchool[]>([]);
     const [monsterCategories, setMonsterCategories] = useState<string[]>([]);
 
     const {
         entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData, switchCategory, activeCategory
     } = useGameData('items');
 
-    const fetchData = useCallback(async (category: string, setter: React.Dispatch<React.SetStateAction<any[]>>) => {
+    const fetchData = useCallback(async (category: string, setter: React.Dispatch<React.SetStateAction<string[]>>) => {
         const { data, error } = await supabase.from(category).select('category');
         if (error) console.error(`Error fetching ${category} categories:`, error);
-        else if (data) setter([...new Set(data.map((item: any) => item.category).filter(Boolean))]);
+        else if (data) {
+            const categories = (data as Array<{ category?: string | null }>)
+                .map((item) => item.category)
+                .filter((value): value is string => Boolean(value));
+            setter([...new Set(categories)]);
+        }
     }, []);
 
     const fetchMagicSchools = useCallback(async () => {
@@ -98,7 +141,8 @@ const useGameDataManagement = () => {
         if (!editingEntry) return;
         let dataToSave = editingEntry;
         if (activeCategory === 'spells') {
-            const { magic_schools, ...cleanEntry } = editingEntry;
+            const cleanEntry = { ...editingEntry };
+            delete cleanEntry.magic_schools;
             dataToSave = cleanEntry;
         }
         await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
@@ -112,13 +156,13 @@ const useGameDataManagement = () => {
         if (activeCategory === 'monsters') fetchData('monsters', setMonsterCategories);
     }, [activeCategory, deleteData, fetchData]);
 
-    const handleFieldChange = useCallback((field: string, value: any) => {
-        setEditingEntry((prev: any) => prev ? ({ ...prev, [field]: value }) : null);
+    const handleFieldChange = useCallback((field: string, value: unknown) => {
+        setEditingEntry((prev) => prev ? ({ ...prev, [field]: value }) : null);
     }, []);
 
     const createNewEntry = useCallback(() => {
         setSaveError(null);
-        let newEntry: any = { name: '' };
+        let newEntry: DataRow = { name: '' };
         switch (activeCategory) {
             case 'spells': newEntry = { ...newEntry, description: '', rank: 1, school_id: null, casting_time: '', range: '', duration: '', willpower_cost: 0 }; break;
             case 'items': newEntry = { ...newEntry, description: '', category: '', cost: 0, weight: 0 }; break;
@@ -133,18 +177,20 @@ const useGameDataManagement = () => {
         setEditingEntry(newEntry);
     }, [activeCategory]);
 
-    const filteredEntries = useMemo(() => entries.filter((entry: any) => {
-        const nameMatch = entry.name?.toLowerCase().includes(searchTerm.toLowerCase());
+    const filteredEntries = useMemo(() => entries.filter((entry) => {
+        const row = entry as unknown as DataRow;
+        const entryName = typeof row.name === 'string' ? row.name : '';
+        const nameMatch = entryName.toLowerCase().includes(searchTerm.toLowerCase());
         if (!nameMatch) return false;
 
         if (selectedSubCategory) {
-            if (activeCategory === 'items') return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
+            if (activeCategory === 'items') return row.category?.toLowerCase() === selectedSubCategory.toLowerCase();
             if (activeCategory === 'spells') {
-                if (selectedSubCategory === 'General') return !entry.school_id;
-                const school = magicSchools.find(s => s.id === entry.school_id);
+                if (selectedSubCategory === 'General') return !row.school_id;
+                const school = magicSchools.find(s => s.id === row.school_id);
                 return school?.name?.toLowerCase() === selectedSubCategory.toLowerCase();
             }
-            if (activeCategory === 'monsters') return entry.category?.toLowerCase() === selectedSubCategory.toLowerCase();
+            if (activeCategory === 'monsters') return row.category?.toLowerCase() === selectedSubCategory.toLowerCase();
         }
         return true;
     }), [entries, searchTerm, selectedSubCategory, activeCategory, magicSchools]);
@@ -182,7 +228,15 @@ const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCateg
     </div>
 );
 
-const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, currentSubCategories, selectedSubCategory, setSelectedSubCategory }: any) => (
+const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, currentSubCategories, selectedSubCategory, setSelectedSubCategory }: {
+    searchTerm: string;
+    setSearchTerm: React.Dispatch<React.SetStateAction<string>>;
+    activeCategory: string;
+    loading: boolean;
+    currentSubCategories: string[];
+    selectedSubCategory: string;
+    setSelectedSubCategory: React.Dispatch<React.SetStateAction<string>>;
+}) => (
     <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -215,22 +269,32 @@ const SearchAndFilter = ({ searchTerm, setSearchTerm, activeCategory, loading, c
     </div>
 );
 
-const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory, searchTerm, selectedSubCategory, loadError }: any) => (
+const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory, searchTerm, selectedSubCategory, loadError }: {
+    columns: TableColumn[];
+    entries: DataRow[];
+    onEdit: (entry: DataRow) => void;
+    onDelete: (id: string) => void;
+    loading: boolean;
+    activeCategory: string;
+    searchTerm: string;
+    selectedSubCategory: string;
+    loadError: string | null;
+}) => (
     <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
         <div className="overflow-x-auto">
             <table className="w-full min-w-[800px]">
                 <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                        {columns.map((col: any) => (
+                        {columns.map((col) => (
                             <th key={col.header} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{col.header}</th>
                         ))}
                         <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky right-0 bg-gray-50">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                    {entries.map((entry: any) => (
+                    {entries.map((entry) => (
                         <tr key={entry.id || entry.name} className="hover:bg-gray-50 transition-colors group">
-                            {columns.map((col: any) => (
+                            {columns.map((col) => (
                                 <td key={col.header} className={`px-4 py-3 text-sm text-gray-700 align-middle ${col.className || ''}`} title={col.titleAccessor ? col.titleAccessor(entry) : undefined}>
                                     {col.accessor(entry)}
                                 </td>
@@ -259,7 +323,16 @@ const DataTable = ({ columns, entries, onEdit, onDelete, loading, activeCategory
     </div>
 );
 
-const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError, onFieldChange, magicSchools }: any) => {
+const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError, onFieldChange, magicSchools }: {
+    entry: DataRow | null;
+    onClose: () => void;
+    onSave: () => void;
+    loading: boolean;
+    activeCategory: string;
+    saveError: string | null;
+    onFieldChange: (field: string, value: unknown) => void;
+    magicSchools: MagicSchool[];
+}) => {
     const renderForm = useCallback(() => {
         if (!entry) return null;
         switch (activeCategory) {
@@ -307,13 +380,13 @@ export function GameDataManager() {
 
     const currentSubCategories = useMemo(() => {
         if (activeCategory === 'items') return itemCategories.sort();
-        if (activeCategory === 'spells') return ['General', ...magicSchools.map((s: any) => s.name)].sort();
+        if (activeCategory === 'spells') return ['General', ...magicSchools.map((s) => s.name)].sort();
         if (activeCategory === 'monsters') return monsterCategories.sort();
         return [];
     }, [activeCategory, itemCategories, magicSchools, monsterCategories]);
 
     const tableColumns = useMemo(() => {
-        const baseCols = [{ header: 'Name', accessor: (e: any) => <span className="font-medium text-gray-900">{e.name}</span> }];
+        const baseCols: TableColumn[] = [{ header: 'Name', accessor: (e) => <span className="font-medium text-gray-900">{e.name}</span> }];
         const commonTruncateClass = "text-sm text-gray-500 max-w-xs truncate";
 
         switch (activeCategory) {
@@ -321,53 +394,53 @@ export function GameDataManager() {
                 return [...baseCols,
                     {
                         header: 'School',
-                        accessor: (e: any) => {
+                        accessor: (e) => {
                             if (!e.school_id) return <span className="text-gray-400 italic">General</span>;
-                            const school = magicSchools.find((s: any) => s.id === e.school_id);
+                            const school = magicSchools.find((s) => s.id === e.school_id);
                             return <span className="text-indigo-600 font-medium">{school?.name || 'Unknown'}</span>;
                         }
                     },
-                    { header: 'Rank', accessor: (e: any) => e.rank === 0 ? <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">Trick</span> : `Rank ${e.rank}` },
-                    { header: 'Cost', accessor: (e: any) => `${e.willpower_cost} WP` },
+                    { header: 'Rank', accessor: (e) => e.rank === 0 ? <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">Trick</span> : `Rank ${e.rank}` },
+                    { header: 'Cost', accessor: (e) => `${e.willpower_cost} WP` },
                 ];
             case 'items':
                 return [...baseCols,
-                    { header: 'Category', accessor: (e: any) => <span className="capitalize">{e.category}</span> },
-                    { header: 'Cost', accessor: (e: any) => `${e.cost}g` },
-                    { header: 'Weight', accessor: (e: any) => e.weight },
+                    { header: 'Category', accessor: (e) => <span className="capitalize">{e.category}</span> },
+                    { header: 'Cost', accessor: (e) => `${e.cost}g` },
+                    { header: 'Weight', accessor: (e) => e.weight as React.ReactNode },
                 ];
             case 'abilities':
                 return [...baseCols,
-                    { header: 'Cost', accessor: (e: any) => e.willpower_cost ? `${e.willpower_cost} WP` : <span className="text-gray-400">-</span> },
-                    { header: 'Requirement', accessor: (e: any) => formatAbilityRequirement(e.requirement), className: commonTruncateClass, titleAccessor: (e: any) => formatAbilityRequirement(e.requirement) },
+                    { header: 'Cost', accessor: (e) => e.willpower_cost ? `${e.willpower_cost} WP` : <span className="text-gray-400">-</span> },
+                    { header: 'Requirement', accessor: (e) => formatAbilityRequirement(e.requirement), className: commonTruncateClass, titleAccessor: (e) => formatAbilityRequirement(e.requirement) },
                 ];
             case 'kin':
                 return [...baseCols,
-                    { header: 'Key Attribute', accessor: (e: any) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
-                    { header: 'Typical Profession', accessor: (e: any) => e.typical_profession },
+                    { header: 'Key Attribute', accessor: (e) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
+                    { header: 'Typical Profession', accessor: (e) => e.typical_profession as React.ReactNode },
                 ];
             case 'profession':
                 return [...baseCols,
-                    { header: 'Key Attribute', accessor: (e: any) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
-                    { header: 'Skills', accessor: (e: any) => Array.isArray(e.skills) ? e.skills.join(', ') : '', className: commonTruncateClass },
+                    { header: 'Key Attribute', accessor: (e) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.key_attribute}</span> },
+                    { header: 'Skills', accessor: (e) => Array.isArray(e.skills) ? e.skills.join(', ') : '', className: commonTruncateClass },
                 ];
             case 'skills':
                 return [...baseCols,
-                    { header: 'Attribute', accessor: (e: any) => e.attribute ? <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.attribute}</span> : <span className="text-gray-400">-</span> },
-                    { header: 'Description', accessor: (e: any) => e.description, className: commonTruncateClass, titleAccessor: (e: any) => e.description || '' },
+                    { header: 'Attribute', accessor: (e) => e.attribute ? <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{e.attribute}</span> : <span className="text-gray-400">-</span> },
+                    { header: 'Description', accessor: (e) => e.description as React.ReactNode, className: commonTruncateClass, titleAccessor: (e) => typeof e.description === 'string' ? e.description : '' },
                 ];
             case 'monsters':
                 return [...baseCols,
-                    { header: 'Category', accessor: (e: any) => <span className="capitalize">{e.category}</span> },
-                    { header: 'HP', accessor: (e: any) => <span className="font-bold text-red-600">{e.stats?.HP}</span> },
-                    { header: 'Armor', accessor: (e: any) => e.stats?.ARMOR },
-                    { header: 'Size', accessor: (e: any) => e.stats?.SIZE },
+                    { header: 'Category', accessor: (e) => <span className="capitalize">{e.category}</span> },
+                    { header: 'HP', accessor: (e) => <span className="font-bold text-red-600">{e.stats?.HP}</span> },
+                    { header: 'Armor', accessor: (e) => e.stats?.ARMOR as React.ReactNode },
+                    { header: 'Size', accessor: (e) => e.stats?.SIZE as React.ReactNode },
                 ];
             case 'bio':
                 return [...baseCols,
-                    { header: 'Appearance', accessor: (e: any) => `${(e.appearance || []).length} options` },
-                    { header: 'Mementos', accessor: (e: any) => `${(e.mementos || []).length} options` },
-                    { header: 'Flaws', accessor: (e: any) => `${(e.flaws || []).length} options` },
+                    { header: 'Appearance', accessor: (e) => `${(e.appearance || []).length} options` },
+                    { header: 'Mementos', accessor: (e) => `${(e.mementos || []).length} options` },
+                    { header: 'Flaws', accessor: (e) => `${(e.flaws || []).length} options` },
                 ];
             default:
                 return baseCols;
@@ -385,7 +458,7 @@ export function GameDataManager() {
                 <div className="bg-gray-50 border-b border-gray-200"><CategoryTabs activeCategory={activeCategory} switchCategory={switchCategory} loading={loading} /></div>
                 <div className="p-4 bg-white border-b border-gray-100"><SearchAndFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} activeCategory={activeCategory} loading={loading} currentSubCategories={currentSubCategories} selectedSubCategory={selectedSubCategory} setSelectedSubCategory={setSelectedSubCategory}/></div>
                 <div>
-                    {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries} onEdit={(entry: any) => { setSaveError(null); setEditingEntry(entry); }} onDelete={handleDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
+                    {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries as DataRow[]} onEdit={(entry) => { setSaveError(null); setEditingEntry(entry); }} onDelete={handleDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
                 </div>
             </div>
             {editingEntry && <EditModal entry={editingEntry} onClose={closeModal} onSave={handleSave} loading={loading} activeCategory={activeCategory} saveError={saveError} onFieldChange={handleFieldChange} magicSchools={magicSchools} />}

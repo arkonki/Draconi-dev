@@ -7,16 +7,16 @@ export function cn(...inputs: ClassValue[]) {
 
 
 // Helper to parse skill levels safely
-export const parseSkillLevels = (skillLevelsData: any): Record<string, number> => {
+export const parseSkillLevels = (skillLevelsData: unknown): Record<string, number> => {
   if (typeof skillLevelsData === 'string') {
     try {
       const parsed = JSON.parse(skillLevelsData);
       if (typeof parsed === 'object' && parsed !== null) {
         // Ensure values are numbers
          const cleaned: Record<string, number> = {};
-         for (const key in parsed) {
+         for (const [key, rawValue] of Object.entries(parsed as Record<string, unknown>)) {
            if (Object.prototype.hasOwnProperty.call(parsed, key)) {
-             const value = Number(parsed[key]);
+             const value = Number(rawValue);
              if (!isNaN(value)) {
                cleaned[key] = value;
              }
@@ -33,9 +33,9 @@ export const parseSkillLevels = (skillLevelsData: any): Record<string, number> =
   } else if (typeof skillLevelsData === 'object' && skillLevelsData !== null) {
      // Ensure values are numbers
      const cleaned: Record<string, number> = {};
-     for (const key in skillLevelsData) {
+     for (const [key, rawValue] of Object.entries(skillLevelsData as Record<string, unknown>)) {
        if (Object.prototype.hasOwnProperty.call(skillLevelsData, key)) {
-         const value = Number(skillLevelsData[key]);
+         const value = Number(rawValue);
          if (!isNaN(value)) {
            cleaned[key] = value;
          } else {

@@ -76,7 +76,7 @@ export interface GameItem {
   // Database specific fields
   created_at?: string;
   updated_at?: string;
-  [key: string]: any; // Allow loose indexing for DB extras
+  [key: string]: unknown; // Allow loose indexing for DB extras
 }
 
 // --- ITEM NOTES & DURABILITY ---
@@ -130,7 +130,7 @@ export interface Ability {
   name: string;
   description: string;
   willpower_cost?: number | null;
-  requirement?: string | any; // Can be JSON logic or string text
+  requirement?: string | unknown; // Can be JSON logic or string text
   kin?: string; // If specific to a kin
 }
 
@@ -140,7 +140,7 @@ export interface Teacher {
 
 // --- TYPE GUARDS & VALIDATION ---
 
-export function isSkillNameRequirement(obj: any): obj is Record<string, number | null> {
+export function isSkillNameRequirement(obj: unknown): obj is Record<string, number | null> {
   if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
     return false;
   }
@@ -152,7 +152,7 @@ export interface SkillUuidRequirement {
   minimumValue?: number;
 }
 
-export function isSkillUuidRequirement(obj: any): obj is SkillUuidRequirement {
+export function isSkillUuidRequirement(obj: unknown): obj is SkillUuidRequirement {
   if (typeof obj !== 'object' || obj === null) {
     return false;
   }

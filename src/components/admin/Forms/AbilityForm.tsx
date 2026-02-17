@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useSkills, GameSkill } from '../../../hooks/useSkills';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useSkills } from '../../../hooks/useSkills';
 import { Ability, SkillRequirement, isSkillNameRequirement, isSkillUuidRequirement } from '../../../types/character';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 
 interface AbilityFormProps {
   entry: Partial<Ability>;
-  onChange: (field: string, value: any) => void;
+  onChange: (field: string, value: unknown) => void;
 }
 
 export const AbilityForm: React.FC<AbilityFormProps> = ({ entry, onChange }) => {
@@ -113,12 +113,6 @@ export const AbilityForm: React.FC<AbilityFormProps> = ({ entry, onChange }) => 
     }
   };
   // --- End Event Handlers ---
-
-  // Helper to get skill ID from name for React keys
-  const getSkillIdFromName = (name: string): string | undefined => {
-    return allSkills.find(s => s.name === name)?.id;
-  };
-
 
   return (
     <div className="space-y-4">

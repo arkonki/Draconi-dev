@@ -1,21 +1,18 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-    Package, Search, ShoppingBag, Coins, Shield, Sword,
-    ArrowRight, ArrowLeft, Plus, Scale, X, Edit2, Wrench, Trash2, CheckSquare, MinusCircle,
-    Info, Target, Star, Heart, Zap, AlertTriangle, Weight, ChevronDown, ChevronUp,
+    Package, Search, Coins, Shield, Sword,
+    ArrowLeft, Plus, X, Wrench, Trash2, CheckSquare, MinusCircle,
+    Target, Star, Zap, Weight, ChevronDown,
     Feather, Utensils, MoreVertical, Flame, Anchor, MinusSquare, Minus, Shirt, Backpack,
-    Dumbbell
 } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../shared/Button';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { formatCost, subtractCost, parseCost, normalizeCurrency } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { Character, InventoryItem, EquippedWeapon, Money } from '../../types/character';
-import { useDice } from '../dice/DiceContext';
+import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
@@ -30,6 +27,10 @@ const shopGroups = [
     { name: 'Survival', categories: ['LIGHT SOURCES', 'CONTAINERS', 'MEDICINE', 'HUNTING & FISHING', 'MEANS OF TRAVEL'], Icon: Flame },
     { name: 'Services & Mounts', categories: ['SERVICES', 'ANIMALS'], Icon: Anchor }
 ];
+
+type ItemDetails = (GameItem & Partial<InventoryItem> & { encumbrance_modifier?: number | string }) | undefined;
+type ShopGroup = (typeof shopGroups)[number];
+type SlotItem = string | InventoryItem | EquippedWeapon;
 
 // --- HELPER FUNCTIONS ---
 
@@ -46,13 +47,13 @@ const formatCategoryLabel = (cat: string) => {
         .replace('&', '&');
 };
 
-const isItemEquippable = (details?: any): boolean => {
+const isItemEquippable = (details?: ItemDetails): boolean => {
     if (details?.equippable === true) return true;
     const cat = details?.category?.toUpperCase();
     return cat ? DEFAULT_EQUIPPABLE_CATEGORIES.includes(cat) : false;
 };
 
-const isItemConsumable = (item: InventoryItem, details?: any): boolean => {
+const isItemConsumable = (item: InventoryItem, details?: ItemDetails): boolean => {
     if (details?.is_consumable === true) return true;
     if (isItemEquippable(details)) return false;
     const name = item.name.toLowerCase();
@@ -140,7 +141,7 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
         const details = getItemData(c);
 
         // STRICT CHECK: Only treat as a separate storage container if is_container is TRUE.
-        if (!(details as any)?.is_container) return;
+        if (!details?.is_container) return;
 
         let containerCap = 0;
         if (details && details.container_capacity) {
@@ -153,8 +154,9 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
         const saddleBags = (equipment.equipped.containers || []).filter((sb: InventoryItem) => sb.equippedOn === c.id);
         saddleBags.forEach((sb: InventoryItem) => {
             const sbDetails = getItemData(sb);
-            if (sbDetails && (sbDetails as any).encumbrance_modifier) {
-                containerCap += Number((sbDetails as any).encumbrance_modifier);
+            const modifier = Number(sbDetails?.encumbrance_modifier ?? 0);
+            if (modifier) {
+                containerCap += modifier;
             }
         });
 
@@ -172,10 +174,10 @@ const calculateEncumbrance = (character: Character, allGameItems: GameItem[]) =>
         const details = getItemData(itemName);
         // If it is strictly a container (is_container=true), it does NOT add to main capacity
         // If it is NOT a container (e.g. Backpack with is_container=false), it SHOULD add encumbrance_modifier
-        const isStorageContainer = (details as any)?.is_container;
-
-        if (!isStorageContainer && (details as any)?.encumbrance_modifier) {
-            capacity += Number((details as any).encumbrance_modifier);
+        const isStorageContainer = details?.is_container;
+        const modifier = Number(details?.encumbrance_modifier ?? 0);
+        if (!isStorageContainer && modifier) {
+            capacity += modifier;
         }
     });
 
@@ -270,7 +272,7 @@ const mergeIntoInventory = (inventory: InventoryItem[], itemToMerge: InventoryIt
         item.containerId === itemToMerge.containerId &&
         item.equippedOn === itemToMerge.equippedOn
     );
-    let newInventory = [...inventory];
+    const newInventory = [...inventory];
 
     if (existingItemIndex > -1) {
         newInventory[existingItemIndex].quantity += itemToMerge.quantity;
@@ -356,7 +358,7 @@ const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem)
     );
 };
 
-const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: any, label: string, item?: string | InventoryItem | EquippedWeapon, onUnequip: () => void, subItems?: React.ReactNode }) => {
+const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: React.ElementType; label: string; item?: SlotItem; onUnequip: () => void; subItems?: React.ReactNode }) => {
     // Determine the name safely. For EquippedWeapon, it's just .name
     const name = typeof item === 'string' ? item : item?.name;
 
@@ -377,7 +379,15 @@ const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: a
     );
 };
 
-export const MoneyManagementModal = ({ onClose, currentMoney, onUpdateMoney }: any) => {
+export const MoneyManagementModal = ({
+    onClose,
+    currentMoney,
+    onUpdateMoney,
+}: {
+    onClose: () => void;
+    currentMoney: Character['equipment']['money'];
+    onUpdateMoney: (money: Character['equipment']['money']) => void;
+}) => {
     const [gold, setGold] = useState(0); const [silver, setSilver] = useState(0); const [copper, setCopper] = useState(0); const [error, setError] = useState<string | null>(null);
     const handleTransaction = (multiplier: 1 | -1) => {
         setError(null); if (gold === 0 && silver === 0 && copper === 0) { setError("Please enter an amount."); return; }
@@ -385,7 +395,17 @@ export const MoneyManagementModal = ({ onClose, currentMoney, onUpdateMoney }: a
         if (newMoney.gold < 0 || newMoney.silver < 0 || newMoney.copper < 0) { setError("Cannot remove more money than is available."); return; }
         onUpdateMoney(normalizeCurrency(newMoney)); onClose();
     };
-    const CoinInput = ({ label, value, setter, color }: any) => (
+    const CoinInput = ({
+        label,
+        value,
+        setter,
+        color,
+    }: {
+        label: string;
+        value: number;
+        setter: React.Dispatch<React.SetStateAction<number>>;
+        color: string;
+    }) => (
         <div className="flex flex-col items-center"><label className={`text-xs font-bold uppercase tracking-wider mb-2 ${color}`}>{label}</label><div className="flex items-center gap-3"><button onClick={() => setter(Math.max(0, value - 1))} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Minus size={20} strokeWidth={3} /></button><div className="w-16 h-12 flex items-center justify-center bg-gray-50 border-2 border-gray-200 rounded-xl"><span className="text-xl font-mono font-bold">{value}</span></div><button onClick={() => setter(value + 1)} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Plus size={20} strokeWidth={3} /></button></div><div className="flex gap-1 mt-2">{[5, 10].map(amt => (<button key={amt} onClick={() => setter(value + amt)} className="px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded text-gray-500 hover:bg-gray-100">+{amt}</button>))}</div></div>
     );
     return (
@@ -402,7 +422,7 @@ const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: 
 
 // --- MAIN COMPONENT ---
 
-export function InventoryModal({ onClose }: any) {
+export function InventoryModal({ onClose }: { onClose: () => void }) {
     const { character: rawCharacter, updateCharacterData } = useCharacterSheetStore();
     const { data: allGameItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
 
@@ -418,7 +438,7 @@ export function InventoryModal({ onClose }: any) {
     const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
 
     // Shop Navigation
-    const [selectedShopGroup, setSelectedShopGroup] = useState<any>(null);
+    const [selectedShopGroup, setSelectedShopGroup] = useState<ShopGroup | null>(null);
     const [activeShopSubCategory, setActiveShopSubCategory] = useState<string | null>(null);
 
     const [sortOrder, setSortOrder] = useState('name-asc');
@@ -452,7 +472,7 @@ export function InventoryModal({ onClose }: any) {
     }, [rawCharacter]);
 
     // Smart Item Lookup
-    const getItemData = (item: InventoryItem | string) => {
+    const getItemData = (item: InventoryItem | string): ItemDetails => {
         const name = typeof item === 'string' ? item : item.name;
         if (!name) return undefined;
         const parsedQuery = parseComplexItemName(name);
@@ -469,7 +489,7 @@ export function InventoryModal({ onClose }: any) {
 
     if (!character) return <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"><LoadingSpinner /></div>;
 
-    const handleUpdateEquipment = (newEquipment: any) => updateCharacterData({ ...character, equipment: newEquipment });
+    const handleUpdateEquipment = (newEquipment: Character['equipment']) => updateCharacterData({ ...character, equipment: newEquipment });
 
     // [Actions]
     const handleAddRations = (amount: number) => {
@@ -496,7 +516,7 @@ export function InventoryModal({ onClose }: any) {
     const handleEquipItem = (itemToEquip: InventoryItem) => {
         const itemDetails = getItemData(itemToEquip); if (!itemDetails) return;
 
-        let newEquipment = structuredClone(character.equipment!);
+        const newEquipment = structuredClone(character.equipment!);
         let inventory = newEquipment.inventory;
 
         const invItemIndex = inventory.findIndex((i: InventoryItem) => i.id === itemToEquip.id);
@@ -615,7 +635,7 @@ export function InventoryModal({ onClose }: any) {
     };
 
     const handleUnequipItem = (itemName: string, type: 'armor' | 'helmet' | 'weapon' | 'clothing' | 'animal' | 'container', itemId?: string, itemIndex?: number) => {
-        let newEquipment = structuredClone(character.equipment!);
+        const newEquipment = structuredClone(character.equipment!);
         let itemToReturn: InventoryItem | null = { id: itemId || generateId(), name: itemName, quantity: 1 };
 
         if (type === 'armor' || type === 'helmet') {
@@ -628,9 +648,9 @@ export function InventoryModal({ onClose }: any) {
             if (itemIndex !== undefined && (type === 'weapon' || type === 'clothing')) {
                 findIndex = itemIndex;
             } else if (itemId) {
-                findIndex = arr.findIndex((i: any) => i.id === itemId);
+                findIndex = arr.findIndex((i: InventoryItem | EquippedWeapon | string) => typeof i !== 'string' && 'id' in i && i.id === itemId);
             } else {
-                findIndex = arr.findIndex((i: any) => (i.name || i) === itemName);
+                findIndex = arr.findIndex((i: InventoryItem | EquippedWeapon | string) => (typeof i === 'string' ? i : i.name) === itemName);
             }
 
             if (findIndex > -1) {
@@ -685,7 +705,7 @@ export function InventoryModal({ onClose }: any) {
     };
 
     const handleUseItem = (itemToUse: InventoryItem) => {
-        let newEquipment = structuredClone(character.equipment!);
+        const newEquipment = structuredClone(character.equipment!);
         const invItemIndex = newEquipment.inventory.findIndex((i: InventoryItem) => i.id === itemToUse.id);
         if (invItemIndex === -1) return;
         if (newEquipment.inventory[invItemIndex].quantity > 1) {
@@ -701,8 +721,8 @@ export function InventoryModal({ onClose }: any) {
 
     // --- NEW CONTAINER MOVE LOGIC ---
     const handleMoveItemToContainer = (itemToMove: InventoryItem, targetContainerId: string | null) => {
-        let newEquipment = structuredClone(character.equipment!);
-        let inventory = newEquipment.inventory;
+        const newEquipment = structuredClone(character.equipment!);
+        const inventory = newEquipment.inventory;
 
         // 1. Find and remove source item
         const invItemIndex = inventory.findIndex((i: InventoryItem) => i.id === itemToMove.id);
@@ -732,7 +752,6 @@ export function InventoryModal({ onClose }: any) {
         const eq = character.equipment?.equipped;
         if (!eq) return null;
         const clothes = eq.wornClothes || [];
-        const backpack = eq.containers?.find(c => c.name.toLowerCase().includes('backpack'));
 
         return (
             <div className="bg-slate-50 border-b p-4">
@@ -751,7 +770,7 @@ export function InventoryModal({ onClose }: any) {
         );
     };
 
-    const renderInventoryRow = (item: InventoryItem, itemDetails: any) => {
+    const renderInventoryRow = (item: InventoryItem, itemDetails: ItemDetails) => {
         const isEquippable = isItemEquippable(itemDetails);
         const isUsable = isItemConsumable(item, itemDetails);
         const isMenuOpen = menuOpenId === item.id;
@@ -766,7 +785,7 @@ export function InventoryModal({ onClose }: any) {
 
         const equippedContainers = allEquippedStorage.filter((c: InventoryItem) => {
             const d = getItemData(c);
-            return !!(d as any)?.is_container;
+            return !!d?.is_container;
         });
         // Filter out the container we are currently in (if any)
         const currentContainerId = item.containerId;
@@ -860,7 +879,7 @@ export function InventoryModal({ onClose }: any) {
 
     return (
         <>
-            {isMoneyModalOpen && <MoneyManagementModal onClose={() => setIsMoneyModalOpen(false)} currentMoney={character.equipment?.money || {}} onUpdateMoney={(newMoney: any) => handleUpdateEquipment({ ...character.equipment, money: newMoney })} />}
+            {isMoneyModalOpen && <MoneyManagementModal onClose={() => setIsMoneyModalOpen(false)} currentMoney={character.equipment?.money || {}} onUpdateMoney={(newMoney: Character['equipment']['money']) => handleUpdateEquipment({ ...character.equipment, money: newMoney })} />}
             {isForageModalOpen && <ForageModal onClose={() => setIsForageModalOpen(false)} onAdd={handleAddRations} />}
 
             {/* Animal Selector Modal */}
@@ -936,7 +955,7 @@ export function InventoryModal({ onClose }: any) {
                                             ...(eq?.animals || [])
                                         ].filter(c => {
                                             const d = getItemData(c);
-                                            return !!(d as any)?.is_container;
+                                            return !!d?.is_container;
                                         });
 
                                         return storageTabs.map(tab => {
@@ -944,14 +963,23 @@ export function InventoryModal({ onClose }: any) {
                                             const unequipType = eq?.animals?.some((a: InventoryItem) => a.id === tab.id) ? 'animal' : 'container';
 
                                             return (
-                                                <button
+                                                <div
                                                     key={tab.id}
                                                     onClick={() => setActiveInventoryTab(tab.id!)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            setActiveInventoryTab(tab.id!);
+                                                        }
+                                                    }}
+                                                    role="button"
+                                                    tabIndex={0}
                                                     className={`group relative flex items-center gap-2 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-all pr-8 ${isActive ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'}`}
                                                 >
                                                     {unequipType === 'animal' ? <Anchor size={14} /> : <Backpack size={14} />}
                                                     {tab.name}
-                                                    <div
+                                                    <button
+                                                        type="button"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             if (confirm(`Unequip ${tab.name}? Items inside will be moved to Main Inventory.`)) {
@@ -960,10 +988,11 @@ export function InventoryModal({ onClose }: any) {
                                                             }
                                                         }}
                                                         className={`absolute right-1 p-1 rounded-full hover:bg-red-100 hover:text-red-600 ${isActive ? 'text-indigo-400' : 'text-gray-300'}`}
+                                                        aria-label={`Unequip ${tab.name}`}
                                                     >
                                                         <X size={12} />
-                                                    </div>
-                                                </button>
+                                                    </button>
+                                                </div>
                                             );
                                         });
                                     })()}
