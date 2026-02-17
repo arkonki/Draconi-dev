@@ -50,7 +50,7 @@ export function StatusPanelView() {
           </div>
           <button 
             onClick={clearActiveStatusMessage}
-            className="p-1.5 text-indigo-300 hover:text-white hover:bg-white/10 rounded-full transition-colors shrink-0"
+            className="w-9 h-9 flex items-center justify-center text-indigo-300 hover:text-white hover:bg-white/10 rounded-full transition-colors shrink-0 touch-manipulation"
           >
             <X className="w-4 h-4" />
           </button>

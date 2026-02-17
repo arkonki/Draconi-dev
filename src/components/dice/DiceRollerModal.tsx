@@ -17,6 +17,7 @@ const DiceIcon = ({ type }: { type: DiceType }) => (
 );
 
 const DICE_VALUES: Record<DiceType, number> = { d4: 4, d6: 6, d8: 8, d10: 10, d12: 12, d20: 20 };
+const SKILL_CHECK_RESULT_DISPLAY_MS = 1400;
 
 function rollDie(type: DiceType): number {
   return Math.floor(Math.random() * DICE_VALUES[type]) + 1;
@@ -62,6 +63,7 @@ export function DiceRollerModal() {
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
   const [lastRolledEntry, setLastRolledEntry] = useState<RollHistoryEntry | null>(null); 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const rollMode = currentConfig?.rollMode;
   const isSkillCheck = rollMode === 'skillCheck';
@@ -72,7 +74,12 @@ export function DiceRollerModal() {
   const isInitiative = rollMode === 'initiative';
   const isRest = rollMode === 'rest';
 
-  useEffect(() => { return () => { if (intervalRef.current) clearInterval(intervalRef.current); }; }, []);
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isBoonActive && !isBaneActive) setModifierCount(1);
@@ -205,8 +212,20 @@ export function DiceRollerModal() {
           timestamp: Date.now(),
         });
 
-        if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
-        if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
+        const runCompletionCallbacks = () => {
+          if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
+          if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
+        };
+
+        if (isSkillCheck && currentConfig?.onRollComplete) {
+          if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+          completionTimeoutRef.current = setTimeout(() => {
+            runCompletionCallbacks();
+            completionTimeoutRef.current = null;
+          }, SKILL_CHECK_RESULT_DISPLAY_MS);
+        } else {
+          runCompletionCallbacks();
+        }
       }
     }, 60);
 
@@ -218,6 +237,10 @@ export function DiceRollerModal() {
       setIsCritical(false); setIsSuccess(undefined); setShowHistory(false); setIsRolling(false);
       setLastRolledEntry(null);
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (completionTimeoutRef.current) {
+        clearTimeout(completionTimeoutRef.current);
+        completionTimeoutRef.current = null;
+      }
     }
   }, [showDiceRoller]);
 

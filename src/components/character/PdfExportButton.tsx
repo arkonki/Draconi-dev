@@ -1,26 +1,27 @@
 import { useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Character } from '../../types/character';
 import { fetchItems, GameItem } from '../../lib/api/items';
 
+const GAME_ITEMS_QUERY = {
+  queryKey: ['gameItems'] as const,
+  queryFn: fetchItems,
+  staleTime: 1000 * 60 * 10
+};
+
 export const PdfExportButton = ({ character }: { character: Character }) => {
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Fetch Items so the PDF has access to Armor Ratings etc
-  const { data: allItems = [] } = useQuery<GameItem[]>({
-    queryKey: ['gameItems'],
-    queryFn: fetchItems,
-    staleTime: 1000 * 60 * 10,
-  });
+  const queryClient = useQueryClient();
 
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
-      // Load heavy PDF modules only when export is requested.
-      const [{ pdf }, { DragonbanePdfDocument }] = await Promise.all([
+      // Load heavy PDF modules and fetch item metadata only when export is requested.
+      const [{ pdf }, { DragonbanePdfDocument }, allItems] = await Promise.all([
         import('@react-pdf/renderer'),
         import('./CharacterSheetPdf'),
+        queryClient.ensureQueryData<GameItem[]>(GAME_ITEMS_QUERY),
       ]);
 
       const blob = await pdf(

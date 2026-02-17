@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   Package, Search, ArrowRight, ArrowLeft, Plus, Trash2, X, Users, History, Pencil, Save, AlertCircle, Shield, Sword, Coins
@@ -12,7 +12,19 @@ import { BarteringCalculator } from './BarteringCalculator';
 import { parseCost } from '../../lib/equipment';
 
 // --- HELPERS ---
-const normalizeName = (name: string) => name.trim().toLowerCase();
+const coerceItemName = (name: unknown): string => {
+  if (typeof name === 'string') return name;
+  if (typeof name === 'number' || typeof name === 'boolean') return String(name);
+  if (name && typeof name === 'object') {
+    const candidate = name as { name?: unknown; label?: unknown; title?: unknown };
+    if (typeof candidate.name === 'string') return candidate.name;
+    if (typeof candidate.label === 'string') return candidate.label;
+    if (typeof candidate.title === 'string') return candidate.title;
+  }
+  return 'Unknown Item';
+};
+const normalizeName = (name: unknown) => coerceItemName(name).trim().toLowerCase();
+const getItemStackKey = (name: string, description?: string) => `${normalizeName(name)}::${description || ''}`;
 
 const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) { return crypto.randomUUID(); }
@@ -263,6 +275,52 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
 
   const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const allItemsByName = useMemo(() => {
+    return new Map(allItems.map(item => [normalizeName(item.name), item]));
+  }, [allItems]);
+  const membersById = useMemo(() => {
+    return new Map(members.map(member => [member.id, member]));
+  }, [members]);
+  const inventoryById = useMemo(() => {
+    return new Map(inventory.map(item => [item.id, item]));
+  }, [inventory]);
+  const inventoryByStackKey = useMemo(() => {
+    return new Map(inventory.map(item => [getItemStackKey(item.name, item.description), item]));
+  }, [inventory]);
+  const selectedItemIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
+  const selectedCharacter = useMemo(() => membersById.get(selectedCharacterId), [membersById, selectedCharacterId]);
+  const categories = useMemo(() => ['all', ...new Set(inventory.map(i => i.category).filter(Boolean) as string[])], [inventory]);
+  const filteredInventory = useMemo(() => {
+    const normalizedSearch = searchTerm.toLowerCase();
+    return inventory.filter(
+      i =>
+        i.name.toLowerCase().includes(normalizedSearch) &&
+        (categoryFilter === 'all' || i.category === categoryFilter)
+    );
+  }, [inventory, searchTerm, categoryFilter]);
+  const inventoryTotalQuantity = useMemo(() => inventory.reduce((acc, i) => acc + i.quantity, 0), [inventory]);
+  const reversedTransactionLog = useMemo(() => [...transactionLog].reverse(), [transactionLog]);
+  const marketVal = useMemo(() => {
+    let totalGoldValue = 0;
+    const itemsToSell = inventory.filter(i => selectedItemIdSet.has(i.id));
+    for (const invItem of itemsToSell) {
+      if (isCurrencyItem(invItem.name)) {
+        const key = getCurrencyKey(invItem.name);
+        if (key === 'gold') totalGoldValue += invItem.quantity;
+        else if (key === 'silver') totalGoldValue += invItem.quantity / 10;
+        else totalGoldValue += invItem.quantity / 100;
+        continue;
+      }
+      const baseItem = allItemsByName.get(normalizeName(invItem.name));
+      const costStr = baseItem?.cost || '0';
+      const { gold, silver, copper } = parseCost(costStr);
+      totalGoldValue += (gold + (silver / 10) + (copper / 100)) * invItem.quantity;
+    }
+
+    if (totalGoldValue >= 1) return { value: totalGoldValue, unit: 'Gold' };
+    if (totalGoldValue >= 0.1) return { value: totalGoldValue * 10, unit: 'Silver' };
+    return { value: Math.round(totalGoldValue * 100), unit: 'Copper' };
+  }, [inventory, selectedItemIdSet, allItemsByName]);
 
   const getParticipantName = (type: string, id: string) => {
     if (type === 'party') return 'Party Stash';
@@ -270,8 +328,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     if (id === 'sold') return 'Sold';
     if (id === 'void') return 'Discarded';
     if (type === 'character') {
-      const char = members.find(m => m.id === id);
-      return char ? char.name : 'Character';
+      return membersById.get(id)?.name || 'Character';
     }
     return 'Unknown';
   };
@@ -287,7 +344,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
         });
         return prev.filter(id => id !== itemId);
       } else {
-        const item = inventory.find(i => i.id === itemId);
+        const item = inventoryById.get(itemId);
         setTransferQuantities(q => ({ ...q, [itemId]: item?.quantity || 1 }));
         return [...prev, itemId];
       }
@@ -295,44 +352,105 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   };
 
   // --- REAL-TIME & DATA LOADING ---
+  const loadData = useCallback(async () => {
+    try {
+      const [invRes, logRes] = await Promise.all([
+        supabase.from('party_inventory').select('*').eq('party_id', partyId),
+        supabase.from('party_inventory_log').select('*').eq('party_id', partyId).order('timestamp', { ascending: false }).limit(50)
+      ]);
+      setInventory(
+        (invRes.data || [])
+          .map((raw): PartyInventoryTableItem | null => {
+            const row = raw as Partial<PartyInventoryTableItem>;
+            if (!row.id) return null;
+            return {
+              id: String(row.id),
+              name: coerceItemName(row.name),
+              quantity: Math.max(0, Number(row.quantity) || 0),
+              description: typeof row.description === 'string' ? row.description : '',
+              category: typeof row.category === 'string' ? row.category : undefined,
+              party_id: String(row.party_id || partyId)
+            };
+          })
+          .filter((row): row is PartyInventoryTableItem => row !== null)
+      );
+      setTransactionLog((logRes.data || []));
+    } catch (err) {
+      console.error('Failed to sync inventory.', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [partyId]);
+
   useEffect(() => {
     loadData();
     const subscription = supabase.channel(`party_inv_${partyId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'party_inventory', filter: `party_id=eq.${partyId}` }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(subscription); };
-  }, [partyId]);
-
-  async function loadData() {
-    try {
-      const [invRes, logRes] = await Promise.all([
-        supabase.from('party_inventory').select('*').eq('party_id', partyId),
-        supabase.from('party_inventory_log').select('*').eq('party_id', partyId).order('timestamp', { ascending: false }).limit(50)
-      ]);
-      setInventory((invRes.data || []));
-      setTransactionLog((logRes.data || []));
-    } catch (err) { console.error('Failed to sync inventory.', err); } finally { setLoading(false); }
-  }
+  }, [partyId, loadData]);
 
   // --- HANDLER: Assign Loot to Party ---
   const handleAssignLoot = async (loot: { item: GameItem; quantity: number }[]) => {
     try {
-      // setError(null);
+      const aggregatedByStack = new Map<string, { item: GameItem; quantity: number; description: string }>();
       for (const { item, quantity } of loot) {
+        if (quantity <= 0) continue;
         const description = item.effect || item.description || '';
-
-        // FIX: Check for exact match (Name AND Description) to determine stacking
-        const existing = inventory.find(i =>
-          normalizeName(i.name) === normalizeName(item.name) &&
-          (i.description || '') === description
-        );
-
+        const stackKey = getItemStackKey(item.name, description);
+        const existing = aggregatedByStack.get(stackKey);
         if (existing) {
-          await supabase.from('party_inventory').insert([{
-            party_id: partyId, name: item.name, quantity, category: item.category, description
-          }]);
+          existing.quantity += quantity;
+        } else {
+          aggregatedByStack.set(stackKey, { item, quantity, description });
         }
-        await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: item.name, quantity, from_type: 'party', from_id: 'DM', to_type: 'party', to_id: partyId }]);
+      }
+
+      const logs: Array<{
+        party_id: string;
+        item_name: string;
+        quantity: number;
+        from_type: 'party';
+        from_id: string;
+        to_type: 'party';
+        to_id: string;
+      }> = [];
+      const rowsToInsert: Array<{ party_id: string; name: string; quantity: number; category: string; description: string }> = [];
+      const rowsToUpdate: Array<{ id: string; quantity: number }> = [];
+
+      for (const { item, quantity, description } of aggregatedByStack.values()) {
+        const existing = inventoryByStackKey.get(getItemStackKey(item.name, description));
+        if (existing) {
+          rowsToUpdate.push({ id: existing.id, quantity: existing.quantity + quantity });
+        } else {
+          rowsToInsert.push({
+            party_id: partyId,
+            name: item.name,
+            quantity,
+            category: item.category,
+            description
+          });
+        }
+
+        logs.push({
+          party_id: partyId,
+          item_name: coerceItemName(item.name),
+          quantity,
+          from_type: 'party',
+          from_id: 'DM',
+          to_type: 'party',
+          to_id: partyId
+        });
+      }
+
+      if (rowsToUpdate.length > 0) {
+        await supabase.from('party_inventory').upsert(rowsToUpdate, { onConflict: 'id' });
+      }
+      if (rowsToInsert.length > 0) {
+        await supabase.from('party_inventory').insert(rowsToInsert);
+      }
+      if (logs.length > 0) {
+        await supabase.from('party_inventory_log').insert(logs);
       }
       await loadData();
     } catch (err) { console.error('Failed to assign loot.', err); }
@@ -343,8 +461,8 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     if (!selectedItemIds.length) return;
     if (!window.confirm(`Permanently delete ${selectedItemIds.length} items from party stash?`)) return;
 
-    const itemsToDelete = inventory.filter(i => selectedItemIds.includes(i.id));
-    setInventory(prev => prev.filter(i => !selectedItemIds.includes(i.id)));
+    const itemsToDelete = inventory.filter(i => selectedItemIdSet.has(i.id));
+    setInventory(prev => prev.filter(i => !selectedItemIdSet.has(i.id)));
     setSelectedItemIds([]);
 
     try {
@@ -364,34 +482,11 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   };
 
   // --- HANDLER: Sell Selected Items ---
-  const getMarketVal = () => {
-    let totalGoldValue = 0;
-    const itemsToSell = inventory.filter(i => selectedItemIds.includes(i.id));
-
-    itemsToSell.forEach(invItem => {
-      const baseItem = allItems.find(i => normalizeName(i.name) === normalizeName(invItem.name));
-      if (isCurrencyItem(invItem.name)) {
-        const key = getCurrencyKey(invItem.name);
-        if (key === 'gold') totalGoldValue += invItem.quantity;
-        else if (key === 'silver') totalGoldValue += invItem.quantity / 10;
-        else totalGoldValue += invItem.quantity / 100;
-        return;
-      }
-      const costStr = baseItem?.cost || '0';
-      const { gold, silver, copper } = parseCost(costStr);
-      const itemValue = (gold + (silver / 10) + (copper / 100)) * invItem.quantity;
-      totalGoldValue += itemValue;
-    });
-
-    if (totalGoldValue >= 1) return { value: totalGoldValue, unit: 'Gold' };
-    if (totalGoldValue >= 0.1) return { value: totalGoldValue * 10, unit: 'Silver' };
-    return { value: Math.round(totalGoldValue * 100), unit: 'Copper' };
-  };
 
   const handleConfirmSell = async (finalPrice: number, unit: string) => {
     if (!selectedItemIds.length) return;
 
-    const itemsToSell = inventory.filter(i => selectedItemIds.includes(i.id));
+    const itemsToSell = inventory.filter(i => selectedItemIdSet.has(i.id));
     const targetName = unit === 'Coins' ? 'Gold' : unit;
 
     try {
@@ -434,60 +529,113 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   // --- HANDLER: Transfer Party -> Character ---
   const handleTransferToCharacter = async () => {
     if (!selectedCharacterId || selectedItemIds.length === 0) return;
-    const character = members.find(m => m.id === selectedCharacterId);
+    const character = membersById.get(selectedCharacterId);
     if (!character) return;
 
-    const idsToRemove = new Set(selectedItemIds);
-    // Optimistic Update Party UI
-    setInventory(prev => prev.map(item => idsToRemove.has(item.id) ? { ...item, quantity: item.quantity - 1 } : item).filter(item => item.quantity > 0));
+    const itemsToTransfer = selectedItemIds
+      .map(itemId => {
+        const partyItem = inventoryById.get(itemId);
+        if (!partyItem) return null;
+        const qty = Math.min(transferQuantities[itemId] || 1, partyItem.quantity || 0);
+        if (qty <= 0) return null;
+        return { partyItem, qty };
+      })
+      .filter((item): item is { partyItem: PartyInventoryTableItem; qty: number } => item !== null);
+
+    if (itemsToTransfer.length === 0) return;
+
+    const qtyByItemId = new Map(itemsToTransfer.map(entry => [entry.partyItem.id, entry.qty]));
+    // Optimistic update Party UI using requested transfer quantities.
+    setInventory(prev =>
+      prev
+        .map(item => (qtyByItemId.has(item.id) ? { ...item, quantity: item.quantity - (qtyByItemId.get(item.id) || 0) } : item))
+        .filter(item => item.quantity > 0)
+    );
     setSelectedItemIds([]);
+    setTransferQuantities({});
 
     try {
-      for (const itemId of selectedItemIds) {
-        const qty = Math.min(transferQuantities[itemId] || 1, inventory.find(i => i.id === itemId)?.quantity || 0);
-        if (qty <= 0) continue;
+      const updatedMoney = { ...(character.equipment?.money || { gold: 0, silver: 0, copper: 0 }) };
+      const updatedCharacterInventory = [...(character.equipment?.inventory || [])];
+      const rowsToUpdate: Array<{ id: string; quantity: number }> = [];
+      const idsToDelete: string[] = [];
+      const logs: Array<{
+        party_id: string;
+        item_name: string;
+        quantity: number;
+        from_type: 'party';
+        from_id: string;
+        to_type: 'character';
+        to_id: string;
+      }> = [];
 
-        const { data: rawItem } = await supabase.from('party_inventory').select('*').eq('id', itemId).single();
-        const partyItem = rawItem as unknown as PartyInventoryTableItem;
-        if (!partyItem) continue;
-
+      for (const { partyItem, qty } of itemsToTransfer) {
+        const safeItemName = coerceItemName(partyItem.name);
         // 1. Decrement Party Inv
         if (partyItem.quantity > qty) {
-          await supabase.from('party_inventory').update({ quantity: partyItem.quantity - qty }).eq('id', partyItem.id);
+          rowsToUpdate.push({ id: partyItem.id, quantity: partyItem.quantity - qty });
         } else {
-          await supabase.from('party_inventory').delete().eq('id', partyItem.id);
+          idsToDelete.push(partyItem.id);
         }
 
         // 2. Add to Character Inv or Money
         if (isCurrencyItem(partyItem.name)) {
           const key = getCurrencyKey(partyItem.name);
-          const money = { ...(character.equipment?.money || { gold: 0, silver: 0, copper: 0 }) };
-          money[key] = (money[key] || 0) + qty;
-          await supabase.from('characters').update({ equipment: { ...character.equipment, money } }).eq('id', character.id);
+          updatedMoney[key] = (updatedMoney[key] || 0) + qty;
         } else {
-          const currentInv = character.equipment?.inventory || [];
-          const existingIdx = currentInv.findIndex(i =>
-            normalizeName(i.name) === normalizeName(partyItem.name) &&
-            (i.description || '') === (partyItem.description || '')
-          );
-
-          const newInv = [...currentInv];
-          const baseDetails = allItems.find(d => normalizeName(d.name) === normalizeName(partyItem.name));
+          const existingIdx = updatedCharacterInventory.findIndex(i => getItemStackKey(i.name, i.description) === getItemStackKey(safeItemName, partyItem.description));
+          const baseDetails = allItemsByName.get(normalizeName(safeItemName));
 
           if (existingIdx >= 0) {
-            newInv[existingIdx] = { ...newInv[existingIdx], quantity: (newInv[existingIdx].quantity || 1) + qty };
+            updatedCharacterInventory[existingIdx] = {
+              ...updatedCharacterInventory[existingIdx],
+              quantity: (updatedCharacterInventory[existingIdx].quantity || 1) + qty
+            };
           } else {
-            newInv.push({
+            updatedCharacterInventory.push({
               id: generateId(),
-              name: partyItem.name,
+              name: safeItemName,
               quantity: qty,
               category: partyItem.category || baseDetails?.category || 'LOOT',
               description: partyItem.description || baseDetails?.effect || ''
             });
           }
-          await supabase.from('characters').update({ equipment: { ...character.equipment, inventory: newInv } }).eq('id', character.id);
         }
-        await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: partyItem.name, quantity: qty, from_type: 'party', from_id: partyId, to_type: 'character', to_id: character.id }]);
+
+        logs.push({
+          party_id: partyId,
+          item_name: safeItemName,
+          quantity: qty,
+          from_type: 'party',
+          from_id: partyId,
+          to_type: 'character',
+          to_id: character.id
+        });
+      }
+
+      if (rowsToUpdate.length > 0) {
+        await supabase.from('party_inventory').upsert(rowsToUpdate, { onConflict: 'id' });
+      }
+      if (idsToDelete.length > 0) {
+        await supabase.from('party_inventory').delete().in('id', idsToDelete);
+      }
+
+      await supabase
+        .from('characters')
+        .update({
+          equipment: {
+            ...character.equipment,
+            money: updatedMoney,
+            inventory: updatedCharacterInventory
+          }
+        })
+        .eq('id', character.id);
+
+      if (logs.length > 0) {
+        const { error: logError } = await supabase.from('party_inventory_log').insert(logs);
+        if (logError) {
+          console.error('Failed to write party transfer logs.', logError);
+        }
       }
 
       // FIX: Force refresh of character data in other components
@@ -495,13 +643,15 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       await queryClient.invalidateQueries({ queryKey: ['party', partyId] }); // Refresh member list just in case
 
       setSelectedCharacterId('');
+      await loadData();
     } catch (err) { console.error('Transfer failed.', err); loadData(); }
   };
 
   // --- HANDLER: Transfer Character -> Party ---
   const handleTransferToParty = async (charItem: CharacterInventoryItem) => {
-    const character = members.find(m => m.id === selectedCharacterId);
+    const character = membersById.get(selectedCharacterId);
     if (!character || !charItem.name) return;
+    const safeCharItemName = coerceItemName(charItem.name);
 
     try {
       const currentInv = [...(character.equipment?.inventory || [])];
@@ -510,7 +660,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
 
       if (idx === -1) {
         // Fallback to name if ID missing (legacy data)
-        const nameIdx = currentInv.findIndex(i => i.name === charItem.name);
+        const nameIdx = currentInv.findIndex(i => normalizeName(i.name) === normalizeName(safeCharItemName));
         if (nameIdx === -1) return;
         if ((currentInv[nameIdx].quantity || 1) > 1) {
           currentInv[nameIdx].quantity = (currentInv[nameIdx].quantity || 1) - 1;
@@ -532,24 +682,23 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       // Add to Party DB
       // Stack if Name AND Description match
       const existingPartyItem = inventory.find(i =>
-        normalizeName(i.name) === normalizeName(charItem.name) &&
-        (i.description || '') === (charItem.description || '')
+        getItemStackKey(i.name, i.description) === getItemStackKey(safeCharItemName, charItem.description)
       );
 
       if (existingPartyItem) {
         await supabase.from('party_inventory').update({ quantity: existingPartyItem.quantity + 1 }).eq('id', existingPartyItem.id);
       } else {
-        const details = allItems.find(d => normalizeName(d.name) === normalizeName(charItem.name));
+        const details = allItemsByName.get(normalizeName(safeCharItemName));
         await supabase.from('party_inventory').insert([{
           party_id: partyId,
-          name: charItem.name,
+          name: safeCharItemName,
           quantity: 1,
           category: charItem.category || details?.category || 'LOOT',
           description: charItem.description || details?.effect || ''
         }]);
       }
 
-      await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: charItem.name, quantity: 1, from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId }]);
+      await supabase.from('party_inventory_log').insert([{ party_id: partyId, item_name: safeCharItemName, quantity: 1, from_type: 'character', from_id: character.id, to_type: 'party', to_id: partyId }]);
 
       // FIX: Refresh UI
       queryClient.invalidateQueries({ queryKey: ['character', character.id] });
@@ -559,7 +708,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   };
 
   const handleTransferMoneyToParty = async (type: 'gold' | 'silver' | 'copper', amount: number = 1) => {
-    const character = members.find(m => m.id === selectedCharacterId);
+    const character = membersById.get(selectedCharacterId);
     if (!character || (character.equipment?.money?.[type] || 0) < amount) return;
 
     try {
@@ -633,10 +782,6 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     } catch (err) { console.error('Consolidation failed.', err); }
   };
 
-  const categories = ['all', ...new Set(inventory.map(i => i.category).filter(Boolean) as string[])];
-  const filteredInventory = inventory.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()) && (categoryFilter === 'all' || i.category === categoryFilter));
-  const selectedCharacter = members.find(m => m.id === selectedCharacterId);
-
   return (
     <>
       {isLootModalOpen && <LootAssignmentModal onClose={() => setIsLootModalOpen(false)} allItems={allItems} onAssignLoot={handleAssignLoot} />}
@@ -652,11 +797,11 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
             <div className="p-6">
               <p className="text-sm text-gray-600 mb-4">
                 Selling <strong>{selectedItemIds.length}</strong> items.
-                <br />Base value estimated at <strong>{getMarketVal().value} {getMarketVal().unit}</strong>.
+                <br />Base value estimated at <strong>{marketVal.value} {marketVal.unit}</strong>.
                 <br />Roll for bartering to determine the final merchant offer!
               </p>
               {(() => {
-                const suggested = getMarketVal();
+                const suggested = marketVal;
                 return (
                   <BarteringCalculator
                     initialCost={suggested.value}
@@ -677,7 +822,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
         {/* LEFT PANEL: PARTY STASH */}
         <div className={`lg:col-span-7 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden ${selectedCharacterId ? 'hidden lg:flex' : 'flex'}`}>
           <div className="p-4 border-b border-gray-100 flex flex-wrap justify-between items-center gap-4 bg-white z-10">
-            <div className="flex items-center gap-2"><div className="bg-indigo-100 p-2 rounded-lg text-indigo-600"><Users size={20} /></div><div><h2 className="text-lg font-bold text-gray-900">Party Stash</h2><p className="text-xs text-gray-500">{inventory.reduce((acc, i) => acc + i.quantity, 0)} Items total</p></div></div>
+            <div className="flex items-center gap-2"><div className="bg-indigo-100 p-2 rounded-lg text-indigo-600"><Users size={20} /></div><div><h2 className="text-lg font-bold text-gray-900">Party Stash</h2><p className="text-xs text-gray-500">{inventoryTotalQuantity} Items total</p></div></div>
             <div className="flex gap-2">
               {isDM && inventory.some(i => isCurrencyItem(i.name)) && <Button size="sm" variant="ghost" icon={Coins} onClick={handleConsolidateCoins} title="Consolidate to Gold" className="text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50" />}
               {isDM && <Button size="sm" variant="primary" icon={Plus} onClick={() => setIsLootModalOpen(true)}>Add Loot</Button>}
@@ -690,10 +835,10 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/30">
             {loading && inventory.length === 0 ? <LoadingSpinner /> : filteredInventory.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-gray-400"><Package size={48} className="opacity-20 mb-2" /><p>Stash is empty or no match.</p></div> : filteredInventory.map(item => (
-              <button type="button" key={item.id} onClick={() => toggleItemSelection(item.id)} className={`w-full p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIds.includes(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
+              <button type="button" key={item.id} onClick={() => toggleItemSelection(item.id)} className={`w-full p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIdSet.has(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIds.includes(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
-                  <div><p className={`font-medium text-sm ${selectedItemIds.includes(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>{item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}</div>
+                  <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIdSet.has(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
+                  <div><p className={`font-medium text-sm ${selectedItemIdSet.has(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>{item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}</div>
                 </div>
                 {item.description && <div className="hidden group-hover:block max-w-xs text-xs text-gray-500 truncate ml-4">{item.description}</div>}
               </button>
@@ -769,7 +914,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {inventory.filter(i => selectedItemIds.includes(i.id)).map(item => (
+                        {inventory.filter(i => selectedItemIdSet.has(i.id)).map(item => (
                           <div key={item.id} className="flex items-center justify-between p-2 bg-indigo-50/50 border border-indigo-100 rounded-lg">
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
@@ -831,7 +976,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
                     <History size={32} className="mb-2" />
                     <p className="text-xs">No transactions yet.</p>
                   </div>
-                ) : [...transactionLog].reverse().map(log => (
+                ) : reversedTransactionLog.map(log => (
                   <div key={log.id} className="text-xs p-3 bg-white rounded-lg border border-gray-100 shadow-sm">
                     <div className="flex justify-between items-start mb-2">
                       <p className="font-bold text-indigo-900">{log.item_name}</p>

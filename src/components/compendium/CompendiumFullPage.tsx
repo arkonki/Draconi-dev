@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Save, Shield, StickyNote, BookOpen, Tag,
   Image as ImageIcon, User, Package
@@ -82,14 +82,26 @@ const noteTemplate = `\`\`\`note
 interface CompendiumFullPageProps {
   entry: CompendiumEntry;
   onClose: () => void;
-  onSave: (entry: CompendiumEntry) => Promise<void>;
+  onSave: (entry: CompendiumEntry) => Promise<CompendiumEntry>;
 }
+
+const normalizeForCompare = (value: CompendiumEntry) => ({
+  title: (value.title || '').trim(),
+  category: (value.category || '').trim(),
+  content: value.content || '',
+});
 
 export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPageProps) {
   const [editedEntry, setEditedEntry] = useState(entry);
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEditedEntry(entry);
+    setSaveError(null);
+  }, [entry]);
 
   useEffect(() => {
     if (!entry.id) {
@@ -97,12 +109,26 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
     }
   }, [entry.id]);
 
+  const baselineEntry = useMemo(() => normalizeForCompare(entry), [entry]);
+  const currentEntry = useMemo(() => normalizeForCompare(editedEntry), [editedEntry]);
+  const isDirty = baselineEntry.title !== currentEntry.title
+    || baselineEntry.category !== currentEntry.category
+    || baselineEntry.content !== currentEntry.content;
+  const isTitleEmpty = currentEntry.title.length === 0;
+  const canSave = !loading && !isTitleEmpty && (isDirty || !entry.id);
+
   // --- Actions ---
 
   const handleSave = async () => {
+    if (!canSave) return;
+
     setLoading(true);
+    setSaveError(null);
     try {
       await onSave(editedEntry);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save entry';
+      setSaveError(message);
     } finally {
       setLoading(false);
     }
@@ -197,7 +223,7 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
               ref={titleInputRef}
               type="text"
               value={editedEntry.title}
-              onChange={(e) => setEditedEntry({ ...editedEntry, title: e.target.value })}
+              onChange={(e) => setEditedEntry((prev) => ({ ...prev, title: e.target.value }))}
               className="text-lg font-bold text-gray-900 border-none p-0 focus:ring-0 placeholder-gray-300 bg-transparent w-full leading-tight"
               placeholder="Entry Title..."
             />
@@ -208,7 +234,7 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
               <input
                 type="text"
                 value={editedEntry.category}
-                onChange={(e) => setEditedEntry({ ...editedEntry, category: e.target.value })}
+                onChange={(e) => setEditedEntry((prev) => ({ ...prev, category: e.target.value }))}
                 className="border-none p-0 focus:ring-0 text-xs text-indigo-600 font-medium placeholder-indigo-300 bg-transparent w-48"
                 placeholder="Uncategorized"
               />
@@ -217,7 +243,8 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
         </div>
 
         <div className="flex items-center gap-3">
-          <Button variant="primary" icon={Save} onClick={handleSave} loading={loading}>
+          {saveError && <p className="text-xs text-red-600 max-w-xs truncate">{saveError}</p>}
+          <Button variant="primary" icon={Save} onClick={handleSave} loading={loading} disabled={!canSave}>
             Save Entry
           </Button>
         </div>
@@ -229,7 +256,7 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
           <MDEditor
             height="100%"
             value={editedEntry.content}
-            onChange={(value) => { setEditedEntry({ ...editedEntry, content: value || '' }); }}
+            onChange={(value) => { setEditedEntry((prev) => ({ ...prev, content: value || '' })); }}
             preview="live"
             visibleDragbar={false}
             className="w-full h-full border-none"

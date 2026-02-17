@@ -37,6 +37,7 @@ interface CharacterRow {
   trained_skills?: string[] | null;
   marked_skills?: string[] | null;
   spells?: Character['spells'] | null;
+  prepared_spells?: string[] | null;
   heroic_ability?: string[] | null;
   equipment?: Partial<Character['equipment']> | null;
   item_notes?: Character['item_notes'];
@@ -114,6 +115,7 @@ export const mapCharacterData = (char: unknown): Character => {
     trainedSkills: row.trained_skills || [],
     marked_skills: row.marked_skills || [],
     spells: row.spells || { school: { name: null, spells: [] }, general: [] },
+    prepared_spells: row.prepared_spells || [],
     heroic_abilities: row.heroic_ability || [],
     equipment: {
       inventory: equipmentData.inventory || [],

@@ -338,7 +338,7 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
 
               {/* --- TAB 1: COMBAT --- */}
               {activeTab === 'combat' && (
-                <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[url('/assets/dragonbane-sheet-bg.jpg')] bg-repeat">
+                <div className="flex-grow p-4 overflow-y-auto space-y-4 bg-[#f5f5f0]">
                   {isLoadingEncounter && !activeEncounter ? (
                     <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-stone-500" /></div>
                   ) : activeEncounter ? (

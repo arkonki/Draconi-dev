@@ -27,12 +27,12 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
       
       {/* Pane */}
       <div className="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
-        <div className="p-6 border-b bg-stone-50 flex justify-between items-start">
+        <div className="p-4 sm:p-6 border-b bg-stone-50 flex justify-between items-start">
             <div>
                 <div className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">Heroic Ability</div>
                 <h3 className="text-2xl font-serif font-bold text-stone-900 leading-none">{ability.name}</h3>
             </div>
-            <button onClick={onClose} className="text-stone-400 hover:text-stone-600 transition-colors"><X size={24} /></button>
+            <button onClick={onClose} className="text-stone-400 hover:text-stone-600 transition-colors p-2 -m-2 rounded-full touch-manipulation"><X size={24} /></button>
         </div>
 
         <div className="flex-grow overflow-y-auto p-6 space-y-6 bg-white text-stone-800">
@@ -59,7 +59,7 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
         </div>
         
         <div className="p-4 border-t bg-stone-50 flex justify-end">
-           <Button variant="ghost" onClick={onClose}>Close</Button>
+           <Button variant="ghost" onClick={onClose} className="min-h-[44px] touch-manipulation">Close</Button>
         </div>
       </div>
     </div>
@@ -166,8 +166,8 @@ export function HeroicAbilitiesView() {
                     }} 
                     disabled={!canAfford || isSaving} 
                     loading={isSaving} 
-                    size="xs"
-                    className={`w-full ${canAfford ? 'bg-orange-600 hover:bg-orange-700 text-white' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}
+                    size="sm"
+                    className={`w-full min-h-[44px] touch-manipulation ${canAfford ? 'bg-orange-600 hover:bg-orange-700 text-white' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}
                  >
                     <Zap className="w-3 h-3 mr-1.5 fill-current" /> Activate
                  </Button>
@@ -183,11 +183,11 @@ export function HeroicAbilitiesView() {
     <div className="space-y-4 relative">
       
       {/* Header */}
-      <div className="flex justify-between items-center p-4 bg-orange-50 border border-orange-200 rounded-lg">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 gap-2 bg-orange-50 border border-orange-200 rounded-lg">
          <h3 className="font-serif font-bold text-orange-900 flex items-center gap-2 text-lg">
            <ShieldCheck className="w-5 h-5" /> Heroic Abilities
          </h3>
-         <div className="text-xs font-bold text-orange-800 bg-white/60 px-2 py-1 rounded border border-orange-200">
+         <div className="text-xs font-bold text-orange-800 bg-white/60 px-2 py-1 rounded border border-orange-200 self-start sm:self-auto">
             {character?.current_wp} WP Available
          </div>
       </div>

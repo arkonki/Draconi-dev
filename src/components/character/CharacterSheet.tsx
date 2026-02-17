@@ -344,14 +344,14 @@ const StatTracker = ({
                  {/* Quick Adjust Buttons */}
                 <button 
                   onClick={() => handleApplyChange(-1)}
-                  className="w-8 h-8 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-red-400 text-stone-600 flex items-center justify-center transition-colors"
+                  className="w-10 h-10 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-red-400 text-stone-600 flex items-center justify-center transition-colors touch-manipulation"
                   title="-1"
                 >
                     <Minus size={14} />
                 </button>
                 <button 
                   onClick={() => handleApplyChange(1)}
-                  className="w-8 h-8 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-emerald-400 text-stone-600 flex items-center justify-center transition-colors"
+                  className="w-10 h-10 rounded border border-stone-300 bg-white hover:bg-stone-50 hover:border-emerald-400 text-stone-600 flex items-center justify-center transition-colors touch-manipulation"
                   title="+1"
                 >
                     <Plus size={14} />
@@ -360,7 +360,7 @@ const StatTracker = ({
             
             <button 
                 onClick={() => setShowModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#e8d5b5] hover:bg-[#d4c5a3] text-[#5c4d3c] text-xs font-bold uppercase tracking-wider rounded border border-[#d4c5a3] transition-colors shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] bg-[#e8d5b5] hover:bg-[#d4c5a3] text-[#5c4d3c] text-xs font-bold uppercase tracking-wider rounded border border-[#d4c5a3] transition-colors shadow-sm touch-manipulation"
             >
                 <Calculator size={14} />
                 Modify
@@ -452,7 +452,7 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
       <button 
         onClick={onToggle}
         disabled={isSaving}
-        className={`mt-2 w-full py-1.5 px-1 text-[9px] md:text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm
+        className={`mt-2 w-full min-h-[40px] py-2 px-2 text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
         ${conditionActive 
           ? 'bg-red-700 border-red-800 text-white' 
           : 'bg-stone-200 border-stone-300 text-stone-600 hover:bg-stone-300'}`}
@@ -466,7 +466,7 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
 // Character Note Components
 function ToolbarButton({ icon: Icon, label, onClick }: { icon: React.ElementType; label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} title={label} className="p-1.5 text-stone-600 hover:text-[#1a472a] hover:bg-stone-200 rounded transition-all">
+    <button type="button" onClick={onClick} title={label} className="w-10 h-10 flex items-center justify-center text-stone-600 hover:text-[#1a472a] hover:bg-stone-200 rounded transition-all touch-manipulation">
       <Icon size={16} />
     </button>
   );
@@ -522,9 +522,9 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 
   return (
     <div className="h-full flex flex-col p-4">
-      <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2">
+      <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2 gap-3">
         <h4 className="font-serif font-bold text-stone-700 text-xl">Journal Entries</h4>
-        <button onClick={() => { setActiveNote({ title: '', content: '' }); setIsEditing(true); }} className="text-[#1a472a] hover:underline text-xs font-bold flex items-center gap-1 border border-[#1a472a] px-2 py-1 rounded hover:bg-[#1a472a] hover:text-white transition-colors"><Plus size={12} /> NEW ENTRY</button>
+        <button onClick={() => { setActiveNote({ title: '', content: '' }); setIsEditing(true); }} className="text-[#1a472a] text-xs md:text-sm font-bold flex items-center gap-1.5 border border-[#1a472a] px-3 py-2 rounded hover:bg-[#1a472a] hover:text-white transition-colors min-h-[40px] touch-manipulation whitespace-nowrap"><Plus size={14} /> NEW ENTRY</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pr-1 custom-scrollbar">
         {notes.length === 0 && <div className="col-span-full text-center py-8 text-stone-400 italic">No notes written yet.</div>}
@@ -541,14 +541,14 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
             }}
             role="button"
             tabIndex={0}
-            className="p-3 bg-white border border-stone-200 shadow-sm cursor-pointer hover:border-[#1a472a] hover:shadow-md group flex flex-col justify-between transition-all min-h-[80px] relative"
+            className="p-3 bg-white border border-stone-200 shadow-sm cursor-pointer hover:border-[#1a472a] hover:shadow-md group flex flex-col justify-between transition-all min-h-[96px] relative touch-manipulation"
           >
             <div>
               <div className="font-serif font-bold text-stone-800 line-clamp-1">{note.title}</div>
               <div className="text-[10px] text-stone-400 mt-1">{new Date(note.created_at).toLocaleDateString()}</div>
             </div>
             <div className="absolute top-2 right-2">
-                <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} className="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-red-600 p-1 transition-opacity"><Trash2 size={14} /></button>
+                <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-stone-400 hover:text-red-600 p-2 transition-opacity touch-manipulation"><Trash2 size={16} /></button>
             </div>
           </div>
         ))}
@@ -557,17 +557,17 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
       {activeNote && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[70] backdrop-blur-sm">
           <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-lg w-full max-w-2xl h-[85vh] flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-200">
-             <button onClick={() => setActiveNote(null)} className="absolute top-2 right-2 text-stone-500 hover:text-red-600 p-2"><X /></button>
+             <button onClick={() => setActiveNote(null)} className="absolute top-2 right-2 text-stone-500 hover:text-red-600 p-3 touch-manipulation"><X /></button>
              <div className="p-4 md:p-6 flex flex-col h-full">
                 {isEditing ? (
                   <>
                     <input className="text-2xl font-serif font-bold bg-transparent border-b-2 border-[#1a472a] mb-4 outline-none text-[#1a472a] w-full" value={activeNote.title} onChange={e => setActiveNote({...activeNote, title: e.target.value})} placeholder="Title" />
-                    <div className="flex gap-2 bg-stone-100 p-1 border-b border-stone-300 overflow-x-auto">
+                    <div className="flex gap-2 bg-stone-100 p-2 border-b border-stone-300 overflow-x-auto">
                       <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
                       <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
                       <ToolbarButton icon={List} label="List" onClick={() => insertMarkdown('- ')} />
                       <div className="flex-1"></div>
-                      <button onClick={() => setShowPreview(!showPreview)} className="text-xs font-bold text-[#1a472a] whitespace-nowrap px-2">{showPreview ? 'EDIT' : 'PREVIEW'}</button>
+                      <button onClick={() => setShowPreview(!showPreview)} className="text-xs font-bold text-[#1a472a] whitespace-nowrap px-3 min-h-[40px] touch-manipulation">{showPreview ? 'EDIT' : 'PREVIEW'}</button>
                     </div>
                     {showPreview ? (
                       <div className="flex-1 overflow-y-auto p-4 prose prose-stone max-w-none"><MarkdownRenderer content={activeNote.content} /></div>
@@ -583,7 +583,7 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
                   <>
                     <div className="flex justify-between items-start border-b-2 border-stone-200 pb-2 mb-4 pr-8">
                       <h2 className="text-2xl md:text-3xl font-serif font-bold text-[#1a472a] break-words">{activeNote.title}</h2>
-                      <Button size="xs" variant="secondary" onClick={() => setIsEditing(true)} icon={Pencil}>Edit</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setIsEditing(true)} icon={Pencil}>Edit</Button>
                     </div>
                     <div className="flex-1 overflow-y-auto prose prose-stone max-w-none custom-scrollbar pr-2">
                        <MarkdownRenderer content={activeNote.content} />
@@ -662,21 +662,21 @@ export function CharacterSheet() {
          <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
             <h3 className="text-2xl font-serif font-bold text-[#1a472a] mb-4 border-b-2 border-stone-200 pb-2">Take a Rest</h3>
             <div className="space-y-3 font-serif">
-              <button onClick={() => handleRest('round')} className="w-full text-left p-3 hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors">
+              <button onClick={() => handleRest('round')} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation">
                 <div className="font-bold text-[#1a472a]">Round Rest (Action)</div>
                 <div className="text-sm text-stone-600">Recover 1d6 WP. No HP.</div>
               </button>
               <div className="p-3 border border-stone-300 rounded group disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                <button onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0} className="w-full text-left hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0} className="w-full text-left min-h-[48px] hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation">
                   <div className="font-bold text-[#1a472a]">Stretch Rest (15 min)</div>
                   <div className="text-sm text-stone-600">Heal 1d6 HP (2d6 w/ Healer), 1d6 WP. Cure 1 Condition.</div>
                 </button>
-                <label className="flex items-center gap-2 mt-2 text-sm pointer-events-auto">
-                  <input type="checkbox" className="accent-[#1a472a] w-4 h-4" checked={healerPresent} onChange={e => setHealerPresent(e.target.checked)} />
+                <label className="flex items-center gap-2 mt-2 text-sm pointer-events-auto min-h-[40px]">
+                  <input type="checkbox" className="accent-[#1a472a] w-5 h-5" checked={healerPresent} onChange={e => setHealerPresent(e.target.checked)} />
                   Healer Present?
                 </label>
               </div>
-              <button onClick={() => handleRest('shift')} className="w-full text-left p-3 hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors">
+              <button onClick={() => handleRest('shift')} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation">
                 <div className="font-bold text-[#1a472a]">Shift Rest (6 hours)</div>
                 <div className="text-sm text-stone-600">Full Recovery of HP & WP. Heal all conditions.</div>
               </button>
@@ -713,7 +713,7 @@ export function CharacterSheet() {
                 { label: 'Session', icon: Award, action: () => setShowAdvancementSystem(true) },
                 { label: 'Help', icon: HelpCircle, action: () => setShowPlayerAidModal(true) },
               ].map(btn => (
-                <button key={btn.label} onClick={btn.action} className="flex flex-col items-center justify-center w-14 h-12 md:w-16 md:h-14 bg-[#2c5e3f] hover:bg-[#3a7a52] active:bg-[#1a472a] rounded border border-[#4a8a62] text-[#e8d5b5] transition-colors shadow-sm touch-manipulation">
+                <button key={btn.label} onClick={btn.action} className="flex flex-col items-center justify-center w-14 h-12 md:w-16 md:h-14 min-h-[48px] bg-[#2c5e3f] hover:bg-[#3a7a52] active:bg-[#1a472a] rounded border border-[#4a8a62] text-[#e8d5b5] transition-colors shadow-sm touch-manipulation">
                   <btn.icon size={18} />
                   <span className="text-[9px] md:text-[10px] uppercase font-bold mt-1">{btn.label}</span>
                 </button>
@@ -840,17 +840,17 @@ export function CharacterSheet() {
                </PaperSection>
                <div className="grid grid-cols-2 gap-4">
                  <div className="flex flex-col items-center justify-center gap-1 p-2 bg-[#fdfbf7] border border-stone-200 shadow-inner rounded-sm h-full"><Gem className="text-[#b8860b] mb-1" size={20} /><span className="text-[10px] uppercase font-bold text-stone-400">Memento</span><span className="font-serif font-bold text-stone-800 text-xs text-center line-clamp-2 leading-tight">{character.memento || "None"}</span></div>
-                 <button onClick={() => setShowInventoryModal(true)} className="flex flex-col items-center justify-center gap-1 border-2 border-stone-400 text-stone-700 bg-stone-50 p-2 font-serif font-bold hover:bg-stone-100 transition-colors rounded-sm shadow-sm h-full"><Backpack size={20}/><span className="text-xs">Inventory</span></button>
+                 <button onClick={() => setShowInventoryModal(true)} className="flex flex-col items-center justify-center gap-1 border-2 border-stone-400 text-stone-700 bg-stone-50 p-2 font-serif font-bold hover:bg-stone-100 transition-colors rounded-sm shadow-sm h-full min-h-[88px] touch-manipulation"><Backpack size={20}/><span className="text-xs">Inventory</span></button>
                </div>
             </div>
           </div>
 
           <div className="w-full">
              <div className="bg-white border-2 border-stone-300 min-h-[500px] flex flex-col rounded-sm shadow-md">
-                <div className="flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto">
-                   <button onClick={() => setActiveTab('equipment')} className={`flex-1 py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
-                   <button onClick={() => setActiveTab('abilities')} className={`flex-1 py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
-                   <button onClick={() => setActiveTab('notes')} className={`flex-1 py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
+                <div className="flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto hide-scrollbar">
+                   <button onClick={() => setActiveTab('equipment')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
+                   <button onClick={() => setActiveTab('abilities')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
+                   <button onClick={() => setActiveTab('notes')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
                 </div>
                 <div className="p-4 md:p-6 flex-1 bg-white/80">
                    {activeTab === 'equipment' && <EquipmentSection character={character} />}

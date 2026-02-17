@@ -214,6 +214,7 @@ export interface Character {
 
   // Magic & Abilities
   spells: CharacterSpells;
+  prepared_spells?: string[]; // Prepared ranked spell IDs
   heroic_abilities: string[]; // List of ability names
 
   // Inventory

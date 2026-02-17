@@ -226,7 +226,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
            <div className="flex gap-1">
              <button 
                 onClick={() => adjustValue('success', -1)} 
-                className="p-1 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50" 
+                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
                 disabled={isSaving}
                 title="Remove Success"
              >
@@ -234,7 +234,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
              </button>
              <button 
                 onClick={() => adjustValue('success', 1)} 
-                className="p-1 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50" 
+                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
                 disabled={isSaving}
                 title="Add Success (Rolled ≤ CON)"
              >
@@ -252,7 +252,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
            <div className="flex gap-1">
              <button 
                 onClick={() => adjustValue('failure', -1)} 
-                className="p-1 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50" 
+                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
                 disabled={isSaving}
                 title="Remove Failure"
              >
@@ -260,7 +260,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
              </button>
              <button 
                 onClick={() => adjustValue('failure', 1)} 
-                className="p-1 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50" 
+                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
                 disabled={isSaving}
                 title="Add Failure (Rolled > CON)"
              >
@@ -284,7 +284,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
             <Zap className="w-4 h-4 fill-yellow-500 text-yellow-600" />
             <span><strong>Rallied!</strong> You can act this turn.</span>
           </div>
-          <button onClick={toggleRallyState} className="p-1 hover:bg-yellow-200 rounded text-yellow-700" title="Un-rally manually">
+          <button onClick={toggleRallyState} className="w-9 h-9 hover:bg-yellow-200 rounded text-yellow-700 flex items-center justify-center touch-manipulation" title="Un-rally manually">
             <XCircle size={14} />
           </button>
         </div>
@@ -315,13 +315,13 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
                 max="6"
                 value={manualHP} 
                 onChange={(e) => setManualHP(e.target.value)} 
-                className={`w-full p-1 text-sm border rounded text-center transition-colors ${hpError ? 'border-red-500 bg-red-50' : 'border-green-300'}`}
+                className={`w-full p-2 min-h-[40px] text-sm border rounded text-center transition-colors ${hpError ? 'border-red-500 bg-red-50' : 'border-green-300'}`}
                 placeholder="1-6"
               />
               <button 
                 onClick={handleManualRecovery}
                 disabled={!manualHP || isSaving}
-                className="p-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                className="p-2 min-h-[40px] min-w-[40px] bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 touch-manipulation"
               >
                 <Check size={16} />
               </button>
@@ -364,7 +364,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
                 {!isRallied && (
                    <button 
                      onClick={toggleRallyState}
-                     className="p-3 bg-stone-100 border border-stone-300 rounded hover:bg-stone-200 text-stone-500"
+                     className="p-3 min-h-[44px] min-w-[44px] bg-stone-100 border border-stone-300 rounded hover:bg-stone-200 text-stone-500 touch-manipulation"
                      title="Force Rally State (Manual)"
                    >
                      <Zap size={18} />

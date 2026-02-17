@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, Sword, Dices, Star, X, Save, Hammer, Crosshair, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Shield, Sword, Dices, Star, X, Save, Hammer, Crosshair, AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useDice } from '../dice/useDice';
+import type { RollHistoryEntry } from '../dice/diceTypes';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
+import { sendMessage } from '../../lib/api/chat';
 
 // --- HELPER FUNCTIONS ---
 const skillAttributeMap: Record<string, AttributeName> = { 
@@ -50,9 +53,32 @@ const formatItemFeatures = (features: string | string[] | undefined): string => 
   return features; 
 };
 
+const toSafeItemName = (value: unknown): string | null => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value && typeof value === 'object') {
+    const candidate = value as { name?: unknown; label?: unknown; title?: unknown };
+    if (typeof candidate.name === 'string' && candidate.name.trim().length > 0) return candidate.name.trim();
+    if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) return candidate.label.trim();
+    if (typeof candidate.title === 'string' && candidate.title.trim().length > 0) return candidate.title.trim();
+  }
+  return null;
+};
+
 // --- TYPES ---
 interface ItemNote { enhanced?: boolean; bonus?: string; broken?: boolean; }
 type ItemCategory = 'armor' | 'weapon';
+type RollCompletionData = Omit<RollHistoryEntry, 'id' | 'timestamp'>;
+type DescriptionTooltipState = {
+  key: string;
+  description: string;
+  top: number;
+  left: number;
+  placement: 'top' | 'bottom';
+};
 
 // --- MODAL COMPONENT ---
 const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: GameItem; category: ItemCategory; character: Character; onClose: () => void; onSave: (notes: Character['item_notes']) => void; }) => {
@@ -92,9 +118,9 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
              <h4 className="font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><AlertTriangle size={14} className={isBroken ? 'text-red-600' : 'text-stone-400'}/>Condition & Durability</h4>
              <div className="flex items-center justify-between">
                 <label htmlFor={uniqueId} className="text-sm font-bold text-stone-700 cursor-pointer select-none">Is the item broken?<span className="block text-[10px] font-normal text-stone-500 mt-0.5">{"Happens if Parry Damage > Durability"} ({item.durability || 'N/A'})</span></label>  
-                <div className="relative inline-flex items-center cursor-pointer">
+                <div className="relative inline-flex items-center">
                     <input type="checkbox" id={uniqueId} checked={isBroken} onChange={(e) => setIsBroken(e.target.checked)} className="peer sr-only" />
-                    <div className="w-11 h-6 bg-stone-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 shadow-inner"></div>
+                    <button type="button" role="switch" aria-checked={isBroken} aria-label="Toggle broken status" onClick={() => setIsBroken((previous) => !previous)} className="w-11 h-6 bg-stone-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 shadow-inner cursor-pointer"></button>
                 </div>
              </div>
           </div>
@@ -116,14 +142,43 @@ export function EquipmentSection({ character }: { character: Character }) {
   const { toggleDiceRoller } = useDice();
   const { updateCharacterData } = useCharacterSheetStore();
   const [editingItem, setEditingItem] = useState<{ item: GameItem; category: ItemCategory } | null>(null);
+  const [activeDescriptionTooltip, setActiveDescriptionTooltip] = useState<DescriptionTooltipState | null>(null);
   const { data: allItems = [], isLoading } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
 
-  // --- SMART ITEM LOOKUP ---
-  const resolveItem = (itemName: string | undefined): GameItem | undefined => {
-    if (!itemName) return undefined;
-    const lowerName = itemName.toLowerCase().trim();
+  useEffect(() => {
+    const closeTooltipOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-item-description-tooltip="true"]')) {
+        setActiveDescriptionTooltip(null);
+      }
+    };
 
-    const invItem = character.equipment?.inventory?.find(i => i.name.toLowerCase().trim() === lowerName);
+    const closeTooltipOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setActiveDescriptionTooltip(null); };
+    const closeTooltipOnScroll = () => setActiveDescriptionTooltip(null);
+
+    document.addEventListener('pointerdown', closeTooltipOnOutsideClick);
+    document.addEventListener('keydown', closeTooltipOnEscape);
+    window.addEventListener('scroll', closeTooltipOnScroll, true);
+    window.addEventListener('resize', closeTooltipOnScroll);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeTooltipOnOutsideClick);
+      document.removeEventListener('keydown', closeTooltipOnEscape);
+      window.removeEventListener('scroll', closeTooltipOnScroll, true);
+      window.removeEventListener('resize', closeTooltipOnScroll);
+    };
+  }, []);
+
+  // --- SMART ITEM LOOKUP ---
+  const resolveItem = (itemName: unknown): GameItem | undefined => {
+    const safeItemName = toSafeItemName(itemName);
+    if (!safeItemName) return undefined;
+    const lowerName = safeItemName.toLowerCase().trim();
+
+    const invItem = character.equipment?.inventory?.find(i => {
+      const invName = toSafeItemName(i.name);
+      return invName ? invName.toLowerCase().trim() === lowerName : false;
+    });
     const staticItem = allItems.find(i => i.name.toLowerCase().trim() === lowerName);
 
     if (invItem && staticItem) {
@@ -132,8 +187,8 @@ export function EquipmentSection({ character }: { character: Character }) {
     
     if (invItem) {
         return { 
-            id: invItem.id || `custom-${itemName}`,
-            name: invItem.name,
+            id: invItem.id || `custom-${safeItemName}`,
+            name: toSafeItemName(invItem.name) || safeItemName,
             category: invItem.category || 'LOOT',
             cost: (invItem.cost as string) || '0',
             weight: invItem.weight || 0,
@@ -173,6 +228,76 @@ export function EquipmentSection({ character }: { character: Character }) {
     return match ? match[1] : null;
   };
 
+  const getItemHoverDescription = (item: GameItem | undefined): string | undefined => {
+    if (!item) return undefined;
+    const description = item.description?.trim();
+    if (description) return description;
+    const effect = item.effect?.trim();
+    return effect || undefined;
+  };
+
+  const logCombatEvent = async (content: string) => {
+    if (!character.party_id || !character.user_id) return;
+    try {
+      await sendMessage(character.party_id, character.user_id, content);
+    } catch (error) {
+      console.error('Failed to send attack combat log message:', error);
+    }
+  };
+
+  const getTooltipLayout = (triggerEl: HTMLElement) => {
+    const rect = triggerEl.getBoundingClientRect();
+    const width = 256;
+    const margin = 12;
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.min(Math.max(centerX, margin + width / 2), window.innerWidth - margin - width / 2);
+    const estimatedHeight = 120;
+    const showAbove = window.innerHeight - rect.bottom < estimatedHeight && rect.top > estimatedHeight;
+    return { left, placement: showAbove ? 'top' as const : 'bottom' as const, top: showAbove ? rect.top - 8 : rect.bottom + 8 };
+  };
+
+  const showDescriptionTooltip = (triggerEl: HTMLElement, tooltipKey: string, description: string) => {
+    const layout = getTooltipLayout(triggerEl);
+    setActiveDescriptionTooltip({ key: tooltipKey, description, top: layout.top, left: layout.left, placement: layout.placement });
+  };
+
+  const hideDescriptionTooltip = (tooltipKey: string) => {
+    setActiveDescriptionTooltip((previous) => (previous?.key === tooltipKey ? null : previous));
+  };
+
+  const toggleDescriptionTooltip = (event: React.MouseEvent<HTMLButtonElement>, tooltipKey: string, description: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveDescriptionTooltip((previous) => {
+      if (previous?.key === tooltipKey) return null;
+      const layout = getTooltipLayout(event.currentTarget);
+      return { key: tooltipKey, description, top: layout.top, left: layout.left, placement: layout.placement };
+    });
+  };
+
+  const renderItemDescriptionTooltipTrigger = (description: string | undefined, tooltipKey: string) => {
+    if (!description) return null;
+    const isActive = activeDescriptionTooltip?.key === tooltipKey;
+
+    return (
+      <div className="relative inline-flex items-center" data-item-description-tooltip="true">
+        <button
+          type="button"
+          aria-label="Show item description"
+          aria-expanded={isActive}
+          onClick={(event) => toggleDescriptionTooltip(event, tooltipKey, description)}
+          onMouseEnter={(event) => showDescriptionTooltip(event.currentTarget, tooltipKey, description)}
+          onMouseLeave={() => hideDescriptionTooltip(tooltipKey)}
+          onFocus={(event) => showDescriptionTooltip(event.currentTarget, tooltipKey, description)}
+          onBlur={() => hideDescriptionTooltip(tooltipKey)}
+          className={`p-1 -m-1 rounded-full transition-colors ${isActive ? 'text-[#1a472a] bg-[#e8d5b5]' : 'text-stone-400 hover:text-[#1a472a] hover:bg-stone-100'}`}
+        >
+          <Info size={13} />
+        </button>
+      </div>
+    );
+  };
+
   const handleDamageRoll = (weaponName: string, damageDiceString: string) => {
     const weaponDetails = resolveItem(weaponName);
     const note = getNoteForItem(weaponDetails, 'weapon');
@@ -193,8 +318,8 @@ export function EquipmentSection({ character }: { character: Character }) {
     const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
 
     // 3. Attribute Bonus Logic
-    const rawSkill = parseBaseSkillName(weaponDetails?.skill);
-    const skill = rawSkill ? rawSkill.toLowerCase() : null;
+    const rawSkill = parseBaseSkillName(typeof weaponDetails?.skill === 'string' ? weaponDetails.skill : null);
+    const skill = typeof rawSkill === 'string' ? rawSkill.toLowerCase() : null;
     const attr = skill ? skillAttributeMap[skill] : null;
     
     // Only apply attribute bonus if weapon doesn't have 'NO DAMAGE BONUS' feature
@@ -216,8 +341,26 @@ export function EquipmentSection({ character }: { character: Character }) {
     toggleDiceRoller({ rollMode: 'attackDamage', initialDice: dicePool, description: `Damage: ${weaponName} (${formulaParts.join(' + ')})` });
   };
 
-  const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean) => {
-    toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `Attack: ${weaponName} (${skillName})`, requiresBane: isAffected, skillName });
+  const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean, damageDiceString?: string) => {
+    toggleDiceRoller({
+      initialDice: ['d20'],
+      rollMode: 'skillCheck',
+      targetValue: skillValue,
+      description: `Attack: ${weaponName} (${skillName})`,
+      requiresBane: isAffected,
+      skillName,
+      onRollComplete: (resultEntry: RollCompletionData) => {
+        const rollValue = resultEntry.results?.[0]?.value;
+        const wasSuccessful = resultEntry.isSuccess === true;
+        void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful ? ' Damage roll follows.' : ''}`);
+        toggleDiceRoller();
+        if (wasSuccessful && damageDiceString) {
+          setTimeout(() => {
+            handleDamageRoll(weaponName, damageDiceString);
+          }, 120);
+        }
+      }
+    });
   };
   
   const handleSaveNotes = async (notes: Character['item_notes']) => {
@@ -240,6 +383,7 @@ export function EquipmentSection({ character }: { character: Character }) {
               {[{ label: 'Body', item: bodyArmor }, { label: 'Head', item: helmet }].map(({ label, item }) => {
                 const isBroken = isItemBroken(item, 'armor');
                 const note = getNoteForItem(item, 'armor');
+                const hoverDescription = getItemHoverDescription(item);
                 let bonusDisplay = '';
                 if (item && note?.enhanced && note.bonus) { const b = parseInt(note.bonus.match(/\d+/)?.[0] || '0'); if (b > 0) bonusDisplay = `+${b}`; }
                 
@@ -248,9 +392,19 @@ export function EquipmentSection({ character }: { character: Character }) {
                     <div className="flex justify-between items-center text-sm">
                       <div className="flex items-center gap-2">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 w-10">{label}</span>
-                          <button onClick={() => item && setEditingItem({ item, category: 'armor' })} className={`font-serif font-bold text-left hover:underline disabled:cursor-default ${isBroken ? 'text-red-700 line-through decoration-2' : 'text-stone-800 hover:text-[#1a472a]'}`} disabled={!item}>
-                            {item?.name || <span className="italic text-stone-400 font-normal no-underline">None Equipped</span>}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                setActiveDescriptionTooltip(null);
+                                if (item) setEditingItem({ item, category: 'armor' });
+                              }}
+                              className={`font-serif font-bold text-left hover:underline disabled:cursor-default ${isBroken ? 'text-red-700 line-through decoration-2' : 'text-stone-800 hover:text-[#1a472a]'}`}
+                              disabled={!item}
+                            >
+                              {item?.name || <span className="italic text-stone-400 font-normal no-underline">None Equipped</span>}
+                            </button>
+                            {renderItemDescriptionTooltipTrigger(hoverDescription, `armor-${label}-${item?.id ?? 'none'}`)}
+                          </div>
                           {isBroken && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-1 rounded border border-red-200">BROKEN</span>}
                           {!isBroken && isItemEnhanced(item, 'armor') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                       </div>
@@ -275,93 +429,213 @@ export function EquipmentSection({ character }: { character: Character }) {
       <div className="bg-white rounded-sm border border-stone-300 shadow-sm overflow-hidden">
         <div className="bg-[#f4f1ea] p-3 border-b border-stone-300 flex items-center justify-between"><h3 className="font-serif font-bold text-lg flex items-center gap-2 text-[#8b2e2e]"><Sword className="w-5 h-5 fill-current" /> Weapons</h3></div>
         {isLoading ? <div className="p-4"><LoadingSpinner size="sm" /></div> : equippedWeapons.length === 0 ? <p className="p-6 text-sm text-stone-400 italic text-center">No weapons equipped.</p> : (
-          <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[600px]">
-              <thead className="bg-[#dcd9c6] text-[#1a472a] font-bold uppercase text-[10px] md:text-xs font-serif tracking-wider">
-                <tr>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20">Weapon</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20">Grip</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20">Range</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20">Damage</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20 text-center">Durability</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20">Features</th>
-                  <th className="px-3 py-2 border-b border-[#1a472a]/20 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
-                {equippedWeapons.map((weapon, index) => {
-                  const weaponDetails = resolveItem(weapon.name);
-                  const rawSkillName = parseBaseSkillName(weaponDetails?.skill);
-                  const skillName = rawSkillName ? rawSkillName.toLowerCase() : '';
-                  const displayName = rawSkillName || '';
-                  const note = getNoteForItem(weaponDetails, 'weapon');
-                  const isBroken = note?.broken || false;
-                  let skillValue: number | null = null; 
-                  let isAffected = false;
-                  let attributeBonus = '';
-                  
-                  // Check for NO DAMAGE BONUS flag
-                  const features = weaponDetails?.features;
-                  const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
-                  const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
+          <>
+            <div className="md:hidden p-3 space-y-3">
+              {equippedWeapons.map((weapon, index) => {
+                const weaponDetails = resolveItem(weapon.name);
+                const hoverDescription = getItemHoverDescription(weaponDetails);
+                const rawSkillName = parseBaseSkillName(typeof weaponDetails?.skill === 'string' ? weaponDetails.skill : null);
+                const skillName = typeof rawSkillName === 'string' ? rawSkillName.toLowerCase() : '';
+                const displayName = rawSkillName || '';
+                const note = getNoteForItem(weaponDetails, 'weapon');
+                const isBroken = note?.broken || false;
+                let skillValue: number | null = null;
+                let isAffected = false;
+                let attributeBonus = '';
+                const features = weaponDetails?.features;
+                const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
+                const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
 
-                  if (skillName && skillAttributeMap[skillName]) {
-                    const attr = skillAttributeMap[skillName];
-                    const val = Number(character.attributes?.[attr] || 10);
-                    
-                    // Only calculate visual bonus if NOT "NO DAMAGE BONUS"
-                    if (!hasNoDamageBonus) {
-                        if (val > 16) attributeBonus = '+D6'; 
+                if (skillName && skillAttributeMap[skillName]) {
+                  const attr = skillAttributeMap[skillName];
+                  const val = Number(character.attributes?.[attr] || 10);
+                  if (!hasNoDamageBonus) {
+                    if (val > 16) attributeBonus = '+D6';
+                    else if (val > 12) attributeBonus = '+D4';
+                  }
+                  const attrKey = getConditionForAttribute(attr);
+                  skillValue = parsedSkillLevels?.[displayName] ?? calculateFallbackLevel(character, displayName, attr);
+                  isAffected = character.conditions?.[attrKey] ?? false;
+                }
+
+                let enhancedBonus = '';
+                if (note?.enhanced && note.bonus) enhancedBonus = ` ${note.bonus}`;
+                const damageValue = weapon.damage || weaponDetails?.damage;
+
+                return (
+                  <div key={`mobile-${weapon.name}-${index}`} className={`rounded-md border p-3 ${isBroken ? 'bg-red-50 border-red-200' : 'bg-[#f9f7f2] border-stone-200'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setActiveDescriptionTooltip(null);
+                              if (weaponDetails) setEditingItem({ item: weaponDetails, category: 'weapon' });
+                            }}
+                            className={`font-serif font-bold text-left ${isBroken ? 'text-red-800 line-through decoration-red-800' : 'text-stone-900'}`}
+                            disabled={!weaponDetails}
+                          >
+                            {weapon.name}
+                          </button>
+                          {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
+                          {renderItemDescriptionTooltipTrigger(hoverDescription, `mobile-weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}
+                        </div>
+                        {isBroken && <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider">Broken</span>}
+                      </div>
+                      <span className="text-xs font-bold text-stone-500 bg-stone-100 px-2 py-1 rounded border border-stone-200">{weaponDetails?.durability || '-'} Dur</span>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="bg-white border border-stone-200 rounded p-2">
+                        <div className="uppercase text-stone-400 font-bold">Grip</div>
+                        <div className="text-stone-700">{weapon.grip || weaponDetails?.grip || '-'}</div>
+                      </div>
+                      <div className="bg-white border border-stone-200 rounded p-2">
+                        <div className="uppercase text-stone-400 font-bold">Range</div>
+                        <div className="text-stone-700">{weapon.range || weaponDetails?.range || '-'}</div>
+                      </div>
+                      <div className="bg-white border border-stone-200 rounded p-2">
+                        <div className="uppercase text-stone-400 font-bold">Damage</div>
+                        <div className="text-stone-800 font-bold">{isBroken ? '-' : `${damageValue || '-'}${attributeBonus ? ` ${attributeBonus}` : ''}${enhancedBonus}`}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 text-[10px] text-stone-500 border border-stone-200 bg-white rounded p-2">
+                      <span className="font-bold uppercase tracking-wide text-stone-400">Features:</span> {formatItemFeatures(weaponDetails?.features)}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {displayName && skillValue !== null && !isBroken && (
+                        <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, damageValue)} className={`flex-1 min-w-[132px] flex items-center justify-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
+                          <Crosshair className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase">Attack {skillValue}</span>
+                        </button>
+                      )}
+                      {damageValue && !isBroken && (
+                        <button onClick={() => handleDamageRoll(weapon.name, damageValue)} className="flex-1 min-w-[132px] flex items-center justify-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation">
+                          <Dices className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase">Damage</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="bg-[#dcd9c6] text-[#1a472a] font-bold uppercase text-[10px] md:text-xs font-serif tracking-wider">
+                  <tr>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20">Weapon</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20">Grip</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20">Range</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20">Damage</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20 text-center">Durability</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20">Features</th>
+                    <th className="px-3 py-2 border-b border-[#1a472a]/20 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
+                  {equippedWeapons.map((weapon, index) => {
+                    const weaponDetails = resolveItem(weapon.name);
+                    const hoverDescription = getItemHoverDescription(weaponDetails);
+                    const rawSkillName = parseBaseSkillName(typeof weaponDetails?.skill === 'string' ? weaponDetails.skill : null);
+                    const skillName = typeof rawSkillName === 'string' ? rawSkillName.toLowerCase() : '';
+                    const displayName = rawSkillName || '';
+                    const note = getNoteForItem(weaponDetails, 'weapon');
+                    const isBroken = note?.broken || false;
+                    let skillValue: number | null = null;
+                    let isAffected = false;
+                    let attributeBonus = '';
+
+                    const features = weaponDetails?.features;
+                    const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
+                    const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
+
+                    if (skillName && skillAttributeMap[skillName]) {
+                      const attr = skillAttributeMap[skillName];
+                      const val = Number(character.attributes?.[attr] || 10);
+                      if (!hasNoDamageBonus) {
+                        if (val > 16) attributeBonus = '+D6';
                         else if (val > 12) attributeBonus = '+D4';
+                      }
+
+                      const attrKey = getConditionForAttribute(attr);
+                      skillValue = parsedSkillLevels?.[displayName] ?? calculateFallbackLevel(character, displayName, attr);
+                      isAffected = character.conditions?.[attrKey] ?? false;
                     }
 
-                    const attrKey = getConditionForAttribute(attr);
-                    skillValue = parsedSkillLevels?.[displayName] ?? calculateFallbackLevel(character, displayName, attr);
-                    isAffected = character.conditions?.[attrKey] ?? false;
-                  }
-                  
-                  let enhancedBonus = '';
-                  if (note?.enhanced && note.bonus) enhancedBonus = ` ${note.bonus}`;
+                    let enhancedBonus = '';
+                    if (note?.enhanced && note.bonus) enhancedBonus = ` ${note.bonus}`;
 
-                  return (
-                    <tr key={`${weapon.name}-${index}`} className={`group transition-colors ${isBroken ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#f9f7f2]'}`}>
-                      <td className="px-3 py-2 font-serif font-bold">
-                        <button onClick={() => weaponDetails && setEditingItem({ item: weaponDetails, category: 'weapon' })} className={`text-left hover:underline disabled:cursor-default flex items-center gap-1.5 ${isBroken ? 'text-red-800 decoration-red-800 line-through' : 'hover:text-[#1a472a]'}`} disabled={!weaponDetails}>
-                          {weapon.name}
-                          {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
-                        </button>
-                        {isBroken && <span className="text-[9px] block text-red-600 font-bold tracking-wider mt-0.5">BROKEN</span>}
-                      </td>
-                      <td className="px-3 py-2 text-stone-600 text-xs">{weapon.grip || weaponDetails?.grip || '-'}</td>
-                      <td className="px-3 py-2 text-stone-600 text-xs">{weapon.range || weaponDetails?.range || '-'}</td>
-                      <td className="px-3 py-2 font-bold text-stone-800">
-                        {isBroken ? <span className="text-red-400">-</span> : (
-                            <>{weapon.damage || weaponDetails?.damage || '-'}{attributeBonus && <span className="ml-1 text-xs text-[#8b2e2e] font-bold">{attributeBonus}</span>}{enhancedBonus && <span className="ml-1 text-xs text-amber-600 font-bold">{enhancedBonus}</span>}</>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-center">{isBroken ? <AlertTriangle size={14} className="text-red-500 mx-auto"/> : <span className="text-stone-600 text-xs">{weaponDetails?.durability || '-'}</span>}</td>
-                      <td className="px-3 py-2 text-[10px] text-stone-500 max-w-[150px]">{formatItemFeatures(weaponDetails?.features)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
-                          {displayName && skillValue !== null && !isBroken && (
-                            <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected)} className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
-                              <Crosshair className="w-4 h-4" /><div className="flex flex-col items-start leading-none -mt-0.5"><span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{displayName}</span><span className="text-sm font-bold">Roll {skillValue}</span></div>
+                    return (
+                      <tr key={`${weapon.name}-${index}`} className={`group transition-colors ${isBroken ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#f9f7f2]'}`}>
+                        <td className="px-3 py-2 font-serif font-bold">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                setActiveDescriptionTooltip(null);
+                                if (weaponDetails) setEditingItem({ item: weaponDetails, category: 'weapon' });
+                              }}
+                              className={`text-left hover:underline disabled:cursor-default flex items-center gap-1.5 ${isBroken ? 'text-red-800 decoration-red-800 line-through' : 'hover:text-[#1a472a]'}`}
+                              disabled={!weaponDetails}
+                            >
+                              {weapon.name}
+                              {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                             </button>
+                            {renderItemDescriptionTooltipTrigger(hoverDescription, `weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}
+                          </div>
+                          {isBroken && <span className="text-[9px] block text-red-600 font-bold tracking-wider mt-0.5">BROKEN</span>}
+                        </td>
+                        <td className="px-3 py-2 text-stone-600 text-xs">{weapon.grip || weaponDetails?.grip || '-'}</td>
+                        <td className="px-3 py-2 text-stone-600 text-xs">{weapon.range || weaponDetails?.range || '-'}</td>
+                        <td className="px-3 py-2 font-bold text-stone-800">
+                          {isBroken ? <span className="text-red-400">-</span> : (
+                              <>{weapon.damage || weaponDetails?.damage || '-'}{attributeBonus && <span className="ml-1 text-xs text-[#8b2e2e] font-bold">{attributeBonus}</span>}{enhancedBonus && <span className="ml-1 text-xs text-amber-600 font-bold">{enhancedBonus}</span>}</>
                           )}
-                          {(weapon.damage || weaponDetails?.damage) && !isBroken && (
-                            <button onClick={() => handleDamageRoll(weapon.name, (weapon.damage || weaponDetails?.damage)!)} className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation"><Dices className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-wide">Damage</span></button>
-                          )}
-                          {isBroken && <span className="text-xs italic text-red-400">Unusable</span>}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center">{isBroken ? <AlertTriangle size={14} className="text-red-500 mx-auto"/> : <span className="text-stone-600 text-xs">{weaponDetails?.durability || '-'}</span>}</td>
+                        <td className="px-3 py-2 text-[10px] text-stone-500 max-w-[150px]">{formatItemFeatures(weaponDetails?.features)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
+                            {displayName && skillValue !== null && !isBroken && (
+                              <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, weapon.damage || weaponDetails?.damage)} className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
+                                <Crosshair className="w-4 h-4" /><div className="flex flex-col items-start leading-none -mt-0.5"><span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{displayName}</span><span className="text-sm font-bold">Roll {skillValue}</span></div>
+                              </button>
+                            )}
+                            {(weapon.damage || weaponDetails?.damage) && !isBroken && (
+                              <button onClick={() => handleDamageRoll(weapon.name, (weapon.damage || weaponDetails?.damage)!)} className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-900 rounded border border-red-200 hover:bg-red-200 active:bg-red-300 transition-colors shadow-sm touch-manipulation"><Dices className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-wide">Damage</span></button>
+                            )}
+                            {isBroken && <span className="text-xs italic text-red-400">Unusable</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
+      {activeDescriptionTooltip && createPortal(
+        <div
+          data-item-description-tooltip="true"
+          style={{ top: `${activeDescriptionTooltip.top}px`, left: `${activeDescriptionTooltip.left}px` }}
+          className={`fixed z-[220] w-64 max-w-[calc(100vw-2rem)] rounded-md border border-stone-300 bg-[#fdfbf7] p-2 text-xs text-stone-700 shadow-2xl -translate-x-1/2 ${
+            activeDescriptionTooltip.placement === 'top' ? '-translate-y-full' : ''
+          }`}
+        >
+          {activeDescriptionTooltip.placement === 'bottom' ? (
+            <div className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-l border-t border-stone-300 bg-[#fdfbf7]" />
+          ) : (
+            <div className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-r border-b border-stone-300 bg-[#fdfbf7]" />
+          )}
+          {activeDescriptionTooltip.description}
+        </div>,
+        document.body
+      )}
       {editingItem && <ItemNotesModal item={editingItem.item} category={editingItem.category} character={character} onClose={() => setEditingItem(null)} onSave={handleSaveNotes} />}
     </div>
   );

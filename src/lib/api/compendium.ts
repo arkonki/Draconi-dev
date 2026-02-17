@@ -74,10 +74,42 @@ export async function deleteCompendiumEntry(id: string): Promise<void> {
   }
 }
 
-export async function createCompendiumEntry(entry: Omit<CompendiumEntry, 'id' | 'created_at' | 'updated_at'>): Promise<CompendiumEntry> {
+export async function saveCompendiumEntry(entry: CompendiumEntry, userId?: string): Promise<CompendiumEntry> {
+  const normalizedTitle = (entry.title || '').trim();
+  const normalizedCategory = (entry.category || 'General').trim() || 'General';
+  const payload = {
+    title: normalizedTitle,
+    content: entry.content,
+    category: normalizedCategory,
+  };
+
+  if (!normalizedTitle) {
+    throw new Error('Entry title is required');
+  }
+
+  if (entry.id) {
+    const { data, error } = await supabase
+      .from('compendium')
+      .update(payload)
+      .eq('id', entry.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating compendium entry:', error);
+      throw new Error(error.message || 'Failed to update compendium entry');
+    }
+
+    return data as CompendiumEntry;
+  }
+
+  if (!userId) {
+    throw new Error('User is required to create a compendium entry');
+  }
+
   const { data, error } = await supabase
     .from('compendium')
-    .insert([entry])
+    .insert([{ ...payload, created_by: userId }])
     .select()
     .single();
 
@@ -85,5 +117,10 @@ export async function createCompendiumEntry(entry: Omit<CompendiumEntry, 'id' | 
     console.error('Error creating compendium entry:', error);
     throw new Error(error.message || 'Failed to create compendium entry');
   }
+
   return data as CompendiumEntry;
+}
+
+export async function createCompendiumEntry(entry: Omit<CompendiumEntry, 'id' | 'created_at' | 'updated_at'>): Promise<CompendiumEntry> {
+  return saveCompendiumEntry(entry, entry.created_by);
 }

@@ -22,9 +22,6 @@ const Settings = lazy(() =>
   import('./pages/Settings').then((module) => ({ default: module.Settings }))
 );
 const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
-const Register = lazy(() =>
-  import('./pages/Register').then((module) => ({ default: module.Register }))
-);
 const DiceRollerModal = lazy(() =>
   import('./components/dice/DiceRollerModal').then((module) => ({ default: module.DiceRollerModal }))
 );
@@ -60,7 +57,6 @@ export function AppRoutes() {
       <Suspense fallback={loadingFallback}>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
 
           <Route
             path="*"

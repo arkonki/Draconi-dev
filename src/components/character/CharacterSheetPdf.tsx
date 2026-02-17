@@ -67,6 +67,93 @@ const HelmetIcon = () => (
   </Svg>
 );
 
+const SKILL_ATTRIBUTE_MAP: Record<string, AttributeName> = {
+  Acrobatics: 'AGL',
+  Awareness: 'INT',
+  Bartering: 'CHA',
+  'Beast Lore': 'INT',
+  Bluffing: 'CHA',
+  Bushcraft: 'INT',
+  Crafting: 'STR',
+  Evade: 'AGL',
+  Healing: 'INT',
+  'Hunting & Fishing': 'AGL',
+  Languages: 'INT',
+  'Myths & Legends': 'INT',
+  Performance: 'CHA',
+  Persuasion: 'CHA',
+  Riding: 'AGL',
+  Seamanship: 'INT',
+  'Sleight of Hand': 'AGL',
+  Sneaking: 'AGL',
+  'Spot Hidden': 'INT',
+  Swimming: 'AGL',
+  Axes: 'STR',
+  Bows: 'AGL',
+  Brawling: 'STR',
+  Crossbows: 'AGL',
+  Hammers: 'STR',
+  Knives: 'AGL',
+  Slings: 'AGL',
+  Spears: 'STR',
+  Staves: 'AGL',
+  Swords: 'STR',
+  Mentalism: 'WIL',
+  Animism: 'WIL',
+  Elementalism: 'WIL'
+};
+
+const CORE_SKILLS_LIST = [
+  'Acrobatics',
+  'Awareness',
+  'Bartering',
+  'Beast Lore',
+  'Bluffing',
+  'Bushcraft',
+  'Crafting',
+  'Evade',
+  'Healing',
+  'Hunting & Fishing',
+  'Languages',
+  'Myths & Legends',
+  'Performance',
+  'Persuasion',
+  'Riding',
+  'Seamanship',
+  'Sleight of Hand',
+  'Sneaking',
+  'Spot Hidden',
+  'Swimming'
+] as const;
+
+const WEAPON_SKILLS_LIST = [
+  'Axes',
+  'Bows',
+  'Brawling',
+  'Crossbows',
+  'Hammers',
+  'Knives',
+  'Slings',
+  'Spears',
+  'Staves',
+  'Swords'
+] as const;
+
+const PRIMARY_SKILLS_SET = new Set<string>([...CORE_SKILLS_LIST, ...WEAPON_SKILLS_LIST]);
+
+const CONDITION_LABELS: Record<AttributeName, string> = {
+  STR: 'EXHAUSTED',
+  CON: 'SICKLY',
+  AGL: 'DAZED',
+  INT: 'ANGRY',
+  WIL: 'SCARED',
+  CHA: 'DISHEARTENED'
+};
+
+const normalizeItemName = (name: string) => name.trim().toLowerCase();
+
+type LegacyTrainedSkills = Character & { trained_skills?: string[] };
+
 const SkillRow = ({ name, value, isTrained, attribute }: { name: string; value: number; isTrained: boolean | undefined; attribute: string }) => (
   <View style={styles.skillRow}>
     <Text>{name} <Text style={{ fontSize: 6, color: '#888' }}>({attribute})</Text></Text>
@@ -80,36 +167,48 @@ const SkillRow = ({ name, value, isTrained, attribute }: { name: string; value: 
 // --- MAIN DOCUMENT COMPONENT ---
 // Added 'allItems' prop to look up stats
 export const DragonbanePdfDocument = ({ character, allItems }: { character: Character, allItems: GameItem[] }) => {
-  
-  // Logic Helpers
   const getBaseChance = (val: number) => {
-      if (val <= 5) return 3; if (val <= 8) return 4; if (val <= 12) return 5; if (val <= 15) return 6; return 7;
+    if (val <= 5) return 3;
+    if (val <= 8) return 4;
+    if (val <= 12) return 5;
+    if (val <= 15) return 6;
+    return 7;
   };
-  
-  const skillAttributeMap: Record<string, string> = { 
-    'Acrobatics': 'AGL', 'Awareness': 'INT', 'Bartering': 'CHA', 'Beast Lore': 'INT', 'Bluffing': 'CHA', 
-    'Bushcraft': 'INT', 'Crafting': 'STR', 'Evade': 'AGL', 'Healing': 'INT', 'Hunting & Fishing': 'AGL', 
-    'Languages': 'INT', 'Myths & Legends': 'INT', 'Performance': 'CHA', 'Persuasion': 'CHA', 'Riding': 'AGL', 
-    'Seamanship': 'INT', 'Sleight of Hand': 'AGL', 'Sneaking': 'AGL', 'Spot Hidden': 'INT', 'Swimming': 'AGL', 
-    'Axes': 'STR', 'Bows': 'AGL', 'Brawling': 'STR', 'Crossbows': 'AGL', 'Hammers': 'STR', 'Knives': 'AGL', 
-    'Slings': 'AGL', 'Spears': 'STR', 'Staves': 'AGL', 'Swords': 'STR', 'Mentalism': 'WIL', 'Animism': 'WIL', 'Elementalism': 'WIL' 
-  };
-  
-  const coreSkillsList = [ 'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft', 'Crafting', 'Evade', 'Healing', 'Hunting & Fishing', 'Languages', 'Myths & Legends', 'Performance', 'Persuasion', 'Riding', 'Seamanship', 'Sleight of Hand', 'Sneaking', 'Spot Hidden', 'Swimming'];
-  const weaponSkillsList = [ 'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords'];
-  
-  const secondarySkills = Object.keys(character.skill_levels || {}).filter(skill => ![...coreSkillsList, ...weaponSkillsList].includes(skill)).sort();
 
-  const getSkillValue = (name: string) => character.skill_levels?.[name] || getBaseChance(character.attributes?.[skillAttributeMap[name] as AttributeName] || 10);
-  const isTrained = (name: string) => character.trained_skills?.includes(name);
+  const skillLevels = character.skill_levels || {};
+  const trainedSkillNames =
+    character.trainedSkills ||
+    (character as LegacyTrainedSkills).trained_skills ||
+    [];
+  const trainedSkillsSet = new Set(trainedSkillNames);
+
+  const baseSkillByAttribute: Record<AttributeName, number> = {
+    STR: getBaseChance(character.attributes?.STR ?? 10),
+    CON: getBaseChance(character.attributes?.CON ?? 10),
+    AGL: getBaseChance(character.attributes?.AGL ?? 10),
+    INT: getBaseChance(character.attributes?.INT ?? 10),
+    WIL: getBaseChance(character.attributes?.WIL ?? 10),
+    CHA: getBaseChance(character.attributes?.CHA ?? 10)
+  };
+
+  const secondarySkills = Object.keys(skillLevels)
+    .filter(skill => !PRIMARY_SKILLS_SET.has(skill))
+    .sort();
+
+  const getSkillValue = (name: string) => {
+    const mappedAttribute = SKILL_ATTRIBUTE_MAP[name] ?? 'INT';
+    return skillLevels[name] ?? baseSkillByAttribute[mappedAttribute];
+  };
+
+  const isTrained = (name: string) => trainedSkillsSet.has(name);
 
   // --- EQUIPMENT & ARMOR LOOKUP ---
-  const armorName = character.equipment?.equipped?.armor || "None";
-  const helmetName = character.equipment?.equipped?.helmet || "None";
+  const armorName = character.equipment?.equipped?.armor || 'None';
+  const helmetName = character.equipment?.equipped?.helmet || 'None';
+  const itemsByName = new Map(allItems.map(item => [normalizeItemName(item.name), item]));
 
-  // Find the full item object from allItems to get the actual rating from DB
-  const armorItem = allItems.find(i => i.name.toLowerCase() === armorName.toLowerCase());
-  const helmetItem = allItems.find(i => i.name.toLowerCase() === helmetName.toLowerCase());
+  const armorItem = itemsByName.get(normalizeItemName(armorName));
+  const helmetItem = itemsByName.get(normalizeItemName(helmetName));
 
   const armorRating = armorItem?.armor_rating ? armorItem.armor_rating : null;
   const helmetRating = helmetItem?.armor_rating ? helmetItem.armor_rating : null;
@@ -142,13 +241,12 @@ export const DragonbanePdfDocument = ({ character, allItems }: { character: Char
         {/* ATTRIBUTES */}
         <View style={styles.attributesContainer}>
           {(['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'] as const).map((attr) => {
-             const map: Record<AttributeName, string> = { STR: 'EXHAUSTED', CON: 'SICKLY', AGL: 'DAZED', INT: 'ANGRY', WIL: 'SCARED', CHA: 'DISHEARTENED' };
              // Just empty checkboxes for printing
              return (
               <View key={attr} style={styles.attrGroup}>
                 <Text style={styles.attrLabel}>{attr}</Text>
                 <View style={styles.attrCircle}><Text style={styles.attrValue}>{character.attributes?.[attr]}</Text></View>
-                <Text style={styles.conditionBox}>[  ] {map[attr]}</Text>
+                <Text style={styles.conditionBox}>[  ] {CONDITION_LABELS[attr]}</Text>
               </View>
              );
           })}
@@ -182,22 +280,22 @@ export const DragonbanePdfDocument = ({ character, allItems }: { character: Char
           {/* COL 2: Skills */}
           <View style={styles.colSkills1}>
             <Text style={[styles.sectionTitle, { marginTop: 0 }]}>General Skills</Text>
-            {coreSkillsList.map(skill => (
-              <SkillRow key={skill} name={skill} attribute={skillAttributeMap[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
+            {CORE_SKILLS_LIST.map(skill => (
+              <SkillRow key={skill} name={skill} attribute={SKILL_ATTRIBUTE_MAP[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
             ))}
           </View>
 
           {/* COL 3: Combat */}
           <View style={styles.colSkills2}>
             <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Weapon Skills</Text>
-            {weaponSkillsList.map(skill => (
-              <SkillRow key={skill} name={skill} attribute={skillAttributeMap[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
+            {WEAPON_SKILLS_LIST.map(skill => (
+              <SkillRow key={skill} name={skill} attribute={SKILL_ATTRIBUTE_MAP[skill]} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
             ))}
             {secondarySkills.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>Secondary</Text>
                 {secondarySkills.map(skill => (
-                  <SkillRow key={skill} name={skill} attribute={skillAttributeMap[skill] || 'INT'} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
+                  <SkillRow key={skill} name={skill} attribute={SKILL_ATTRIBUTE_MAP[skill] || 'INT'} value={getSkillValue(skill)} isTrained={isTrained(skill)} />
                 ))}
               </>
             )}

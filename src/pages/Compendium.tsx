@@ -10,7 +10,7 @@ import { CompendiumEntry } from '../types/compendium';
 import { Button } from '../components/shared/Button';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
-import { fetchCompendiumEntries, deleteCompendiumEntry } from '../lib/api/compendium';
+import { fetchCompendiumEntries, deleteCompendiumEntry, saveCompendiumEntry } from '../lib/api/compendium';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { sendMessage } from '../lib/api/chat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
@@ -45,6 +45,16 @@ const getPreviewText = (content: string): string =>
     .replace(/[()[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+const sortEntriesByCategoryAndTitle = (entries: CompendiumEntry[]): CompendiumEntry[] =>
+  [...entries].sort((a, b) => {
+    const categoryCompare = (a.category || '').localeCompare(b.category || '');
+    if (categoryCompare !== 0) {
+      return categoryCompare;
+    }
+
+    return a.title.localeCompare(b.title);
+  });
 
 export function Compendium() {
   const { user, isAdmin } = useAuth();
@@ -137,24 +147,55 @@ export function Compendium() {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async (entry: CompendiumEntry) => {
-      const entryData = { title: entry.title, content: entry.content, category: entry.category };
-      if (entry.id) {
-        const { error } = await supabase.from('compendium').update(entryData).eq('id', entry.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('compendium').insert([{ ...entryData, created_by: user?.id }]);
-        if (error) throw error;
-      }
+    mutationFn: (entry: CompendiumEntry) => saveCompendiumEntry(entry, user?.id),
+    onSuccess: (savedEntry) => {
+      queryClient.setQueryData<CompendiumEntry[]>(['compendiumEntries'], (current = []) => {
+        const existingIndex = current.findIndex((candidate) => candidate.id === savedEntry.id);
+
+        if (existingIndex === -1) {
+          return sortEntriesByCategoryAndTitle([...current, savedEntry]);
+        }
+
+        const updated = [...current];
+        updated[existingIndex] = savedEntry;
+        return sortEntriesByCategoryAndTitle(updated);
+      });
+
+      setSelectedEntry(savedEntry);
+      setFullPageEntry(null);
+
+      setBookmarkedEntries((previous) => {
+        if (!savedEntry.id || !previous.some((bookmark) => bookmark.id === savedEntry.id)) {
+          return previous;
+        }
+
+        const updatedBookmarks = previous.map((bookmark) =>
+          bookmark.id === savedEntry.id
+            ? { ...bookmark, ...savedEntry, preview: savedEntry.content.slice(0, 400) }
+            : bookmark
+        );
+        localStorage.setItem('compendium_bookmarks', JSON.stringify(updatedBookmarks));
+        return updatedBookmarks;
+      });
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['compendiumEntries'] }); setFullPageEntry(null); },
     onError: (err) => console.error("Save error:", err)
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteCompendiumEntry,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compendiumEntries'] });
+    onSuccess: (_, deletedEntryId) => {
+      queryClient.setQueryData<CompendiumEntry[]>(['compendiumEntries'], (current = []) =>
+        current.filter((entry) => entry.id !== deletedEntryId)
+      );
+
+      setBookmarkedEntries((previous) => {
+        const updated = previous.filter((entry) => entry.id !== deletedEntryId);
+        if (updated.length !== previous.length) {
+          localStorage.setItem('compendium_bookmarks', JSON.stringify(updated));
+        }
+        return updated;
+      });
+
       setSelectedEntry(null);
     },
     onError: (err) => console.error("Delete error:", err)
@@ -192,11 +233,11 @@ export function Compendium() {
   const handleNextEntry = () => { if (currentEntryIndex > -1 && currentEntryIndex < filteredEntries.length - 1) setSelectedEntry(filteredEntries[currentEntryIndex + 1]); };
   const handlePrevEntry = () => { if (currentEntryIndex > 0) setSelectedEntry(filteredEntries[currentEntryIndex - 1]); };
   const handleNewEntry = () => { setFullPageEntry({ id: undefined, title: 'New Entry', content: '# New Entry\nWrite your content here...', category: 'General', created_by: user?.id }); };
+  const bookmarkedEntryIds = useMemo(() => new Set(bookmarkedEntries.map((entry) => entry.id)), [bookmarkedEntries]);
+  const isBookmarked = (id?: string) => (id ? bookmarkedEntryIds.has(id) : false);
 
   if (isLoading) return <div className="flex items-center justify-center h-96"><LoadingSpinner size="lg" /></div>;
   if (queryError) return <div className="p-8"><ErrorMessage message={queryError.message} /></div>;
-
-  const isBookmarked = (id?: string) => bookmarkedEntries.some(b => b.id === id);
 
   const breadcrumbs = [
     { label: 'Home', path: '/', icon: Home },
