@@ -196,14 +196,8 @@ export function Login() {
         </form>
         
         <div className="text-center text-sm text-gray-600">
-          <span>Don&apos;t have an account? </span>
-          <button
-            type="button"
-            onClick={() => navigate('/register')}
-            className="font-semibold text-indigo-600 hover:text-indigo-500 transition-colors"
-          >
-            Create one
-          </button>
+          {/* Account self-registration is temporarily disabled. */}
+          <span>New account creation is currently unavailable.</span>
         </div>
       </div>
     </div>
