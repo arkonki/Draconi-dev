@@ -245,7 +245,11 @@ export function EquipmentSection({ character }: { character: Character }) {
     }
   };
 
-  const getTooltipLayout = (triggerEl: HTMLElement) => {
+  const getTooltipLayout = (triggerEl: HTMLElement | null) => {
+    if (!triggerEl || !triggerEl.isConnected) {
+      return null;
+    }
+
     const rect = triggerEl.getBoundingClientRect();
     const width = 256;
     const margin = 12;
@@ -258,6 +262,7 @@ export function EquipmentSection({ character }: { character: Character }) {
 
   const showDescriptionTooltip = (triggerEl: HTMLElement, tooltipKey: string, description: string) => {
     const layout = getTooltipLayout(triggerEl);
+    if (!layout) return;
     setActiveDescriptionTooltip({ key: tooltipKey, description, top: layout.top, left: layout.left, placement: layout.placement });
   };
 
@@ -268,9 +273,11 @@ export function EquipmentSection({ character }: { character: Character }) {
   const toggleDescriptionTooltip = (event: React.MouseEvent<HTMLButtonElement>, tooltipKey: string, description: string) => {
     event.preventDefault();
     event.stopPropagation();
+    const triggerEl = event.currentTarget;
     setActiveDescriptionTooltip((previous) => {
       if (previous?.key === tooltipKey) return null;
-      const layout = getTooltipLayout(event.currentTarget);
+      const layout = getTooltipLayout(triggerEl);
+      if (!layout) return null;
       return { key: tooltipKey, description, top: layout.top, left: layout.left, placement: layout.placement };
     });
   };
