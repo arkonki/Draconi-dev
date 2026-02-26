@@ -217,6 +217,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
             onPointerDownCapture={(e) => e.stopPropagation()}
             onMouseDownCapture={(e) => e.stopPropagation()}
             onTouchStartCapture={(e) => e.stopPropagation()}
+            data-atlas-ui="true"
             className="absolute top-0 right-0 w-80 h-full bg-white border-l shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300"
         >
             <div className="p-4 border-b flex justify-between items-center bg-gray-50">
@@ -371,7 +372,7 @@ function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin:
     );
 
     return (
-        <div className="absolute top-0 left-0 w-64 h-full bg-white/95 backdrop-blur-md border-r shadow-2xl z-40 flex flex-col animate-in slide-in-from-left duration-300">
+        <div data-atlas-ui="true" className="absolute top-0 left-0 w-64 h-full bg-white/95 backdrop-blur-md border-r shadow-2xl z-40 flex flex-col animate-in slide-in-from-left duration-300">
             <div className="p-4 border-b flex items-center gap-2 bg-gray-50/50">
                 <MapIcon size={18} className="text-indigo-600" />
                 <h3 className="font-black text-xs uppercase tracking-tighter">Map Legend / Explorer</h3>
@@ -408,6 +409,7 @@ function MapContextMenu({ x, y, onSelectTool, onClose }: {
 
     return (
         <div
+            data-atlas-ui="true"
             className="fixed z-[100] w-48 bg-white/95 backdrop-blur-md border border-slate-200 shadow-2xl rounded-xl p-1.5 animate-in fade-in zoom-in-95 duration-100"
             style={{ left: x, top: y }}
             onContextMenu={(e) => e.preventDefault()}
@@ -864,6 +866,9 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     };
 
     const handleMapMouseDown = (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('[data-atlas-ui="true"]')) return;
+
         const rect = imgRef.current?.getBoundingClientRect();
         if (!rect) return;
 
@@ -1170,6 +1175,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                     activeMap && (
 
                         <div
+                            data-atlas-ui="true"
                             className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm border border-slate-200 shadow-xl rounded-2xl p-1.5 flex items-center gap-1 z-30 animate-in slide-in-from-bottom-6 fade-in duration-500"
                             onPointerDownCapture={(e) => e.stopPropagation()}
                         >
@@ -1361,7 +1367,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 {/* ZOOM CONTROLS */}
                 {
                     activeMap && (
-                        <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-50">
+                        <div data-atlas-ui="true" className="absolute bottom-4 right-4 flex flex-col gap-2 z-50">
                             <div className="bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-xl flex flex-col p-1">
                                 <button
                                     onClick={() => setZoom(prev => Math.min(prev + 0.2, 4))}
