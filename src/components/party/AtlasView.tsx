@@ -215,6 +215,8 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
     return (
         <div
             onPointerDownCapture={(e) => e.stopPropagation()}
+            onMouseDownCapture={(e) => e.stopPropagation()}
+            onTouchStartCapture={(e) => e.stopPropagation()}
             className="absolute top-0 right-0 w-80 h-full bg-white border-l shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300"
         >
             <div className="p-4 border-b flex justify-between items-center bg-gray-50">
