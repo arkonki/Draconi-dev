@@ -20,6 +20,25 @@ export interface CompendiumTemplate {
   updated_at?: string;
 }
 
+export interface GrimoireSpell {
+  id: string;
+  name: string;
+  description: string | null;
+  school_id: string | null;
+  rank: number | null;
+  casting_time: string | null;
+  range: string | null;
+  duration: string | null;
+  willpower_cost: number | null;
+  dice: string | null;
+  power_level: 'yes' | 'none' | null;
+  prerequisite: string | null;
+  requirement: string | null;
+  magic_schools: { name: string } | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface BioData {
   id?: string;
   name: string;

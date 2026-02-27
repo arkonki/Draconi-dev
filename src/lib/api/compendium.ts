@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { CompendiumEntry, CompendiumTemplate } from '../../types/compendium';
+import { CompendiumEntry, CompendiumTemplate, GrimoireSpell } from '../../types/compendium';
 
 export interface BioOptions {
   appearance: string[];
@@ -33,6 +33,38 @@ export async function fetchCompendiumTemplates(): Promise<CompendiumTemplate[]> 
     throw new Error(error.message || 'Failed to load compendium templates');
   }
   return (data as CompendiumTemplate[]) || [];
+}
+
+export async function fetchGrimoireSpells(): Promise<GrimoireSpell[]> {
+  const { data, error } = await supabase
+    .from('game_spells')
+    .select(`
+      id,
+      name,
+      description,
+      school_id,
+      rank,
+      casting_time,
+      range,
+      duration,
+      willpower_cost,
+      dice,
+      power_level,
+      prerequisite,
+      requirement,
+      created_at,
+      updated_at,
+      magic_schools ( name )
+    `)
+    .order('rank', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching grimoire spells:', error);
+    throw new Error(error.message || 'Failed to load grimoire spells');
+  }
+
+  return (data as GrimoireSpell[]) || [];
 }
 
 export async function fetchBioData(): Promise<BioOptions> {
