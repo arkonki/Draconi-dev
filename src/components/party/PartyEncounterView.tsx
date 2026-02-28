@@ -22,6 +22,9 @@ import { fetchAllMonsters } from '../../lib/api/monsters';
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
+import { CharacterSheet } from '../character/CharacterSheet';
+import { RandomTableManager } from '../tools/RandomTableManager';
+import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import {
   PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward,
   ArrowUpDown, Copy, List, RotateCcw, ShieldAlert, Skull, Dices, Search, User,
@@ -52,6 +55,18 @@ interface CombatLogEntry {
   message?: string;
 }
 interface InitiativeUpdate { id: string; initiative_roll: number; }
+interface PersistedEncounterViewState {
+  selectedEncounterId: string | null;
+  viewMode: 'details' | 'create';
+  selectedActorId: string | null;
+  temporaryNotes: string;
+  editedName: string;
+  isEditingEncounter: boolean;
+  swapSourceId: string | null;
+}
+
+const ENCOUNTER_VIEW_STATE_STORAGE_PREFIX = 'partyEncounterViewState';
+const getEncounterViewStateStorageKey = (partyId: string) => `${ENCOUNTER_VIEW_STATE_STORAGE_PREFIX}:${partyId}`;
 
 // --- HELPER: SYNC LOGIC ---
 const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombatant[]) => {
@@ -209,15 +224,16 @@ function WaitTurnModal({ isOpen, onClose, currentActor, allCombatants, onSwap }:
 }
 
 // --- MODAL: ATTACK RESOLUTION ---
-interface AttackResolutionModalProps { isOpen: boolean; onClose: () => void; attacker: EncounterCombatant; targets: EncounterCombatant[]; attackName?: string; onConfirm: (targetId: string, damage: number) => void; }
+interface AttackResolutionModalProps { isOpen: boolean; onClose: () => void; attacker: EncounterCombatant; targets: EncounterCombatant[]; attackName?: string; onConfirm: (targetIds: string[], damage: number) => void; }
 
 function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, onConfirm }: AttackResolutionModalProps) {
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const [damage, setDamage] = useState<string>('');
   const damageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedTargetIds([]);
       damageInputRef.current?.focus();
     }
   }, [isOpen]);
@@ -250,19 +266,21 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
         <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><div><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Sword className="w-5 h-5 text-red-400" /> Resolve Action</h3><p className="text-xs text-stone-400">{attacker.display_name} is acting{attackName ? ` using ${attackName}` : ''}</p></div><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24} /></button></div>
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-4">
           <div>
-            <h4 className="text-xs font-bold text-stone-500 uppercase mb-2 flex items-center gap-1"><Target size={12} /> Select Target</h4>
+            <h4 className="text-xs font-bold text-stone-500 uppercase mb-2 flex items-center gap-1"><Target size={12} /> Select Target(s)</h4>
+            <p className="text-[11px] text-stone-500 mb-2">{selectedTargetIds.length} selected</p>
             <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
               {sortedTargets.map(t => {
                 const isFoe = (isAttackerMonster && !t.monster_id) || (!isAttackerMonster && !!t.monster_id);
                 const isDead = t.current_hp === 0;
                 const displayName = t.monster_id ? t.display_name.replace(/ \(Act \d+\)$/, '') : t.display_name;
+                const isSelected = selectedTargetIds.includes(t.id);
                 return (
-                  <button type="button" key={t.id} onClick={() => !isDead && setSelectedTargetId(t.id)} className={`w-full p-3 rounded border flex justify-between items-center cursor-pointer transition-all text-left ${selectedTargetId === t.id ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
+                  <button type="button" key={t.id} onClick={() => !isDead && setSelectedTargetIds(prev => prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id])} className={`w-full p-3 rounded border flex justify-between items-center cursor-pointer transition-all text-left ${isSelected ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
                     <div>
                       <span className={`font-bold ${isFoe ? 'text-red-700' : 'text-blue-700'}`}>{displayName}</span>
                       <div className="text-xs text-stone-500">{isFoe ? 'Enemy' : 'Ally'} • HP: {t.current_hp}/{t.max_hp}</div>
                     </div>
-                    {selectedTargetId === t.id && <Target className="text-red-600 w-5 h-5 animate-pulse" />}
+                    {isSelected && <Check className="text-red-600 w-5 h-5" />}
                   </button>
                 );
               })}
@@ -270,7 +288,7 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
           </div>
           <div><h4 className="text-xs font-bold text-stone-500 uppercase mb-2">Damage Amount</h4><div className="flex gap-2"><input ref={damageInputRef} type="number" placeholder="0" className="flex-grow p-3 text-lg font-bold border rounded shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={damage} onChange={(e) => setDamage(e.target.value)} /></div><p className="text-xs text-stone-400 mt-1">Enter negative number to heal.</p></div>
         </div>
-        <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" icon={Sword} disabled={!selectedTargetId || !damage} onClick={() => selectedTargetId && onConfirm(selectedTargetId, parseInt(damage))}>Apply</Button></div>
+        <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" icon={Sword} disabled={selectedTargetIds.length === 0 || !damage} onClick={() => { const parsed = parseInt(damage, 10); if (!isNaN(parsed)) onConfirm(selectedTargetIds, parsed); }}>Apply to {selectedTargetIds.length || 0}</Button></div>
       </div>
     </div>
   );
@@ -368,7 +386,85 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
   );
 }
 
-function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onWait, isDM }: {
+interface CharacterSheetModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  isLoading: boolean;
+  isReady: boolean;
+  error: string | null;
+  onRetry: () => void;
+}
+
+function CharacterSheetModal({ isOpen, onClose, title, isLoading, isReady, error, onRetry }: CharacterSheetModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[70] p-2 md:p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full h-[96vh] md:h-[92vh] max-w-[1400px] overflow-hidden border border-stone-300 flex flex-col">
+        <div className="p-3 md:p-4 border-b bg-stone-800 text-white flex justify-between items-center">
+          <div>
+            <h3 className="text-base md:text-lg font-bold font-serif">Character Sheet</h3>
+            <p className="text-xs text-stone-300">{title}</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close character sheet">
+            <XCircle size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-[#f5f0e1]">
+          {error ? (
+            <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+              <p className="text-red-600 font-semibold">{error}</p>
+              <div className="mt-4 flex gap-2">
+                <Button variant="secondary" onClick={onClose}>Close</Button>
+                <Button variant="primary" onClick={onRetry}>Retry</Button>
+              </div>
+            </div>
+          ) : isLoading || !isReady ? (
+            <div className="h-full flex items-center justify-center gap-3 text-stone-600">
+              <LoadingSpinner />
+              <span className="font-medium">Loading character sheet...</span>
+            </div>
+          ) : (
+            <CharacterSheet />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface RollTablesModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  partyId: string;
+}
+
+function RollTablesModal({ isOpen, onClose, partyId }: RollTablesModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[65] p-2 md:p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full h-[96vh] md:h-[92vh] max-w-[1400px] overflow-hidden border border-stone-300 flex flex-col">
+        <div className="p-3 md:p-4 border-b bg-stone-800 text-white flex justify-between items-center">
+          <div>
+            <h3 className="text-base md:text-lg font-bold font-serif">Roll Tables</h3>
+            <p className="text-xs text-stone-300">Open and use random tables during combat</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close roll tables">
+            <XCircle size={24} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-stone-50 p-4">
+          <RandomTableManager partyId={partyId} allowedCategoryKeywords={['combat']} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onWait, onOpenCharacterSheet, isDM }: {
   combatant: EncounterCombatant,
   monsterData?: MonsterData,
   currentAttack?: MonsterAttack | null,
@@ -376,6 +472,7 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
   onEndTurn: () => void,
   onOpenAttackModal: () => void,
   onWait: () => void,
+  onOpenCharacterSheet?: () => void,
   isDM: boolean
 }) {
   const isMonster = !!combatant.monster_id;
@@ -388,6 +485,11 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
         <div className="flex gap-2">
           {canControl && (
             <>
+              {isDM && combatant.character_id && onOpenCharacterSheet && (
+                <Button size="sm" variant="secondary" onClick={onOpenCharacterSheet} icon={User} title="Open character sheet">
+                  Sheet
+                </Button>
+              )}
               <Button size="sm" variant="secondary" onClick={onWait} icon={Hourglass} title="Swap Initiative (Wait)">Wait</Button>
               <Button size="sm" variant="secondary" onClick={onEndTurn} icon={RotateCcw} title="End turn and automatically flip next card">End Turn</Button>
             </>
@@ -426,9 +528,10 @@ interface DragonbaneCombatantCardProps {
   isDM: boolean;
   myCharacterId: string | null;
   onSetInitiative: (id: string, val: number) => void;
+  onOpenCharacterSheet: (combatant: EncounterCombatant) => void;
 }
 
-function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative }: DragonbaneCombatantCardProps) {
+function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
   const initValue = combatant.initiative_roll ?? '-';
@@ -439,6 +542,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
 
   const isMyCharacter = myCharacterId && combatant.character_id === myCharacterId;
   const canEdit = isDM || isMyCharacter;
+  const canOpenCharacterSheet = isDM && !!combatant.character_id;
 
   const handleInitClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -493,6 +597,18 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
           <div className={`flex items-center gap-1 transition-opacity ${hasActed ? 'opacity-50 hover:opacity-100' : ''}`} onPointerDownCapture={e => e.stopPropagation()}>
             {!hasActed && !isDefeated && (<button className={`p-1 rounded transition-colors ${isSwapSource ? 'bg-purple-600 text-white' : 'text-stone-400 hover:text-purple-600 hover:bg-purple-50'}`} title="Swap Initiative (Wait)" onClick={() => onSwapRequest(combatant.id)}><ArrowUpDown size={14} /></button>)}
             {!isDefeated && <button className={`p-1 rounded transition-colors ${hasActed ? 'text-stone-400 hover:bg-stone-200' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800'}`} title={hasActed ? "Unflip Card" : "Flip Card (End Turn/Reaction)"} onClick={() => onFlipCard(combatant.id, hasActed)}>{hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}</button>}
+            {canOpenCharacterSheet && (
+              <button
+                className="p-1 rounded transition-colors text-stone-400 hover:text-blue-700 hover:bg-blue-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCharacterSheet(combatant);
+                }}
+                title="Open Character Sheet"
+              >
+                <User size={14} />
+              </button>
+            )}
             {isDM && (<button className={`p-1 rounded transition-colors flex items-center gap-1 ${isDefeated ? 'bg-red-600 text-white hover:bg-red-700 px-2 shadow-sm' : 'text-stone-300 hover:text-red-600 hover:bg-red-50'}`} onClick={() => onRemove(combatant.id)} title="Remove from Encounter"><Trash2 size={14} />{isDefeated && <span className="text-[10px] font-bold uppercase">Remove Corpse</span>}</button>)}
           </div>
         </div>
@@ -510,7 +626,18 @@ import { useAuth } from '../../contexts/useAuth';
 export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncounterViewProps) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const {
+    character: viewedSheetCharacter,
+    isLoading: isCharacterSheetLoading,
+    error: characterSheetError,
+    fetchCharacter: fetchCharacterSheetData,
+    setCharacter: setViewedSheetCharacter,
+  } = useCharacterSheetStore();
   // const { toggleDiceRoller } = useDice();
+  const previousViewedCharacterRef = useRef<Character | null>(null);
+  const activeSheetRequestIdRef = useRef(0);
+  const shouldRestoreCharacterContextRef = useRef(false);
+  const hasHydratedPersistedStateRef = useRef(false);
 
   // Determine current user's character ID from the party members list
   const myCharacterId = useMemo(() => {
@@ -530,12 +657,15 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [isInitModalOpen, setIsInitModalOpen] = useState(false);
   const [isAttackModalOpen, setIsAttackModalOpen] = useState(false);
   const [isWaitModalOpen, setIsWaitModalOpen] = useState(false); // NEW: Wait Modal State
+  const [isRollTablesModalOpen, setIsRollTablesModalOpen] = useState(false);
+  const [isCharacterSheetModalOpen, setIsCharacterSheetModalOpen] = useState(false);
   const [showEncounterList, setShowEncounterList] = useState(false);
   const [isEditingEncounter, setIsEditingEncounter] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [editingStats, setEditingStats] = useState<Record<string, EditableCombatantStats>>({});
   const [currentMonsterAttacks, setCurrentMonsterAttacks] = useState<Record<string, MonsterAttack | null>>({});
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
+  const [sheetCombatant, setSheetCombatant] = useState<EncounterCombatant | null>(null);
   const [temporaryNotes, setTemporaryNotes] = useState('');
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<{ id: number; text: string, type?: 'success' | 'error' } | null>(null);
@@ -567,9 +697,137 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const activeCombatant = useMemo(() => combatants.find(c => c.id === selectedActorId), [combatants, selectedActorId]);
   const activeCombatantMonsterData = useMemo(() => activeCombatant?.monster_id ? monstersById.get(activeCombatant.monster_id) : null, [activeCombatant, monstersById]);
   const availableParty = useMemo(() => partyMembers.filter(m => !combatants.some(c => c.character_id === m.id)), [partyMembers, combatants]);
+  const requestedSheetCharacterId = sheetCombatant?.character_id || null;
+  const isRequestedCharacterLoaded = !!requestedSheetCharacterId && viewedSheetCharacter?.id === requestedSheetCharacterId;
+
+  const restorePreviousCharacterContext = () => {
+    const previousCharacter = previousViewedCharacterRef.current;
+    previousViewedCharacterRef.current = null;
+    shouldRestoreCharacterContextRef.current = false;
+    setViewedSheetCharacter(previousCharacter ?? null);
+  };
+
+  const loadCharacterSheetForModal = (characterId: string, userId: string) => {
+    shouldRestoreCharacterContextRef.current = false;
+    const requestId = ++activeSheetRequestIdRef.current;
+
+    void fetchCharacterSheetData(characterId, userId).finally(() => {
+      if (activeSheetRequestIdRef.current !== requestId) return;
+      if (shouldRestoreCharacterContextRef.current) {
+        restorePreviousCharacterContext();
+      }
+    });
+  };
+
+  const handleOpenCharacterSheet = (combatant: EncounterCombatant) => {
+    if (!combatant.character_id) return;
+    if (!user?.id) {
+      setFeedbackToast({ id: Date.now(), text: 'Cannot open sheet: user not authenticated.', type: 'error' });
+      setTimeout(() => setFeedbackToast(null), 3000);
+      return;
+    }
+
+    if (!isCharacterSheetModalOpen) {
+      previousViewedCharacterRef.current = useCharacterSheetStore.getState().character;
+    }
+
+    setSheetCombatant(combatant);
+    setIsCharacterSheetModalOpen(true);
+    loadCharacterSheetForModal(combatant.character_id, user.id);
+  };
+
+  const handleRetryCharacterSheetLoad = () => {
+    if (!requestedSheetCharacterId || !user?.id) return;
+    loadCharacterSheetForModal(requestedSheetCharacterId, user.id);
+  };
+
+  const handleCloseCharacterSheetModal = () => {
+    setIsCharacterSheetModalOpen(false);
+    setSheetCombatant(null);
+
+    shouldRestoreCharacterContextRef.current = true;
+    if (!isCharacterSheetLoading) {
+      restorePreviousCharacterContext();
+    }
+  };
+
+  useEffect(() => {
+    hasHydratedPersistedStateRef.current = false;
+    if (!partyId || typeof window === 'undefined') {
+      hasHydratedPersistedStateRef.current = true;
+      return;
+    }
+
+    try {
+      const stored = window.localStorage.getItem(getEncounterViewStateStorageKey(partyId));
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<PersistedEncounterViewState>;
+        if (typeof parsed.selectedEncounterId === 'string' || parsed.selectedEncounterId === null) setSelectedEncounterId(parsed.selectedEncounterId ?? null);
+        if (parsed.viewMode === 'details' || parsed.viewMode === 'create') setViewMode(parsed.viewMode);
+        if (typeof parsed.selectedActorId === 'string' || parsed.selectedActorId === null) setSelectedActorId(parsed.selectedActorId ?? null);
+        if (typeof parsed.temporaryNotes === 'string') setTemporaryNotes(parsed.temporaryNotes);
+        if (typeof parsed.editedName === 'string') setEditedName(parsed.editedName);
+        if (typeof parsed.isEditingEncounter === 'boolean') setIsEditingEncounter(parsed.isEditingEncounter);
+        if (typeof parsed.swapSourceId === 'string' || parsed.swapSourceId === null) setSwapSourceId(parsed.swapSourceId ?? null);
+      }
+    } catch (error) {
+      console.warn('Failed to restore encounter view state:', error);
+    } finally {
+      hasHydratedPersistedStateRef.current = true;
+    }
+  }, [partyId]);
+
+  useEffect(() => {
+    if (!hasHydratedPersistedStateRef.current || !partyId || typeof window === 'undefined') return;
+
+    const stateToPersist: PersistedEncounterViewState = {
+      selectedEncounterId,
+      viewMode,
+      selectedActorId,
+      temporaryNotes,
+      editedName,
+      isEditingEncounter,
+      swapSourceId,
+    };
+
+    try {
+      window.localStorage.setItem(getEncounterViewStateStorageKey(partyId), JSON.stringify(stateToPersist));
+    } catch (error) {
+      console.warn('Failed to persist encounter view state:', error);
+    }
+  }, [partyId, selectedEncounterId, viewMode, selectedActorId, temporaryNotes, editedName, isEditingEncounter, swapSourceId]);
+
+  useEffect(() => {
+    if (loadingEnc) return;
+    if (!allEncounters || allEncounters.length === 0) {
+      if (selectedEncounterId) setSelectedEncounterId(null);
+      return;
+    }
+    if (selectedEncounterId && !allEncounters.some((enc) => enc.id === selectedEncounterId)) {
+      setSelectedEncounterId(null);
+    }
+  }, [allEncounters, loadingEnc, selectedEncounterId]);
+
+  useEffect(() => {
+    if (selectedActorId && !combatants.some((combatant) => combatant.id === selectedActorId)) {
+      setSelectedActorId(null);
+    }
+    if (swapSourceId && !combatants.some((combatant) => combatant.id === swapSourceId)) {
+      setSwapSourceId(null);
+    }
+  }, [combatants, selectedActorId, swapSourceId]);
+
+  useEffect(() => {
+    return () => {
+      if (previousViewedCharacterRef.current) {
+        setViewedSheetCharacter(previousViewedCharacterRef.current);
+        previousViewedCharacterRef.current = null;
+      }
+    };
+  }, [setViewedSheetCharacter]);
 
   useEffect(() => { if (!loadingEnc && (!allEncounters || allEncounters.length === 0)) setViewMode('create'); }, [allEncounters, loadingEnc]);
-  useEffect(() => { if (encounterDetails) setEditedName(encounterDetails.name); }, [encounterDetails]);
+  useEffect(() => { if (encounterDetails && !isEditingEncounter) setEditedName(encounterDetails.name); }, [encounterDetails, isEditingEncounter]);
 
   useEffect(() => {
     if (!combatants) return;
@@ -690,16 +948,33 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     updateCombatantMu.mutate({ id, updates: { has_acted: !current } });
   };
 
-  const handleAttackConfirm = (targetId: string, dmg: number) => {
-    if (!activeCombatant) return;
-    const target = combatants.find(c => c.id === targetId);
-    if (!target) return;
-    const newHp = Math.max(0, target.current_hp - dmg);
-    const updates: Partial<EncounterCombatant> = { current_hp: newHp };
-    let siblings = [target];
-    if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
-    siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
-    appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: target.display_name, damage: dmg });
+  const handleAttackConfirm = (targetIds: string[], dmg: number) => {
+    if (!activeCombatant || targetIds.length === 0) return;
+    const updatedCombatantIds = new Set<string>();
+    const loggedTargets = new Set<string>();
+
+    targetIds.forEach((targetId) => {
+      const target = combatants.find(c => c.id === targetId);
+      if (!target) return;
+
+      const newHp = Math.max(0, target.current_hp - dmg);
+      const updates: Partial<EncounterCombatant> = { current_hp: newHp };
+      let siblings = [target];
+      if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
+
+      siblings.forEach((sib) => {
+        if (updatedCombatantIds.has(sib.id)) return;
+        updatedCombatantIds.add(sib.id);
+        updateCombatantMu.mutate({ id: sib.id, updates });
+      });
+
+      const targetName = target.monster_id ? target.display_name.replace(/ \(Act \d+\)$/, '') : target.display_name;
+      if (!loggedTargets.has(targetName)) {
+        loggedTargets.add(targetName);
+        appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: targetName, damage: dmg });
+      }
+    });
+
     setIsAttackModalOpen(false);
   };
 
@@ -725,6 +1000,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                   <>
                     <Button variant="ghost" icon={PlusCircle} onClick={() => setViewMode('create')}>New</Button>
                     <Button onClick={() => setShowEncounterList(true)} icon={List} variant="secondary">List</Button>
+                    <Button onClick={() => setIsRollTablesModalOpen(true)} icon={Dices} variant="secondary">Tables</Button>
                   </>
                 )}
                 {encounterDetails?.status === 'planning' && isDM && <Button variant="primary" icon={Play} onClick={() => startEncounterMu.mutate()}>Start</Button>}
@@ -777,13 +1053,14 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                 onEndTurn={() => handleFlip(activeCombatant.id, false)}
                 onOpenAttackModal={() => setIsAttackModalOpen(true)}
                 onWait={() => setIsWaitModalOpen(true)}
+                onOpenCharacterSheet={() => handleOpenCharacterSheet(activeCombatant)}
                 isDM={isDM}
               />
             )}
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
             </div>
           </div>
         </div>
@@ -818,6 +1095,20 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           onSwap={handleWaitConfirm}
         />
       )}
+      <CharacterSheetModal
+        isOpen={isCharacterSheetModalOpen}
+        onClose={handleCloseCharacterSheetModal}
+        title={sheetCombatant?.display_name || 'Character'}
+        isLoading={isCharacterSheetLoading}
+        isReady={isRequestedCharacterLoaded}
+        error={characterSheetError}
+        onRetry={handleRetryCharacterSheetLoad}
+      />
+      <RollTablesModal
+        isOpen={isRollTablesModalOpen}
+        onClose={() => setIsRollTablesModalOpen(false)}
+        partyId={partyId}
+      />
       {showEncounterList && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl space-y-4 max-h-[80vh] flex flex-col"><div className="flex items-center justify-between"><h3 className="text-xl font-semibold">All Encounters</h3><Button variant="ghost" size="sm" onClick={() => setShowEncounterList(false)} icon={XCircle}>Close</Button></div><div className="overflow-y-auto space-y-2 border-t pt-4">{(allEncounters ?? []).map(enc => (<div key={enc.id} className={`flex items-center justify-between p-3 rounded-md ${currentEncounterId === enc.id ? 'bg-blue-100' : 'bg-gray-50'}`}><div><p className="font-semibold">{enc.name}</p><p className="text-sm text-gray-600 capitalize">Status: {enc.status}</p></div><div className="flex items-center gap-2"><Button size="sm" onClick={() => setSelectedEncounterId(enc.id)} disabled={currentEncounterId === enc.id}>Select</Button><Button size="sm" variant="outline" icon={Copy} onClick={() => duplicateEncounterMu.mutate({ id: enc.id, name: enc.name })}>Copy</Button><Button size="sm" variant="danger" icon={Trash2} onClick={() => deleteEncounterMu.mutate(enc.id)}>Del</Button></div></div>))}</div></div></div>)}
     </div>
   );

@@ -13,6 +13,7 @@ import { supabase } from '../../lib/supabase';
 interface PartyMemberListProps {
   party: {
     id: string;
+    name: string;
     created_by: string;
     members: Character[];
   };
@@ -329,7 +330,11 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
             member={member} 
             isDM={isDM} 
             onRemove={handleRemoveMember}
-            onView={(id) => navigate(`/character/${id}`)}
+            onView={(id) =>
+              navigate(`/character/${id}?fromPartyId=${encodeURIComponent(party.id)}&fromPartyName=${encodeURIComponent(party.name)}`, {
+                state: { fromPartyId: party.id, fromPartyName: party.name },
+              })
+            }
             onAdjustHP={(amount) => handleStatAdjust(member.id, 'current_hp', amount, member.current_hp, member.attributes.CON)}
             onAdjustWP={(amount) => handleStatAdjust(member.id, 'current_wp', amount, member.current_wp, member.attributes.WIL)}
         />

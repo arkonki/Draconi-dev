@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { TimeTracker, TimeMarker } from '../../types/timeTracker';
@@ -34,6 +34,16 @@ const MARKER_TYPES: { value: TimeMarker; label: string; icon: LucideIcon; color:
   { value: 'L', label: 'Lantern', icon: Flame, color: 'text-yellow-600', bg: 'bg-yellow-50' },
 ];
 
+interface PersistedTimeTrackerViewState {
+  activeShift: number;
+  expandedHour: number | null;
+  selectedTableId: string;
+  encounterResult: { text: string; type: 'safe' | 'danger' } | null;
+}
+
+const TIME_TRACKER_VIEW_STATE_STORAGE_PREFIX = 'partyTimeTrackerViewState';
+const getTimeTrackerViewStateStorageKey = (partyId: string) => `${TIME_TRACKER_VIEW_STATE_STORAGE_PREFIX}:${partyId}`;
+
 const createDefaultGridState = (): TimeTracker['grid_state'] => {
   const defaultState: TimeTracker['grid_state'] = {};
   for (let i = 1; i <= 24; i++) {
@@ -52,15 +62,85 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
 
   const [selectedTableId, setSelectedTableId] = useState<string>('');
   const [encounterResult, setEncounterResult] = useState<{ text: string, type: 'safe' | 'danger' } | null>(null);
+  const hasHydratedPersistedStateRef = useRef(false);
+  const hasRestoredShiftFromPersistenceRef = useRef(false);
 
   const { data: customTables } = useQuery({
     queryKey: ['randomTables', partyId],
     queryFn: () => fetchRandomTables(partyId),
   });
 
+  useEffect(() => {
+    hasHydratedPersistedStateRef.current = false;
+    hasRestoredShiftFromPersistenceRef.current = false;
+
+    if (!partyId || typeof window === 'undefined') {
+      hasHydratedPersistedStateRef.current = true;
+      return;
+    }
+
+    try {
+      const stored = window.localStorage.getItem(getTimeTrackerViewStateStorageKey(partyId));
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<PersistedTimeTrackerViewState>;
+
+        if (typeof parsed.activeShift === 'number' && parsed.activeShift >= 1 && parsed.activeShift <= 4) {
+          setActiveShift(parsed.activeShift);
+          hasRestoredShiftFromPersistenceRef.current = true;
+        }
+
+        if (typeof parsed.expandedHour === 'number' || parsed.expandedHour === null) {
+          setExpandedHour(parsed.expandedHour ?? null);
+        }
+
+        if (typeof parsed.selectedTableId === 'string') {
+          setSelectedTableId(parsed.selectedTableId);
+        }
+
+        if (parsed.encounterResult && typeof parsed.encounterResult.text === 'string' && (parsed.encounterResult.type === 'safe' || parsed.encounterResult.type === 'danger')) {
+          setEncounterResult(parsed.encounterResult);
+        } else if (parsed.encounterResult === null) {
+          setEncounterResult(null);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to restore time tracker view state:', error);
+    } finally {
+      hasHydratedPersistedStateRef.current = true;
+    }
+  }, [partyId]);
+
+  useEffect(() => {
+    if (!hasHydratedPersistedStateRef.current || !partyId || typeof window === 'undefined') return;
+
+    const stateToPersist: PersistedTimeTrackerViewState = {
+      activeShift,
+      expandedHour,
+      selectedTableId,
+      encounterResult,
+    };
+
+    try {
+      window.localStorage.setItem(getTimeTrackerViewStateStorageKey(partyId), JSON.stringify(stateToPersist));
+    } catch (error) {
+      console.warn('Failed to persist time tracker view state:', error);
+    }
+  }, [partyId, activeShift, expandedHour, selectedTableId, encounterResult]);
+
   // Auto-select first table if none selected
   useEffect(() => {
     if (customTables && customTables.length > 0 && !selectedTableId) {
+      setSelectedTableId(customTables[0].id);
+    }
+  }, [customTables, selectedTableId]);
+
+  useEffect(() => {
+    if (!customTables || customTables.length === 0) {
+      if (selectedTableId) setSelectedTableId('');
+      return;
+    }
+
+    if (selectedTableId && !customTables.some((table) => table.id === selectedTableId)) {
       setSelectedTableId(customTables[0].id);
     }
   }, [customTables, selectedTableId]);
@@ -77,7 +157,9 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
       if (data) {
         const existingTracker = data as unknown as TimeTracker;
         setTracker(existingTracker);
-        setActiveShift(existingTracker.current_shift || 1);
+        if (!hasRestoredShiftFromPersistenceRef.current) {
+          setActiveShift(existingTracker.current_shift || 1);
+        }
         setLoading(false);
       } else if (!error) {
         const defaultState = createDefaultGridState();

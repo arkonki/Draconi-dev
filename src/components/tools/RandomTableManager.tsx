@@ -1,28 +1,84 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchRandomTables, createRandomTable, updateRandomTable, deleteRandomTable } from '../../lib/api/randomTables';
 import { RandomTable, RandomTableRow } from '../../types/randomTable';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { Plus, Trash2, Edit3, Save, X, Dices } from 'lucide-react';
+import { Plus, Trash2, Edit3, Save, X, Dices, Search } from 'lucide-react';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 
 interface RandomTableManagerProps {
     partyId: string;
+    allowedCategoryKeywords?: string[];
 }
 
 const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd66', 'd100'];
 
-export function RandomTableManager({ partyId }: RandomTableManagerProps) {
+export function RandomTableManager({ partyId, allowedCategoryKeywords = [] }: RandomTableManagerProps) {
     const queryClient = useQueryClient();
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [testResult, setTestResult] = useState<{ roll: number, result: string } | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
 
     const { data: tables, isLoading } = useQuery({
         queryKey: ['randomTables', partyId],
         queryFn: () => fetchRandomTables(partyId),
     });
+
+    const normalizedCategoryKeywords = useMemo(
+        () => allowedCategoryKeywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean),
+        [allowedCategoryKeywords]
+    );
+
+    const visibleTables = useMemo(() => {
+        if (!tables || normalizedCategoryKeywords.length === 0) return tables || [];
+        return tables.filter((table) => {
+            const category = (table.category || '').toLowerCase();
+            return normalizedCategoryKeywords.some((keyword) => category.includes(keyword));
+        });
+    }, [tables, normalizedCategoryKeywords]);
+
+    const categoryOptions = useMemo(() => {
+        const categorySet = new Set<string>();
+        visibleTables.forEach((table) => {
+            const category = (table.category || 'Uncategorized').trim() || 'Uncategorized';
+            categorySet.add(category);
+        });
+        return Array.from(categorySet).sort((a, b) => a.localeCompare(b));
+    }, [visibleTables]);
+
+    useEffect(() => {
+        if (selectedCategoryFilter !== 'all' && !categoryOptions.includes(selectedCategoryFilter)) {
+            setSelectedCategoryFilter('all');
+        }
+    }, [categoryOptions, selectedCategoryFilter]);
+
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
+    const filteredTables = useMemo(() => {
+        return visibleTables.filter((table) => {
+            if (editingId === table.id) return true;
+
+            const category = (table.category || 'Uncategorized').trim() || 'Uncategorized';
+            const matchesCategory = selectedCategoryFilter === 'all' || category === selectedCategoryFilter;
+            if (!matchesCategory) return false;
+
+            if (!normalizedSearchTerm) return true;
+
+            const searchableValues = [
+                table.name,
+                table.category,
+                table.die_type,
+                ...table.rows.map((row) => row.result),
+            ];
+
+            return searchableValues.some((value) => (value || '').toLowerCase().includes(normalizedSearchTerm));
+        });
+    }, [visibleTables, selectedCategoryFilter, normalizedSearchTerm, editingId]);
+
+    const hasActiveClientFilters = normalizedSearchTerm.length > 0 || selectedCategoryFilter !== 'all';
 
     const createMutation = useMutation({
         mutationFn: createRandomTable,
@@ -67,8 +123,48 @@ export function RandomTableManager({ partyId }: RandomTableManagerProps) {
                 />
             )}
 
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-stone-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="relative md:col-span-2">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Search by name, category, die type, or result..."
+                            className="w-full pl-9 pr-3 py-2 border border-stone-300 rounded-md bg-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                        />
+                    </div>
+                    <select
+                        value={selectedCategoryFilter}
+                        onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                        className="w-full p-2 border border-stone-300 rounded-md bg-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    >
+                        <option value="all">All Categories</option>
+                        {categoryOptions.map((category) => (
+                            <option key={category} value={category}>{category}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="mt-2 flex justify-between items-center">
+                    <span className="text-xs text-stone-500">{filteredTables.length} of {visibleTables.length} table{visibleTables.length === 1 ? '' : 's'}</span>
+                    {hasActiveClientFilters && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                                setSearchTerm('');
+                                setSelectedCategoryFilter('all');
+                            }}
+                        >
+                            Clear Filters
+                        </Button>
+                    )}
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {tables?.map(table => (
+                {filteredTables.map(table => (
                     <div key={table.id} className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
                         {editingId === table.id ? (
                             <TableEditor
@@ -119,11 +215,30 @@ export function RandomTableManager({ partyId }: RandomTableManagerProps) {
                 ))}
             </div>
 
-            {(!tables || tables.length === 0) && !isCreating && (
+            {(filteredTables.length === 0) && !isCreating && (
                 <div className="text-center py-12 bg-stone-50 rounded-xl border border-dashed border-stone-300">
                     <Dices className="mx-auto h-12 w-12 text-stone-300 mb-3" />
-                    <h3 className="text-lg font-medium text-stone-900">No tables yet</h3>
-                    <p className="text-stone-500 mb-4 max-w-sm mx-auto">Create your first random encounter table to start rolling dynamic events for your party.</p>
+                    <h3 className="text-lg font-medium text-stone-900">No matching tables</h3>
+                    <p className="text-stone-500 mb-4 max-w-sm mx-auto">
+                        {visibleTables.length === 0 && normalizedCategoryKeywords.length > 0
+                            ? `No tables found for category filter: ${normalizedCategoryKeywords.join(', ')}.`
+                            : hasActiveClientFilters
+                                ? 'No tables match your current search/filter selection.'
+                                : 'Create your first random encounter table to start rolling dynamic events for your party.'}
+                    </p>
+                    {hasActiveClientFilters && visibleTables.length > 0 && (
+                        <div className="mb-3">
+                            <Button
+                                variant="secondary"
+                                onClick={() => {
+                                    setSearchTerm('');
+                                    setSelectedCategoryFilter('all');
+                                }}
+                            >
+                                Reset Search & Filters
+                            </Button>
+                        </div>
+                    )}
                     <Button onClick={() => setIsCreating(true)} variant="primary" icon={Plus}>Create Table</Button>
                 </div>
             )}

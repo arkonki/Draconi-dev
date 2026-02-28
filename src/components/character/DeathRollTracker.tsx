@@ -102,7 +102,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
   const handleRecoveryRollComplete = (resultEntry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
     setIsRolling(false);
     const hpRecovered = resultEntry.results[0].value;
-    setLastRollResult({ msg: `Recovered ${hpRecovered} HP!`, type: 'success' });
+    setLastRollResult({ msg: `Recovered ${hpRecovered} HP! Roll on SEVERE INJURIES table.`, type: 'success' });
     adjustStat('current_hp', hpRecovered); 
     toggleDiceRoller();
   };
@@ -116,7 +116,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
         return;
       }
       adjustStat('current_hp', amount);
-      setLastRollResult({ msg: `Manually Recovered ${amount} HP`, type: 'success' });
+      setLastRollResult({ msg: `Manually Recovered ${amount} HP. Roll on SEVERE INJURIES table.`, type: 'success' });
       setManualHP('');
     }
   };
@@ -298,6 +298,12 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
           </div>
         ) : isRecovering ? (
           <div className="space-y-2 bg-green-50 p-2 rounded border border-green-200">
+            <div className="flex items-start gap-2 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-xs font-semibold leading-relaxed">
+                Recovery reminder: Roll on the <span className="uppercase">Severe Injuries</span> table after recovering.
+              </p>
+            </div>
             <Button 
               onClick={performRecoveryRoll} 
               className="w-full bg-green-600 hover:bg-green-700 text-white border-green-800"
