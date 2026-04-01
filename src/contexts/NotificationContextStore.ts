@@ -7,6 +7,7 @@ export interface DesktopNotificationOptions {
   type: 'message' | 'invite' | 'session' | 'encounter';
   url?: string;
   tag?: string;
+  ignorePreferences?: boolean;
 }
 
 export interface NotificationContextType {

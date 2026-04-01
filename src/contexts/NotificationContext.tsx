@@ -152,6 +152,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     type,
     url,
     tag,
+    ignorePreferences = false,
   }: DesktopNotificationOptions) => {
     const currentSettings = settingsRef.current;
 
@@ -181,7 +182,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       (type === 'invite' && currentSettings.desktop.partyInvite) ||
       ((type === 'session' || type === 'encounter') && currentSettings.desktop.sessionScheduled);
 
-    if (!shouldSend) {
+    if (!ignorePreferences && !shouldSend) {
       return;
     }
 

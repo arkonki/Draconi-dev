@@ -154,6 +154,8 @@ export function NotificationSettings() {
         title: 'Success',
         body: 'Notifications are now enabled!',
         type: 'message',
+        tag: `notifications-enabled-${Date.now()}`,
+        ignorePreferences: true,
       });
     }
   };
@@ -163,6 +165,8 @@ export function NotificationSettings() {
       title: 'Test Notification',
       body: 'If you see this, it works!',
       type: 'message',
+      tag: `test-notification-${Date.now()}`,
+      ignorePreferences: true,
     });
     playSound('notification');
   };
