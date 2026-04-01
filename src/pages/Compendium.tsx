@@ -38,14 +38,6 @@ const HomebrewRenderer = lazy(() =>
   }))
 );
 
-const getPreviewText = (content: string): string =>
-  content
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/[`#>*_|]/g, ' ')
-    .replace(/[()[\]]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
 const sortEntriesByCategoryAndTitle = (entries: CompendiumEntry[]): CompendiumEntry[] =>
   [...entries].sort((a, b) => {
     const categoryCompare = (a.category || '').localeCompare(b.category || '');
@@ -622,14 +614,17 @@ export function Compendium() {
 
               {bookmarkedEntries.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
-                  {bookmarkedEntries.map((bookmark) => (
+                  {bookmarkedEntries.map((bookmark) => {
+                    const previewEntry = entries.find((entry) => entry.id === bookmark.id) || bookmark;
+
+                    return (
                     <div
                       key={bookmark.id}
-                      onClick={() => setSelectedEntry(entries.find((entry) => entry.id === bookmark.id) || bookmark)}
+                      onClick={() => setSelectedEntry(previewEntry)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
-                          setSelectedEntry(entries.find((entry) => entry.id === bookmark.id) || bookmark);
+                          setSelectedEntry(previewEntry);
                         }
                       }}
                       role="button"
@@ -640,15 +635,17 @@ export function Compendium() {
                         <h3 className="font-bold text-gray-800 group-hover:text-indigo-700 truncate mr-2 text-sm md:text-base">{bookmark.title}</h3>
                         <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded shrink-0">{bookmark.category}</span>
                       </div>
-                      <div className="relative h-20 md:h-24 overflow-hidden text-xs text-gray-500">
-                        <p className="text-xs text-gray-500 leading-relaxed">
-                          {getPreviewText(bookmark.preview).slice(0, 260)}
-                        </p>
-                        <div className="absolute bottom-0 left-0 w-full h-10 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
+                      <div className="relative h-32 md:h-36 overflow-hidden rounded-md border border-gray-100 bg-stone-50/60">
+                        <div className="pointer-events-none scale-[0.72] origin-top-left w-[138.9%] p-3">
+                          <Suspense fallback={<div className="h-20" />}>
+                            <HomebrewRenderer content={previewEntry.content} />
+                          </Suspense>
+                        </div>
+                        <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white via-white/90 to-transparent pointer-events-none" />
                       </div>
                       <div className="mt-2 flex items-center text-xs text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-4 z-20 bg-white pl-2">Read Entry <ChevronRight size={14} className="ml-1" /></div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               ) : (
                 <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50"><p className="text-gray-400 text-sm">You haven't bookmarked any entries yet.</p></div>
