@@ -39,7 +39,38 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const messageIdFromUrl = searchParams.get('messageId');
+
+  const syncActiveChatContext = (isActive: boolean) => {
+    const payload = { partyId, active: isActive };
+
+    if (isActive) {
+      sessionStorage.setItem('active_chat_context', JSON.stringify(payload));
+    } else {
+      const current = sessionStorage.getItem('active_chat_context');
+      if (current) {
+        try {
+          const parsed = JSON.parse(current) as { partyId?: string; active?: boolean };
+          if (parsed.partyId === partyId) {
+            sessionStorage.removeItem('active_chat_context');
+          }
+        } catch {
+          sessionStorage.removeItem('active_chat_context');
+        }
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      void navigator.serviceWorker.ready.then((registration) => {
+        registration.active?.postMessage({
+          type: 'ACTIVE_CHAT_CONTEXT',
+          ...payload,
+        });
+      });
+    }
+  };
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['messages', partyId],
@@ -78,6 +109,58 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     setShowScrollButton(scrollHeight - scrollTop - clientHeight > 200);
   };
+
+  useEffect(() => {
+    if (!messageIdFromUrl || messages.length === 0) {
+      return;
+    }
+
+    const targetMessage = messages.find((message) => message.id === messageIdFromUrl);
+    if (!targetMessage) {
+      return;
+    }
+
+    let clearHighlightTimeout: number | undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      const messageElement = document.querySelector<HTMLElement>(`[data-message-id="${messageIdFromUrl}"]`);
+      if (!messageElement) {
+        return;
+      }
+
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMessageId(messageIdFromUrl);
+
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedMessageId((current) => (current === messageIdFromUrl ? null : current));
+      }, 3500);
+
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('messageId');
+      setSearchParams(nextParams, { replace: true });
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [messageIdFromUrl, messages, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const updateContext = () => {
+      syncActiveChatContext(document.visibilityState === 'visible');
+    };
+
+    updateContext();
+    document.addEventListener('visibilitychange', updateContext);
+
+    return () => {
+      document.removeEventListener('visibilitychange', updateContext);
+      syncActiveChatContext(false);
+    };
+  }, [partyId]);
 
   // --- ACTIONS ---
   
@@ -193,7 +276,13 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
             if (isEmote) displayContent = msg.content.substring(4);
 
             return (
-              <div key={msg.id} className={`flex gap-3 ${shouldGroup ? 'mt-1' : 'mt-4'} ${isMe ? 'flex-row-reverse' : 'flex-row'} group`}>
+              <div
+                key={msg.id}
+                data-message-id={msg.id}
+                className={`flex gap-3 ${shouldGroup ? 'mt-1' : 'mt-4'} ${isMe ? 'flex-row-reverse' : 'flex-row'} group rounded-xl transition-all duration-500 ${
+                  highlightedMessageId === msg.id ? 'bg-indigo-50/80 ring-2 ring-indigo-200 px-2 py-2 -mx-2' : ''
+                }`}
+              >
                 <div className="flex-shrink-0 w-8 flex flex-col items-center">
                   {!shouldGroup && !isMe ? (
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm ${avatarColor}`}>{initials}</div>

@@ -670,6 +670,49 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<{ id: number; text: string, type?: 'success' | 'error' } | null>(null);
 
+  useEffect(() => {
+    const syncActiveEncounterContext = (isActive: boolean) => {
+      const payload = { partyId, active: isActive };
+
+      if (isActive) {
+        sessionStorage.setItem('active_encounter_context', JSON.stringify(payload));
+      } else {
+        const current = sessionStorage.getItem('active_encounter_context');
+        if (current) {
+          try {
+            const parsed = JSON.parse(current) as { partyId?: string; active?: boolean };
+            if (parsed.partyId === partyId) {
+              sessionStorage.removeItem('active_encounter_context');
+            }
+          } catch {
+            sessionStorage.removeItem('active_encounter_context');
+          }
+        }
+      }
+
+      if ('serviceWorker' in navigator) {
+        void navigator.serviceWorker.ready.then((registration) => {
+          registration.active?.postMessage({
+            type: 'ACTIVE_ENCOUNTER_CONTEXT',
+            ...payload,
+          });
+        });
+      }
+    };
+
+    const updateContext = () => {
+      syncActiveEncounterContext(document.visibilityState === 'visible');
+    };
+
+    updateContext();
+    document.addEventListener('visibilitychange', updateContext);
+
+    return () => {
+      document.removeEventListener('visibilitychange', updateContext);
+      syncActiveEncounterContext(false);
+    };
+  }, [partyId]);
+
   const { data: allEncounters, isLoading: loadingEnc } = useQuery<Encounter[]>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
   const { data: allMonsters } = useQuery<MonsterData[]>({
     queryKey: ['allMonsters'], queryFn: async () => {

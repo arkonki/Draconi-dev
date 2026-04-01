@@ -8,9 +8,26 @@ import { ExpirationPlugin } from 'workbox-expiration';
 // 1. Standard PWA cleanup and precaching (handled by the plugin)
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+let activeChatContext = { partyId: null, active: false };
+let activeEncounterContext = { partyId: null, active: false };
+
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+
+  if (event.data && event.data.type === 'ACTIVE_CHAT_CONTEXT') {
+    activeChatContext = {
+      partyId: event.data.partyId || null,
+      active: Boolean(event.data.active),
+    };
+  }
+
+  if (event.data && event.data.type === 'ACTIVE_ENCOUNTER_CONTEXT') {
+    activeEncounterContext = {
+      partyId: event.data.partyId || null,
+      active: Boolean(event.data.active),
+    };
   }
 });
 
@@ -57,6 +74,17 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'New Notification';
+  const targetPartyId = payload.data?.partyId || null;
+  const targetView = payload.data?.view || null;
+
+  if (targetView === 'chat' && activeChatContext.active && targetPartyId && activeChatContext.partyId === targetPartyId) {
+    return;
+  }
+
+  if (targetView === 'encounter' && activeEncounterContext.active && targetPartyId && activeEncounterContext.partyId === targetPartyId) {
+    return;
+  }
+
   const options = {
     body: payload.body || '',
     icon: payload.icon || APP_ICON,
@@ -73,10 +101,16 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.url || '/';
+  const relativeTargetUrl = event.notification.data?.url || '/';
+  const targetUrl = new URL(relativeTargetUrl, self.location.origin).toString();
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      const matchingClient = windowClients.find((client) => client.url === targetUrl);
+      if (matchingClient && 'focus' in matchingClient) {
+        return matchingClient.focus();
+      }
+
       for (const client of windowClients) {
         if ('focus' in client) {
           if ('navigate' in client && client.url !== targetUrl) {

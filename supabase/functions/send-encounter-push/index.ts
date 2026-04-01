@@ -7,11 +7,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-type ChatMessageRow = {
+type EncounterRow = {
   id: string;
   party_id: string;
-  user_id: string;
-  content: string;
+  name: string;
+  status: 'planning' | 'active' | 'completed';
+  current_round: number;
 };
 
 type PartyRow = {
@@ -32,7 +33,7 @@ type UserRow = {
 
 type NotificationSettingsRow = {
   user_id: string;
-  desktop_new_message: boolean;
+  desktop_session_scheduled: boolean;
 };
 
 type PushSubscriptionRow = {
@@ -59,61 +60,13 @@ function buildSenderName(user: UserRow | null, fallback = 'Someone'): string {
   return fullName || user.username || fallback;
 }
 
-function stripFormatting(text: string): string {
-  return text
-    .replace(/<<<[^>]+>>>/g, '')
-    .replace(/\*\*/g, '')
-    .replace(/`/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildNotificationBody(message: string, senderName: string): string {
-  const pokeMatch = message.match(/<<<POKE:([^>]+)>>>/);
-  if (pokeMatch) {
-    return 'Open party chat to respond.';
+function buildEncounterBody(encounterName: string, senderName: string, round: number): string {
+  const trimmedName = encounterName.trim();
+  if (!trimmedName) {
+    return `${senderName} started combat. Round ${round} is underway.`;
   }
 
-  const noteMatch = message.match(/<<<NOTE:([^:]+):([^>]+)>>>/);
-  if (noteMatch) {
-    return noteMatch[2];
-  }
-
-  const compendiumMatch = message.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/);
-  if (compendiumMatch) {
-    return compendiumMatch[2];
-  }
-
-  if (message.startsWith('🎲')) {
-    return `${senderName} posted a dice roll.`;
-  }
-
-  const cleaned = stripFormatting(message);
-  if (!cleaned) {
-    return `${senderName} sent a new message.`;
-  }
-
-  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
-}
-
-function buildNotificationTitle(message: string, senderName: string, partyName: string): string {
-  if (message.match(/<<<POKE:([^>]+)>>>/)) {
-    return `${senderName} poked you in ${partyName}`;
-  }
-
-  if (message.match(/<<<NOTE:([^:]+):([^>]+)>>>/)) {
-    return `${senderName} shared a note in ${partyName}`;
-  }
-
-  if (message.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/)) {
-    return `${senderName} shared a compendium entry in ${partyName}`;
-  }
-
-  if (message.startsWith('🎲')) {
-    return `${senderName} rolled dice in ${partyName}`;
-  }
-
-  return `${senderName} in ${partyName}`;
+  return `${senderName} started ${trimmedName}. Round ${round} is underway.`;
 }
 
 serve(async (request) => {
@@ -155,39 +108,43 @@ serve(async (request) => {
     return jsonResponse(401, { error: 'Unauthorized.' });
   }
 
-  const { messageId } = await request.json().catch(() => ({ messageId: null }));
-  if (!messageId || typeof messageId !== 'string') {
-    return jsonResponse(400, { error: 'messageId is required.' });
+  const { encounterId } = await request.json().catch(() => ({ encounterId: null }));
+  if (!encounterId || typeof encounterId !== 'string') {
+    return jsonResponse(400, { error: 'encounterId is required.' });
   }
 
-  const { data: message, error: messageError } = await adminClient
-    .from('messages')
-    .select('id, party_id, user_id, content')
-    .eq('id', messageId)
-    .single<ChatMessageRow>();
+  const { data: encounter, error: encounterError } = await adminClient
+    .from('encounters')
+    .select('id, party_id, name, status, current_round')
+    .eq('id', encounterId)
+    .single<EncounterRow>();
 
-  if (messageError || !message) {
-    return jsonResponse(404, { error: 'Message not found.' });
+  if (encounterError || !encounter) {
+    return jsonResponse(404, { error: 'Encounter not found.' });
   }
 
-  if (message.user_id !== user.id) {
-    return jsonResponse(403, { error: 'You can only dispatch push for your own message.' });
+  if (encounter.status !== 'active') {
+    return jsonResponse(400, { error: 'Encounter must be active before notifications can be sent.' });
   }
 
   const { data: party, error: partyError } = await adminClient
     .from('parties')
     .select('id, name, created_by')
-    .eq('id', message.party_id)
+    .eq('id', encounter.party_id)
     .single<PartyRow>();
 
   if (partyError || !party) {
     return jsonResponse(404, { error: 'Party not found.' });
   }
 
+  if (party.created_by !== user.id) {
+    return jsonResponse(403, { error: 'You can only dispatch encounter push for parties you manage.' });
+  }
+
   const { data: members, error: membersError } = await adminClient
     .from('party_members')
     .select('user_id')
-    .eq('party_id', message.party_id)
+    .eq('party_id', encounter.party_id)
     .returns<PartyMemberRow[]>();
 
   if (membersError) {
@@ -213,7 +170,7 @@ serve(async (request) => {
 
   const { data: settingsRows, error: settingsError } = await adminClient
     .from('user_notification_settings')
-    .select('user_id, desktop_new_message')
+    .select('user_id, desktop_session_scheduled')
     .in('user_id', recipientIds)
     .returns<NotificationSettingsRow[]>();
 
@@ -221,13 +178,13 @@ serve(async (request) => {
     return jsonResponse(500, { error: settingsError.message });
   }
 
-  const desktopDisabledRecipients = new Set(
+  const disabledRecipients = new Set(
     (settingsRows || [])
-      .filter((row) => row.desktop_new_message === false)
+      .filter((row) => row.desktop_session_scheduled === false)
       .map((row) => row.user_id)
   );
 
-  const allowedRecipients = recipientIds.filter((recipientId) => !desktopDisabledRecipients.has(recipientId));
+  const allowedRecipients = recipientIds.filter((recipientId) => !disabledRecipients.has(recipientId));
   if (allowedRecipients.length === 0) {
     return jsonResponse(200, { sent: 0, skipped: 'desktop-disabled' });
   }
@@ -249,15 +206,20 @@ serve(async (request) => {
   webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 
   const senderName = buildSenderName(senderProfile, 'Someone');
-  const targetUrl = `/party/${party.id}?tab=chat&messageId=${message.id}`;
+  const targetUrl = `/party/${party.id}?tab=encounter`;
   const payload = JSON.stringify({
-    title: buildNotificationTitle(message.content, senderName, party.name),
-    body: buildNotificationBody(message.content, senderName),
-    tag: `party-chat-${party.id}`,
+    title: `Combat started in ${party.name}`,
+    body: buildEncounterBody(encounter.name, senderName, encounter.current_round || 1),
+    tag: `party-encounter-${party.id}`,
     url: targetUrl,
     icon: '/icons/icon-192x192.png',
     badge: '/icons/icon-192x192.png',
-    data: { url: targetUrl, messageId: message.id, partyId: party.id, view: 'chat' },
+    data: {
+      url: targetUrl,
+      partyId: party.id,
+      encounterId: encounter.id,
+      view: 'encounter',
+    },
   });
 
   let sent = 0;
@@ -287,7 +249,7 @@ serve(async (request) => {
       if (statusCode === 404 || statusCode === 410) {
         await adminClient.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint);
       } else {
-        console.error('Push delivery failed:', error);
+        console.error('Encounter push delivery failed:', error);
       }
     }
   }

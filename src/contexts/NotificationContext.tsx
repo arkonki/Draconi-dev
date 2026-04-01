@@ -179,7 +179,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const shouldSend =
       (type === 'message' && currentSettings.desktop.newMessage) ||
       (type === 'invite' && currentSettings.desktop.partyInvite) ||
-      (type === 'session' && currentSettings.desktop.sessionScheduled);
+      ((type === 'session' || type === 'encounter') && currentSettings.desktop.sessionScheduled);
 
     if (!shouldSend) {
       return;

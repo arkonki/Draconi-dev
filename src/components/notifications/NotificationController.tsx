@@ -10,10 +10,135 @@ type MessagePayload = {
   content: string;
 };
 
-const buildPartyChatUrl = (partyId: string) => `/party/${partyId}?tab=chat`;
+type EncounterPayload = {
+  id: string;
+  party_id: string;
+  name: string;
+  status: 'planning' | 'active' | 'completed';
+  current_round: number;
+};
+
+type PartySummary = {
+  id: string;
+  name: string;
+};
+
+type SenderSummary = {
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+const buildPartyChatUrl = (partyId: string, messageId?: string) =>
+  messageId ? `/party/${partyId}?tab=chat&messageId=${messageId}` : `/party/${partyId}?tab=chat`;
+const buildPartyEncounterUrl = (partyId: string) => `/party/${partyId}?tab=encounter`;
+
+function isViewingActivePartyChat(partyId: string): boolean {
+  if (document.visibilityState !== 'visible') {
+    return false;
+  }
+
+  const rawContext = sessionStorage.getItem('active_chat_context');
+  if (!rawContext) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(rawContext) as { partyId?: string; active?: boolean };
+    return parsed.partyId === partyId && parsed.active === true;
+  } catch {
+    return false;
+  }
+}
+
+function isViewingActivePartyEncounter(partyId: string): boolean {
+  if (document.visibilityState !== 'visible') {
+    return false;
+  }
+
+  const rawContext = sessionStorage.getItem('active_encounter_context');
+  if (!rawContext) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(rawContext) as { partyId?: string; active?: boolean };
+    return parsed.partyId === partyId && parsed.active === true;
+  } catch {
+    return false;
+  }
+}
+
+function formatSenderName(sender: SenderSummary | null): string {
+  if (!sender) {
+    return 'Someone';
+  }
+
+  const fullName = [sender.first_name, sender.last_name].filter(Boolean).join(' ').trim();
+  return fullName || sender.username || 'Someone';
+}
+
+function cleanMessagePreview(content: string): string {
+  return content
+    .replace(/<<<[^>]+>>>/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function truncateBody(body: string): string {
-  return body.length > 100 ? `${body.substring(0, 100)}...` : body;
+  return body.length > 120 ? `${body.substring(0, 120)}...` : body;
+}
+
+function buildNotificationCopy(message: MessagePayload, senderName: string, partyName: string) {
+  const pokeMatch = message.content.match(/<<<POKE:([^>]+)>>>/);
+  if (pokeMatch) {
+    return {
+      title: `${senderName} poked you in ${partyName}`,
+      body: 'Open party chat to respond.',
+    };
+  }
+
+  const noteMatch = message.content.match(/<<<NOTE:([^:]+):([^>]+)>>>/);
+  if (noteMatch) {
+    return {
+      title: `${senderName} shared a note in ${partyName}`,
+      body: noteMatch[2],
+    };
+  }
+
+  const compendiumMatch = message.content.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/);
+  if (compendiumMatch) {
+    return {
+      title: `${senderName} shared a compendium entry in ${partyName}`,
+      body: compendiumMatch[2],
+    };
+  }
+
+  if (message.content.startsWith('🎲')) {
+    return {
+      title: `${senderName} rolled dice in ${partyName}`,
+      body: truncateBody(cleanMessagePreview(message.content)),
+    };
+  }
+
+  return {
+    title: `${senderName} in ${partyName}`,
+    body: truncateBody(cleanMessagePreview(message.content) || 'Sent a new message.'),
+  };
+}
+
+function buildEncounterNotificationCopy(encounter: EncounterPayload, partyName: string) {
+  const round = encounter.current_round || 1;
+  const encounterName = encounter.name?.trim();
+
+  return {
+    title: `Combat started in ${partyName}`,
+    body: encounterName
+      ? `${encounterName} is now active. Round ${round} is underway.`
+      : `A combat encounter is now active. Round ${round} is underway.`,
+  };
 }
 
 export function NotificationController() {
@@ -24,6 +149,43 @@ export function NotificationController() {
     if (!user) {
       return;
     }
+
+    const partyCache = new Map<string, string>();
+    const senderCache = new Map<string, string>();
+
+    const resolvePartyName = async (partyId: string): Promise<string> => {
+      const cached = partyCache.get(partyId);
+      if (cached) {
+        return cached;
+      }
+
+      const { data } = await supabase
+        .from('parties')
+        .select('id, name')
+        .eq('id', partyId)
+        .maybeSingle();
+
+      const name = (data as PartySummary | null)?.name || 'Party Chat';
+      partyCache.set(partyId, name);
+      return name;
+    };
+
+    const resolveSenderName = async (userId: string): Promise<string> => {
+      const cached = senderCache.get(userId);
+      if (cached) {
+        return cached;
+      }
+
+      const { data } = await supabase
+        .from('users')
+        .select('username, first_name, last_name')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const senderName = formatSenderName((data as SenderSummary | null) ?? null);
+      senderCache.set(userId, senderName);
+      return senderName;
+    };
 
     const channel = supabase
       .channel('global-notifications')
@@ -41,19 +203,25 @@ export function NotificationController() {
             return;
           }
 
+          if (isViewingActivePartyChat(newMessage.party_id)) {
+            return;
+          }
+
           playSound('notification');
 
-          let title = 'New Message';
-          let body = newMessage.content;
-          const targetUrl = buildPartyChatUrl(newMessage.party_id);
+          const targetUrl = buildPartyChatUrl(newMessage.party_id, newMessage.id);
+          const [partyName, senderName] = await Promise.all([
+            resolvePartyName(newMessage.party_id),
+            resolveSenderName(newMessage.user_id),
+          ]);
 
           const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
           if (pokeMatch) {
             const targetId = pokeMatch[1];
             if (targetId === user.id) {
               await sendDesktopNotification({
-                title: '👉 YOU WERE POKED!',
-                body: 'Someone is trying to get your attention.',
+                title: `${senderName} poked you in ${partyName}`,
+                body: 'Open party chat to respond.',
                 type: 'message',
                 url: targetUrl,
                 tag: `party-chat-${newMessage.party_id}`,
@@ -62,27 +230,79 @@ export function NotificationController() {
             return;
           }
 
-          const noteMatch = newMessage.content.match(/<<<NOTE:([^:]+):([^>]+)>>>/);
-          const compendiumMatch = newMessage.content.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/);
-          const isRoll = newMessage.content.startsWith('🎲');
-
-          if (noteMatch) {
-            title = 'New Note Shared';
-            body = newMessage.content.replace(/<<<NOTE:[^>]+>>>/, '').trim();
-          } else if (compendiumMatch) {
-            title = 'Compendium Entry Shared';
-            body = newMessage.content.replace(/<<<COMPENDIUM:[^>]+>>>/, '').trim();
-          } else if (isRoll) {
-            title = 'Dice Roll';
-            body = newMessage.content.replace(/\*\*/g, '').replace('🎲', '').trim();
-          }
+          const { title, body } = buildNotificationCopy(newMessage, senderName, partyName);
 
           await sendDesktopNotification({
             title,
-            body: truncateBody(body),
+            body,
             type: 'message',
             url: targetUrl,
             tag: `party-chat-${newMessage.party_id}`,
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'encounters',
+        },
+        async (payload) => {
+          const encounter = payload.new as EncounterPayload;
+
+          if (encounter.status !== 'active') {
+            return;
+          }
+
+          if (isViewingActivePartyEncounter(encounter.party_id)) {
+            return;
+          }
+
+          playSound('notification');
+
+          const partyName = await resolvePartyName(encounter.party_id);
+          const { title, body } = buildEncounterNotificationCopy(encounter, partyName);
+
+          await sendDesktopNotification({
+            title,
+            body,
+            type: 'encounter',
+            url: buildPartyEncounterUrl(encounter.party_id),
+            tag: `party-encounter-${encounter.party_id}`,
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'encounters',
+        },
+        async (payload) => {
+          const previousEncounter = payload.old as EncounterPayload | null;
+          const encounter = payload.new as EncounterPayload;
+
+          if (encounter.status !== 'active' || previousEncounter?.status === 'active') {
+            return;
+          }
+
+          if (isViewingActivePartyEncounter(encounter.party_id)) {
+            return;
+          }
+
+          playSound('notification');
+
+          const partyName = await resolvePartyName(encounter.party_id);
+          const { title, body } = buildEncounterNotificationCopy(encounter, partyName);
+
+          await sendDesktopNotification({
+            title,
+            body,
+            type: 'encounter',
+            url: buildPartyEncounterUrl(encounter.party_id),
+            tag: `party-encounter-${encounter.party_id}`,
           });
         }
       )

@@ -7,6 +7,13 @@ const formatLabel = (key: string) => {
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 };
 
+const desktopSettingDescriptions: Partial<Record<'newMessage' | 'partyInvite' | 'sessionScheduled' | 'diceRolls', string>> = {
+  newMessage: 'Chat messages and shared party content.',
+  partyInvite: 'When someone adds you to a party.',
+  sessionScheduled: 'Session reminders and combat encounter alerts.',
+  diceRolls: 'Dice-focused desktop alerts where supported.',
+};
+
 // Touch-Friendly Toggle Row
 const ToggleRow = ({ 
   label, 
@@ -85,7 +92,7 @@ export function NotificationSettings() {
         ? {
             label: 'Active',
             tone: 'bg-green-50 text-green-800 border-green-100',
-            description: 'This browser is subscribed and can receive background chat notifications.',
+            description: 'This browser is subscribed and can receive background chat and combat notifications.',
           }
         : {
             label: 'Not Subscribed',
@@ -237,7 +244,7 @@ export function NotificationSettings() {
           {permissionStatus === 'granted' && pushSupported && (
             <div className="bg-indigo-50 text-indigo-800 text-sm p-3 rounded-lg border border-indigo-100">
               {isPushSubscribed
-                ? 'Background push is active for this browser. Chat notifications can open the party chat directly.'
+                ? 'Background push is active for this browser. Chat and combat notifications can open the relevant party view directly.'
                 : 'Browser permission is granted, but this browser is not yet subscribed for background push. Save your settings or re-enable notifications to retry.'}
             </div>
           )}
@@ -249,6 +256,7 @@ export function NotificationSettings() {
                 label={formatLabel(key)}
                 checked={value}
                 onChange={() => toggleSetting('desktop', key)}
+                description={desktopSettingDescriptions[key as keyof typeof desktopSettingDescriptions]}
                 disabled={permissionStatus === 'denied'}
               />
             ))}

@@ -165,7 +165,19 @@ export async function appendEncounterLog(encounterId: string, entry: unknown): P
 
 // --- ENCOUNTER FLOW OPERATIONS ---
 
-export const startEncounter = (id: string) => updateEncounter(id, { status: 'active', current_round: 1 });
+export async function startEncounter(id: string): Promise<Encounter> {
+  const encounter = await updateEncounter(id, { status: 'active', current_round: 1 });
+
+  try {
+    await supabase.functions.invoke('send-encounter-push', {
+      body: { encounterId: encounter.id },
+    });
+  } catch (pushError) {
+    console.warn('Encounter push notification dispatch failed:', pushError);
+  }
+
+  return encounter;
+}
 export const endEncounter = (id: string) => updateEncounter(id, { status: 'completed' });
 
 export const nextRound = async (id: string) => {

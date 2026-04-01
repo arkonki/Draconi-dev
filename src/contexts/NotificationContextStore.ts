@@ -4,7 +4,7 @@ import type { UINotificationState } from '../lib/api/notifications';
 export interface DesktopNotificationOptions {
   title: string;
   body: string;
-  type: 'message' | 'invite' | 'session';
+  type: 'message' | 'invite' | 'session' | 'encounter';
   url?: string;
   tag?: string;
 }
