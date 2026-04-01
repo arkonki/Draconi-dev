@@ -131,8 +131,10 @@ export function NotificationSettings() {
       // Play a sound to confirm volume settings
       if (localSettings.sounds.enabled) playSound('notification');
       setTimeout(() => setMessage(null), 3000);
-    } catch {
-      setMessage({ type: 'error', text: 'Failed to save changes.' });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save changes.';
+      console.error('Failed to save notification settings:', error);
+      setMessage({ type: 'error', text: errorMessage });
     } finally {
       setIsSaving(false);
     }

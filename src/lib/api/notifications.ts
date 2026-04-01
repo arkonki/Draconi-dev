@@ -115,7 +115,9 @@ export const notificationApi = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(error.message || 'Failed to update notification settings.');
+    }
     return data as DBNotificationSettings;
   }
 };
