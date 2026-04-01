@@ -16,6 +16,8 @@ self.addEventListener('message', (event) => {
 
 clientsClaim();
 
+const APP_ICON = '/icons/icon-192x192.png';
+
 // 2. Google Fonts Caching (Migrated from your vite config)
 // Cache Google Fonts Stylesheets
 registerRoute(
@@ -41,26 +43,53 @@ registerRoute(
   })
 );
 
-// 3. NOTIFICATION CLICK HANDLER (The new part)
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close(); // Close the notification
+self.addEventListener('push', (event) => {
+  if (!event.data) {
+    return;
+  }
 
-  // Get the URL to open (default to root if not provided)
+  let payload = {};
+
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: 'New Notification', body: event.data.text() };
+  }
+
+  const title = payload.title || 'New Notification';
+  const options = {
+    body: payload.body || '',
+    icon: payload.icon || APP_ICON,
+    badge: payload.badge || APP_ICON,
+    tag: payload.tag || 'default-notification',
+    renotify: payload.renotify ?? true,
+    data: payload.data || { url: payload.url || '/' },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// 3. NOTIFICATION CLICK HANDLER
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
   const targetUrl = event.notification.data?.url || '/';
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Check if tab is already open
       for (const client of windowClients) {
-        // If url matches or is just the base app
-        if (client.url.includes(targetUrl) && 'focus' in client) {
+        if ('focus' in client) {
+          if ('navigate' in client && client.url !== targetUrl) {
+            return client.navigate(targetUrl).then((navigatedClient) => navigatedClient?.focus());
+          }
           return client.focus();
         }
       }
-      // If not open, open new window
+
       if (clients.openWindow) {
         return clients.openWindow(targetUrl);
       }
-    })
+      return undefined;
+    }),
   );
 });

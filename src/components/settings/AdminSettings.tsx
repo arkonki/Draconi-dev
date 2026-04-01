@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { UserPlus } from 'lucide-react';
+import { BookOpen, UserPlus } from 'lucide-react';
 import { UserManagement } from '../admin/UserManagement';
-import { GameDataManager } from '../admin/GameDataManager';
 import { CompendiumManager } from '../admin/CompendiumManager';
 
-type AdminSection = 'users' | 'gameData' | 'compendium';
+type AdminSection = 'users' | 'compendium';
 
 export function AdminSettings() {
   const [activeSection, setActiveSection] = useState<AdminSection>('users');
@@ -13,8 +12,6 @@ export function AdminSettings() {
     switch (activeSection) {
       case 'users':
         return <UserManagement />;
-      case 'gameData':
-        return <GameDataManager />;
       case 'compendium':
         return <CompendiumManager />;
       default:
@@ -22,18 +19,18 @@ export function AdminSettings() {
     }
   };
 
-  const remainingTabs: { key: AdminSection; label: string; Icon: React.ElementType }[] = [
-    { key: 'users',      label: 'Users',         Icon: UserPlus },
+  const tabs: { key: AdminSection; label: string; Icon: React.ElementType }[] = [
+    { key: 'users', label: 'Users', Icon: UserPlus },
+    { key: 'compendium', label: 'Compendium', Icon: BookOpen },
   ];
-
 
   return (
     <div className="">
       {/* Top Tab Navigation */}
-      {remainingTabs.length > 0 && (
+      {tabs.length > 0 && (
         <nav className="border-b">
           <ul className="flex -mb-px">
-            {remainingTabs.map(({ key, label, Icon }) => (
+            {tabs.map(({ key, label, Icon }) => (
               <li key={key} className="mr-6">
                 <button
                   onClick={() => setActiveSection(key)}

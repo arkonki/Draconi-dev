@@ -28,6 +28,15 @@ export async function sendMessage(partyId: string, userId: string, content: stri
     .single();
 
   if (error) throw error;
+
+  try {
+    await supabase.functions.invoke('send-chat-push', {
+      body: { messageId: (data as Message).id },
+    });
+  } catch (pushError) {
+    console.warn('Chat push notification dispatch failed:', pushError);
+  }
+
   return data as Message;
 }
 

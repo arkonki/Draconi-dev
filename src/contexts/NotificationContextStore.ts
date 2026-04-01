@@ -1,12 +1,24 @@
 import { createContext } from 'react';
 import type { UINotificationState } from '../lib/api/notifications';
 
+export interface DesktopNotificationOptions {
+  title: string;
+  body: string;
+  type: 'message' | 'invite' | 'session';
+  url?: string;
+  tag?: string;
+}
+
 export interface NotificationContextType {
   settings: UINotificationState | null;
   isLoading: boolean;
+  pushSupported: boolean;
+  isPushSubscribed: boolean;
   updateSettings: (newSettings: UINotificationState) => Promise<void>;
   playSound: (type: 'dice' | 'notification') => void;
-  sendDesktopNotification: (title: string, body: string, type: 'message' | 'invite' | 'session') => Promise<void>;
+  sendDesktopNotification: (options: DesktopNotificationOptions) => Promise<void>;
+  syncPushSubscription: () => Promise<boolean>;
+  unsubscribePushSubscription: () => Promise<void>;
 }
 
 export const NotificationContext = createContext<NotificationContextType | undefined>(undefined);

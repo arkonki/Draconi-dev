@@ -20,6 +20,7 @@ import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 
 type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
+const VALID_PARTY_TABS: Tab[] = ['members', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
 
 const StoryHelperApp = lazy(() =>
   import('../components/party/StoryHelper').then((module) => ({
@@ -87,15 +88,24 @@ export function PartyView() {
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // 3. Extract noteId from URL
+  // 3. Extract noteId and tab from URL
   const noteIdFromUrl = searchParams.get('noteId');
+  const tabFromUrl = searchParams.get('tab');
 
-  // 4. Effect: Switch to Notes tab if URL has a noteId
+  const isValidTab = (value: string | null): value is Tab =>
+    Boolean(value && VALID_PARTY_TABS.includes(value as Tab));
+
+  // 4. Effect: Switch to the tab requested in the URL
   useEffect(() => {
     if (noteIdFromUrl) {
       setActiveTab('notes');
+      return;
     }
-  }, [noteIdFromUrl]);
+
+    if (isValidTab(tabFromUrl)) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [noteIdFromUrl, tabFromUrl]);
 
   const { data: party, isLoading, error } = useQuery({
     queryKey: ['party', partyId],
