@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Monitor, QrCode, Copy, Eye, Power, RefreshCw, RotateCw, Upload, XCircle } from 'lucide-react';
+import { Heart, Monitor, QrCode, Copy, Eye, Power, RefreshCw, RotateCw, Shield, Skull, Upload, XCircle, Zap } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -30,6 +30,12 @@ interface ProjectorDisplayManagerProps {
 
 const ROTATION_PRESETS = [0, 90, 180, 270];
 type DisplaySourceMode = 'active_map' | 'specific_map' | 'custom_image';
+const PREVIEW_SIDE_CLASSES: Record<PartyDisplaySlot['corner'], string> = {
+  top_left: 'top-3 left-1/2 -translate-x-1/2',
+  top_right: 'top-1/2 right-3 -translate-y-1/2',
+  bottom_left: 'top-1/2 left-3 -translate-y-1/2',
+  bottom_right: 'bottom-3 left-1/2 -translate-x-1/2',
+};
 
 function formatCornerLabel(corner: PartyDisplaySlot['corner']) {
   const labels: Record<PartyDisplaySlot['corner'], string> = {
@@ -40,6 +46,74 @@ function formatCornerLabel(corner: PartyDisplaySlot['corner']) {
   };
 
   return labels[corner];
+}
+
+function ProjectorSeatPreviewCard({ member, rotation }: { member: Character; rotation: number }) {
+  const activeConditions = Object.entries(member.conditions || {}).filter(([, active]) => active);
+  const isDying = member.current_hp === 0;
+
+  return (
+    <div
+      className={`w-36 rounded-2xl border bg-black/75 text-white shadow-xl backdrop-blur-sm overflow-hidden ${
+        isDying ? 'border-red-400/60 ring-2 ring-red-500/40' : 'border-white/15'
+      }`}
+      style={{ transform: `rotate(${rotation}deg)` }}
+    >
+      <div className="flex items-center gap-2 p-2.5 border-b border-white/10">
+        {member.portrait_url ? (
+          <img src={member.portrait_url} alt={member.name} className="w-9 h-9 rounded-full object-cover border border-white/20 bg-black/40" />
+        ) : (
+          <div className="w-9 h-9 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-xs font-bold">
+            {member.name.slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h4 className="font-bold text-sm truncate">{member.name}</h4>
+          <p className="text-[9px] uppercase tracking-[0.2em] text-white/55">Preview</p>
+        </div>
+      </div>
+
+      <div className="p-2.5 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div className={`rounded-lg border px-2 py-1.5 ${isDying ? 'bg-red-500/20 border-red-300/30' : 'bg-red-500/10 border-red-400/20'}`}>
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-red-200">
+              <Heart className="w-3 h-3" />
+              HP
+            </div>
+            <div className="mt-0.5 text-sm font-bold">{member.current_hp}/{member.max_hp}</div>
+          </div>
+          <div className="rounded-lg bg-blue-500/10 border border-blue-400/20 px-2 py-1.5">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-blue-200">
+              <Zap className="w-3 h-3" />
+              WP
+            </div>
+            <div className="mt-0.5 text-sm font-bold">{member.current_wp}/{member.max_wp}</div>
+          </div>
+        </div>
+
+        <div className="min-h-[26px] flex flex-wrap gap-1">
+          {isDying ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-red-300/30 bg-red-500/20 px-2 py-1 text-[9px] font-bold uppercase text-red-100">
+              <Skull className="w-3 h-3" />
+              Dying
+            </span>
+          ) : null}
+          {activeConditions.length > 0 ? (
+            activeConditions.slice(0, 2).map(([condition]) => (
+              <span key={condition} className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-2 py-1 text-[9px] font-bold uppercase text-white/80">
+                {condition}
+              </span>
+            ))
+          ) : !isDying ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold uppercase text-emerald-200">
+              <Shield className="w-3 h-3" />
+              Ready
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ProjectorDisplayManager({
@@ -174,6 +248,10 @@ export function ProjectorDisplayManager({
   const reservedCharacterIds = useMemo(
     () => new Set(editableSlots.map((slot) => slot.character_id).filter(Boolean)),
     [editableSlots]
+  );
+  const partyMembersById = useMemo(
+    () => new Map(partyMembers.map((member) => [member.id, member])),
+    [partyMembers]
   );
 
   const handleCopyLink = async () => {
@@ -431,6 +509,41 @@ export function ProjectorDisplayManager({
               <div>
                 <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">Assign Seats</h3>
                 <p className="text-sm text-stone-600">Choose who appears on each projector side and set the rotation for that seat. Leave a seat unassigned to hide it completely.</p>
+              </div>
+
+              <div className="rounded-xl border border-stone-200 bg-stone-950 p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-wide text-white/80">Seat Preview</h4>
+                    <p className="text-xs text-white/50">Matches the side positions used on the live projector.</p>
+                  </div>
+                  <span className="text-[11px] uppercase tracking-[0.25em] text-white/40">Preview Canvas</span>
+                </div>
+
+                <div className="relative aspect-[16/10] overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.18),_transparent_35%),radial-gradient(circle_at_bottom,_rgba(245,158,11,0.12),_transparent_35%),linear-gradient(180deg,#111827,#020617)]">
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="rounded-full border border-white/10 bg-black/40 px-5 py-2 text-center backdrop-blur-sm">
+                      <p className="text-[11px] uppercase tracking-[0.25em] text-white/45">{partyName}</p>
+                      <p className="text-sm font-semibold text-white/90">Player Display Preview</p>
+                    </div>
+                  </div>
+
+                  {editableSlots.map((slot) => {
+                    const member = slot.character_id ? partyMembersById.get(slot.character_id) : null;
+
+                    return (
+                      <div key={slot.corner} className={`absolute ${PREVIEW_SIDE_CLASSES[slot.corner]}`}>
+                        {member ? (
+                          <ProjectorSeatPreviewCard member={member} rotation={slot.rotation_deg} />
+                        ) : (
+                          <div className="rounded-full border border-dashed border-white/20 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
+                            {formatCornerLabel(slot.corner)} hidden
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">

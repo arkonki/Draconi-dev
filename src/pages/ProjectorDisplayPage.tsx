@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { AlertTriangle, Heart, Minus, Monitor, RotateCcw, Search, Plus, Shield, Zap } from 'lucide-react';
+import { AlertTriangle, Heart, Minus, Monitor, RotateCcw, Search, Plus, Shield, Skull, Zap } from 'lucide-react';
 import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
@@ -95,10 +95,13 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
   const activeConditions = character
     ? Object.entries(character.conditions || {}).filter(([, active]) => active)
     : [];
+  const isDying = !!character && character.currentHp === 0;
 
   return (
     <div
-      className="w-56 rounded-2xl border border-white/20 bg-black/70 text-white shadow-2xl backdrop-blur-md overflow-hidden"
+      className={`w-56 rounded-2xl border bg-black/70 text-white shadow-2xl backdrop-blur-md overflow-hidden ${
+        isDying ? 'border-red-400/60 ring-2 ring-red-500/40' : 'border-white/20'
+      }`}
       style={{ transform: `rotate(${slot.rotationDeg}deg)` }}
     >
       {character ? (
@@ -119,7 +122,7 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
 
           <div className="p-3 space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-red-500/15 border border-red-400/20 px-3 py-2">
+              <div className={`rounded-xl px-3 py-2 ${isDying ? 'bg-red-500/25 border border-red-300/35' : 'bg-red-500/15 border border-red-400/20'}`}>
                 <div className="flex items-center gap-2 text-red-200 text-xs uppercase tracking-wide">
                   <Heart className="w-3.5 h-3.5" />
                   Health
@@ -136,8 +139,14 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
             </div>
 
             <div className="min-h-[40px]">
-              {activeConditions.length > 0 ? (
+              {isDying || activeConditions.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
+                  {isDying ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-300/30 bg-red-500/20 px-2 py-1 text-[10px] font-bold uppercase text-red-100">
+                      <Skull className="w-3 h-3" />
+                      Dying
+                    </span>
+                  ) : null}
                   {activeConditions.map(([name]) => (
                     <span
                       key={name}

@@ -36,11 +36,21 @@ import type { Character } from '../../types/character';
 
 // --- TYPES ---
 export interface MonsterStats { HP?: number; SIZE?: string; ARMOR?: number; FEROCITY?: number; MOVEMENT?: number;[key: string]: unknown; }
-export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values: string; }
+export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values?: string; }
 export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
 interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
 interface EditableCombatantStats { current_hp: string; current_wp: string; initiative_roll?: string; }
-interface AttackDescriptionRendererProps { description: string; attackName: string; }
+interface AttackDescriptionRendererProps {
+  description: string;
+  attackName: string;
+  onDamageRollComplete?: (result: { total: number | null; formula: string }) => void;
+}
+interface MonsterAttackResolutionContext {
+  roll: number;
+  attackName: string;
+  damage: number | null;
+  damageFormula: string | null;
+}
 interface CombatLogEntry {
   type: string;
   ts: number;
@@ -88,6 +98,46 @@ const generateDeck = (totalNeeded: number, manualValues: number[]): number[] => 
   return deck;
 };
 
+const hasRollableMonsterAttacks = (monsterData?: MonsterData) =>
+  Boolean(monsterData?.attacks?.some((attack) => (attack.roll_values ?? '').trim().length > 0));
+
+const matchesMonsterAttackRoll = (rollValues: string | undefined, roll: number) => {
+  const normalized = (rollValues ?? '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized
+    .split(',')
+    .map((part) => part.trim())
+    .some((part) => {
+      if (!part) {
+        return false;
+      }
+
+      if (part.includes('-')) {
+        const [startRaw, endRaw] = part.split('-');
+        const start = parseInt(startRaw, 10);
+        const end = parseInt(endRaw, 10);
+        if (Number.isNaN(start) || Number.isNaN(end)) {
+          return false;
+        }
+        return roll >= Math.min(start, end) && roll <= Math.max(start, end);
+      }
+
+      return parseInt(part, 10) === roll;
+    });
+};
+
+const getDefaultMonsterAttack = (monsterData?: MonsterData): MonsterAttack | null => {
+  const attacks = monsterData?.attacks ?? [];
+  if (attacks.length === 0) {
+    return null;
+  }
+
+  return attacks.find((attack) => !(attack.roll_values ?? '').trim()) ?? null;
+};
+
 // --- SUB-COMPONENTS ---
 const StatsTableView = ({ stats }: { stats: object }) => (
   <div className="grid grid-cols-3 gap-2 text-xs">
@@ -100,13 +150,30 @@ const StatsTableView = ({ stats }: { stats: object }) => (
   </div>
 );
 
-function AttackDescriptionRenderer({ description, attackName }: AttackDescriptionRendererProps) {
+function AttackDescriptionRenderer({ description, attackName, onDamageRollComplete }: AttackDescriptionRendererProps) {
   const { toggleDiceRoller } = useDice();
   const diceRegex = /(\d*d\d+\s*[+-]?\s*\d*)/gi;
   const parts = description.split(diceRegex);
   return (<p className="text-stone-800 mt-1 leading-relaxed">{parts.map((part, index) => {
     if (part.match(diceRegex) && part.match(/[dD]/)) {
-      return (<button key={index} className="inline-flex items-center justify-center font-bold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors" onClick={() => toggleDiceRoller?.({ dice: part.toLowerCase().replace(/\s/g, ''), label: `${attackName} - Damage`, })}><Dice6 size={10} className="mr-1" />{part}</button>);
+      const normalizedFormula = part.toLowerCase().replace(/\s/g, '');
+      return (
+        <button
+          key={index}
+          className="inline-flex items-center justify-center font-bold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors"
+          onClick={() => toggleDiceRoller?.({
+            dice: normalizedFormula,
+            label: `${attackName} - Damage`,
+            onRollComplete: (result) => {
+              const total = typeof result.finalOutcome === 'number' ? result.finalOutcome : null;
+              onDamageRollComplete?.({ total, formula: normalizedFormula });
+            },
+          })}
+        >
+          <Dice6 size={10} className="mr-1" />
+          {part}
+        </button>
+      );
     }
     return <span key={index}>{part}</span>;
   })}</p>);
@@ -152,7 +219,7 @@ function LogEntry({ entry }: { entry: CombatLogEntry }) {
       );
       break;
     }
-    case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}</div></div>); break;
+    case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}</div>{entry.message ? <div className="text-xs text-orange-800 mt-1">{entry.message}</div> : null}</div>); break;
     case 'attack_resolve': content = (<span className="text-stone-700"><Crosshair size={12} className="inline mr-1" /><strong>{entry.attacker}</strong> dealt {entry.damage} damage to <strong>{entry.target}</strong></span>); break;
     default: content = <span>{entry.message || JSON.stringify(entry)}</span>;
   }
@@ -224,9 +291,18 @@ function WaitTurnModal({ isOpen, onClose, currentActor, allCombatants, onSwap }:
 }
 
 // --- MODAL: ATTACK RESOLUTION ---
-interface AttackResolutionModalProps { isOpen: boolean; onClose: () => void; attacker: EncounterCombatant; targets: EncounterCombatant[]; attackName?: string; onConfirm: (targetIds: string[], damage: number) => void; }
+interface AttackResolutionModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  attacker: EncounterCombatant;
+  targets: EncounterCombatant[];
+  attackName?: string;
+  attackContext?: MonsterAttackResolutionContext | null;
+  onConfirm: (targetIds: string[], damage: number) => void;
+}
 
-function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, onConfirm }: AttackResolutionModalProps) {
+function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, attackContext, onConfirm }: AttackResolutionModalProps) {
+  const { rollHistory } = useDice();
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const [damage, setDamage] = useState<string>('');
   const damageInputRef = useRef<HTMLInputElement>(null);
@@ -234,9 +310,10 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
   useEffect(() => {
     if (isOpen) {
       setSelectedTargetIds([]);
+      setDamage(attackContext?.damage != null ? String(attackContext.damage) : '');
       damageInputRef.current?.focus();
     }
-  }, [isOpen]);
+  }, [attackContext?.damage, isOpen]);
 
   if (!isOpen) return null;
 
@@ -259,12 +336,61 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
     if (isAttackerMonster) return (aIsMonster === bIsMonster) ? 0 : aIsMonster ? 1 : -1;
     return (aIsMonster === bIsMonster) ? 0 : aIsMonster ? -1 : 1;
   });
+  const recentRolls = rollHistory.slice(0, 3);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-stone-200 flex flex-col max-h-[90vh]">
         <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><div><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Sword className="w-5 h-5 text-red-400" /> Resolve Action</h3><p className="text-xs text-stone-400">{attacker.display_name} is acting{attackName ? ` using ${attackName}` : ''}</p></div><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24} /></button></div>
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-4">
+          {attackContext ? (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+              <div className="font-semibold">Attack table roll: {attackContext.roll} ({attackContext.attackName})</div>
+              {attackContext.damageFormula ? (
+                <div className="text-xs text-orange-700">
+                  Last damage roll {attackContext.damageFormula}
+                  {attackContext.damage != null ? ` = ${attackContext.damage}` : ''}
+                </div>
+              ) : (
+                <div className="text-xs text-orange-700">No damage roll captured yet. Roll from the active action text or enter damage manually.</div>
+              )}
+            </div>
+          ) : null}
+          <div className="rounded-lg border border-stone-200 bg-white px-3 py-2">
+            <div className="text-xs font-bold uppercase text-stone-500 mb-2">Recent Dice Rolls</div>
+            {recentRolls.length > 0 ? (
+              <div className="space-y-2">
+                {recentRolls.map((entry) => {
+                  const total = typeof entry.finalOutcome === 'number'
+                    ? entry.finalOutcome
+                    : entry.results.reduce((sum, result) => sum + result.value, 0);
+                  const isApplied = damage !== '' && Number(damage) === total;
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => setDamage(String(total))}
+                      className={`w-full rounded border px-2 py-1.5 text-left transition-colors ${
+                        isApplied
+                          ? 'border-red-300 bg-red-50'
+                          : 'border-stone-100 bg-stone-50 hover:border-red-200 hover:bg-red-50/60'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold text-stone-700">{entry.description || 'Dice Roll'}</div>
+                      <div className="text-[11px] text-stone-500">
+                        {entry.dicePool.join(' + ')} = <span className="font-bold text-stone-800">{total}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-stone-500">No recent dice rolls yet.</div>
+            )}
+            {recentRolls.length > 0 ? (
+              <div className="mt-2 text-[11px] text-stone-500">Tap a roll to use it as the damage amount.</div>
+            ) : null}
+          </div>
           <div>
             <h4 className="text-xs font-bold text-stone-500 uppercase mb-2 flex items-center gap-1"><Target size={12} /> Select Target(s)</h4>
             <p className="text-[11px] text-stone-500 mb-2">{selectedTargetIds.length} selected</p>
@@ -470,13 +596,21 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
   currentAttack?: MonsterAttack | null,
   onRollAttack: () => void,
   onEndTurn: () => void,
-  onOpenAttackModal: () => void,
+  onOpenAttackModal: (result?: { total: number | null; formula: string }, attackName?: string) => void,
   onWait: () => void,
   onOpenCharacterSheet?: () => void,
   isDM: boolean
 }) {
   const isMonster = !!combatant.monster_id;
   const canControl = isDM || (!isMonster);
+  const hasAttackTable = hasRollableMonsterAttacks(monsterData);
+  const defaultAttack = !currentAttack ? getDefaultMonsterAttack(monsterData) : null;
+  const displayedAttack = currentAttack || defaultAttack;
+  const attackHeading = currentAttack
+    ? 'Active Action (Rolled)'
+    : defaultAttack
+      ? 'Active Action'
+      : 'Active Action';
 
   return (
     <div className="bg-white rounded-xl shadow-lg border-2 border-blue-500 overflow-hidden mb-6 relative animate-in fade-in slide-in-from-top-2">
@@ -502,9 +636,38 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
             {monsterData.stats && <StatsTableView stats={monsterData.stats} />}
             {monsterData.effectsSummary && (<div className="bg-yellow-50 p-3 rounded border border-yellow-200 text-sm"><span className="text-xs font-bold text-yellow-800 uppercase block mb-1">Traits & Effects</span><MarkdownDiceRenderer text={monsterData.effectsSummary} contextLabel={monsterData.name} /></div>)}
             <div className="bg-stone-50 rounded-lg border border-stone-200 p-3">
-              {currentAttack ? (
-                <div className="animate-in fade-in"><div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-stone-400 uppercase">Active Action (Rolled)</span></div><h4 className="font-bold text-lg text-red-700 mb-1">{currentAttack.name}</h4><AttackDescriptionRenderer description={currentAttack.description} attackName={currentAttack.name} /><div className="mt-3 pt-2 border-t border-stone-200 flex justify-end gap-2">{isDM && <Button size="sm" variant="outline" icon={Dices} onClick={onRollAttack}>Reroll</Button>}{canControl && <Button size="sm" variant="danger" icon={Crosshair} onClick={onOpenAttackModal}>Resolve / Apply</Button>}</div></div>
-              ) : (<div className="text-center py-4"><p className="text-stone-500 text-sm mb-3 italic">No attack selected.</p>{isDM && <Button size="default" variant="danger" icon={Sword} onClick={onRollAttack} className="w-full justify-center shadow-md">Roll Monster Attack</Button>}</div>)}
+              {displayedAttack ? (
+                <div className="animate-in fade-in">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-xs font-bold text-stone-400 uppercase">{attackHeading}</span>
+                  </div>
+                  <h4 className="font-bold text-lg text-red-700 mb-1">{displayedAttack.name}</h4>
+                  <AttackDescriptionRenderer
+                    description={displayedAttack.description}
+                    attackName={displayedAttack.name}
+                    onDamageRollComplete={(result) => onOpenAttackModal?.(result, displayedAttack.name)}
+                  />
+                  {!hasAttackTable && (
+                    <p className="mt-2 text-xs text-stone-500">
+                      This monster has no rollable attack table. Choose targets and apply damage manually.
+                    </p>
+                  )}
+                  <div className="mt-3 pt-2 border-t border-stone-200 flex justify-end gap-2">
+                    {isDM && hasAttackTable && <Button size="sm" variant="outline" icon={Dices} onClick={onRollAttack}>Reroll</Button>}
+                    {canControl && <Button size="sm" variant="danger" icon={Crosshair} onClick={onOpenAttackModal}>Resolve / Apply</Button>}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <p className="text-stone-500 text-sm mb-3 italic">
+                    {hasAttackTable ? 'No attack selected.' : 'No rollable attack table is available.'}
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {isDM && hasAttackTable && <Button size="default" variant="danger" icon={Sword} onClick={onRollAttack} className="w-full justify-center shadow-md">Roll Monster Attack</Button>}
+                    {canControl && <Button size="default" variant="outline" icon={Crosshair} onClick={onOpenAttackModal} className="w-full justify-center">Resolve / Apply Manual Attack</Button>}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : (<div className="text-center py-6 text-stone-500 flex flex-col items-center gap-3"><p className="italic">It's a player's turn.</p>{canControl && <Button size="sm" variant="outline" icon={Crosshair} onClick={onOpenAttackModal}>Record Action / Damage</Button>}</div>)}
@@ -664,6 +827,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [editedName, setEditedName] = useState('');
   const [editingStats, setEditingStats] = useState<Record<string, EditableCombatantStats>>({});
   const [currentMonsterAttacks, setCurrentMonsterAttacks] = useState<Record<string, MonsterAttack | null>>({});
+  const [currentMonsterAttackContexts, setCurrentMonsterAttackContexts] = useState<Record<string, MonsterAttackResolutionContext | null>>({});
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [sheetCombatant, setSheetCombatant] = useState<EncounterCombatant | null>(null);
   const [temporaryNotes, setTemporaryNotes] = useState('');
@@ -981,8 +1145,50 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const handleRollMonsterAttack = (id: string, m: MonsterData) => {
     if (!m.attacks?.length) return;
     const roll = Math.floor(Math.random() * 6) + 1;
-    const attack = m.attacks.find(a => a.roll_values.split(',').includes(String(roll)));
-    if (attack) { setCurrentMonsterAttacks(p => ({ ...p, [id]: attack })); appendLogMu.mutate({ type: 'monster_attack', ts: Date.now(), who: id, name: m.name, roll, attack: { name: attack.name } }); }
+    const attack = m.attacks.find((candidate) => matchesMonsterAttackRoll(candidate.roll_values, roll)) ?? getDefaultMonsterAttack(m);
+    if (attack) {
+      setCurrentMonsterAttacks(p => ({ ...p, [id]: attack }));
+      setCurrentMonsterAttackContexts((previous) => ({
+        ...previous,
+        [id]: {
+          roll,
+          attackName: attack.name,
+          damage: null,
+          damageFormula: null,
+        },
+      }));
+      appendLogMu.mutate({
+        type: 'monster_attack',
+        ts: Date.now(),
+        who: id,
+        name: m.name,
+        roll,
+        attack: { name: attack.name },
+      });
+      setSelectedActorId(id);
+      setIsAttackModalOpen(true);
+      return;
+    }
+
+    setFeedbackToast({ id: Date.now(), text: `${m.name} has no attack entry for roll ${roll}.`, type: 'error' });
+    setTimeout(() => setFeedbackToast(null), 3000);
+  };
+
+  const handleMonsterDamageRollComplete = (combatantId: string, attackName: string, result: { total: number | null; formula: string }) => {
+    setCurrentMonsterAttackContexts((previous) => ({
+      ...previous,
+      [combatantId]: {
+        roll: previous[combatantId]?.roll ?? 0,
+        attackName,
+        damage: result.total,
+        damageFormula: result.formula,
+      },
+    }));
+
+    if (result.total != null) {
+      setFeedbackToast({ id: Date.now(), text: `${attackName} damage rolled: ${result.total}` });
+      setTimeout(() => setFeedbackToast(null), 2500);
+    }
   };
 
   const handleInitApply = async (updates: { id: string, initiative_roll: number }[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { ...u, has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
@@ -1094,7 +1300,12 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                 currentAttack={currentMonsterAttacks[activeCombatant.id]}
                 onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData as MonsterData)}
                 onEndTurn={() => handleFlip(activeCombatant.id, false)}
-                onOpenAttackModal={() => setIsAttackModalOpen(true)}
+                onOpenAttackModal={(result, attackName) => {
+                  if (result && activeCombatant.monster_id) {
+                    handleMonsterDamageRollComplete(activeCombatant.id, attackName || currentMonsterAttacks[activeCombatant.id]?.name || 'Attack', result);
+                  }
+                  setIsAttackModalOpen(true);
+                }}
                 onWait={() => setIsWaitModalOpen(true)}
                 onOpenCharacterSheet={() => handleOpenCharacterSheet(activeCombatant)}
                 isDM={isDM}
@@ -1124,7 +1335,12 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           onClose={() => setIsAttackModalOpen(false)}
           attacker={activeCombatant}
           targets={combatants.filter(c => c.id !== activeCombatant.id)}
-          attackName={activeCombatant.monster_id ? currentMonsterAttacks[activeCombatant.id]?.name : undefined}
+          attackName={
+            activeCombatant.monster_id
+              ? currentMonsterAttacks[activeCombatant.id]?.name ?? getDefaultMonsterAttack(activeCombatantMonsterData || undefined)?.name
+              : undefined
+          }
+          attackContext={activeCombatant.monster_id ? currentMonsterAttackContexts[activeCombatant.id] : null}
           onConfirm={handleAttackConfirm}
         />
       )}
