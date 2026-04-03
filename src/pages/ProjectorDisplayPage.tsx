@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { AlertTriangle, Heart, Monitor, Shield, Zap } from 'lucide-react';
+import { AlertTriangle, Heart, Minus, Monitor, RotateCcw, Search, Plus, Shield, Zap } from 'lucide-react';
 import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
@@ -159,7 +159,7 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
       ) : (
         <div className="p-4">
           <p className="text-sm font-semibold text-white/80">Seat Unassigned</p>
-          <p className="mt-1 text-xs text-white/50">The GM has not assigned a character to this corner yet.</p>
+          <p className="mt-1 text-xs text-white/50">The GM has not assigned a character to this side yet.</p>
         </div>
       )}
     </div>
@@ -167,19 +167,29 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
 }
 
 const CORNER_CLASSES: Record<DisplayCorner, string> = {
-  top_left: 'top-4 left-4 items-start',
-  top_right: 'top-4 right-4 items-end',
-  bottom_left: 'bottom-4 left-4 items-start',
-  bottom_right: 'bottom-4 right-4 items-end',
+  top_left: 'top-4 left-1/2 -translate-x-1/2 items-center',
+  top_right: 'top-1/2 right-4 -translate-y-1/2 items-end',
+  bottom_left: 'top-1/2 left-4 -translate-y-1/2 items-start',
+  bottom_right: 'bottom-4 left-1/2 -translate-x-1/2 items-center',
 };
+
+const MIN_IMAGE_SCALE = 1;
+const MAX_IMAGE_SCALE = 3;
+const IMAGE_SCALE_STEP = 0.2;
+
+function clampScale(value: number) {
+  return Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, value));
+}
 
 export function ProjectorDisplayPage() {
   const { sessionToken } = useParams<{ sessionToken: string }>();
-  const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const [imageRect, setImageRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const dragStateRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [imageTransform, setImageTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [now, setNow] = useState(() => Date.now());
 
-  const { data, error, isLoading, isFetching } = useQuery({
+  const { data, error, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['player-display', sessionToken],
     queryFn: () => getPlayerDisplayState(sessionToken!),
     enabled: !!sessionToken,
@@ -188,18 +198,13 @@ export function ProjectorDisplayPage() {
   });
 
   const measureImage = () => {
-    if (!containerRef.current || !imageRef.current) {
+    if (!imageRef.current) {
       return;
     }
 
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const renderedRect = imageRef.current.getBoundingClientRect();
-
-    setImageRect({
-      left: renderedRect.left - containerRect.left,
-      top: renderedRect.top - containerRect.top,
-      width: renderedRect.width,
-      height: renderedRect.height,
+    setImageSize({
+      width: imageRef.current.clientWidth,
+      height: imageRef.current.clientHeight,
     });
   };
 
@@ -212,7 +217,81 @@ export function ProjectorDisplayPage() {
 
   useEffect(() => {
     measureImage();
-  }, [data?.map?.imageUrl]);
+  }, [data?.displayImageUrl, data?.map?.imageUrl]);
+
+  useEffect(() => {
+    setImageTransform({ x: 0, y: 0, scale: 1 });
+  }, [data?.displayImageUrl, data?.map?.imageUrl]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const connectionLost = !!data && now - dataUpdatedAt > 5000;
+  const displayImageUrl = data?.displayImageUrl || data?.map?.imageUrl || null;
+  const displayMap = data?.map ?? null;
+
+  const updateScale = (nextScale: number) => {
+    setImageTransform((current) => ({
+      ...current,
+      scale: clampScale(nextScale),
+    }));
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    updateScale(imageTransform.scale + direction * IMAGE_SCALE_STEP);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!displayImageUrl) {
+      return;
+    }
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current || dragStateRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - dragStateRef.current.x;
+    const deltaY = event.clientY - dragStateRef.current.y;
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+
+    setImageTransform((current) => ({
+      ...current,
+      x: current.x + deltaX,
+      y: current.y + deltaY,
+    }));
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current || dragStateRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    dragStateRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
 
   if (!sessionToken) {
     return (
@@ -235,7 +314,7 @@ export function ProjectorDisplayPage() {
     );
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <div className="min-h-screen bg-stone-950 text-white flex items-center justify-center p-8">
         <div className="max-w-md rounded-2xl border border-red-400/20 bg-red-500/10 p-6 text-center">
@@ -248,43 +327,50 @@ export function ProjectorDisplayPage() {
   }
 
   return (
-    <div ref={containerRef} className="relative min-h-screen overflow-hidden bg-stone-950 text-white">
+    <div className="relative min-h-screen overflow-hidden bg-stone-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.2),_transparent_40%),radial-gradient(circle_at_bottom,_rgba(245,158,11,0.12),_transparent_40%)]" />
 
-      {data.map?.imageUrl ? (
-        <>
-          <img
-            ref={imageRef}
-            src={data.map.imageUrl}
-            alt={`${data.party.name} battle map`}
-            onLoad={measureImage}
-            className="absolute inset-0 w-full h-full object-contain"
-          />
+      {displayImageUrl ? (
+        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+          <div
+            className="relative touch-none cursor-grab active:cursor-grabbing"
+            style={{
+              transform: `translate(${imageTransform.x}px, ${imageTransform.y}px) scale(${imageTransform.scale})`,
+              transformOrigin: 'center center',
+            }}
+            onWheel={handleWheel}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            <img
+              ref={imageRef}
+              src={displayImageUrl}
+              alt={`${data.party.name} projector display`}
+              onLoad={measureImage}
+              draggable={false}
+              className="block max-w-screen max-h-screen object-contain select-none"
+            />
 
-          {imageRect.width > 0 && imageRect.height > 0 && (
-            <div
-              className="absolute pointer-events-none"
-              style={{
-                left: imageRect.left,
-                top: imageRect.top,
-                width: imageRect.width,
-                height: imageRect.height,
-              }}
-            >
-              <GridOverlay
-                gridType={data.map.gridType}
-                gridSize={data.map.gridSize}
-                gridOpacity={data.map.gridOpacity}
-                gridColor={data.map.gridColor}
-                gridOffsetX={data.map.gridOffsetX}
-                gridOffsetY={data.map.gridOffsetY}
-                gridRotation={data.map.gridRotation}
-                width={imageRect.width}
-                height={imageRect.height}
-              />
-            </div>
-          )}
-        </>
+            {displayMap && imageSize.width > 0 && imageSize.height > 0 && (
+              <div className="absolute inset-0 pointer-events-none">
+                <GridOverlay
+                  gridType={displayMap.gridType}
+                  gridSize={displayMap.gridSize}
+                  gridOpacity={displayMap.gridOpacity}
+                  gridColor={displayMap.gridColor}
+                  gridOffsetX={displayMap.gridOffsetX}
+                  gridOffsetY={displayMap.gridOffsetY}
+                  gridRotation={displayMap.gridRotation}
+                  width={imageSize.width}
+                  height={imageSize.height}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="rounded-2xl border border-white/10 bg-black/50 p-8 text-center backdrop-blur-md">
@@ -301,17 +387,58 @@ export function ProjectorDisplayPage() {
           <p className="text-lg font-semibold">
             {data.encounter.isActive ? data.encounter.name || 'Combat Active' : 'Player Display'}
           </p>
-          <p className="text-xs text-white/60">
-            {data.encounter.isActive && data.encounter.round ? `Round ${data.encounter.round}` : isFetching ? 'Refreshing…' : 'Waiting for updates'}
-          </p>
+          {connectionLost ? (
+            <p className="text-xs text-amber-300">
+              Connection lost. Retrying...
+            </p>
+          ) : (
+            <p className="text-xs text-white/60">
+              {data.encounter.isActive && data.encounter.round ? `Round ${data.encounter.round}` : 'Waiting for updates'}
+            </p>
+          )}
         </div>
       </div>
 
       {data.slots.map((slot) => (
-        <div key={slot.corner} className={`absolute ${CORNER_CLASSES[slot.corner]} z-20 flex`}>
-          <SlotCard slot={slot} />
-        </div>
+        slot.character ? (
+          <div key={slot.corner} className={`absolute ${CORNER_CLASSES[slot.corner]} z-20 flex`}>
+            <SlotCard slot={slot} />
+          </div>
+        ) : null
       ))}
+
+      {displayImageUrl ? (
+        <div className="absolute right-4 bottom-4 z-30 flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 backdrop-blur-md shadow-xl">
+          <button
+            type="button"
+            onClick={() => updateScale(imageTransform.scale - IMAGE_SCALE_STEP)}
+            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+            aria-label="Zoom out"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <div className="flex items-center gap-2 px-1 text-xs text-white/70">
+            <Search className="w-4 h-4" />
+            <span>{Math.round(imageTransform.scale * 100)}%</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => updateScale(imageTransform.scale + IMAGE_SCALE_STEP)}
+            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+            aria-label="Zoom in"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setImageTransform({ x: 0, y: 0, scale: 1 })}
+            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+            aria-label="Reset image position"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

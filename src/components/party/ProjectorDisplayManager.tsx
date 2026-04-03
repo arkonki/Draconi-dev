@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Monitor, QrCode, Copy, Eye, Power, RefreshCw, RotateCw, XCircle } from 'lucide-react';
+import { Monitor, QrCode, Copy, Eye, Power, RefreshCw, RotateCw, Upload, XCircle } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -9,10 +9,12 @@ import {
   buildPartyDisplayUrl,
   createPartyDisplaySession,
   fetchActivePartyDisplaySession,
+  fetchPartyMaps,
   fetchPartyDisplaySlots,
   getStoredPartyDisplayToken,
   renewPartyDisplaySession,
   revokePartyDisplaySession,
+  uploadProjectorImage,
   updatePartyDisplayLayout,
 } from '../../lib/api/projectorDisplay';
 import type { PartyDisplaySlot } from '../../types/projectorDisplay';
@@ -27,12 +29,17 @@ interface ProjectorDisplayManagerProps {
 }
 
 const ROTATION_PRESETS = [0, 90, 180, 270];
+type DisplaySourceMode = 'active_map' | 'specific_map' | 'custom_image';
 
 function formatCornerLabel(corner: PartyDisplaySlot['corner']) {
-  return corner
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+  const labels: Record<PartyDisplaySlot['corner'], string> = {
+    top_left: 'Top Side',
+    top_right: 'Right Side',
+    bottom_left: 'Left Side',
+    bottom_right: 'Bottom Side',
+  };
+
+  return labels[corner];
 }
 
 export function ProjectorDisplayManager({
@@ -44,6 +51,9 @@ export function ProjectorDisplayManager({
 }: ProjectorDisplayManagerProps) {
   const queryClient = useQueryClient();
   const [editableSlots, setEditableSlots] = useState<PartyDisplaySlot[]>(DEFAULT_DISPLAY_SLOTS);
+  const [displaySourceMode, setDisplaySourceMode] = useState<DisplaySourceMode>('active_map');
+  const [displayMapId, setDisplayMapId] = useState<string | null>(null);
+  const [displayImageUrl, setDisplayImageUrl] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -55,6 +65,12 @@ export function ProjectorDisplayManager({
   });
 
   const activeSession = activeSessionQuery.data;
+
+  const mapsQuery = useQuery({
+    queryKey: ['party-projector-maps', partyId],
+    queryFn: () => fetchPartyMaps(partyId),
+    enabled: isOpen,
+  });
 
   const slotsQuery = useQuery({
     queryKey: ['party-display-slots', activeSession?.id],
@@ -70,6 +86,19 @@ export function ProjectorDisplayManager({
     }
   }, [slotsQuery.data, activeSession]);
 
+  useEffect(() => {
+    setDisplayImageUrl(activeSession?.display_image_url || '');
+    setDisplayMapId(activeSession?.display_map_id || null);
+
+    if (activeSession?.display_image_url) {
+      setDisplaySourceMode('custom_image');
+    } else if (activeSession?.display_map_id) {
+      setDisplaySourceMode('specific_map');
+    } else {
+      setDisplaySourceMode('active_map');
+    }
+  }, [activeSession?.display_image_url, activeSession?.display_map_id]);
+
   const storedToken = activeSession ? getStoredPartyDisplayToken(partyId, activeSession.id) : null;
   const displayUrl = storedToken ? buildPartyDisplayUrl(storedToken) : null;
   const qrUrl = displayUrl
@@ -84,6 +113,8 @@ export function ProjectorDisplayManager({
       queryClient.setQueryData(['party-display-session', partyId], result.session);
       queryClient.setQueryData(['party-display-slots', result.session.id], result.slots);
       setEditableSlots(result.slots);
+      setDisplayMapId(result.session.display_map_id || null);
+      setDisplayImageUrl(result.session.display_image_url || '');
     },
     onError: (error: Error) => {
       setLocalError(error.message);
@@ -109,6 +140,9 @@ export function ProjectorDisplayManager({
       queryClient.setQueryData(['party-display-session', partyId], null);
       queryClient.removeQueries({ queryKey: ['party-display-slots', activeSession?.id] });
       setEditableSlots(DEFAULT_DISPLAY_SLOTS);
+      setDisplayMapId(null);
+      setDisplayImageUrl('');
+      setDisplaySourceMode('active_map');
     },
     onError: (error: Error) => {
       setLocalError(error.message);
@@ -116,11 +150,19 @@ export function ProjectorDisplayManager({
   });
 
   const saveLayoutMutation = useMutation({
-    mutationFn: () => updatePartyDisplayLayout(activeSession!.id, editableSlots),
-    onSuccess: (slots) => {
+    mutationFn: () => updatePartyDisplayLayout(
+      activeSession!.id,
+      editableSlots,
+      displaySourceMode === 'custom_image' ? (displayImageUrl.trim() || null) : null,
+      displaySourceMode === 'specific_map' ? displayMapId : null
+    ),
+    onSuccess: (result) => {
       setLocalError(null);
-      queryClient.setQueryData(['party-display-slots', activeSession?.id], slots);
-      setEditableSlots(slots);
+      queryClient.setQueryData(['party-display-session', partyId], result.session);
+      queryClient.setQueryData(['party-display-slots', activeSession?.id], result.slots);
+      setEditableSlots(result.slots);
+      setDisplayMapId(result.session.display_map_id || null);
+      setDisplayImageUrl(result.session.display_image_url || '');
     },
     onError: (error: Error) => {
       setLocalError(error.message);
@@ -157,6 +199,24 @@ export function ProjectorDisplayManager({
     window.open(displayUrl, '_blank', 'noopener,noreferrer');
   };
 
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setLocalError(null);
+      const publicUrl = await uploadProjectorImage(partyId, file);
+      setDisplayImageUrl(publicUrl);
+      setDisplaySourceMode('custom_image');
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Failed to upload projector image.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const updateSlot = (corner: PartyDisplaySlot['corner'], updates: Partial<PartyDisplaySlot>) => {
     setEditableSlots((currentSlots) =>
       currentSlots.map((slot) =>
@@ -191,7 +251,7 @@ export function ProjectorDisplayManager({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 bg-stone-50 space-y-5">
-          <ErrorMessage message={localError || (activeSessionQuery.error as Error | undefined)?.message || (slotsQuery.error as Error | undefined)?.message || null} onClose={() => setLocalError(null)} />
+          <ErrorMessage message={localError || (activeSessionQuery.error as Error | undefined)?.message || (slotsQuery.error as Error | undefined)?.message || (mapsQuery.error as Error | undefined)?.message || null} onClose={() => setLocalError(null)} />
 
           {(activeSessionQuery.isLoading || (activeSession && slotsQuery.isLoading)) && (
             <div className="flex items-center gap-3 text-stone-600">
@@ -276,8 +336,101 @@ export function ProjectorDisplayManager({
 
             <section className="bg-white rounded-xl border border-stone-200 p-4 space-y-4">
               <div>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">Projector Image</h3>
+                <p className="text-sm text-stone-600">Choose whether the projector uses the active map, a specific map, or a custom uploaded image.</p>
+              </div>
+
+              <div className="grid gap-2">
+                <label className={`rounded-lg border px-3 py-3 text-sm ${displaySourceMode === 'active_map' ? 'border-stone-800 bg-stone-100 text-stone-900' : 'border-stone-200 bg-white text-stone-700'}`}>
+                  <input
+                    type="radio"
+                    name="projector-source"
+                    className="mr-2"
+                    checked={displaySourceMode === 'active_map'}
+                    onChange={() => setDisplaySourceMode('active_map')}
+                    disabled={!activeSession || isBusy}
+                  />
+                  Active Map
+                </label>
+                <label className={`rounded-lg border px-3 py-3 text-sm ${displaySourceMode === 'specific_map' ? 'border-stone-800 bg-stone-100 text-stone-900' : 'border-stone-200 bg-white text-stone-700'}`}>
+                  <input
+                    type="radio"
+                    name="projector-source"
+                    className="mr-2"
+                    checked={displaySourceMode === 'specific_map'}
+                    onChange={() => setDisplaySourceMode('specific_map')}
+                    disabled={!activeSession || isBusy}
+                  />
+                  Specific Map
+                </label>
+                <label className={`rounded-lg border px-3 py-3 text-sm ${displaySourceMode === 'custom_image' ? 'border-stone-800 bg-stone-100 text-stone-900' : 'border-stone-200 bg-white text-stone-700'}`}>
+                  <input
+                    type="radio"
+                    name="projector-source"
+                    className="mr-2"
+                    checked={displaySourceMode === 'custom_image'}
+                    onChange={() => setDisplaySourceMode('custom_image')}
+                    disabled={!activeSession || isBusy}
+                  />
+                  Custom Image
+                </label>
+              </div>
+
+              {displaySourceMode === 'specific_map' && (
+                <label className="block text-xs font-bold uppercase tracking-wide text-stone-500">
+                  Projector Map
+                  <select
+                    value={displayMapId || ''}
+                    onChange={(event) => setDisplayMapId(event.target.value || null)}
+                    className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                    disabled={!activeSession || isBusy || mapsQuery.isLoading}
+                  >
+                    <option value="">Choose a map</option>
+                    {(mapsQuery.data || []).map((map) => (
+                      <option key={map.id} value={map.id}>
+                        {map.name}{map.is_active ? ' (Active)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {displaySourceMode === 'custom_image' && (
+                <div className="space-y-3">
+                  <label className="block text-xs font-bold uppercase tracking-wide text-stone-500">
+                    Image URL
+                    <input
+                      type="url"
+                      value={displayImageUrl}
+                      onChange={(event) => setDisplayImageUrl(event.target.value)}
+                      placeholder="https://example.com/projector-image.jpg"
+                      className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                      disabled={!activeSession || isBusy}
+                    />
+                  </label>
+
+                  <div className="flex items-center gap-3">
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">
+                      <Upload className="w-4 h-4" />
+                      Upload Image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleImageUpload}
+                        disabled={!activeSession || isBusy}
+                      />
+                    </label>
+                    {displayImageUrl && (
+                      <span className="text-xs text-stone-500 break-all">{displayImageUrl}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div>
                 <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">Assign Seats</h3>
-                <p className="text-sm text-stone-600">Choose who appears in each projector corner and set the rotation for that seat.</p>
+                <p className="text-sm text-stone-600">Choose who appears on each projector side and set the rotation for that seat. Leave a seat unassigned to hide it completely.</p>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -346,7 +499,7 @@ export function ProjectorDisplayManager({
 
               <div className="flex items-center justify-between gap-3 pt-2">
                 <p className="text-xs text-stone-500">
-                  The projector page only shows the active map, encounter banner, and these four player corners.
+                  Empty seats stay hidden on the projector. Save after changing the source, uploaded image, or selected map.
                 </p>
                 <Button onClick={() => saveLayoutMutation.mutate()} disabled={!activeSession} loading={saveLayoutMutation.isPending}>
                   Save Seats

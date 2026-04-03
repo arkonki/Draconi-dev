@@ -1,5 +1,54 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
-import { corsHeaders, createAdminClient, jsonResponse, requireUser } from '../_shared/projector.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function jsonResponse(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function getEnv(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) {
+    throw new Error(`Missing environment variable: ${name}`);
+  }
+  return value;
+}
+
+function createAdminClient() {
+  return createClient(getEnv('SUPABASE_URL'), getEnv('SUPABASE_SERVICE_ROLE_KEY'));
+}
+
+function createAuthClient(authorization: string) {
+  return createClient(getEnv('SUPABASE_URL'), getEnv('SUPABASE_ANON_KEY'), {
+    global: { headers: { Authorization: authorization } },
+  });
+}
+
+async function requireUser(request: Request) {
+  const authorization = request.headers.get('Authorization');
+  if (!authorization) {
+    return { error: jsonResponse(401, { error: 'Missing authorization header.' }) };
+  }
+
+  const authClient = createAuthClient(authorization);
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser();
+
+  if (error || !user) {
+    return { error: jsonResponse(401, { error: 'Unauthorized.' }) };
+  }
+
+  return { user };
+}
 
 serve(async (request) => {
   if (request.method === 'OPTIONS') {

@@ -3,6 +3,8 @@ export type DisplayCorner = 'top_left' | 'top_right' | 'bottom_left' | 'bottom_r
 export interface PartyDisplaySession {
   id: string;
   party_id: string;
+  display_map_id: string | null;
+  display_image_url: string | null;
   expires_at: string;
   revoked_at: string | null;
   created_at: string;
@@ -36,6 +38,7 @@ export interface PlayerDisplayState {
     id: string;
     name: string;
   };
+  displayImageUrl: string | null;
   map: {
     imageUrl: string | null;
     gridType: 'none' | 'square' | 'hex';
