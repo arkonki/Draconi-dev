@@ -34,6 +34,9 @@ const PartyView = lazy(() =>
 const PartyJoinPage = lazy(() =>
   import('./pages/PartyJoinPage').then((module) => ({ default: module.PartyJoinPage }))
 );
+const ProjectorDisplayPage = lazy(() =>
+  import('./pages/ProjectorDisplayPage').then((module) => ({ default: module.ProjectorDisplayPage }))
+);
 const EncounterChatView = lazy(() =>
   import('./components/party/EncounterChatView').then((module) => ({ default: module.EncounterChatView }))
 );
@@ -57,6 +60,7 @@ export function AppRoutes() {
       <Suspense fallback={loadingFallback}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/display/:sessionToken" element={<ProjectorDisplayPage />} />
 
           <Route
             path="*"

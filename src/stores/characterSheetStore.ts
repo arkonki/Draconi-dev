@@ -6,10 +6,76 @@ import { Spell, MagicSchool } from '../types/magic';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
 import { fetchActiveEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
+import { queryClient } from '../lib/queryClient';
+import type { Party } from '../lib/api/parties';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
 
 export interface HeroicAbility { id: string; name: string; description: string; willpower_cost: number | null; }
+
+interface PartySummary {
+  id: string;
+  name: string;
+  members: Character[];
+}
+
+const mergeCharacterState = (existing: Character, updated: Character): Character => ({
+  ...existing,
+  ...updated,
+});
+
+const syncCharacterCaches = (updatedCharacter: Character) => {
+  queryClient.setQueryData<Character[]>(['characters', updatedCharacter.user_id], (characters) => {
+    if (!characters) {
+      return characters;
+    }
+
+    return characters.map((character) =>
+      character.id === updatedCharacter.id ? mergeCharacterState(character, updatedCharacter) : character
+    );
+  });
+
+  if (updatedCharacter.party_id) {
+    queryClient.setQueryData<Party>(['party', updatedCharacter.party_id], (party) => {
+      if (!party) {
+        return party;
+      }
+
+      return {
+        ...party,
+        members: party.members.map((member) =>
+          member.id === updatedCharacter.id ? mergeCharacterState(member, updatedCharacter) : member
+        ),
+      };
+    });
+  }
+
+  queryClient.setQueriesData<Party[]>({ queryKey: ['parties'] }, (parties) => {
+    if (!parties) {
+      return parties;
+    }
+
+    return parties.map((party) => ({
+      ...party,
+      members: party.members.map((member) =>
+        member.id === updatedCharacter.id ? mergeCharacterState(member, updatedCharacter) : member
+      ),
+    }));
+  });
+
+  queryClient.setQueriesData<PartySummary[]>({ queryKey: ['myParties'] }, (parties) => {
+    if (!parties) {
+      return parties;
+    }
+
+    return parties.map((party) => ({
+      ...party,
+      members: party.members.map((member) =>
+        member.id === updatedCharacter.id ? mergeCharacterState(member, updatedCharacter) : member
+      ),
+    }));
+  });
+};
 
 interface CharacterSheetState {
   character: Character | null;
@@ -170,23 +236,23 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ isSaving: true, saveError: null });
     try {
       // A. Update the Character Database
-      await updateCharacter(character.id, updates);
+      const savedCharacter = await updateCharacter(character.id, updates);
+      if (!savedCharacter) {
+        throw new Error('Failed to save character');
+      }
       
       // B. Update Local Character State
-      set(state => {
-        if (!state.character) return {};
-        const newCharacterState: Character = {
-          ...state.character,
-          ...updates,
-          updated_at: new Date().toISOString(),
-        };
-        return { character: newCharacterState, isSaving: false };
-      });
+      syncCharacterCaches(savedCharacter);
+      set({ character: savedCharacter, isSaving: false });
 
       // C. AUTOMATIC SYNC: Push HP/WP changes to Encounter
       const combatantUpdates: Partial<EncounterCombatant> = {};
-      if (updates.current_hp !== undefined) combatantUpdates.current_hp = updates.current_hp;
-      if (updates.current_wp !== undefined) combatantUpdates.current_wp = updates.current_wp;
+      if (savedCharacter.current_hp !== undefined && updates.current_hp !== undefined) {
+        combatantUpdates.current_hp = savedCharacter.current_hp;
+      }
+      if (savedCharacter.current_wp !== undefined && updates.current_wp !== undefined) {
+        combatantUpdates.current_wp = savedCharacter.current_wp;
+      }
       
       if (Object.keys(combatantUpdates).length > 0) {
         // Fire and forget (don't await) to keep UI snappy

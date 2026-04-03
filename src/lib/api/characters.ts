@@ -219,11 +219,14 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
     .update(dbUpdates)
     .eq('id', characterId)
     .select(CHARACTER_SELECT_QUERY)
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message || 'Failed to update character');
+  if (!data) {
+    throw new Error('Character not found or permission denied');
+  }
 
-  return data ? mapCharacterData(data) : null;
+  return mapCharacterData(data);
 }
 
 export async function deleteCharacters(characterIds: string[]): Promise<void> {

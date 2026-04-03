@@ -8,7 +8,7 @@ import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
-  MessageSquare, ChevronDown, Dices, Map
+  MessageSquare, ChevronDown, Dices, Map, Monitor
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
@@ -18,6 +18,7 @@ import { EncounterChatView } from '../components/party/EncounterChatView';
 import { supabase } from '../lib/supabase';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
+import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
 
 type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 const VALID_PARTY_TABS: Tab[] = ['members', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
@@ -84,6 +85,7 @@ export function PartyView() {
   const [isMenuOpen, setIsMenuOpen] = useState(false); // Added for custom dropdown
   const [dialogOpen, setDialogOpen] = useState<'deleteParty' | 'removeMember' | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
+  const [isProjectorManagerOpen, setIsProjectorManagerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -221,6 +223,14 @@ export function PartyView() {
 
             {isPartyOwner && (
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Monitor}
+                  onClick={() => setIsProjectorManagerOpen(true)}
+                >
+                  Projector
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -457,6 +467,13 @@ export function PartyView() {
         isDestructive={true}
         isLoading={deletePartyMutation.isPending}
         icon={<ShieldAlert className="w-6 h-6 text-red-500" />}
+      />
+      <ProjectorDisplayManager
+        isOpen={isProjectorManagerOpen}
+        onClose={() => setIsProjectorManagerOpen(false)}
+        partyId={partyId!}
+        partyName={party.name}
+        partyMembers={party.members}
       />
       {partyId && <EncounterChatView forcedPartyId={partyId} forcedPartyName={party.name} forcedMembers={party.members} />}
     </div>
