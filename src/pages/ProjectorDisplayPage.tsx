@@ -99,7 +99,7 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
 
   return (
     <div
-      className={`w-56 rounded-2xl border bg-black/70 text-white shadow-2xl backdrop-blur-md overflow-hidden ${
+      className={`w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border bg-black/70 text-white shadow-2xl backdrop-blur-md overflow-hidden ${
         isDying ? 'border-red-400/60 ring-2 ring-red-500/40' : 'border-white/20'
       }`}
       style={{ transform: `rotate(${slot.rotationDeg}deg)` }}
@@ -108,36 +108,35 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
         <>
           <div className="flex items-center gap-3 p-3 border-b border-white/10">
             {character.portraitUrl ? (
-              <img src={character.portraitUrl} alt={character.name} className="w-14 h-14 rounded-full object-cover border border-white/20 bg-black/40" />
+              <img src={character.portraitUrl} alt={character.name} className="h-12 w-12 rounded-full object-cover border border-white/20 bg-black/40 shrink-0" />
             ) : (
-              <div className="w-14 h-14 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-lg font-bold">
+              <div className="h-12 w-12 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-lg font-bold shrink-0">
                 {character.name.slice(0, 2).toUpperCase()}
               </div>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h3 className="font-bold text-lg leading-tight truncate">{character.name}</h3>
               <p className="text-xs uppercase tracking-[0.2em] text-white/60">Player Seat</p>
             </div>
-          </div>
 
-          <div className="p-3 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div className={`rounded-xl px-3 py-2 ${isDying ? 'bg-red-500/25 border border-red-300/35' : 'bg-red-500/15 border border-red-400/20'}`}>
-                <div className="flex items-center gap-2 text-red-200 text-xs uppercase tracking-wide">
-                  <Heart className="w-3.5 h-3.5" />
-                  Health
-                </div>
-                <div className="mt-1 text-xl font-bold">{character.currentHp}/{character.maxHp}</div>
+            <div className={`min-w-[5.25rem] rounded-xl border px-3 py-2 ${isDying ? 'bg-red-500/25 border-red-300/35' : 'bg-red-500/15 border-red-400/20'}`}>
+              <div className="flex items-center gap-1.5 text-red-200 text-[10px] uppercase tracking-[0.18em]">
+                <Heart className="h-3.5 w-3.5" />
+                Health
               </div>
-              <div className="rounded-xl bg-blue-500/15 border border-blue-400/20 px-3 py-2">
-                <div className="flex items-center gap-2 text-blue-200 text-xs uppercase tracking-wide">
-                  <Zap className="w-3.5 h-3.5" />
-                  Willpower
-                </div>
-                <div className="mt-1 text-xl font-bold">{character.currentWp}/{character.maxWp}</div>
-              </div>
+              <div className="mt-1 text-lg font-bold leading-none">{character.currentHp}/{character.maxHp}</div>
             </div>
 
+            <div className="min-w-[5.25rem] rounded-xl bg-blue-500/15 border border-blue-400/20 px-3 py-2">
+              <div className="flex items-center gap-1.5 text-blue-200 text-[10px] uppercase tracking-[0.18em]">
+                <Zap className="h-3.5 w-3.5" />
+                Will
+              </div>
+              <div className="mt-1 text-lg font-bold leading-none">{character.currentWp}/{character.maxWp}</div>
+            </div>
+          </div>
+
+          <div className="p-3">
             <div className="min-h-[40px]">
               {isDying || activeConditions.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
@@ -357,7 +356,7 @@ export function ProjectorDisplayPage() {
             <img
               ref={imageRef}
               src={displayImageUrl}
-              alt={`${data.party.name} projector display`}
+              alt="Projector display"
               onLoad={measureImage}
               draggable={false}
               className="block max-w-screen max-h-screen object-contain select-none"
@@ -384,29 +383,11 @@ export function ProjectorDisplayPage() {
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="rounded-2xl border border-white/10 bg-black/50 p-8 text-center backdrop-blur-md">
             <Monitor className="w-12 h-12 mx-auto text-white/60" />
-            <h1 className="mt-4 text-2xl font-bold">{data.party.name}</h1>
-            <p className="mt-2 text-white/60">No active map is selected yet.</p>
+            <h1 className="mt-4 text-2xl font-bold">Projector Display</h1>
+            <p className="mt-2 text-white/60">No active map or display image is selected yet.</p>
           </div>
         </div>
       )}
-
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 text-center">
-        <div className="rounded-full border border-white/15 bg-black/70 px-5 py-2 backdrop-blur-md shadow-xl">
-          <p className="text-[11px] uppercase tracking-[0.25em] text-white/60">{data.party.name}</p>
-          <p className="text-lg font-semibold">
-            {data.encounter.isActive ? data.encounter.name || 'Combat Active' : 'Player Display'}
-          </p>
-          {connectionLost ? (
-            <p className="text-xs text-amber-300">
-              Connection lost. Retrying...
-            </p>
-          ) : (
-            <p className="text-xs text-white/60">
-              {data.encounter.isActive && data.encounter.round ? `Round ${data.encounter.round}` : 'Waiting for updates'}
-            </p>
-          )}
-        </div>
-      </div>
 
       {data.slots.map((slot) => (
         slot.character ? (
@@ -418,6 +399,11 @@ export function ProjectorDisplayPage() {
 
       {displayImageUrl ? (
         <div className="absolute right-4 bottom-4 z-30 flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 backdrop-blur-md shadow-xl">
+          {connectionLost ? (
+            <div className="rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
+              Connection lost. Retrying...
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => updateScale(imageTransform.scale - IMAGE_SCALE_STEP)}

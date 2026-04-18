@@ -60,6 +60,7 @@ export function AppRoutes() {
       <Suspense fallback={loadingFallback}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/d/:sessionToken" element={<ProjectorDisplayPage />} />
           <Route path="/display/:sessionToken" element={<ProjectorDisplayPage />} />
 
           <Route

@@ -81,12 +81,26 @@ export async function sha256Hex(value: string) {
     .join('');
 }
 
-export function createDisplayToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+export function slugifyPartyName(name: string) {
+  const normalized = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  return (normalized || 'party').slice(0, 24).replace(/-+$/g, '') || 'party';
+}
+
+export function createShortCode(length = 6) {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+export function createDisplayToken(partyName: string) {
+  return `${slugifyPartyName(partyName)}-${createShortCode(6)}`;
 }
 
 export function getSessionExpiryIso() {

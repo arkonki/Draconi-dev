@@ -4,10 +4,18 @@ import type { PartyDisplaySession, PartyDisplaySlot, PlayerDisplayState } from '
 const DISPLAY_TOKEN_STORAGE_PREFIX = 'party-display-token';
 const PROJECTOR_IMAGE_FOLDER = 'ProjectorDisplays';
 const PARTY_DISPLAY_SESSION_SELECT = 'id, party_id, display_map_id, display_image_url, expires_at, revoked_at, created_at, last_seen_at';
+const PROJECTOR_IMAGE_BUCKET = 'images';
 
 interface StoredDisplayToken {
   sessionId: string;
   token: string;
+}
+
+export interface ProjectorStoredImage {
+  name: string;
+  path: string;
+  publicUrl: string;
+  updatedAt: string | null;
 }
 
 export const DEFAULT_DISPLAY_SLOTS: PartyDisplaySlot[] = [
@@ -44,7 +52,7 @@ export function clearStoredPartyDisplayToken(partyId: string) {
 }
 
 export function buildPartyDisplayUrl(sessionToken: string) {
-  return `${window.location.origin}/display/${sessionToken}`;
+  return `${window.location.origin}/d/${sessionToken}`;
 }
 
 function normalizePartyDisplaySession(value: unknown): PartyDisplaySession | null {
@@ -158,21 +166,70 @@ export async function createPartyDisplaySession(partyId: string) {
   return { sessionToken: data.sessionToken as string, session, slots };
 }
 
-export async function uploadProjectorImage(partyId: string, file: File) {
-  const fileExt = file.name.split('.').pop() || 'png';
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
-  const filePath = `${PROJECTOR_IMAGE_FOLDER}/${partyId}/${fileName}`;
+export async function uploadProjectorImages(partyId: string, files: File[]) {
+  const uploadedImages: ProjectorStoredImage[] = [];
 
-  const { error: uploadError } = await supabase.storage
-    .from('images')
-    .upload(filePath, file);
+  for (const file of files) {
+    const fileExt = file.name.split('.').pop() || 'png';
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
+    const filePath = `${PROJECTOR_IMAGE_FOLDER}/${partyId}/${fileName}`;
 
-  if (uploadError) {
-    throw new Error(uploadError.message || 'Failed to upload projector image');
+    const { error: uploadError } = await supabase.storage
+      .from(PROJECTOR_IMAGE_BUCKET)
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw new Error(uploadError.message || 'Failed to upload projector image');
+    }
+
+    const { data } = supabase.storage.from(PROJECTOR_IMAGE_BUCKET).getPublicUrl(filePath);
+    uploadedImages.push({
+      name: file.name,
+      path: filePath,
+      publicUrl: data.publicUrl,
+      updatedAt: null,
+    });
   }
 
-  const { data } = supabase.storage.from('images').getPublicUrl(filePath);
-  return data.publicUrl;
+  return uploadedImages;
+}
+
+export async function listProjectorImages(partyId: string): Promise<ProjectorStoredImage[]> {
+  const folderPath = `${PROJECTOR_IMAGE_FOLDER}/${partyId}`;
+  const { data, error } = await supabase.storage
+    .from(PROJECTOR_IMAGE_BUCKET)
+    .list(folderPath, {
+      limit: 100,
+      sortBy: { column: 'updated_at', order: 'desc' },
+    });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to list projector images');
+  }
+
+  return (data || [])
+    .filter((entry) => entry.name && !entry.id?.endsWith('/'))
+    .map((entry) => {
+      const path = `${folderPath}/${entry.name}`;
+      const { data: publicUrlData } = supabase.storage.from(PROJECTOR_IMAGE_BUCKET).getPublicUrl(path);
+
+      return {
+        name: entry.name,
+        path,
+        publicUrl: publicUrlData.publicUrl,
+        updatedAt: entry.updated_at ?? null,
+      };
+    });
+}
+
+export async function deleteProjectorImage(path: string) {
+  const { error } = await supabase.storage
+    .from(PROJECTOR_IMAGE_BUCKET)
+    .remove([path]);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to delete projector image');
+  }
 }
 
 export async function fetchPartyMaps(partyId: string) {

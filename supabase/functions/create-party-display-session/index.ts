@@ -72,12 +72,26 @@ async function sha256Hex(value: string) {
     .join('');
 }
 
-function createDisplayToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+function slugifyPartyName(name: string) {
+  const normalized = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  return (normalized || 'party').slice(0, 24).replace(/-+$/g, '') || 'party';
+}
+
+function createShortCode(length = 6) {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+function createDisplayToken(partyName: string) {
+  return `${slugifyPartyName(partyName)}-${createShortCode(6)}`;
 }
 
 function getSessionExpiryIso() {
@@ -185,7 +199,7 @@ serve(async (request) => {
       .eq('party_id', partyId)
       .is('revoked_at', null);
 
-    const sessionToken = createDisplayToken();
+    const sessionToken = createDisplayToken(party.name);
     const tokenHash = await sha256Hex(sessionToken);
     const expiresAt = getSessionExpiryIso();
 
