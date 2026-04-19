@@ -59,8 +59,8 @@ export function GearSelection() {
   const [errorOptions, setErrorOptions] = useState('');
 
   // Tooltip State (Mobile Friendly)
-  const [activeTooltip, setActiveTooltip] = useState<string | null>(null); 
-  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number; placement: 'top' | 'bottom' } | null>(null);
 
   const { data: allItems = [], isLoading: isLoadingItems, error: errorItems } = useQuery<GameItem[], Error>({
     queryKey: ['gameItems'],
@@ -162,19 +162,30 @@ export function GearSelection() {
     }));
   };
 
+  const getTooltipLayout = (triggerEl: HTMLElement | null) => {
+    if (!triggerEl || !triggerEl.isConnected) return null;
+    const rect = triggerEl.getBoundingClientRect();
+    const width = Math.min(256, window.innerWidth - 24);
+    const estimatedHeight = 288;
+    const margin = 12;
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.min(Math.max(centerX, margin + width / 2), window.innerWidth - margin - width / 2);
+    const showAbove = rect.top > estimatedHeight + margin;
+    const placement = showAbove ? 'top' as const : 'bottom' as const;
+    const top = placement === 'top'
+      ? Math.max(margin + estimatedHeight, rect.top - 10)
+      : Math.min(window.innerHeight - margin - estimatedHeight, rect.bottom + 10);
+    return { top, left, placement };
+  };
+
   const handleInfoClick = (e: React.MouseEvent, itemName: string) => {
     e.stopPropagation();
     if (activeTooltip === itemName) {
       setActiveTooltip(null);
     } else {
-      const rect = e.currentTarget.getBoundingClientRect();
-      let leftPos = rect.left + rect.width / 2;
-      
-      // Keep tooltip on screen
-      if (leftPos < 140) leftPos = 140; 
-      if (leftPos > window.innerWidth - 140) leftPos = window.innerWidth - 140;
-
-      setTooltipPosition({ top: rect.top, left: leftPos });
+      const layout = getTooltipLayout(e.currentTarget);
+      if (!layout) return;
+      setTooltipPosition(layout);
       setActiveTooltip(itemName);
     }
   };
@@ -517,9 +528,13 @@ export function GearSelection() {
       {activeTooltip && tooltipPosition && (
         <div 
           style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} 
-          className="fixed -translate-x-1/2 -translate-y-[calc(100%+10px)] w-64 p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[100] animate-in fade-in zoom-in-95 duration-200 pointer-events-none"
+          className={`fixed -translate-x-1/2 w-64 max-w-[calc(100vw-1.5rem)] max-h-[min(18rem,calc(100vh-1.5rem))] overflow-y-auto p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[100] animate-in fade-in zoom-in-95 duration-200 pointer-events-none ${tooltipPosition.placement === 'top' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-[10px]'}`}
         >
-          <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          {tooltipPosition.placement === 'top' ? (
+            <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          ) : (
+            <div className="absolute top-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+          )}
           {(() => {
             const details = getActiveItemDetails();
             if (!details) return "No details available.";

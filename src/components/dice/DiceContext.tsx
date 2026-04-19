@@ -3,7 +3,7 @@ import { parseDiceString } from '../../lib/dice-utils';
 import { sendMessage } from '../../lib/api/chat';
 import { DiceContext } from './diceStore';
 import type { DiceType, RollConfig, RollHistoryEntry } from './diceTypes';
-export type { DiceType, DiceRollResult, RollHistoryEntry, RollConfig, DiceContextType } from './diceTypes';
+export type { DiceType, DiceRollResult, RollHistoryEntry, RollConfig, DiceContextType, PostRollAction } from './diceTypes';
 
 const MAX_HISTORY = 20; 
 

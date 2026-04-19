@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom'; 
 import { useAuth } from '../../contexts/useAuth';
-import { DiceType, DiceRollResult, RollHistoryEntry } from './DiceContext';
+import { DiceType, DiceRollResult, RollHistoryEntry, PostRollAction } from './DiceContext';
 import { useDice } from './useDice';
 // 1. IMPORT NOTIFICATIONS
 import { useNotifications } from '../../contexts/useNotifications';
 import { 
   Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
-  ShieldQuestion, GraduationCap, Zap, Moon, Share 
+  ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
@@ -62,6 +62,7 @@ export function DiceRollerModal() {
   const [isRolling, setIsRolling] = useState(false);
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
   const [lastRolledEntry, setLastRolledEntry] = useState<RollHistoryEntry | null>(null); 
+  const [pendingPostRollAction, setPendingPostRollAction] = useState<PostRollAction | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -110,6 +111,7 @@ export function DiceRollerModal() {
     setIsCritical(false);
     setIsSuccess(undefined);
     setLastRolledEntry(null);
+    setPendingPostRollAction(null);
 
     const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
     const currentBoonResults: DiceRollResult[] = [];
@@ -177,6 +179,18 @@ export function DiceRollerModal() {
         setIsCritical(crit);
         setIsSuccess(success);
 
+        const configuredPostRollAction = currentConfig?.postRollAction;
+        if (configuredPostRollAction) {
+          const actionWhen = configuredPostRollAction.when ?? 'always';
+          const shouldShowAction =
+            actionWhen === 'always'
+            || (actionWhen === 'success' && success === true)
+            || (actionWhen === 'failure' && success === false);
+          setPendingPostRollAction(shouldShowAction ? configuredPostRollAction : null);
+        } else {
+          setPendingPostRollAction(null);
+        }
+
         if (isSkillCheck && skillName && (numericFinalValue === 1 || numericFinalValue === 20)) {
             markSkillThisSession(skillName);
         }
@@ -236,6 +250,7 @@ export function DiceRollerModal() {
       setResults([]); setBoonResults([]); setFinalOutcome(null); setDisplayedOutcome('...');
       setIsCritical(false); setIsSuccess(undefined); setShowHistory(false); setIsRolling(false);
       setLastRolledEntry(null);
+      setPendingPostRollAction(null);
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (completionTimeoutRef.current) {
         clearTimeout(completionTimeoutRef.current);
@@ -284,32 +299,32 @@ export function DiceRollerModal() {
   const controlsDisabled = isRolling || isDeathRoll || isRallyRoll || isRecoveryRoll || isAdvancementRoll || isInitiative || isRest;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] border border-gray-200 overflow-hidden transform transition-all scale-100">
+    <div className="dice-modal-root fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="dice-modal-shell bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] border border-gray-200 overflow-hidden transform transition-all scale-100">
         
         {/* Header */}
-        <div className="p-4 border-b bg-gray-50 flex justify-between items-center text-lg font-bold text-gray-800">
-          <div className="flex items-center gap-2 text-indigo-700">
+        <div className="dice-modal-header p-4 border-b bg-gray-50 flex justify-between items-center text-lg font-bold text-gray-800">
+          <div className="dice-modal-title flex items-center gap-2 text-indigo-700">
             {getIconForMode()} {getModalTitle()}
           </div>
-          <button onClick={() => toggleDiceRoller()} className="text-gray-400 hover:text-gray-700 transition-colors">
+          <button onClick={() => toggleDiceRoller()} className="dice-modal-close text-gray-400 hover:text-gray-700 transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto flex-grow flex flex-col">
+        <div className="dice-modal-body p-5 overflow-y-auto flex-grow flex flex-col">
           {showHistory ? (
-            <div className="animate-in slide-in-from-right-4 duration-200">
-              <div className="flex justify-between items-center mb-3 border-b pb-2">
+            <div className="dice-modal-history animate-in slide-in-from-right-4 duration-200">
+              <div className="dice-modal-history-header flex justify-between items-center mb-3 border-b pb-2">
                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Roll History</h3>
                 <Button onClick={clearHistory} variant="danger" size="xs" disabled={rollHistory.length === 0}>
                   <Trash2 className="w-3 h-3 mr-1" /> Clear
                 </Button>
               </div>
-              <ul className="space-y-3 max-h-60 overflow-y-auto pr-2">
+              <ul className="dice-modal-history-list space-y-3 max-h-60 overflow-y-auto pr-2">
                   {rollHistory.map(entry => (
-                    <li key={entry.id} className="text-sm p-2 rounded bg-gray-50 border border-gray-100 relative group">
-                      <div className="flex justify-between font-bold text-gray-700 mb-1">
+                    <li key={entry.id} className="dice-modal-history-entry text-sm p-2 rounded bg-gray-50 border border-gray-100 relative group">
+                      <div className="flex justify-between font-bold text-gray-700 mb-1 gap-3">
                          <span>{entry.description}</span>
                          <span className={entry.isSuccess ? "text-green-600" : entry.isSuccess === false ? "text-red-600" : ""}>{String(entry.finalOutcome)}</span>
                       </div>
@@ -333,14 +348,14 @@ export function DiceRollerModal() {
               </ul>
             </div>
           ) : (
-            <div className="flex flex-col h-full">
+            <div className="dice-modal-roller flex flex-col h-full">
               {/* Dice Pool Display */}
-              <div className="mb-6 p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 min-h-[80px] flex flex-wrap gap-2 items-center justify-center">
+              <div className="dice-modal-pool mb-6 p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 min-h-[80px] flex flex-wrap gap-2 items-center justify-center">
                 {dicePool.length === 0 ? (
-                  <span className="text-gray-400 text-sm font-medium">Add dice to roll...</span>
+                  <span className="dice-modal-pool-empty text-gray-400 text-sm font-medium">Add dice to roll...</span>
                 ) : (
                   dicePool.map((die, index) => (
-                    <button key={index} onClick={() => !controlsDisabled && removeLastDie()} disabled={controlsDisabled} className={`w-12 h-12 rounded-lg flex items-center justify-center shadow-sm transition-all transform hover:scale-105 ${controlsDisabled ? 'bg-gray-200 cursor-not-allowed opacity-50' : 'bg-white border border-gray-200 hover:border-red-300 hover:text-red-500'}`}>
+                    <button key={index} onClick={() => !controlsDisabled && removeLastDie()} disabled={controlsDisabled} className={`dice-modal-pool-die w-12 h-12 rounded-lg flex items-center justify-center shadow-sm transition-all transform hover:scale-105 ${controlsDisabled ? 'bg-gray-200 cursor-not-allowed opacity-50' : 'bg-white border border-gray-200 hover:border-red-300 hover:text-red-500'}`}>
                       <DiceIcon type={die} />
                     </button>
                   ))
@@ -349,20 +364,20 @@ export function DiceRollerModal() {
 
               {/* Controls */}
               {!controlsDisabled && (
-                <div className="grid grid-cols-6 gap-2 mb-6">
+                <div className="dice-modal-controls grid grid-cols-6 gap-2 mb-6">
                   {(['d4', 'd6', 'd8', 'd10', 'd12', 'd20'] as DiceType[]).map(die => (
-                    <Button key={die} onClick={() => addDie(die)} variant="outline" size="sm" disabled={isRolling} className="h-10 font-mono text-xs">{die}</Button>
+                    <Button key={die} onClick={() => addDie(die)} variant="outline" size="sm" disabled={isRolling} className="dice-modal-control-button h-10 font-mono text-xs">{die}</Button>
                   ))}
                 </div>
               )}
 
               {/* BOON / BANE */}
               {dicePool.length === 1 && dicePool[0] === 'd20' && !controlsDisabled && (
-                <div className="flex justify-center gap-4 mb-6">
-                  <button onClick={handleBoonClick} className={`relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200 ${isBoonActive ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-105' : 'bg-white border-gray-200 text-gray-500 hover:border-emerald-400 hover:text-emerald-600'}`}>
+                <div className="dice-modal-modifiers flex justify-center gap-4 mb-6">
+                  <button onClick={handleBoonClick} className={`dice-modal-modifier relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200 ${isBoonActive ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-105' : 'bg-white border-gray-200 text-gray-500 hover:border-emerald-400 hover:text-emerald-600'}`}>
                     <Star className={`w-4 h-4 mr-2 ${isBoonActive ? 'fill-white' : ''}`} /> Boon {isBoonActive && modifierCount > 1 && `x${modifierCount}`}
                   </button>
-                  <button onClick={handleBaneClick} className={`relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200 ${isBaneActive ? 'bg-rose-600 border-rose-600 text-white shadow-md scale-105' : 'bg-white border-gray-200 text-gray-500 hover:border-rose-400 hover:text-rose-600'}`}>
+                  <button onClick={handleBaneClick} className={`dice-modal-modifier relative flex items-center justify-center w-32 py-2 rounded-lg border-2 font-bold text-sm transition-all duration-200 ${isBaneActive ? 'bg-rose-600 border-rose-600 text-white shadow-md scale-105' : 'bg-white border-gray-200 text-gray-500 hover:border-rose-400 hover:text-rose-600'}`}>
                     <ShieldOff className="w-4 h-4 mr-2" /> Bane {isBaneActive && modifierCount > 1 && `x${modifierCount}`}
                   </button>
                 </div>
@@ -370,17 +385,17 @@ export function DiceRollerModal() {
 
               {/* Result Display */}
               {(isRolling || finalOutcome !== null) && (
-                <div className={`mt-auto mb-2 p-6 rounded-xl text-center transition-all duration-300 transform ${isRolling ? 'bg-gray-100 scale-95 opacity-80' : 'bg-indigo-50 border-2 border-indigo-100 scale-100 opacity-100 shadow-inner'}`}>
-                   <div className={`text-5xl font-black mb-2 ${isCritical ? 'text-purple-600 animate-bounce' : isRolling ? 'text-gray-400 blur-sm' : 'text-indigo-900'}`}>{displayedOutcome}</div>
+                <div className={`dice-modal-result mt-auto mb-2 p-6 rounded-xl text-center transition-all duration-300 transform ${isRolling ? 'bg-gray-100 scale-95 opacity-80' : 'bg-indigo-50 border-2 border-indigo-100 scale-100 opacity-100 shadow-inner'}`}>
+                   <div className={`dice-modal-result-value text-5xl font-black mb-2 ${isCritical ? 'text-purple-600 animate-bounce' : isRolling ? 'text-gray-400 blur-sm' : 'text-indigo-900'}`}>{displayedOutcome}</div>
                    {!isRolling && (
-                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                     <div className="dice-modal-result-body animate-in fade-in slide-in-from-bottom-2 duration-300">
                         {currentConfig?.targetValue !== undefined && !isCritical && (
-                            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
+                            <p className="dice-modal-result-target text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
                                 {isAdvancementRoll ? `Need > ${currentConfig.targetValue}` : `Target: ${currentConfig.targetValue}`}
                             </p>
                         )}
 
-                        <div className="flex items-center justify-center gap-2 mb-2">
+                        <div className="dice-modal-result-status flex items-center justify-center gap-2 mb-2">
                            {isSuccess === true && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-bold"><Star size={14} className="fill-current" /> Success</div>}
                            {isSuccess === false && !isCritical && <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-bold"><X size={14} /> Failure</div>}
                         </div>
@@ -400,19 +415,243 @@ export function DiceRollerModal() {
                    )}
                 </div>
               )}
+
+              {!isRolling && finalOutcome !== null && pendingPostRollAction && (
+                <div className="dice-modal-followup mt-3 rounded-xl border border-indigo-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-indigo-100 p-2 text-indigo-700 shrink-0">
+                      <ArrowRightCircle className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold uppercase tracking-wider text-indigo-500">Next Step</div>
+                      <div className="mt-1 text-sm font-semibold text-stone-900">{pendingPostRollAction.title}</div>
+                      {pendingPostRollAction.message && (
+                        <p className="mt-1 text-sm text-stone-600 leading-snug">{pendingPostRollAction.message}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {pendingPostRollAction.onAction && pendingPostRollAction.actionLabel && (
+                          <Button
+                            onClick={() => {
+                              const action = pendingPostRollAction.onAction;
+                              setPendingPostRollAction(null);
+                              action();
+                            }}
+                            size="sm"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                          >
+                            <ArrowRightCircle className="w-4 h-4 mr-1" />
+                            {pendingPostRollAction.actionLabel}
+                          </Button>
+                        )}
+                        <Button
+                          onClick={() => {
+                            setPendingPostRollAction(null);
+                            toggleDiceRoller();
+                          }}
+                          variant="outline"
+                          size="sm"
+                        >
+                          {pendingPostRollAction.dismissLabel || 'Close'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t flex justify-between items-center bg-gray-50">
-          <div>
+        <div className="dice-modal-footer p-4 border-t flex justify-between items-center bg-gray-50">
+          <div className="dice-modal-footer-actions">
             <Button onClick={() => setShowHistory(!showHistory)} variant="ghost" size="sm" className="text-gray-500 hover:text-gray-800"><History className="w-4 h-4 mr-1" /> {showHistory ? 'Roller' : 'History'}</Button>
             {!showHistory && !controlsDisabled && dicePool.length > 0 && <Button onClick={clearDicePool} variant="ghost" size="sm" className="ml-2 text-red-400 hover:text-red-600">Clear</Button>}
           </div>
-          {!showHistory && <Button onClick={handleRoll} disabled={dicePool.length === 0 || isRolling} size="lg" className={`w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>}
+          {!showHistory && <Button onClick={handleRoll} disabled={dicePool.length === 0 || isRolling} size="lg" className={`dice-modal-roll-button w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>}
         </div>
       </div>
+      <style>{`
+        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+          .dice-modal-root {
+            padding: 0;
+          }
+
+          .dice-modal-shell {
+            max-width: 100vw;
+            max-height: 100vh;
+            height: 100vh;
+            border-radius: 0;
+            border-width: 0;
+          }
+
+          .dice-modal-header {
+            padding: 0.75rem 0.9rem;
+            font-size: 0.95rem;
+          }
+
+          .dice-modal-title {
+            gap: 0.45rem;
+            font-size: 0.82rem;
+            line-height: 1.15;
+          }
+
+          .dice-modal-title svg,
+          .dice-modal-close svg {
+            width: 1.05rem;
+            height: 1.05rem;
+          }
+
+          .dice-modal-body {
+            padding: 0.85rem 0.9rem;
+          }
+
+          .dice-modal-pool {
+            margin-bottom: 0.75rem;
+            min-height: 3.65rem;
+            padding: 0.7rem;
+            gap: 0.45rem;
+          }
+
+          .dice-modal-pool-empty {
+            font-size: 0.74rem;
+          }
+
+          .dice-modal-pool-die {
+            width: 2.25rem;
+            height: 2.25rem;
+            font-size: 0.7rem;
+          }
+
+          .dice-modal-controls {
+            margin-bottom: 0.75rem;
+            gap: 0.35rem;
+          }
+
+          .dice-modal-control-button {
+            height: 2.2rem;
+            padding-left: 0.25rem;
+            padding-right: 0.25rem;
+            font-size: 0.65rem;
+          }
+
+          .dice-modal-modifiers {
+            margin-bottom: 0.75rem;
+            gap: 0.55rem;
+          }
+
+          .dice-modal-modifier {
+            width: 7.1rem;
+            padding-top: 0.45rem;
+            padding-bottom: 0.45rem;
+            font-size: 0.7rem;
+          }
+
+          .dice-modal-modifier svg {
+            width: 0.9rem;
+            height: 0.9rem;
+            margin-right: 0.35rem;
+          }
+
+          .dice-modal-result {
+            margin-bottom: 0;
+            padding: 0.9rem;
+          }
+
+          .dice-modal-result-value {
+            margin-bottom: 0.35rem;
+            font-size: 2.25rem;
+            line-height: 1;
+          }
+
+          .dice-modal-result-target {
+            margin-bottom: 0.25rem;
+            font-size: 0.62rem;
+          }
+
+          .dice-modal-result-status {
+            margin-bottom: 0.35rem;
+            gap: 0.35rem;
+          }
+
+          .dice-modal-result-status > div {
+            padding: 0.25rem 0.6rem;
+            font-size: 0.7rem;
+          }
+
+          .dice-modal-result-status svg {
+            width: 0.75rem;
+            height: 0.75rem;
+          }
+
+          .dice-modal-result-body .mt-3 {
+            margin-top: 0.45rem;
+          }
+
+          .dice-modal-result-body .text-xs {
+            font-size: 0.64rem;
+            line-height: 1.2;
+          }
+
+          .dice-modal-followup {
+            margin-top: 0.55rem;
+            padding: 0.75rem;
+          }
+
+          .dice-modal-followup .text-sm {
+            font-size: 0.74rem;
+            line-height: 1.2;
+          }
+
+          .dice-modal-followup button {
+            min-height: 2rem;
+            font-size: 0.7rem;
+          }
+
+          .dice-modal-history-header {
+            margin-bottom: 0.55rem;
+            padding-bottom: 0.4rem;
+          }
+
+          .dice-modal-history-header h3 {
+            font-size: 0.66rem;
+          }
+
+          .dice-modal-history-list {
+            max-height: none;
+            padding-right: 0.15rem;
+          }
+
+          .dice-modal-history-entry {
+            padding: 0.55rem;
+            font-size: 0.72rem;
+          }
+
+          .dice-modal-footer {
+            padding: 0.65rem 0.9rem;
+          }
+
+          .dice-modal-footer-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+          }
+
+          .dice-modal-footer-actions .ml-2 {
+            margin-left: 0;
+          }
+
+          .dice-modal-footer button {
+            min-height: 2rem;
+            font-size: 0.72rem;
+          }
+
+          .dice-modal-roll-button {
+            width: 6rem;
+          }
+        }
+      `}</style>
     </div>
   );
 }

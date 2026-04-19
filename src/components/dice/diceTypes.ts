@@ -21,6 +21,15 @@ export interface RollHistoryEntry {
   skillName?: string;
 }
 
+export interface PostRollAction {
+  when?: 'success' | 'failure' | 'always';
+  title: string;
+  message?: string;
+  actionLabel?: string;
+  dismissLabel?: string;
+  onAction?: () => void;
+}
+
 export interface RollConfig {
   dice?: string;
   initialDice?: DiceType[];
@@ -41,6 +50,7 @@ export interface RollConfig {
   skillName?: string;
   restType?: 'round' | 'stretch' | 'shift';
   combatantId?: string;
+  postRollAction?: PostRollAction;
   onRoll?: (result: { total: number | string }) => void;
   onRollComplete?: (result: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => void;
 }

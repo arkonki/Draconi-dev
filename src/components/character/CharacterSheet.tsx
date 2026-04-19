@@ -26,9 +26,9 @@ import { PdfExportButton } from './PdfExportButton';
 // --- HELPER COMPONENTS ---
 
 const PaperSection = ({ title, children, className = "", action }: { title?: string, children: React.ReactNode, className?: string, action?: React.ReactNode }) => (
-  <div className={`relative bg-white/40 border-2 border-stone-300 rounded-sm p-4 shadow-sm ${className}`}>
+  <div className={`paper-section relative bg-white/40 border-2 border-stone-300 rounded-sm p-4 shadow-sm ${className}`}>
     {title && (
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a472a] text-[#e8d5b5] px-4 py-0.5 text-xs md:text-sm font-serif font-bold tracking-wider uppercase shadow-md flex items-center gap-2 whitespace-nowrap z-10 clip-path-banner">
+      <div className="paper-section-title absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a472a] text-[#e8d5b5] px-4 py-0.5 text-xs md:text-sm font-serif font-bold tracking-wider uppercase shadow-md flex items-center gap-2 whitespace-nowrap z-10 clip-path-banner">
         {title}
         {action}
       </div>
@@ -312,7 +312,7 @@ const StatTracker = ({
 
   return (
     <>
-      <div className="w-full bg-stone-100 rounded-md border border-stone-300 p-2 shadow-sm relative overflow-hidden group">
+      <div className="stat-tracker-shell w-full bg-stone-100 rounded-md border border-stone-300 p-2 shadow-sm relative overflow-hidden group">
         
         {/* Header Row */}
         <div className="flex justify-between items-end mb-1 relative z-10">
@@ -438,21 +438,21 @@ interface AttributeCircleProps {
 const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onClick, isSaving }: AttributeCircleProps) => {
   const displayValue = value ?? 10;
   return (
-    <div className="flex flex-col items-center relative group w-full max-w-[120px]"> 
+    <div className="attribute-circle-shell flex flex-col items-center relative group w-full max-w-[120px]"> 
       <button 
         onClick={onClick}
         title={`Edit ${name} Score`}
-        className="w-16 h-16 md:w-20 md:h-20 rounded-full border-4 border-[#1a472a] bg-[#fdfbf7] flex items-center justify-center shadow-lg relative z-10 transition-all hover:scale-105 hover:bg-[#e8d5b5] group/circle outline-none focus:ring-2 ring-offset-2 ring-[#1a472a] cursor-pointer"
+        className="attribute-circle-button w-16 h-16 md:w-20 md:h-20 rounded-full border-4 border-[#1a472a] bg-[#fdfbf7] flex items-center justify-center shadow-lg relative z-10 transition-all hover:scale-105 hover:bg-[#e8d5b5] group/circle outline-none focus:ring-2 ring-offset-2 ring-[#1a472a] cursor-pointer"
       >
-        <span className="text-2xl md:text-3xl font-serif font-bold text-[#1a472a]">{displayValue}</span>
-        <span className="absolute -top-3 bg-[#fdfbf7] px-1 text-[10px] font-bold text-stone-500 uppercase tracking-widest border border-stone-200 rounded shadow-sm group-hover/circle:bg-white transition-colors">{name}</span>
+        <span className="attribute-circle-value text-2xl md:text-3xl font-serif font-bold text-[#1a472a]">{displayValue}</span>
+        <span className="attribute-circle-name absolute -top-3 bg-[#fdfbf7] px-1 text-[10px] font-bold text-stone-500 uppercase tracking-widest border border-stone-200 rounded shadow-sm group-hover/circle:bg-white transition-colors">{name}</span>
         <span className="absolute bottom-1 text-[#1a472a]/0 group-hover/circle:text-[#1a472a]/50 transition-colors"><Pencil size={10} /></span>
       </button>
 
       <button 
         onClick={onToggle}
         disabled={isSaving}
-        className={`mt-2 w-full min-h-[40px] py-2 px-2 text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
+        className={`attribute-condition-button mt-2 w-full min-h-[40px] py-2 px-2 text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
         ${conditionActive 
           ? 'bg-red-700 border-red-800 text-white' 
           : 'bg-stone-200 border-stone-300 text-stone-600 hover:bg-stone-300'}`}
@@ -688,14 +688,14 @@ export function CharacterSheet() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f0e1] text-stone-800 p-0 md:p-6 font-sans overflow-x-hidden">
-      <div className="max-w-7xl mx-auto bg-[#fdfbf7] shadow-2xl border-x-0 md:border-2 border-[#d4c5a3] relative">
+    <div className="character-sheet-root min-h-screen bg-[#f5f0e1] text-stone-800 p-0 md:p-6 font-sans overflow-x-hidden">
+      <div className="character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] shadow-2xl border-x-0 md:border-2 border-[#d4c5a3] relative">
         
         {/* HEADER */}
-        <div className="bg-[#1a472a] text-[#e8d5b5] p-4 flex flex-col md:flex-row justify-between items-center border-b-4 border-[#d4c5a3] relative">
-          <div className="z-10 flex flex-col w-full md:w-auto text-center md:text-left">
-            <h1 className="text-4xl md:text-5xl font-serif font-black tracking-tighter uppercase drop-shadow-md">Dragonbane</h1>
-            <div className="flex flex-wrap justify-center md:justify-start gap-2 md:gap-4 mt-2 text-xs md:text-sm font-serif tracking-wide opacity-90">
+        <div className="character-sheet-header bg-[#1a472a] text-[#e8d5b5] p-4 flex flex-col md:flex-row justify-between items-center border-b-4 border-[#d4c5a3] relative">
+          <div className="character-sheet-brand z-10 flex flex-col w-full md:w-auto text-center md:text-left">
+            <h1 className="character-sheet-brand-title text-4xl md:text-5xl font-serif font-black tracking-tighter uppercase drop-shadow-md">Dragonbane</h1>
+            <div className="character-sheet-meta flex flex-wrap justify-center md:justify-start gap-2 md:gap-4 mt-2 text-xs md:text-sm font-serif tracking-wide opacity-90">
               <span className="bg-[#0f2e1b] px-2 py-0.5 rounded">{character.kin}</span>
               <span className="hidden md:inline">•</span>
               <span className="bg-[#0f2e1b] px-2 py-0.5 rounded">{character.profession}</span>
@@ -704,8 +704,8 @@ export function CharacterSheet() {
             </div>
           </div>
 
-          <div className="z-10 mt-4 md:mt-0 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
-            <div className="flex gap-2 min-w-max px-1">
+          <div className="character-sheet-actions z-10 mt-4 md:mt-0 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+            <div className="character-sheet-action-row flex gap-2 min-w-max px-1">
               {[
                 { label: 'Bio', icon: UserSquare, action: () => setShowBioModal(true) },
                 { label: 'Rest', icon: Bed, action: () => setShowRestOptionsModal(true) },
@@ -713,7 +713,7 @@ export function CharacterSheet() {
                 { label: 'Session', icon: Award, action: () => setShowAdvancementSystem(true) },
                 { label: 'Help', icon: HelpCircle, action: () => setShowPlayerAidModal(true) },
               ].map(btn => (
-                <button key={btn.label} onClick={btn.action} className="flex flex-col items-center justify-center w-14 h-12 md:w-16 md:h-14 min-h-[48px] bg-[#2c5e3f] hover:bg-[#3a7a52] active:bg-[#1a472a] rounded border border-[#4a8a62] text-[#e8d5b5] transition-colors shadow-sm touch-manipulation">
+                <button key={btn.label} onClick={btn.action} className="character-sheet-action-button flex flex-col items-center justify-center w-14 h-12 md:w-16 md:h-14 min-h-[48px] bg-[#2c5e3f] hover:bg-[#3a7a52] active:bg-[#1a472a] rounded border border-[#4a8a62] text-[#e8d5b5] transition-colors shadow-sm touch-manipulation">
                   <btn.icon size={18} />
                   <span className="text-[9px] md:text-[10px] uppercase font-bold mt-1">{btn.label}</span>
                 </button>
@@ -724,16 +724,16 @@ export function CharacterSheet() {
         </div>
 
         {/* MAIN PAPER AREA */}
-        <div className="p-3 md:p-8 space-y-6 md:space-y-8 bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]">
+        <div className="character-sheet-main p-3 md:p-8 space-y-6 md:space-y-8 bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]">
           
           {/* NAME & VITALS ROW */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 items-end">
-             <div className="md:col-span-5 border-b-2 border-stone-400 pb-2 text-center md:text-left">
+          <div className="character-sheet-name-vitals grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 items-end">
+             <div className="character-sheet-name-block md:col-span-5 border-b-2 border-stone-400 pb-2 text-center md:text-left">
                 <p className="block text-[10px] md:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Character Name</p>
                 <div className="text-3xl md:text-4xl font-serif font-bold text-[#1a472a] leading-none">{character.name}</div>
              </div>
              
-             <div className="md:col-span-7 flex flex-wrap gap-2 md:gap-4 justify-center md:justify-end">
+             <div className="character-sheet-vitals-strip md:col-span-7 flex flex-wrap gap-2 md:gap-4 justify-center md:justify-end">
                 <div className="bg-[#1a472a] text-white px-3 py-1 md:px-4 md:py-2 clip-path-banner shadow-md text-center min-w-[80px]">
                    <div className="text-[9px] md:text-[10px] uppercase font-bold opacity-80">Movement</div>
                    <div className="text-lg md:text-xl font-serif font-bold">{calculateMovement(character.kin, character.attributes?.AGL)} m</div>
@@ -754,10 +754,10 @@ export function CharacterSheet() {
           </div>
 
           {/* ATTRIBUTES ROW - UPDATED FOR MOBILE RESPONSIVENESS */}
-          <div className="relative py-4 md:py-6">
+          <div className="character-sheet-attributes relative py-4 md:py-6">
              <div className="hidden md:block absolute top-1/2 left-0 w-full h-2 bg-[#1a472a] opacity-20 -z-0 rounded-full"></div>
              {/* grid-cols-2 on mobile, grid-cols-6 on desktop */}
-             <div className="relative z-10 grid grid-cols-2 md:grid-cols-6 gap-y-8 gap-x-4 justify-items-center">
+             <div className="character-sheet-attributes-grid relative z-10 grid grid-cols-2 md:grid-cols-6 gap-y-8 gap-x-4 justify-items-center">
                 {[
                   ['STR', 'exhausted'], 
                   ['CON', 'sickly'], 
@@ -784,7 +784,7 @@ export function CharacterSheet() {
           </div>
 
           {/* TOP SECTION: 3 Columns */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
+          <div className="character-sheet-top-grid grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
             <div className="space-y-4 md:space-y-6">
                <PaperSection title="Vitals & Combat">
                   <div className="space-y-4 pt-2">
@@ -846,13 +846,13 @@ export function CharacterSheet() {
           </div>
 
           <div className="w-full">
-             <div className="bg-white border-2 border-stone-300 min-h-[500px] flex flex-col rounded-sm shadow-md">
-                <div className="flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto hide-scrollbar">
-                   <button onClick={() => setActiveTab('equipment')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
-                   <button onClick={() => setActiveTab('abilities')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
-                   <button onClick={() => setActiveTab('notes')} className={`flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
+             <div className="character-sheet-lower-panel bg-white border-2 border-stone-300 min-h-[500px] flex flex-col rounded-sm shadow-md">
+                <div className="character-sheet-tabs flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto hide-scrollbar">
+                   <button onClick={() => setActiveTab('equipment')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
+                   <button onClick={() => setActiveTab('abilities')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
+                   <button onClick={() => setActiveTab('notes')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
                 </div>
-                <div className="p-4 md:p-6 flex-1 bg-white/80">
+                <div className="character-sheet-tab-panel p-4 md:p-6 flex-1 bg-white/80">
                    {activeTab === 'equipment' && <EquipmentSection character={character} />}
                    {activeTab === 'abilities' && <HeroicAbilitiesView />}
                    {activeTab === 'notes' && <CharacterNotesSection character={character} />}
@@ -885,6 +885,159 @@ export function CharacterSheet() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #1a472a; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+          .character-sheet-root {
+            padding: 0;
+          }
+
+          .character-sheet-shell {
+            border-width: 0;
+            box-shadow: none;
+          }
+
+          .character-sheet-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.75rem;
+            align-items: center;
+            padding: 0.75rem;
+          }
+
+          .character-sheet-brand {
+            width: auto;
+            min-width: 0;
+            text-align: left;
+          }
+
+          .character-sheet-brand-title {
+            font-size: 2rem;
+            line-height: 1;
+          }
+
+          .character-sheet-meta {
+            justify-content: flex-start;
+            gap: 0.35rem 0.5rem;
+            margin-top: 0.5rem;
+            font-size: 0.7rem;
+          }
+
+          .character-sheet-actions {
+            width: auto;
+            margin-top: 0;
+            padding-bottom: 0;
+          }
+
+          .character-sheet-action-row {
+            gap: 0.35rem;
+          }
+
+          .character-sheet-action-button {
+            width: 3.35rem;
+            height: 3rem;
+            min-height: 3rem;
+          }
+
+          .character-sheet-action-button span {
+            font-size: 0.48rem;
+            margin-top: 0.2rem;
+          }
+
+          .character-sheet-main {
+            padding: 0.75rem;
+          }
+
+          .character-sheet-name-vitals {
+            grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+            gap: 0.75rem;
+            align-items: center;
+          }
+
+          .character-sheet-name-block,
+          .character-sheet-vitals-strip {
+            grid-column: auto;
+          }
+
+          .character-sheet-name-block {
+            text-align: left;
+          }
+
+          .character-sheet-vitals-strip {
+            justify-content: flex-end;
+          }
+
+          .character-sheet-attributes {
+            padding-top: 0.5rem;
+            padding-bottom: 0.75rem;
+          }
+
+          .character-sheet-attributes-grid {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 0.65rem;
+          }
+
+          .attribute-circle-shell {
+            max-width: 5rem;
+          }
+
+          .attribute-circle-button {
+            width: 3.25rem;
+            height: 3.25rem;
+            border-width: 3px;
+          }
+
+          .attribute-circle-value {
+            font-size: 1.35rem;
+            line-height: 1;
+          }
+
+          .attribute-circle-name {
+            top: -0.55rem;
+            font-size: 0.45rem;
+          }
+
+          .attribute-condition-button {
+            margin-top: 0.35rem;
+            min-height: 2rem;
+            padding: 0.35rem 0.25rem;
+            font-size: 0.42rem;
+            line-height: 1.15;
+          }
+
+          .character-sheet-top-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+          }
+
+          .paper-section {
+            padding: 0.85rem;
+          }
+
+          .paper-section-title {
+            top: -0.55rem;
+            font-size: 0.62rem;
+            padding-left: 0.9rem;
+            padding-right: 0.9rem;
+          }
+
+          .stat-tracker-shell {
+            padding: 0.45rem;
+          }
+
+          .character-sheet-lower-panel {
+            min-height: 22rem;
+          }
+
+          .character-sheet-tab-button {
+            min-width: 9rem;
+            padding: 0.8rem 1rem;
+            font-size: 0.8rem;
+          }
+
+          .character-sheet-tab-panel {
+            padding: 0.85rem;
+          }
+        }
       `}</style>
     </div>
   );

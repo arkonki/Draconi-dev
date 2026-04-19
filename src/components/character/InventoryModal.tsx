@@ -925,20 +925,20 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             {itemToDelete && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[90] backdrop-blur-sm"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center transform transition-all scale-100"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600"><Trash2 size={28} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Drop Item?</h3><p className="text-sm text-gray-500 mb-6">Are you sure you want to drop <strong>{itemToDelete.name}</strong>? {itemToDelete.quantity > 1 ? "1 unit will be removed." : "This cannot be undone."}</p><div className="grid grid-cols-2 gap-3"><Button variant="ghost" onClick={() => setItemToDelete(null)}>Cancel</Button><Button variant="danger" onClick={confirmDropItem}>Confirm</Button></div></div></div>
             )}
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-0 md:p-4 z-50">
-                <div className="bg-white md:rounded-2xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
-                    <div className="px-4 py-3 border-b flex items-center justify-between bg-white z-20">
-                        <div className="flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 rounded font-bold">HEAVY</span>}</div></div></div>
-                        <div className="flex items-center gap-2"><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button onClick={onClose} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
+            <div className="inventory-modal-root fixed inset-0 bg-black/50 flex items-center justify-center p-0 md:p-4 z-50">
+                <div className="inventory-modal-shell bg-white md:rounded-2xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
+                    <div className="inventory-modal-header px-4 py-3 border-b flex items-center justify-between bg-white z-20">
+                        <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 rounded font-bold">HEAVY</span>}</div></div></div>
+                        <div className="inventory-modal-toolbar flex items-center gap-2"><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button onClick={onClose} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
                     </div>
-                    <div className="px-4 py-2 bg-white border-b flex gap-2"><button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'inventory' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>My Gear</button><button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>Shop</button></div>
-                    <div className="flex-1 overflow-y-auto bg-gray-50/50 relative">
+                    <div className="inventory-modal-tabs px-4 py-2 bg-white border-b flex gap-2"><button onClick={() => setActiveTab('inventory')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'inventory' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>My Gear</button><button onClick={() => setActiveTab('shop')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>Shop</button></div>
+                    <div className="inventory-modal-body flex-1 overflow-y-auto bg-gray-50/50 relative">
                         {activeTab === 'inventory' && (
-                            <div className="pb-20">
+                            <div className="inventory-tab-body pb-20">
                                 {renderLoadout()}
 
                                 {/* STORAGE TABS */}
-                                <div className="px-4 pb-0 pt-2 bg-slate-50 border-b border-gray-200 overflow-x-auto flex gap-2 no-scrollbar">
+                                <div className="inventory-storage-tabs px-4 pb-0 pt-2 bg-slate-50 border-b border-gray-200 overflow-x-auto flex gap-2 no-scrollbar">
                                     <button
                                         onClick={() => setActiveInventoryTab('main')}
                                         className={`flex items-center gap-2 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-all ${activeInventoryTab === 'main' ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'}`}
@@ -998,8 +998,8 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                     })()}
                                 </div>
 
-                                <div className="p-4">
-                                    <div className="relative mb-4">
+                                <div className="inventory-pane p-4">
+                                    <div className="inventory-search relative mb-4">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                                         <input
                                             type="text"
@@ -1014,7 +1014,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                             </button>
                                         )}
                                     </div>
-                                    <div className="space-y-3">
+                                    <div className="inventory-list space-y-3">
                                         {(() => {
                                             const allItems = (character.equipment?.inventory || []).filter(item => item?.name && item.name.toLowerCase().includes(inventorySearch.toLowerCase()));
 
@@ -1088,10 +1088,10 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             </div>
                         )}
                         {activeTab === 'shop' && (
-                            <div className="p-4 min-h-full flex flex-col">
+                            <div className="shop-pane p-4 min-h-full flex flex-col">
 
                                 {/* Universal Shop Search Bar */}
-                                <div className="relative mb-6 flex-shrink-0">
+                                <div className="shop-search relative mb-6 flex-shrink-0">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                                     <input
                                         type="text"
@@ -1127,7 +1127,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                     <>
                                         {!selectedShopGroup ? (
                                             // Main Categories Grid
-                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                            <div className="shop-group-grid grid grid-cols-2 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
                                                 {shopGroups.map(g => (
                                                     <button
                                                         key={g.name}
@@ -1144,7 +1144,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                             <div className="flex flex-col h-full animate-in fade-in zoom-in-95 duration-200">
 
                                                 {/* Header & Back Button */}
-                                                <div className="flex items-center gap-3 mb-4">
+                                                <div className="shop-category-header flex items-center gap-3 mb-4">
                                                     <button onClick={() => setSelectedShopGroup(null)} className="p-2 bg-white border rounded-lg hover:bg-gray-50 text-gray-600">
                                                         <ArrowLeft size={18} />
                                                     </button>
@@ -1155,7 +1155,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                 </div>
 
                                                 {/* Sub-Category Filter Tabs */}
-                                                <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+                                                <div className="shop-subtabs flex items-center gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
                                                     <button
                                                         onClick={() => setActiveShopSubCategory(null)}
                                                         className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors border ${!activeShopSubCategory ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
@@ -1186,7 +1186,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                     </div>
                                                 </div>
 
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-20">
+                                                <div className="shop-item-grid grid grid-cols-1 sm:grid-cols-2 gap-3 pb-20">
                                                     {allGameItems
                                                         .filter(item => {
                                                             if (item.is_custom) return false;
@@ -1219,7 +1219,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
                     {/* --- FLOATING ACTION BUTTON --- */}
                     {activeTab === 'inventory' && (
-                        <div className="absolute bottom-6 right-6 z-50">
+                        <div className="inventory-floating-action absolute bottom-6 right-6 z-50">
                             <button onClick={() => setIsForageModalOpen(true)} className="flex items-center gap-2 bg-green-600 text-white px-5 py-3 rounded-full shadow-lg hover:bg-green-700 transition-transform hover:scale-105 active:scale-95 font-bold">
                                 <Utensils size={18} /> Forage
                             </button>
@@ -1227,6 +1227,156 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                     )}
                 </div>
             </div>
+            <style>{`
+              @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+                .inventory-modal-shell {
+                  border-radius: 0;
+                }
+
+                .inventory-modal-header {
+                  padding: 0.65rem 0.8rem;
+                }
+
+                .inventory-modal-heading {
+                  gap: 0.55rem;
+                }
+
+                .inventory-modal-heading h2 {
+                  font-size: 1rem;
+                }
+
+                .inventory-modal-heading .text-xs {
+                  font-size: 0.65rem;
+                }
+
+                .inventory-modal-toolbar {
+                  gap: 0.35rem;
+                }
+
+                .inventory-modal-toolbar button {
+                  padding-top: 0.45rem;
+                  padding-bottom: 0.45rem;
+                }
+
+                .inventory-modal-tabs {
+                  padding: 0.45rem 0.8rem;
+                }
+
+                .inventory-main-tab {
+                  padding-top: 0.45rem;
+                  padding-bottom: 0.45rem;
+                  font-size: 0.75rem;
+                }
+
+                .inventory-tab-body {
+                  padding-bottom: 4rem;
+                }
+
+                .inventory-pane,
+                .shop-pane {
+                  padding: 0.8rem;
+                }
+
+                .inventory-search,
+                .shop-search {
+                  margin-bottom: 0.75rem;
+                }
+
+                .inventory-search input,
+                .shop-search input {
+                  padding-top: 0.6rem;
+                  padding-bottom: 0.6rem;
+                  font-size: 0.78rem;
+                }
+
+                .inventory-storage-tabs {
+                  padding-left: 0.8rem;
+                  padding-right: 0.8rem;
+                  padding-top: 0.45rem;
+                }
+
+                .inventory-storage-tabs button,
+                .inventory-storage-tabs div[role="button"] {
+                  padding-left: 0.6rem;
+                  padding-right: 1.6rem;
+                  padding-top: 0.45rem;
+                  padding-bottom: 0.45rem;
+                  font-size: 0.68rem;
+                }
+
+                .inventory-list,
+                .shop-item-grid {
+                  gap: 0.55rem;
+                }
+
+                .shop-group-grid {
+                  gap: 0.7rem;
+                }
+
+                .shop-group-grid button {
+                  padding: 1rem 0.75rem;
+                }
+
+                .shop-category-header {
+                  margin-bottom: 0.75rem;
+                }
+
+                .shop-subtabs {
+                  margin-bottom: 0.7rem;
+                }
+
+                .inventory-floating-action {
+                  right: 0.9rem;
+                  bottom: 0.9rem;
+                }
+
+                .inventory-floating-action button {
+                  padding: 0.7rem 1rem;
+                  font-size: 0.78rem;
+                }
+
+                .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 {
+                  gap: 0.45rem;
+                  margin-bottom: 0.45rem;
+                }
+
+                .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 > div {
+                  padding: 0.45rem;
+                }
+
+                .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 .text-xs,
+                .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 .text-\\[10px\\] {
+                  font-size: 0.55rem;
+                }
+
+                .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 .text-sm {
+                  font-size: 0.7rem;
+                  line-height: 0.95rem;
+                }
+
+                .inventory-modal-body .p-3.border.border-gray-200.rounded-xl {
+                  padding: 0.65rem;
+                  gap: 0.55rem;
+                }
+
+                .inventory-modal-body .p-3.border.border-gray-200.rounded-xl .text-sm {
+                  font-size: 0.78rem;
+                  line-height: 1rem;
+                }
+
+                .inventory-modal-body .p-3.border.border-gray-200.rounded-xl .h-8 {
+                  height: 1.8rem;
+                }
+
+                .inventory-modal-body .p-3.border.border-gray-200.rounded-xl .text-xs {
+                  font-size: 0.68rem;
+                }
+
+                .inventory-modal-body .p-3.border.border-gray-200.rounded-xl .text-\\[10px\\] {
+                  font-size: 0.52rem;
+                }
+              }
+            `}</style>
         </>
     );
 }

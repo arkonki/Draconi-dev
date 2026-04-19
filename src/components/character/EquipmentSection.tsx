@@ -245,7 +245,7 @@ export function EquipmentSection({ character }: { character: Character }) {
     }
   };
 
-  const getTooltipLayout = (triggerEl: HTMLElement | null) => {
+const getTooltipLayout = (triggerEl: HTMLElement | null) => {
     if (!triggerEl || !triggerEl.isConnected) {
       return null;
     }
@@ -255,9 +255,13 @@ export function EquipmentSection({ character }: { character: Character }) {
     const margin = 12;
     const centerX = rect.left + rect.width / 2;
     const left = Math.min(Math.max(centerX, margin + width / 2), window.innerWidth - margin - width / 2);
-    const estimatedHeight = 120;
+    const estimatedHeight = 288;
     const showAbove = window.innerHeight - rect.bottom < estimatedHeight && rect.top > estimatedHeight;
-    return { left, placement: showAbove ? 'top' as const : 'bottom' as const, top: showAbove ? rect.top - 8 : rect.bottom + 8 };
+    const placement = showAbove ? 'top' as const : 'bottom' as const;
+    const top = placement === 'top'
+      ? Math.max(margin + estimatedHeight, rect.top - 8)
+      : Math.min(window.innerHeight - margin - estimatedHeight, rect.bottom + 8);
+    return { left, placement, top };
   };
 
   const showDescriptionTooltip = (triggerEl: HTMLElement, tooltipKey: string, description: string) => {
@@ -348,6 +352,13 @@ export function EquipmentSection({ character }: { character: Character }) {
     toggleDiceRoller({ rollMode: 'attackDamage', initialDice: dicePool, description: `Damage: ${weaponName} (${formulaParts.join(' + ')})` });
   };
 
+  const queueDamageRoll = (weaponName: string, damageDiceString: string) => {
+    toggleDiceRoller();
+    setTimeout(() => {
+      handleDamageRoll(weaponName, damageDiceString);
+    }, 120);
+  };
+
   const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean, damageDiceString?: string) => {
     toggleDiceRoller({
       initialDice: ['d20'],
@@ -356,16 +367,20 @@ export function EquipmentSection({ character }: { character: Character }) {
       description: `Attack: ${weaponName} (${skillName})`,
       requiresBane: isAffected,
       skillName,
+      postRollAction: damageDiceString
+        ? {
+            when: 'success',
+            title: `Attack hit with ${weaponName}`,
+            message: `The attack connected. Roll the weapon's damage when you're ready.`,
+            actionLabel: 'Roll Damage',
+            dismissLabel: 'Done',
+            onAction: () => queueDamageRoll(weaponName, damageDiceString),
+          }
+        : undefined,
       onRollComplete: (resultEntry: RollCompletionData) => {
         const rollValue = resultEntry.results?.[0]?.value;
         const wasSuccessful = resultEntry.isSuccess === true;
-        void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful ? ' Damage roll follows.' : ''}`);
-        toggleDiceRoller();
-        if (wasSuccessful && damageDiceString) {
-          setTimeout(() => {
-            handleDamageRoll(weaponName, damageDiceString);
-          }, 120);
-        }
+        void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful && damageDiceString ? ' Damage roll is ready.' : ''}`);
       }
     });
   };
@@ -630,7 +645,7 @@ export function EquipmentSection({ character }: { character: Character }) {
         <div
           data-item-description-tooltip="true"
           style={{ top: `${activeDescriptionTooltip.top}px`, left: `${activeDescriptionTooltip.left}px` }}
-          className={`fixed z-[220] w-64 max-w-[calc(100vw-2rem)] rounded-md border border-stone-300 bg-[#fdfbf7] p-2 text-xs text-stone-700 shadow-2xl -translate-x-1/2 ${
+          className={`fixed z-[220] w-64 max-w-[calc(100vw-2rem)] max-h-[min(18rem,calc(100vh-1.5rem))] overflow-y-auto rounded-md border border-stone-300 bg-[#fdfbf7] p-2 text-xs text-stone-700 shadow-2xl -translate-x-1/2 ${
             activeDescriptionTooltip.placement === 'top' ? '-translate-y-full' : ''
           }`}
         >

@@ -68,27 +68,27 @@ const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onCl
         onClick={onClose}
         aria-label="Close spell details"
       />
-      <div className="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
+      <div className="spell-detail-pane absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
         
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b bg-stone-50 flex justify-between items-start">
-            <div>
+        <div className="spell-detail-pane-header p-4 sm:p-6 border-b bg-stone-50 flex justify-between items-start">
+            <div className="spell-detail-pane-heading">
                 <div className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">Spell Details</div>
                 <h3 className="text-2xl font-serif font-bold text-stone-900 leading-none">{spell.name}</h3>
             </div>
-            <button onClick={onClose} className="text-stone-400 hover:text-stone-600 transition-colors p-2 -m-2 rounded-full touch-manipulation"><X size={24} /></button>
+            <button onClick={onClose} className="spell-detail-pane-close text-stone-400 hover:text-stone-600 transition-colors p-2 -m-2 rounded-full touch-manipulation"><X size={24} /></button>
         </div>
 
         {/* Content */}
-        <div className="flex-grow overflow-y-auto p-6 space-y-6 bg-white">
+        <div className="spell-detail-pane-body flex-grow overflow-y-auto p-6 space-y-6 bg-white">
             
             {/* Description Box */}
-            <div className="prose prose-stone prose-sm max-w-none text-stone-600 leading-relaxed italic border-l-4 border-stone-300 pl-4">
+            <div className="spell-detail-pane-description prose prose-stone prose-sm max-w-none text-stone-600 leading-relaxed italic border-l-4 border-stone-300 pl-4">
                 {spell.description}
             </div>
 
             {/* Properties Grid */}
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="spell-detail-pane-properties grid grid-cols-2 gap-4 text-sm">
                 <div className="p-3 bg-stone-50 rounded border border-stone-100">
                     <span className="block text-xs font-bold text-stone-400 uppercase">Rank</span>
                     <span className="font-medium text-stone-800">{spell.rank === 0 ? 'Trick' : `Rank ${spell.rank}`}</span>
@@ -462,24 +462,24 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     const handleLevelChange = (delta: number) => setLevel(c => Math.max(1, Math.min(3, c + delta)));
 
     return (
-      <div className="flex flex-col sm:flex-row sm:items-center p-3 sm:p-4 border-b border-stone-100 hover:bg-stone-50 transition-colors group">
+      <div className="spell-row flex flex-col sm:flex-row sm:items-center p-3 sm:p-4 border-b border-stone-100 hover:bg-stone-50 transition-colors group">
         {/* Icon / Rank */}
-        <div className="mr-4 hidden sm:flex flex-col items-center justify-center w-12 h-12 bg-stone-100 rounded-lg text-stone-500">
+        <div className="spell-row-rank mr-4 hidden sm:flex flex-col items-center justify-center w-12 h-12 bg-stone-100 rounded-lg text-stone-500">
            {isTrick ? <Sparkles size={20} /> : <span className="font-serif font-bold text-lg">{spell.rank}</span>}
         </div>
 
         {/* Main Info */}
         <button
           type="button"
-          className="flex-grow min-w-0 cursor-pointer text-left bg-transparent rounded-md touch-manipulation min-h-[44px]"
+          className="spell-row-main flex-grow min-w-0 cursor-pointer text-left bg-transparent rounded-md touch-manipulation min-h-[44px]"
           onClick={() => setInfoPaneSpell(spell)}
         >
-          <div className="flex items-center gap-2 mb-1">
+          <div className="spell-row-title flex items-center gap-2 mb-1">
              <h3 className="font-bold text-stone-800 group-hover:text-indigo-700 transition-colors truncate">{spell.name}</h3>
              {isReactionSpell && <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 rounded">Reaction</span>}
           </div>
           
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+          <div className="spell-row-meta flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
             <div className="flex items-center gap-1" title="Casting Time"><Clock size={12}/> {spell.castingTime}</div>
             <div className="flex items-center gap-1" title="Range"><Target size={12}/> {spell.range}</div>
             <div className="flex items-center gap-1 font-medium text-indigo-600"><Zap size={12}/> {actualWpCost} WP</div>
@@ -493,7 +493,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
         </button>
 
         {/* Actions */}
-        <div className="mt-3 sm:mt-0 flex items-center gap-3 sm:border-l sm:border-stone-200 sm:pl-4 w-full sm:w-auto justify-between sm:justify-start">
+        <div className="spell-row-actions mt-3 sm:mt-0 flex items-center gap-3 sm:border-l sm:border-stone-200 sm:pl-4 w-full sm:w-auto justify-between sm:justify-start">
             {activeTab === 'grimoire' && (
                <button 
                   onClick={(e) => { e.stopPropagation(); handleTogglePrepare(spell.id, isPrepared); }} 
@@ -506,7 +506,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             )}
             
             {/* Cast Button Group */}
-            <div className="flex items-center bg-stone-100 rounded-lg p-0.5 shadow-inner">
+            <div className="spell-row-cast-controls flex items-center bg-stone-100 rounded-lg p-0.5 shadow-inner">
                {isPowerLevelSpell && (
                    <button disabled={level<=1} onClick={(e)=>{e.stopPropagation(); handleLevelChange(-1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Minus size={16}/></button>
                )}
@@ -542,7 +542,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   if (spellsLoading) return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"><LoadingSpinner size="lg" /></div>;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-0 sm:p-6">
+    <div className="spellcasting-modal-root fixed inset-0 z-40 flex items-center justify-center p-0 sm:p-6">
       <button
         type="button"
         className="fixed inset-0 bg-black/60 backdrop-blur-sm"
@@ -550,15 +550,15 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
         aria-label="Close spellbook"
       />
       
-      <div className="relative bg-white w-full max-w-4xl h-[100dvh] sm:h-[85vh] rounded-none sm:rounded-xl shadow-2xl flex flex-col overflow-hidden border-0 sm:border border-stone-200 animate-in zoom-in-95 duration-200">
+      <div className="spellcasting-modal-shell relative bg-white w-full max-w-4xl h-[100dvh] sm:h-[85vh] rounded-none sm:rounded-xl shadow-2xl flex flex-col overflow-hidden border-0 sm:border border-stone-200 animate-in zoom-in-95 duration-200">
          
          {/* Header */}
-         <div className="p-4 sm:p-6 border-b border-stone-200 bg-stone-50 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-            <div className="min-w-0">
+         <div className="spellcasting-modal-header p-4 sm:p-6 border-b border-stone-200 bg-stone-50 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+            <div className="spellcasting-modal-heading min-w-0">
                <h2 className="text-2xl font-serif font-bold text-stone-900 flex items-center gap-2">
                   <Sparkles className="text-purple-600"/> Spellbook
                </h2>
-               <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-2 text-sm text-stone-600">
+               <div className="spellcasting-modal-stats flex flex-wrap items-center gap-2 sm:gap-4 mt-2 text-sm text-stone-600">
                   <div className="flex items-center gap-1 bg-white px-2 py-1.5 min-h-[40px] rounded border border-stone-200 shadow-sm">
                      <Zap size={14} className="text-indigo-500"/>
                      <span className="font-bold">{character.current_wp ?? character.attributes.WIL}</span>
@@ -578,26 +578,26 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                   )}
                </div>
             </div>
-            <button onClick={onClose} className="p-3 hover:bg-stone-200 rounded-full text-stone-400 transition-colors touch-manipulation self-end sm:self-auto"><X/></button>
+            <button onClick={onClose} className="spellcasting-modal-close p-3 hover:bg-stone-200 rounded-full text-stone-400 transition-colors touch-manipulation self-end sm:self-auto"><X/></button>
          </div>
 
          {/* Alerts */}
 	         {(castError || prepError) && (
-	            <div className={`px-4 sm:px-6 py-2 text-xs font-bold text-center ${castError ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+            <div className={`spellcasting-modal-alert px-4 sm:px-6 py-2 text-xs font-bold text-center ${castError ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
 	               {castError || prepError}
 	            </div>
 	         )}
 	         {nextCastHasBane && !pendingDragonCast && (
-	            <div className="px-4 sm:px-6 py-2 text-xs font-bold text-center bg-violet-100 text-violet-800">
+            <div className="spellcasting-modal-alert px-4 sm:px-6 py-2 text-xs font-bold text-center bg-violet-100 text-violet-800">
 	               Dragon effect active: your next spellcasting check will roll with bane.
 	            </div>
 	         )}
 	         {pendingDragonCast && (
-	            <div className="px-4 sm:px-6 py-3 bg-emerald-50 border-b border-emerald-200">
-	               <p className="text-xs sm:text-sm font-bold text-emerald-800 mb-2">
+            <div className="spellcasting-modal-alert px-4 sm:px-6 py-3 bg-emerald-50 border-b border-emerald-200">
+	               <p className="spellcasting-modal-dragon-copy text-xs sm:text-sm font-bold text-emerald-800 mb-2">
 	                  Dragon on {pendingDragonCast.spell.name}: choose how to resolve the cast.
 	               </p>
-	               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+	               <div className="spellcasting-modal-dragon-actions grid grid-cols-1 sm:grid-cols-3 gap-2">
 	                  <button
 	                     type="button"
 	                     onClick={() => handleResolveDragonChoice('double')}
@@ -624,8 +624,8 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 	         )}
 
          {/* Tabs & Filters */}
-         <div className="bg-white px-4 sm:px-6 py-2 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex gap-1 bg-stone-100 p-1 rounded-lg overflow-x-auto no-scrollbar">
+         <div className="spellcasting-modal-controls bg-white px-4 sm:px-6 py-2 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="spellcasting-modal-tabs flex gap-1 bg-stone-100 p-1 rounded-lg overflow-x-auto no-scrollbar">
                <button onClick={() => setActiveTab('prepared')} className={`px-4 py-2 min-h-[40px] text-sm font-bold rounded-md transition-all whitespace-nowrap touch-manipulation ${activeTab === 'prepared' ? 'bg-white text-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>
                   Prepared ({preparedSpellsList.length})
                </button>
@@ -635,7 +635,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             </div>
             
             {availableRanks.length > 0 && (
-               <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto pb-1 sm:pb-0">
+               <div className="spellcasting-modal-filters flex items-center gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto pb-1 sm:pb-0">
                   <Filter size={14} className="text-stone-400"/>
                   <button onClick={() => setSelectedRankFilter('all')} className={`text-xs px-3 py-2 min-h-[36px] rounded border whitespace-nowrap touch-manipulation ${selectedRankFilter === 'all' ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'}`}>All</button>
                   {availableRanks.map(r => (
@@ -648,7 +648,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          </div>
 
          {/* Spell List */}
-         <div className="flex-grow overflow-y-auto bg-stone-50/30">
+         <div className="spellcasting-modal-list flex-grow overflow-y-auto bg-stone-50/30">
             {spellsToDisplay.length > 0 ? (
                <div className="divide-y divide-stone-100">
                   {spellsToDisplay.map(spell => <SpellRow key={spell.id} spell={spell} />)}
@@ -662,13 +662,208 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          </div>
 
          {/* Footer */}
-         <div className="p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
+         <div className="spellcasting-modal-footer p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
             Prep Limit: {preparedRankedSpellCount} / {preparationLimit} • Tricks don't count against limit
          </div>
       </div>
 
       {/* Detail Panel Overlay */}
       <SpellDetailPane spell={infoPaneSpell} onClose={() => setInfoPaneSpell(null)} />
+      <style>{`
+        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+          .spellcasting-modal-shell {
+            max-width: 100vw;
+            height: 100vh;
+            border-radius: 0;
+            border-width: 0;
+          }
+
+          .spellcasting-modal-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: start;
+            gap: 0.65rem;
+            padding: 0.75rem 0.9rem;
+          }
+
+          .spellcasting-modal-heading h2 {
+            font-size: 1.05rem;
+            line-height: 1.1;
+          }
+
+          .spellcasting-modal-stats {
+            gap: 0.45rem 0.55rem;
+            margin-top: 0.45rem;
+            font-size: 0.72rem;
+          }
+
+          .spellcasting-modal-stats > * {
+            min-height: 2rem;
+            padding: 0.35rem 0.55rem;
+          }
+
+          .spellcasting-modal-close {
+            padding: 0.45rem;
+          }
+
+          .spellcasting-modal-alert {
+            padding-left: 0.9rem;
+            padding-right: 0.9rem;
+            font-size: 0.68rem;
+            line-height: 1.25;
+          }
+
+          .spellcasting-modal-dragon-copy {
+            margin-bottom: 0.45rem;
+            font-size: 0.72rem;
+          }
+
+          .spellcasting-modal-dragon-actions {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .spellcasting-modal-dragon-actions button {
+            min-height: 2.1rem;
+            padding: 0.45rem 0.5rem;
+            font-size: 0.62rem;
+            line-height: 1.15;
+          }
+
+          .spellcasting-modal-controls {
+            padding: 0.55rem 0.9rem;
+            gap: 0.55rem;
+          }
+
+          .spellcasting-modal-tabs button {
+            min-height: 2rem;
+            padding: 0.45rem 0.75rem;
+            font-size: 0.74rem;
+          }
+
+          .spellcasting-modal-filters {
+            gap: 0.35rem;
+            padding-bottom: 0;
+          }
+
+          .spellcasting-modal-filters svg {
+            width: 0.8rem;
+            height: 0.8rem;
+          }
+
+          .spellcasting-modal-filters button {
+            min-height: 1.9rem;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.64rem;
+          }
+
+          .spell-row {
+            padding: 0.65rem 0.9rem;
+          }
+
+          .spell-row-rank {
+            width: 2.25rem;
+            height: 2.25rem;
+            margin-right: 0.65rem;
+          }
+
+          .spell-row-rank svg {
+            width: 1rem;
+            height: 1rem;
+          }
+
+          .spell-row-rank span {
+            font-size: 0.9rem;
+          }
+
+          .spell-row-title {
+            margin-bottom: 0.2rem;
+            gap: 0.35rem;
+          }
+
+          .spell-row-title h3 {
+            font-size: 0.82rem;
+            line-height: 1.15;
+          }
+
+          .spell-row-meta {
+            gap: 0.2rem 0.6rem;
+            font-size: 0.67rem;
+            line-height: 1.1;
+          }
+
+          .spell-row-meta svg {
+            width: 0.7rem;
+            height: 0.7rem;
+          }
+
+          .spell-row-actions {
+            margin-top: 0.55rem;
+            gap: 0.55rem;
+          }
+
+          .spell-row-actions > button {
+            min-width: 2.25rem;
+            min-height: 2.25rem;
+            padding: 0.45rem;
+          }
+
+          .spell-row-cast-controls {
+            padding: 0.1rem;
+          }
+
+          .spell-row-cast-controls > button {
+            min-height: 2.15rem;
+          }
+
+          .spell-row-cast-controls > button:not([class*="px-"]) {
+            padding: 0.4rem;
+          }
+
+          .spell-row-cast-controls .min-w-\\[84px\\] {
+            min-width: 4.25rem;
+            padding: 0.45rem 0.7rem;
+            font-size: 0.65rem;
+          }
+
+          .spellcasting-modal-footer {
+            padding: 0.45rem 0.9rem;
+            font-size: 0.64rem;
+            line-height: 1.2;
+          }
+
+          .spell-detail-pane {
+            max-width: min(24rem, 60vw);
+          }
+
+          .spell-detail-pane-header {
+            padding: 0.8rem 0.95rem;
+          }
+
+          .spell-detail-pane-heading h3 {
+            font-size: 1.05rem;
+          }
+
+          .spell-detail-pane-body {
+            padding: 0.95rem;
+            gap: 0.9rem;
+          }
+
+          .spell-detail-pane-description {
+            font-size: 0.74rem;
+            line-height: 1.35;
+          }
+
+          .spell-detail-pane-properties {
+            gap: 0.55rem;
+            font-size: 0.72rem;
+          }
+
+          .spell-detail-pane-properties > div,
+          .spell-detail-pane-body .rounded-lg {
+            padding: 0.7rem;
+          }
+        }
+      `}</style>
     </div>
   );
 }
