@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
-import { AlertTriangle, Heart, Minus, Monitor, RotateCcw, Search, Plus, Shield, Skull, Zap } from 'lucide-react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, Heart, Maximize, Minimize, Minus, Monitor, RotateCcw, Search, Plus, Shield, Skull, Zap } from 'lucide-react';
 import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
@@ -90,7 +90,36 @@ function GridOverlay({
   );
 }
 
-function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
+type WakeLockSentinelLike = EventTarget & {
+  released: boolean;
+  release: () => Promise<void>;
+};
+
+type WakeLockNavigator = Navigator & {
+  wakeLock?: {
+    request: (type?: 'screen') => Promise<WakeLockSentinelLike>;
+  };
+};
+
+type FullscreenCapableElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+  msRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenCapableDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  msFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+  msExitFullscreen?: () => Promise<void> | void;
+};
+
+function SlotCard({
+  slot,
+  kioskMode,
+}: {
+  slot: PlayerDisplayState['slots'][number];
+  kioskMode: boolean;
+}) {
   const character = slot.character;
   const activeConditions = character
     ? Object.entries(character.conditions || {}).filter(([, active]) => active)
@@ -99,7 +128,9 @@ function SlotCard({ slot }: { slot: PlayerDisplayState['slots'][number] }) {
 
   return (
     <div
-      className={`w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border bg-black/70 text-white shadow-2xl backdrop-blur-md overflow-hidden ${
+      className={`w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border text-white shadow-2xl overflow-hidden ${
+        kioskMode ? 'bg-black/85' : 'bg-black/70 backdrop-blur-md'
+      } ${
         isDying ? 'border-red-400/60 ring-2 ring-red-500/40' : 'border-white/20'
       }`}
       style={{ transform: `rotate(${slot.rotationDeg}deg)` }}
@@ -184,18 +215,80 @@ const CORNER_CLASSES: Record<DisplayCorner, string> = {
 const MIN_IMAGE_SCALE = 1;
 const MAX_IMAGE_SCALE = 3;
 const IMAGE_SCALE_STEP = 0.2;
+const CONTROL_HIDE_DELAY_MS = 2600;
 
 function clampScale(value: number) {
   return Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, value));
 }
 
+function getFullscreenElement() {
+  const fullscreenDocument = document as FullscreenCapableDocument;
+  return document.fullscreenElement
+    || fullscreenDocument.webkitFullscreenElement
+    || fullscreenDocument.msFullscreenElement
+    || null;
+}
+
+async function requestFullscreenCompat(element: HTMLElement | null) {
+  const target = (element || document.documentElement) as FullscreenCapableElement;
+
+  if (target.requestFullscreen) {
+    await target.requestFullscreen();
+    return;
+  }
+
+  if (target.webkitRequestFullscreen) {
+    await target.webkitRequestFullscreen();
+    return;
+  }
+
+  if (target.msRequestFullscreen) {
+    await target.msRequestFullscreen();
+    return;
+  }
+
+  throw new Error('Fullscreen is not supported in this browser.');
+}
+
+async function exitFullscreenCompat() {
+  const fullscreenDocument = document as FullscreenCapableDocument;
+
+  if (document.exitFullscreen) {
+    await document.exitFullscreen();
+    return;
+  }
+
+  if (fullscreenDocument.webkitExitFullscreen) {
+    await fullscreenDocument.webkitExitFullscreen();
+    return;
+  }
+
+  if (fullscreenDocument.msExitFullscreen) {
+    await fullscreenDocument.msExitFullscreen();
+    return;
+  }
+
+  throw new Error('Fullscreen exit is not supported in this browser.');
+}
+
 export function ProjectorDisplayPage() {
   const { sessionToken } = useParams<{ sessionToken: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rootRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const dragStateRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const controlsHideTimeoutRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [imageTransform, setImageTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [now, setNow] = useState(() => Date.now());
+  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(getFullscreenElement()));
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [wakeLockState, setWakeLockState] = useState<'idle' | 'active' | 'unsupported' | 'error'>('idle');
+  const [wakeLockError, setWakeLockError] = useState<string | null>(null);
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+  const isKiosk = searchParams.get('kiosk') === '1';
+  const shouldKeepAwake = isKiosk || isFullscreen;
 
   const { data, error, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['player-display', sessionToken],
@@ -216,12 +309,54 @@ export function ProjectorDisplayPage() {
     });
   };
 
+  const clearControlsHideTimer = useCallback(() => {
+    if (controlsHideTimeoutRef.current !== null) {
+      window.clearTimeout(controlsHideTimeoutRef.current);
+      controlsHideTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleControlsHide = useCallback((delay = CONTROL_HIDE_DELAY_MS) => {
+    clearControlsHideTimer();
+
+    if (!isKiosk) {
+      setControlsVisible(true);
+      return;
+    }
+
+    controlsHideTimeoutRef.current = window.setTimeout(() => {
+      setControlsVisible(false);
+    }, delay);
+  }, [clearControlsHideTimer, isKiosk]);
+
+  const revealControls = useCallback((delay = CONTROL_HIDE_DELAY_MS) => {
+    setControlsVisible(true);
+    scheduleControlsHide(delay);
+  }, [scheduleControlsHide]);
+
   useEffect(() => {
     window.addEventListener('resize', measureImage);
     return () => {
       window.removeEventListener('resize', measureImage);
     };
   }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(getFullscreenElement()));
+      setFullscreenError(null);
+      revealControls(4000);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange as EventListener);
+    document.addEventListener('msfullscreenchange', handleFullscreenChange as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange as EventListener);
+      document.removeEventListener('msfullscreenchange', handleFullscreenChange as EventListener);
+    };
+  }, [revealControls]);
 
   useEffect(() => {
     measureImage();
@@ -241,9 +376,169 @@ export function ProjectorDisplayPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isKiosk) {
+      clearControlsHideTimer();
+      setControlsVisible(true);
+      return;
+    }
+
+    revealControls(4000);
+    return clearControlsHideTimer;
+  }, [clearControlsHideTimer, isKiosk, revealControls]);
+
+  useEffect(() => {
+    if (!isKiosk) {
+      return;
+    }
+
+    const handleActivity = () => revealControls();
+    const handleKeyDown = () => revealControls(4000);
+
+    window.addEventListener('pointermove', handleActivity, { passive: true });
+    window.addEventListener('touchstart', handleActivity, { passive: true });
+    window.addEventListener('wheel', handleActivity, { passive: true });
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointermove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('wheel', handleActivity);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isKiosk, revealControls]);
+
   const connectionLost = !!data && now - dataUpdatedAt > 5000;
   const displayImageUrl = data?.displayImageUrl || data?.map?.imageUrl || null;
   const displayMap = data?.map ?? null;
+  const showControlOverlay = controlsVisible || !isKiosk || wakeLockState === 'error' || !isFullscreen;
+
+  const releaseWakeLock = useCallback(async () => {
+    const sentinel = wakeLockRef.current;
+    wakeLockRef.current = null;
+
+    if (sentinel) {
+      try {
+        await sentinel.release();
+      } catch {
+        // Ignore release failures; the browser may have already dropped the lock.
+      }
+    }
+
+    setWakeLockState((current) => (current === 'unsupported' ? current : 'idle'));
+  }, []);
+
+  const requestWakeLock = useCallback(async () => {
+    const wakeLockNavigator = navigator as WakeLockNavigator;
+
+    if (!shouldKeepAwake) {
+      return;
+    }
+
+    if (!wakeLockNavigator.wakeLock) {
+      setWakeLockState('unsupported');
+      setWakeLockError(null);
+      return;
+    }
+
+    if (document.visibilityState !== 'visible') {
+      return;
+    }
+
+    if (wakeLockRef.current && !wakeLockRef.current.released) {
+      setWakeLockState('active');
+      return;
+    }
+
+    try {
+      const sentinel = await wakeLockNavigator.wakeLock.request('screen');
+      wakeLockRef.current = sentinel;
+      setWakeLockState('active');
+      setWakeLockError(null);
+
+      sentinel.addEventListener('release', () => {
+        if (wakeLockRef.current === sentinel) {
+          wakeLockRef.current = null;
+        }
+        setWakeLockState((current) => (current === 'unsupported' ? current : 'idle'));
+      }, { once: true });
+    } catch (wakeLockError) {
+      setWakeLockState('error');
+      setWakeLockError(wakeLockError instanceof Error ? wakeLockError.message : 'Unable to keep the projector awake.');
+    }
+  }, [shouldKeepAwake]);
+
+  useEffect(() => {
+    if (!shouldKeepAwake) {
+      void releaseWakeLock();
+      return;
+    }
+
+    void requestWakeLock();
+    return () => {
+      void releaseWakeLock();
+    };
+  }, [releaseWakeLock, requestWakeLock, shouldKeepAwake]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (shouldKeepAwake) {
+          void requestWakeLock();
+        }
+        if (isKiosk) {
+          revealControls(4000);
+        }
+        return;
+      }
+
+      if (wakeLockRef.current) {
+        wakeLockRef.current = null;
+      }
+
+      setWakeLockState((current) => (current === 'unsupported' ? current : 'idle'));
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isKiosk, requestWakeLock, revealControls, shouldKeepAwake]);
+
+  const updateKioskMode = (enabled: boolean) => {
+    setSearchParams((currentParams) => {
+      const nextParams = new URLSearchParams(currentParams);
+
+      if (enabled) {
+        nextParams.set('kiosk', '1');
+      } else {
+        nextParams.delete('kiosk');
+      }
+
+      return nextParams;
+    }, { replace: true });
+  };
+
+  const toggleKioskMode = () => {
+    const nextKioskMode = !isKiosk;
+    updateKioskMode(nextKioskMode);
+    setControlsVisible(true);
+  };
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!getFullscreenElement()) {
+        await requestFullscreenCompat(rootRef.current);
+      } else {
+        await exitFullscreenCompat();
+      }
+    } catch (fullscreenError) {
+      console.error('Failed to toggle fullscreen', fullscreenError);
+      setFullscreenError(fullscreenError instanceof Error ? fullscreenError.message : 'Fullscreen request failed.');
+    } finally {
+      revealControls(4000);
+    }
+  };
 
   const updateScale = (nextScale: number) => {
     setImageTransform((current) => ({
@@ -256,9 +551,12 @@ export function ProjectorDisplayPage() {
     event.preventDefault();
     const direction = event.deltaY > 0 ? -1 : 1;
     updateScale(imageTransform.scale + direction * IMAGE_SCALE_STEP);
+    revealControls();
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    revealControls();
+
     if (!displayImageUrl) {
       return;
     }
@@ -275,6 +573,8 @@ export function ProjectorDisplayPage() {
     if (!dragStateRef.current || dragStateRef.current.pointerId !== event.pointerId) {
       return;
     }
+
+    revealControls();
 
     const deltaX = event.clientX - dragStateRef.current.x;
     const deltaY = event.clientY - dragStateRef.current.y;
@@ -299,6 +599,7 @@ export function ProjectorDisplayPage() {
 
     dragStateRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
+    revealControls();
   };
 
   if (!sessionToken) {
@@ -335,8 +636,10 @@ export function ProjectorDisplayPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-stone-950 text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.2),_transparent_40%),radial-gradient(circle_at_bottom,_rgba(245,158,11,0.12),_transparent_40%)]" />
+    <div ref={rootRef} className="relative min-h-screen overflow-hidden bg-stone-950 text-white">
+      {!isKiosk ? (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.2),_transparent_40%),radial-gradient(circle_at_bottom,_rgba(245,158,11,0.12),_transparent_40%)]" />
+      ) : null}
 
       {displayImageUrl ? (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
@@ -392,46 +695,134 @@ export function ProjectorDisplayPage() {
       {data.slots.map((slot) => (
         slot.character ? (
           <div key={slot.corner} className={`absolute ${CORNER_CLASSES[slot.corner]} z-20 flex`}>
-            <SlotCard slot={slot} />
+            <SlotCard slot={slot} kioskMode={isKiosk} />
           </div>
         ) : null
       ))}
 
-      {displayImageUrl ? (
-        <div className="absolute right-4 bottom-4 z-30 flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 backdrop-blur-md shadow-xl">
+      <div
+        className={`absolute right-4 bottom-24 z-30 flex max-w-[calc(100vw-2rem)] justify-end transition-opacity duration-300 ${
+          showControlOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2 rounded-3xl border border-white/15 bg-black/75 px-3 py-2 text-xs text-white/85 shadow-xl backdrop-blur-md">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 font-semibold">
+            <Monitor className="h-4 w-4" />
+            {isKiosk ? 'Kiosk Mode' : 'Projector View'}
+          </span>
+
+          <span className={`rounded-full border px-3 py-1 font-medium ${
+            wakeLockState === 'active'
+              ? 'border-emerald-300/30 bg-emerald-500/15 text-emerald-100'
+              : wakeLockState === 'unsupported'
+                ? 'border-white/10 bg-white/5 text-white/65'
+                : wakeLockState === 'error'
+                  ? 'border-red-300/30 bg-red-500/15 text-red-100'
+                  : 'border-white/10 bg-white/5 text-white/70'
+          }`}>
+            {wakeLockState === 'active'
+              ? 'Screen awake'
+              : wakeLockState === 'unsupported'
+                ? 'Wake lock unavailable'
+                : wakeLockState === 'error'
+                  ? 'Wake lock failed'
+                  : 'Screen can sleep'}
+          </span>
+
+          {!isFullscreen && isKiosk ? (
+            <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 font-medium text-amber-100">
+              Fullscreen recommended
+            </span>
+          ) : null}
+
           {connectionLost ? (
-            <div className="rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
+            <div className="rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 font-semibold text-amber-200">
               Connection lost. Retrying...
             </div>
           ) : null}
+        </div>
+      </div>
+
+      <div
+        className={`absolute right-4 bottom-4 z-30 flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-end gap-2 rounded-3xl border border-white/15 bg-black/75 px-3 py-3 shadow-xl backdrop-blur-md transition-opacity duration-300 ${
+          showControlOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={toggleKioskMode}
+          className={`rounded-full border px-3 py-2 text-sm font-medium transition-colors ${
+            isKiosk ? 'border-blue-300/35 bg-blue-500/15 text-blue-100' : 'border-white/15 bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          {isKiosk ? 'Exit Kiosk' : 'Enter Kiosk'}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
+        >
+          {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+          {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
+
+        {wakeLockState === 'error' || wakeLockState === 'idle' ? (
           <button
             type="button"
-            onClick={() => updateScale(imageTransform.scale - IMAGE_SCALE_STEP)}
-            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="Zoom out"
+            onClick={() => {
+              void requestWakeLock();
+              revealControls(4000);
+            }}
+            className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
           >
-            <Minus className="w-4 h-4" />
+            Keep Awake
           </button>
-          <div className="flex items-center gap-2 px-1 text-xs text-white/70">
-            <Search className="w-4 h-4" />
-            <span>{Math.round(imageTransform.scale * 100)}%</span>
+        ) : null}
+
+        {displayImageUrl ? (
+          <>
+            <button
+              type="button"
+              onClick={() => updateScale(imageTransform.scale - IMAGE_SCALE_STEP)}
+              className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+              aria-label="Zoom out"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-2 px-1 text-xs text-white/70">
+              <Search className="w-4 h-4" />
+              <span>{Math.round(imageTransform.scale * 100)}%</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => updateScale(imageTransform.scale + IMAGE_SCALE_STEP)}
+              className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+              aria-label="Zoom in"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setImageTransform({ x: 0, y: 0, scale: 1 });
+                revealControls(4000);
+              }}
+              className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
+              aria-label="Reset image position"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {(wakeLockError || fullscreenError) && showControlOverlay ? (
+        <div className="absolute left-4 bottom-4 z-30 max-w-md rounded-2xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm text-red-50 shadow-xl backdrop-blur-md">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{fullscreenError || wakeLockError}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => updateScale(imageTransform.scale + IMAGE_SCALE_STEP)}
-            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="Zoom in"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setImageTransform({ x: 0, y: 0, scale: 1 })}
-            className="rounded-full border border-white/15 bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="Reset image position"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
         </div>
       ) : null}
     </div>
