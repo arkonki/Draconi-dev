@@ -42,6 +42,7 @@ interface ManagedEntry {
   reconnectTimer: number | null;
   degradedTimer: number | null;
   fallbackTimers: Map<string, number>;
+  hasEverSubscribed: boolean;
 }
 
 interface ChannelManagerOptions {
@@ -132,12 +133,13 @@ export class RealtimeChannelManager {
       bindingSignature,
       subscribers: new Map(),
       channel: null,
-      status: 'reconnecting',
+      status: 'healthy',
       connectionId: 0,
       reconnectAttempt: 0,
       reconnectTimer: null,
       degradedTimer: null,
       fallbackTimers: new Map(),
+      hasEverSubscribed: false,
     };
 
     this.entries.set(key, entry);
@@ -157,7 +159,9 @@ export class RealtimeChannelManager {
       entry.channel = null;
     }
 
-    this.setStatus(entry, 'reconnecting');
+    if (entry.hasEverSubscribed && (entry.reconnectAttempt > 0 || entry.status !== 'healthy')) {
+      this.setStatus(entry, 'reconnecting');
+    }
     const currentConnectionId = entry.connectionId;
     const channel = this.client.channel(entry.key);
 
@@ -195,6 +199,7 @@ export class RealtimeChannelManager {
     switch (status) {
       case 'SUBSCRIBED': {
         const shouldNotifyReconnect = entry.status !== 'healthy' && entry.reconnectAttempt > 0;
+        entry.hasEverSubscribed = true;
         entry.reconnectAttempt = 0;
         this.clearTimer(entry.degradedTimer);
         entry.degradedTimer = null;
@@ -228,10 +233,12 @@ export class RealtimeChannelManager {
       return;
     }
 
-    this.setStatus(entry, 'reconnecting');
+    if (entry.hasEverSubscribed) {
+      this.setStatus(entry, 'reconnecting');
+    }
 
     entry.degradedTimer = window.setTimeout(() => {
-      if (entry.status === 'reconnecting') {
+      if (entry.status !== 'healthy' || !entry.hasEverSubscribed) {
         this.setStatus(entry, 'degraded');
       }
     }, this.options.degradedAfterMs);

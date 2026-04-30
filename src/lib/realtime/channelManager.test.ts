@@ -134,6 +134,33 @@ describe('RealtimeChannelManager', () => {
     expect(onStatus).toHaveBeenLastCalledWith('healthy');
   });
 
+  it('keeps initial connection retries quiet until the channel is truly degraded', () => {
+    const client = new FakeClient();
+    const onStatus = vi.fn();
+    const manager = new RealtimeChannelManager(client as never, {
+      baseReconnectMs: 300,
+      maxReconnectMs: 300,
+      degradedAfterMs: 200,
+      jitterRatio: 0,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    manager.subscribe({
+      key: 'party-chat',
+      bindings: TEST_BINDINGS,
+      onEvent: vi.fn(),
+      onStatus,
+    });
+
+    client.channels[0].emitStatus('TIMED_OUT');
+
+    expect(onStatus).toHaveBeenCalledWith('healthy');
+    expect(onStatus).not.toHaveBeenCalledWith('reconnecting');
+
+    vi.advanceTimersByTime(200);
+    expect(onStatus).toHaveBeenLastCalledWith('degraded');
+  });
+
   it('dispatches realtime events to every subscriber on a shared channel', () => {
     const client = new FakeClient();
     const firstHandler = vi.fn();
