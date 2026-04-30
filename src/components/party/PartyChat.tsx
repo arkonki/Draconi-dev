@@ -1,15 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
 // 1. Import deleteMessage
 import { getPartyMessages, sendMessage, deleteMessage, Message } from '../../lib/api/chat';
-import { supabase } from '../../lib/supabase';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MessageContent } from './MessageContent';
 import type { Character } from '../../types/character';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -77,31 +77,52 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
     queryFn: () => getPartyMessages(partyId),
   });
 
-  // --- REALTIME SUBSCRIPTION (INSERT & DELETE) ---
-  useEffect(() => {
-    const channel = supabase.channel(`chat:${partyId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `party_id=eq.${partyId}` }, (payload) => {
-          const incoming = payload.new as Message;
-          if (incoming.content.includes(`<<<POKE:${user?.id}>>>`)) triggerShake();
-
-          queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => {
-            if (oldData.find(msg => msg.id === incoming.id)) return oldData;
-            return [...oldData, incoming];
-          });
-      })
-      // 2. LISTEN FOR DELETES
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
-          const deletedId = payload.old.id;
-          queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => {
-            return oldData.filter(msg => msg.id !== deletedId);
-          });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [partyId, queryClient, user?.id]);
-
   // ... (triggerShake, scrollToBottom, handleScroll logic remains the same) ...
   const triggerShake = () => { setIsShaking(true); setTimeout(() => setIsShaking(false), 500); };
+  const chatBindings = useMemo(() => ([
+    {
+      bindingId: 'message-insert',
+      event: 'INSERT' as const,
+      schema: 'public' as const,
+      table: 'messages',
+      filter: `party_id=eq.${partyId}`,
+    },
+    {
+      bindingId: 'message-delete',
+      event: 'DELETE' as const,
+      schema: 'public' as const,
+      table: 'messages',
+      filter: `party_id=eq.${partyId}`,
+    },
+  ]), [partyId]);
+
+  useRealtimeChannel({
+    key: `chat:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: chatBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: (bindingId, payload) => {
+      if (bindingId === 'message-insert') {
+        const incoming = payload.new as Message;
+        if (incoming.content.includes(`<<<POKE:${user?.id}>>>`)) triggerShake();
+
+        queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => {
+          if (oldData.find((msg) => msg.id === incoming.id)) return oldData;
+          return [...oldData, incoming];
+        });
+        return;
+      }
+
+      const deletedId = String(payload.old.id);
+      queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => (
+        oldData.filter((msg) => msg.id !== deletedId)
+      ));
+    },
+    onReconnect: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['messages', partyId] });
+    },
+  });
+
   const scrollToBottom = (smooth = true) => { messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' }); setShowScrollButton(false); };
   useEffect(() => { scrollToBottom(); }, [messages.length]);
   const handleScroll = () => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Map as MapIcon, MousePointer2, Pencil, Upload, Loader2, Trash2, Check, ZoomIn, ZoomOut, Maximize, Minimize, Eraser, ChevronDown, User, StickyNote, MapPin, Flag, Link as LinkIcon, Edit2, Eye } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '../shared/Button';
@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PartyMap, MapPin as MapPinType, MapDrawing } from '../../types/atlas';
 import { useAuth } from '../../contexts/useAuth';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 interface AtlasViewProps {
     partyId: string;
@@ -637,24 +638,53 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
     const selectedPin = pins.find(p => p.id === selectedPinId);
 
-    // Real-time subscription
-    useEffect(() => {
-        if (!activeMap?.id) return;
+    const mapBindings = useMemo(() => (
+        activeMap?.id
+            ? [
+                {
+                    bindingId: 'map-pins',
+                    event: '*' as const,
+                    schema: 'public' as const,
+                    table: 'party_map_pins',
+                    filter: `map_id=eq.${activeMap.id}`,
+                },
+                {
+                    bindingId: 'map-drawings',
+                    event: '*' as const,
+                    schema: 'public' as const,
+                    table: 'party_map_drawings',
+                    filter: `map_id=eq.${activeMap.id}`,
+                },
+              ]
+            : []
+    ), [activeMap?.id]);
 
-        const channel = supabase
-            .channel(`map-changes-${activeMap.id}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'party_map_pins', filter: `map_id=eq.${activeMap.id}` }, () => {
-                queryClient.invalidateQueries({ queryKey: ['map-pins', activeMap.id] });
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'party_map_drawings', filter: `map_id=eq.${activeMap.id}` }, () => {
-                queryClient.invalidateQueries({ queryKey: ['map-drawings', activeMap.id] });
-            })
-            .subscribe();
+    useRealtimeChannel({
+        key: `map-changes-${activeMap?.id ?? 'inactive'}`,
+        scope: `party:${partyId}`,
+        bindings: mapBindings,
+        enabled: Boolean(activeMap?.id),
+        fallbackRefetchMs: 15000,
+        onEvent: (bindingId) => {
+            if (!activeMap?.id) {
+                return;
+            }
 
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [activeMap?.id, queryClient]);
+            if (bindingId === 'map-pins') {
+                void queryClient.invalidateQueries({ queryKey: ['map-pins', activeMap.id] });
+                return;
+            }
+
+            void queryClient.invalidateQueries({ queryKey: ['map-drawings', activeMap.id] });
+        },
+        onReconnect: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['party-maps', partyId] }),
+                activeMap?.id ? queryClient.invalidateQueries({ queryKey: ['map-pins', activeMap.id] }) : Promise.resolve(),
+                activeMap?.id ? queryClient.invalidateQueries({ queryKey: ['map-drawings', activeMap.id] }) : Promise.resolve(),
+            ]);
+        },
+    });
 
     // Force refetch pins if maps refetch (sanity check for syncing)
     useEffect(() => {

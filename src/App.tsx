@@ -4,12 +4,14 @@ import { AuthProvider } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { AppProvider } from './contexts/AppContext'; 
 import { SessionTimeoutProvider } from './contexts/SessionTimeoutContext';
+import { LiveSyncProvider } from './contexts/LiveSyncContext';
 import { ErrorBoundary } from './components/errors/ErrorBoundary';
 import { AppRoutes } from './AppRoutes';
 import { SessionTimeoutWarning } from './components/session/SessionTimeoutWarning';
 import { DiceProvider } from './components/dice/DiceContext';
 import { ReloadPrompt } from './pages/ReloadPrompt'; 
 import { NotificationController } from './components/notifications/NotificationController';
+import { LiveSyncIndicator } from './components/shared/LiveSyncIndicator';
 
 function App() {
   const isProduction = import.meta.env.PROD;
@@ -20,16 +22,19 @@ function App() {
         <AppProvider>
           <AuthProvider>
             <NotificationProvider>
-              <SessionTimeoutProvider>
-                <DiceProvider>
-                  <div className="min-h-screen bg-gray-100">
-                    <AppRoutes />
-                    <SessionTimeoutWarning />
-                    <ReloadPrompt />
-                    <NotificationController />
-                  </div>
-                </DiceProvider>
-              </SessionTimeoutProvider>
+              <LiveSyncProvider>
+                <SessionTimeoutProvider>
+                  <DiceProvider>
+                    <div className="min-h-screen bg-gray-100">
+                      <AppRoutes />
+                      <SessionTimeoutWarning />
+                      <LiveSyncIndicator />
+                      <ReloadPrompt />
+                      <NotificationController />
+                    </div>
+                  </DiceProvider>
+                </SessionTimeoutProvider>
+              </LiveSyncProvider>
             </NotificationProvider>
           </AuthProvider>
         </AppProvider>

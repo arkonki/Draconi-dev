@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // 1. Added useSearchParams
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/useAuth';
@@ -15,10 +15,10 @@ import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
 import { EncounterChatView } from '../components/party/EncounterChatView';
-import { supabase } from '../lib/supabase';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
+import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
 
 type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 const VALID_PARTY_TABS: Tab[] = ['members', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
@@ -115,35 +115,36 @@ export function PartyView() {
     enabled: !!partyId,
   });
 
-  // Realtime Listener for Unread Badge
-  useEffect(() => {
-    if (!partyId) return;
-
-    const channel = supabase
-      .channel(`party-view-badge:${partyId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
+  const badgeBindings = useMemo(() => (
+    partyId
+      ? [{
+          bindingId: 'message-insert',
+          event: 'INSERT' as const,
+          schema: 'public' as const,
           table: 'messages',
           filter: `party_id=eq.${partyId}`,
-        },
-        () => {
-          setActiveTab(currentTab => {
-            if (currentTab !== 'chat') {
-              setUnreadCount(prev => prev + 1);
-            }
-            return currentTab;
-          });
-        }
-      )
-      .subscribe();
+        }]
+      : []
+  ), [partyId]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [partyId]);
+  useRealtimeChannel({
+    key: `party-view-badge:${partyId}`,
+    scope: partyId ? `party:${partyId}` : undefined,
+    bindings: badgeBindings,
+    enabled: Boolean(partyId),
+    fallbackRefetchMs: 20000,
+    onEvent: () => {
+      setActiveTab((currentTab) => {
+        if (currentTab !== 'chat') {
+          setUnreadCount((prev) => prev + 1);
+        }
+        return currentTab;
+      });
+    },
+    onReconnect: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['messages', partyId] });
+    },
+  });
 
   const handleTabChange = (tabId: Tab) => {
     setActiveTab(tabId);

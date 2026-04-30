@@ -1,62 +1,57 @@
-import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { useMemo } from 'react';
+import { useRealtimeChannel } from './useRealtimeChannel';
 
-export function useEncounterRealtime(encounterId: string | null) {
+export function useEncounterRealtime(encounterId: string | null, partyId: string | null) {
   const queryClient = useQueryClient();
+  const encounterBindings = useMemo(() => (
+    encounterId
+      ? [
+          {
+            bindingId: 'encounter',
+            event: '*' as const,
+            schema: 'public' as const,
+            table: 'encounters',
+            filter: `id=eq.${encounterId}`,
+          },
+          {
+            bindingId: 'combatants',
+            event: '*' as const,
+            schema: 'public' as const,
+            table: 'encounter_combatants',
+            filter: `encounter_id=eq.${encounterId}`,
+          },
+        ]
+      : []
+  ), [encounterId]);
 
-  useEffect(() => {
-    if (!encounterId) {
-      return;
-    }
+  useRealtimeChannel({
+    key: `encounter_room:${encounterId ?? 'inactive'}`,
+    scope: partyId ? `party:${partyId}` : undefined,
+    bindings: encounterBindings,
+    enabled: Boolean(encounterId),
+    fallbackRefetchMs: 15000,
+    onEvent: async (bindingId) => {
+      if (!encounterId) {
+        return;
+      }
 
-    console.log(`Setting up realtime subscription for encounter: ${encounterId}`);
+      if (bindingId === 'encounter') {
+        await queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] });
+        return;
+      }
 
-    const channel = supabase
-      .channel(`encounter_room:${encounterId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to ALL events (INSERT, UPDATE, DELETE)
-          schema: 'public',
-          table: 'encounters',
-          filter: `id=eq.${encounterId}`,
-        },
-        (payload) => {
-          console.log('Realtime: Encounter updated', payload);
-          // Immediately invalidate to trigger a refetch
-          queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'encounter_combatants',
-          filter: `encounter_id=eq.${encounterId}`,
-        },
-        (payload) => {
-          console.log('Realtime: Combatants updated', payload);
-          // Immediately invalidate to trigger a refetch
-          queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] });
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`Connected to realtime for encounter ${encounterId}`);
-        }
-        if (status === 'CHANNEL_ERROR') {
-          console.error(`Realtime connection error for encounter ${encounterId}`);
-        }
-        if (status === 'TIMED_OUT') {
-          console.error(`Realtime connection timed out for encounter ${encounterId}`);
-        }
-      });
+      await queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] });
+    },
+    onReconnect: async () => {
+      if (!encounterId) {
+        return;
+      }
 
-    return () => {
-      console.log(`Cleaning up realtime for encounter ${encounterId}`);
-      supabase.removeChannel(channel);
-    };
-  }, [encounterId, queryClient]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] }),
+        queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] }),
+      ]);
+    },
+  });
 }

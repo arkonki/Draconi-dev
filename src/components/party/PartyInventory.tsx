@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { BarteringCalculator } from './BarteringCalculator';
 import { parseCost } from '../../lib/equipment';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -382,13 +383,39 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     }
   }, [partyId]);
 
+  const inventoryBindings = useMemo(() => ([
+    {
+      bindingId: 'inventory',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'party_inventory',
+      filter: `party_id=eq.${partyId}`,
+    },
+    {
+      bindingId: 'inventory-log',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'party_inventory_log',
+      filter: `party_id=eq.${partyId}`,
+    },
+  ]), [partyId]);
+
   useEffect(() => {
     loadData();
-    const subscription = supabase.channel(`party_inv_${partyId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'party_inventory', filter: `party_id=eq.${partyId}` }, () => loadData())
-      .subscribe();
-    return () => { supabase.removeChannel(subscription); };
-  }, [partyId, loadData]);
+  }, [loadData]);
+
+  useRealtimeChannel({
+    key: `party_inv_${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: inventoryBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: () => {
+      void loadData();
+    },
+    onReconnect: async () => {
+      await loadData();
+    },
+  });
 
   // --- HANDLER: Assign Loot to Party ---
   const handleAssignLoot = async (loot: { item: GameItem; quantity: number }[]) => {

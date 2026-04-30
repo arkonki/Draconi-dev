@@ -1,8 +1,9 @@
 /* @refresh reset */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth } from './useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { SessionTimeoutContext } from './SessionTimeoutContextStore';
+import { isLiveCollaborativePath } from '../lib/realtime/collaborativeRoutes';
 
 const TIMEOUT_DURATION = 30 * 60 * 1000; // 30 minutes
 const WARNING_DURATION = 30 * 1000; // 30 seconds
@@ -11,16 +12,25 @@ const ACTIVITY_CHECK_INTERVAL = 10 * 1000; // Check every 10 seconds
 export function SessionTimeoutProvider({ children }: { children: React.ReactNode }) {
   const { signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const lastActivityRef = useRef(Date.now());
   const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
   const warningIdRef = useRef<NodeJS.Timeout | null>(null);
   
   const [showWarning, setShowWarning] = useState(false);
+  const isCollaborativeRoute = isLiveCollaborativePath(location.pathname);
 
   const resetTimers = useCallback(() => {
     if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
     if (warningIdRef.current) clearTimeout(warningIdRef.current);
+
+    lastActivityRef.current = Date.now();
+
+    if (isCollaborativeRoute) {
+      setShowWarning(false);
+      return;
+    }
 
     warningIdRef.current = setTimeout(() => {
       setShowWarning(true);
@@ -33,9 +43,8 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
       });
     }, TIMEOUT_DURATION);
 
-    lastActivityRef.current = Date.now();
     setShowWarning(false);
-  }, [signOut, navigate]);
+  }, [isCollaborativeRoute, signOut, navigate]);
 
   const extendSession = useCallback(() => {
     resetTimers();
@@ -66,6 +75,10 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
     });
 
     const activityCheckInterval = window.setInterval(() => {
+      if (isCollaborativeRoute) {
+        return;
+      }
+
       const inactiveTime = Date.now() - lastActivityRef.current;
       
       if (inactiveTime >= TIMEOUT_DURATION - WARNING_DURATION) {
@@ -90,7 +103,16 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
       if (warningIdRef.current) clearTimeout(warningIdRef.current);
       window.clearInterval(activityCheckInterval);
     };
-  }, [resetTimers, signOut, navigate]);
+  }, [isCollaborativeRoute, resetTimers, signOut, navigate]);
+
+  useEffect(() => {
+    lastActivityRef.current = Date.now();
+    if (isCollaborativeRoute) {
+      setShowWarning(false);
+    } else {
+      resetTimers();
+    }
+  }, [isCollaborativeRoute, resetTimers]);
 
   return (
     <SessionTimeoutContext.Provider value={{ showWarning, extendSession }}>

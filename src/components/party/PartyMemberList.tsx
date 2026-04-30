@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheet } from '../character/CharacterSheet';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -476,77 +477,75 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
     };
   }, []);
 
-  // --- 1. REAL-TIME SUBSCRIPTION ---
-  useEffect(() => {
-    const applyCharacterUpdate = (updatedRow: unknown) => {
-      const updatedMember = mapCharacterData(updatedRow);
+  const applyCharacterUpdate = useMemo(() => (updatedRow: unknown) => {
+    const updatedMember = mapCharacterData(updatedRow);
 
-      queryClient.setQueryData<Party>(['party', party.id], (currentParty) => {
-        if (!currentParty) {
-          return currentParty;
+    queryClient.setQueryData<Party>(['party', party.id], (currentParty) => {
+      if (!currentParty) {
+        return currentParty;
+      }
+
+      return {
+        ...currentParty,
+        members: currentParty.members.map((member) =>
+          member.id === updatedMember.id
+            ? {
+                ...member,
+                ...updatedMember,
+                party_id: updatedMember.party_id || member.party_id || party.id,
+              }
+            : member
+        ),
+      };
+    });
+  }, [party.id, queryClient]);
+
+  const partyRealtimeBindings = useMemo(() => ([
+    {
+      bindingId: 'character-update',
+      event: 'UPDATE' as const,
+      schema: 'public' as const,
+      table: 'characters',
+    },
+    {
+      bindingId: 'party-members',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'party_members',
+      filter: `party_id=eq.${party.id}`,
+    },
+  ]), [party.id]);
+
+  useRealtimeChannel({
+    key: `party-view-${party.id}`,
+    scope: `party:${party.id}`,
+    bindings: partyRealtimeBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: (bindingId, payload) => {
+      if (bindingId === 'character-update') {
+        const updatedId = typeof payload.new?.id === 'string' ? payload.new.id : null;
+        const previousId = typeof payload.old?.id === 'string' ? payload.old.id : null;
+        if (!updatedId || (!memberIds.has(updatedId) && !(previousId && memberIds.has(previousId)))) {
+          return;
         }
 
-        return {
-          ...currentParty,
-          members: currentParty.members.map((member) =>
-            member.id === updatedMember.id
-              ? {
-                  ...member,
-                  ...updatedMember,
-                  party_id: updatedMember.party_id || member.party_id || party.id,
-                }
-              : member
-          ),
-        };
-      });
-    };
+        applyCharacterUpdate(payload.new);
+      }
 
-    const channel = supabase
-      .channel(`party-view-${party.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'characters',
-        },
-        (payload) => {
-          const updatedId = typeof payload.new?.id === 'string' ? payload.new.id : null;
-          const previousId = typeof payload.old?.id === 'string' ? payload.old.id : null;
-          if (!updatedId || (!memberIds.has(updatedId) && !(previousId && memberIds.has(previousId)))) {
-            return;
-          }
+      void queryClient.invalidateQueries({ queryKey: ['party', party.id] });
+      void queryClient.invalidateQueries({ queryKey: ['parties'] });
+      void queryClient.invalidateQueries({ queryKey: ['myParties'] });
 
-          applyCharacterUpdate(payload.new);
-          queryClient.invalidateQueries({ queryKey: ['party', party.id] });
-          queryClient.invalidateQueries({ queryKey: ['parties'] });
-          queryClient.invalidateQueries({ queryKey: ['myParties'] });
-
-          if (onUpdate) onUpdate();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'party_members',
-          filter: `party_id=eq.${party.id}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['party', party.id] });
-          queryClient.invalidateQueries({ queryKey: ['parties'] });
-          queryClient.invalidateQueries({ queryKey: ['myParties'] });
-
-          if (onUpdate) onUpdate();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [memberIds, onUpdate, party.id, queryClient]);
+      if (onUpdate) onUpdate();
+    },
+    onReconnect: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['party', party.id] }),
+        queryClient.invalidateQueries({ queryKey: ['parties'] }),
+        queryClient.invalidateQueries({ queryKey: ['myParties'] }),
+      ]);
+    },
+  });
 
   // --- 2. STAT ADJUSTMENT ---
   const handleStatAdjust = async (charId: string, stat: 'current_hp' | 'current_wp', amount: number, currentVal: number, maxVal: number) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull, Zap, ChevronDown } from 'lucide-react';
 import { Button } from '../shared/Button';
@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { PartyChat } from '../party/PartyChat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 import { fetchParties } from '../../lib/api/parties';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- HELPER: Editable Stat Box ---
 interface StatInputProps {
@@ -174,28 +175,6 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
     }
   }, [character?.party_id, myParties, forcedPartyId]);
 
-  // 3. Listen for Chat Messages (Unread Badge)
-  useEffect(() => {
-    if (!selectedPartyId) return;
-
-    const channel = supabase.channel(`global-chat-monitor`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const msg = payload.new as IncomingMessage;
-        const messagePartyId = msg.party_id;
-        const isRelevant = typeof messagePartyId === 'string' &&
-          ((myParties.some(p => p.id === messagePartyId)) || (forcedPartyId === messagePartyId));
-
-        if (isRelevant) {
-          if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== messagePartyId)) {
-            setUnreadCount(prev => prev + 1);
-          }
-        }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [myParties, isOpen, activeTab, selectedPartyId, forcedPartyId]);
-
   // Clear unread when opening chat
   useEffect(() => {
     if (isOpen && activeTab === 'chat') {
@@ -203,48 +182,107 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
     }
   }, [isOpen, activeTab]);
 
+  const targetPartyId = forcedPartyId || character?.party_id || null;
+  const targetCharId = character?.id || 'dm-observer';
+  const unreadBindings = useMemo(() => ([
+    {
+      bindingId: 'message-insert',
+      event: 'INSERT' as const,
+      schema: 'public' as const,
+      table: 'messages',
+    },
+  ]), []);
+
+  useRealtimeChannel({
+    key: 'global-chat-monitor',
+    bindings: unreadBindings,
+    enabled: Boolean(selectedPartyId),
+    reportToSync: false,
+    fallbackRefetchMs: 20000,
+    onEvent: (_bindingId, payload) => {
+      const msg = payload.new as IncomingMessage;
+      const messagePartyId = msg.party_id;
+      const isRelevant = typeof messagePartyId === 'string' &&
+        ((myParties.some((party) => party.id === messagePartyId)) || (forcedPartyId === messagePartyId));
+
+      if (isRelevant) {
+        if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== messagePartyId)) {
+          setUnreadCount((prev) => prev + 1);
+        }
+      }
+    },
+  });
+
   // 4. Listen for Encounter Updates
   useEffect(() => {
-    const targetPartyId = forcedPartyId || character?.party_id;
-    const targetCharId = character?.id || 'dm-observer';
-
     if (!targetPartyId) return;
 
-    // Initial fetch
-    fetchActiveEncounter(targetPartyId, targetCharId);
+    void fetchActiveEncounter(targetPartyId, targetCharId);
+  }, [targetCharId, targetPartyId]);
 
-    // Subscribe specifically to this party's encounters
-    const channel = supabase.channel(`encounter-updates-${targetPartyId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'encounters',
-          filter: `party_id=eq.${targetPartyId}`
-        },
-        (payload) => {
-          console.log("Encounter update received:", payload);
-          if (targetPartyId) {
-            fetchActiveEncounter(targetPartyId, targetCharId);
-          }
-        }
-      )
-      .subscribe();
+  const encounterBindings = useMemo(() => (
+    targetPartyId
+      ? [
+          {
+            bindingId: 'encounters',
+            event: '*' as const,
+            schema: 'public' as const,
+            table: 'encounters',
+            filter: `party_id=eq.${targetPartyId}`,
+          },
+        ]
+      : []
+  ), [targetPartyId]);
 
-    return () => { supabase.removeChannel(channel); };
-  }, [character?.party_id, character?.id, forcedPartyId]);
+  useRealtimeChannel({
+    key: `encounter-updates-${targetPartyId ?? 'inactive'}`,
+    bindings: encounterBindings,
+    enabled: Boolean(targetPartyId),
+    reportToSync: false,
+    fallbackRefetchMs: 15000,
+    onEvent: async () => {
+      if (targetPartyId) {
+        await fetchActiveEncounter(targetPartyId, targetCharId);
+      }
+    },
+    onReconnect: async () => {
+      if (targetPartyId) {
+        await fetchActiveEncounter(targetPartyId, targetCharId);
+      }
+    },
+  });
 
-  useEffect(() => {
-    if (!activeEncounter?.id) return;
-    const targetPartyId = forcedPartyId || character?.party_id;
-    const targetCharId = character?.id || 'dm-observer';
+  const combatantBindings = useMemo(() => (
+    activeEncounter?.id
+      ? [
+          {
+            bindingId: 'combatants',
+            event: '*' as const,
+            schema: 'public' as const,
+            table: 'encounter_combatants',
+            filter: `encounter_id=eq.${activeEncounter.id}`,
+          },
+        ]
+      : []
+  ), [activeEncounter?.id]);
 
-    const channel = supabase.channel(`combatant-updates`).on('postgres_changes', { event: '*', schema: 'public', table: 'encounter_combatants' }, () => {
-      if (targetPartyId) fetchActiveEncounter(targetPartyId, targetCharId);
-    }).subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [activeEncounter?.id, forcedPartyId, character?.party_id, character?.id]);
+  useRealtimeChannel({
+    key: `combatant-updates-${activeEncounter?.id ?? 'inactive'}`,
+    bindings: combatantBindings,
+    enabled: Boolean(activeEncounter?.id && targetPartyId),
+    reportToSync: false,
+    fallbackRefetchMs: 15000,
+    onEvent: async () => {
+      if (targetPartyId) {
+        await fetchActiveEncounter(targetPartyId, targetCharId);
+      }
+    },
+    onReconnect: async () => {
+      if (targetPartyId) {
+        await fetchActiveEncounter(targetPartyId, targetCharId);
+      }
+    },
+  });
 
   if (!character && myParties.length === 0 && !forcedPartyId) return null;
 

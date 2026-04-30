@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/useAuth';
 import { useNotifications } from '../../contexts/useNotifications';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 type MessagePayload = {
   id: string;
@@ -144,194 +145,164 @@ function buildEncounterNotificationCopy(encounter: EncounterPayload, partyName: 
 export function NotificationController() {
   const { user } = useAuth();
   const { playSound, sendDesktopNotification } = useNotifications();
+  const partyCacheRef = useRef(new Map<string, string>());
+  const senderCacheRef = useRef(new Map<string, string>());
 
   useEffect(() => {
-    if (!user) {
-      return;
+    partyCacheRef.current.clear();
+    senderCacheRef.current.clear();
+  }, [user?.id]);
+
+  const resolvePartyName = async (partyId: string): Promise<string> => {
+    const cached = partyCacheRef.current.get(partyId);
+    if (cached) {
+      return cached;
     }
 
-    const partyCache = new Map<string, string>();
-    const senderCache = new Map<string, string>();
+    const { data } = await supabase
+      .from('parties')
+      .select('id, name')
+      .eq('id', partyId)
+      .maybeSingle();
 
-    const resolvePartyName = async (partyId: string): Promise<string> => {
-      const cached = partyCache.get(partyId);
-      if (cached) {
-        return cached;
+    const name = (data as PartySummary | null)?.name || 'Party Chat';
+    partyCacheRef.current.set(partyId, name);
+    return name;
+  };
+
+  const resolveSenderName = async (userId: string): Promise<string> => {
+    const cached = senderCacheRef.current.get(userId);
+    if (cached) {
+      return cached;
+    }
+
+    const { data } = await supabase
+      .from('users')
+      .select('username, first_name, last_name')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const senderName = formatSenderName((data as SenderSummary | null) ?? null);
+    senderCacheRef.current.set(userId, senderName);
+    return senderName;
+  };
+
+  const notificationBindings = useMemo(() => (
+    user
+      ? [
+          {
+            bindingId: 'message-insert',
+            event: 'INSERT' as const,
+            schema: 'public' as const,
+            table: 'messages',
+          },
+          {
+            bindingId: 'encounter-insert',
+            event: 'INSERT' as const,
+            schema: 'public' as const,
+            table: 'encounters',
+          },
+          {
+            bindingId: 'encounter-update',
+            event: 'UPDATE' as const,
+            schema: 'public' as const,
+            table: 'encounters',
+          },
+          {
+            bindingId: 'party-member-insert',
+            event: 'INSERT' as const,
+            schema: 'public' as const,
+            table: 'party_members',
+            filter: `user_id=eq.${user.id}`,
+          },
+        ]
+      : []
+  ), [user]);
+
+  useRealtimeChannel({
+    key: 'global-notifications',
+    bindings: notificationBindings,
+    enabled: Boolean(user),
+    reportToSync: false,
+    fallbackRefetchMs: 30000,
+    onEvent: async (bindingId, payload) => {
+      if (!user) {
+        return;
       }
 
-      const { data } = await supabase
-        .from('parties')
-        .select('id, name')
-        .eq('id', partyId)
-        .maybeSingle();
+      if (bindingId === 'message-insert') {
+        const newMessage = payload.new as MessagePayload;
 
-      const name = (data as PartySummary | null)?.name || 'Party Chat';
-      partyCache.set(partyId, name);
-      return name;
-    };
+        if (newMessage.user_id === user.id || isViewingActivePartyChat(newMessage.party_id)) {
+          return;
+        }
 
-    const resolveSenderName = async (userId: string): Promise<string> => {
-      const cached = senderCache.get(userId);
-      if (cached) {
-        return cached;
+        playSound('notification');
+
+        const targetUrl = buildPartyChatUrl(newMessage.party_id, newMessage.id);
+        const [partyName, senderName] = await Promise.all([
+          resolvePartyName(newMessage.party_id),
+          resolveSenderName(newMessage.user_id),
+        ]);
+
+        const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
+        if (pokeMatch) {
+          const targetId = pokeMatch[1];
+          if (targetId === user.id) {
+            await sendDesktopNotification({
+              title: `${senderName} poked you in ${partyName}`,
+              body: 'Open party chat to respond.',
+              type: 'message',
+              url: targetUrl,
+              tag: `party-chat-${newMessage.party_id}`,
+            });
+          }
+          return;
+        }
+
+        const { title, body } = buildNotificationCopy(newMessage, senderName, partyName);
+        await sendDesktopNotification({
+          title,
+          body,
+          type: 'message',
+          url: targetUrl,
+          tag: `party-chat-${newMessage.party_id}`,
+        });
+        return;
       }
 
-      const { data } = await supabase
-        .from('users')
-        .select('username, first_name, last_name')
-        .eq('id', userId)
-        .maybeSingle();
+      if (bindingId === 'party-member-insert') {
+        playSound('notification');
+        await sendDesktopNotification({
+          title: 'Party Invite',
+          body: 'You have been added to a new adventure party!',
+          type: 'invite',
+          url: '/adventure-party',
+          tag: 'party-invite',
+        });
+        return;
+      }
 
-      const senderName = formatSenderName((data as SenderSummary | null) ?? null);
-      senderCache.set(userId, senderName);
-      return senderName;
-    };
+      const encounter = payload.new as EncounterPayload;
+      const previousEncounter = bindingId === 'encounter-update' ? payload.old as EncounterPayload | null : null;
 
-    const channel = supabase
-      .channel('global-notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
-        async (payload) => {
-          const newMessage = payload.new as MessagePayload;
+      if (encounter.status !== 'active' || previousEncounter?.status === 'active' || isViewingActivePartyEncounter(encounter.party_id)) {
+        return;
+      }
 
-          if (newMessage.user_id === user.id) {
-            return;
-          }
+      playSound('notification');
+      const partyName = await resolvePartyName(encounter.party_id);
+      const { title, body } = buildEncounterNotificationCopy(encounter, partyName);
 
-          if (isViewingActivePartyChat(newMessage.party_id)) {
-            return;
-          }
-
-          playSound('notification');
-
-          const targetUrl = buildPartyChatUrl(newMessage.party_id, newMessage.id);
-          const [partyName, senderName] = await Promise.all([
-            resolvePartyName(newMessage.party_id),
-            resolveSenderName(newMessage.user_id),
-          ]);
-
-          const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
-          if (pokeMatch) {
-            const targetId = pokeMatch[1];
-            if (targetId === user.id) {
-              await sendDesktopNotification({
-                title: `${senderName} poked you in ${partyName}`,
-                body: 'Open party chat to respond.',
-                type: 'message',
-                url: targetUrl,
-                tag: `party-chat-${newMessage.party_id}`,
-              });
-            }
-            return;
-          }
-
-          const { title, body } = buildNotificationCopy(newMessage, senderName, partyName);
-
-          await sendDesktopNotification({
-            title,
-            body,
-            type: 'message',
-            url: targetUrl,
-            tag: `party-chat-${newMessage.party_id}`,
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'encounters',
-        },
-        async (payload) => {
-          const encounter = payload.new as EncounterPayload;
-
-          if (encounter.status !== 'active') {
-            return;
-          }
-
-          if (isViewingActivePartyEncounter(encounter.party_id)) {
-            return;
-          }
-
-          playSound('notification');
-
-          const partyName = await resolvePartyName(encounter.party_id);
-          const { title, body } = buildEncounterNotificationCopy(encounter, partyName);
-
-          await sendDesktopNotification({
-            title,
-            body,
-            type: 'encounter',
-            url: buildPartyEncounterUrl(encounter.party_id),
-            tag: `party-encounter-${encounter.party_id}`,
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'encounters',
-        },
-        async (payload) => {
-          const previousEncounter = payload.old as EncounterPayload | null;
-          const encounter = payload.new as EncounterPayload;
-
-          if (encounter.status !== 'active' || previousEncounter?.status === 'active') {
-            return;
-          }
-
-          if (isViewingActivePartyEncounter(encounter.party_id)) {
-            return;
-          }
-
-          playSound('notification');
-
-          const partyName = await resolvePartyName(encounter.party_id);
-          const { title, body } = buildEncounterNotificationCopy(encounter, partyName);
-
-          await sendDesktopNotification({
-            title,
-            body,
-            type: 'encounter',
-            url: buildPartyEncounterUrl(encounter.party_id),
-            tag: `party-encounter-${encounter.party_id}`,
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'party_members',
-          filter: `user_id=eq.${user.id}`,
-        },
-        async () => {
-          playSound('notification');
-
-          await sendDesktopNotification({
-            title: 'Party Invite',
-            body: 'You have been added to a new adventure party!',
-            type: 'invite',
-            url: '/adventure-party',
-            tag: 'party-invite',
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, playSound, sendDesktopNotification]);
+      await sendDesktopNotification({
+        title,
+        body,
+        type: 'encounter',
+        url: buildPartyEncounterUrl(encounter.party_id),
+        tag: `party-encounter-${encounter.party_id}`,
+      });
+    },
+  });
 
   return null;
 }

@@ -889,7 +889,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const { data: encounterDetails } = useQuery<Encounter | null>({ queryKey: ['encounterDetails', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)), enabled: !!currentEncounterId });
   const { data: combatantsData } = useQuery<EncounterCombatant[]>({ queryKey: ['encounterCombatants', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])), enabled: !!currentEncounterId });
 
-  useEncounterRealtime(currentEncounterId);
+  useEncounterRealtime(currentEncounterId, partyId);
 
   const monstersById = useMemo(() => {
     const map = new Map<string, MonsterData>();
