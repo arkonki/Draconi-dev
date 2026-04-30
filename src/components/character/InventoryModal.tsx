@@ -10,7 +10,7 @@ import { Button } from '../shared/Button';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
-import { formatCost, subtractCost, parseCost, normalizeCurrency } from '../../lib/equipment';
+import { applyMoneyDelta, formatCost, subtractCost, parseCost } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
 
@@ -391,9 +391,13 @@ export const MoneyManagementModal = ({
     const [gold, setGold] = useState(0); const [silver, setSilver] = useState(0); const [copper, setCopper] = useState(0); const [error, setError] = useState<string | null>(null);
     const handleTransaction = (multiplier: 1 | -1) => {
         setError(null); if (gold === 0 && silver === 0 && copper === 0) { setError("Please enter an amount."); return; }
-        const newMoney = { gold: (currentMoney.gold || 0) + (gold * multiplier), silver: (currentMoney.silver || 0) + (silver * multiplier), copper: (currentMoney.copper || 0) + (copper * multiplier) };
-        if (newMoney.gold < 0 || newMoney.silver < 0 || newMoney.copper < 0) { setError("Cannot remove more money than is available."); return; }
-        onUpdateMoney(normalizeCurrency(newMoney)); onClose();
+        const { success, newMoney } = applyMoneyDelta(currentMoney || { gold: 0, silver: 0, copper: 0 }, {
+            gold: gold * multiplier,
+            silver: silver * multiplier,
+            copper: copper * multiplier,
+        });
+        if (!success) { setError("Cannot remove more money than is available."); return; }
+        onUpdateMoney(newMoney); onClose();
     };
     const CoinInput = ({
         label,

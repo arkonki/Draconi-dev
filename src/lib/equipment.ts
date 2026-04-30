@@ -1,4 +1,5 @@
 import { GameItem, findItemByName as findItemByNameApi } from './api/items';
+import type { Money } from '../types/character';
 
 // Keep the findEquipment function using the API call for now
 export async function findEquipment(name: string): Promise<GameItem | null> {
@@ -8,7 +9,7 @@ export async function findEquipment(name: string): Promise<GameItem | null> {
 // --- Utility Functions ---
 
 // Parse cost string (e.g., "2 gold, 5 silver") into an object
-export function parseCost(costString: string | undefined | null): { gold: number; silver: number; copper: number } {
+export function parseCost(costString: string | undefined | null): Money {
   const cost = { gold: 0, silver: 0, copper: 0 };
   if (!costString || typeof costString !== 'string') return cost;
 
@@ -34,7 +35,7 @@ export function parseCost(costString: string | undefined | null): { gold: number
 }
 
 // Format cost object back into a string
-export function formatCost(cost: { gold: number; silver: number; copper: number } | undefined | null): string {
+export function formatCost(cost: Money | undefined | null): string {
   if (!cost) return '0 copper';
   const parts = [];
   if (cost.gold > 0) parts.push(`${cost.gold} gold`);
@@ -48,7 +49,7 @@ export function formatCost(cost: { gold: number; silver: number; copper: number 
 //  10 Copper = 1 Silver
 //  10 Silver = 1 Gold
 // ---------------------------------------------------------
-export function normalizeCurrency(money: { gold: number; silver: number; copper: number }): { gold: number; silver: number; copper: number } {
+export function normalizeCurrency(money: Money): Money {
   let { gold, silver, copper } = money;
 
   // 10 Copper -> 1 Silver
@@ -62,34 +63,43 @@ export function normalizeCurrency(money: { gold: number; silver: number; copper:
   return { gold, silver, copper };
 }
 
+export function currencyToCopper(money: Money): number {
+  return (money.gold || 0) * 100 + (money.silver || 0) * 10 + (money.copper || 0);
+}
+
+export function copperToCurrency(totalCopper: number): Money {
+  const safeCopper = Math.max(0, totalCopper);
+  const gold = Math.floor(safeCopper / 100);
+  const silver = Math.floor((safeCopper % 100) / 10);
+  const copper = safeCopper % 10;
+
+  return { gold, silver, copper };
+}
+
+export function applyMoneyDelta(currentMoney: Money, delta: Money): { success: boolean; newMoney: Money } {
+  const newTotalCopper = currencyToCopper(currentMoney) + currencyToCopper(delta);
+
+  if (newTotalCopper < 0) {
+    return { success: false, newMoney: currentMoney };
+  }
+
+  return {
+    success: true,
+    newMoney: copperToCurrency(newTotalCopper),
+  };
+}
+
 
 // ---------------------------------------------------------
 //  Subtract cost using Dragonbane values
 // ---------------------------------------------------------
 export function subtractCost(
-  currentMoney: { gold: number; silver: number; copper: number },
-  itemCost: { gold: number; silver: number; copper: number }
-): { success: boolean; newMoney: { gold: number; silver: number; copper: number } } {
-
-  // Dragonbane: Gold is 100 copper (10*10), Silver is 10 copper
-  const totalCurrentCopper = currentMoney.gold * 100 + currentMoney.silver * 10 + currentMoney.copper;
-  const totalItemCopper = itemCost.gold * 100 + itemCost.silver * 10 + itemCost.copper;
-
-  if (totalCurrentCopper < totalItemCopper) {
-    return { success: false, newMoney: currentMoney };
-  }
-
-  let remainingCopper = totalCurrentCopper - totalItemCopper;
-
-  // Convert back to Gold (100 copper = 1 gold)
-  const newGold = Math.floor(remainingCopper / 100);
-  remainingCopper %= 100;
-
-  // Convert remainder to Silver (10 copper = 1 silver)
-  const newSilver = Math.floor(remainingCopper / 10);
-  remainingCopper %= 10;
-
-  const newCopper = remainingCopper;
-
-  return { success: true, newMoney: { gold: newGold, silver: newSilver, copper: newCopper } };
+  currentMoney: Money,
+  itemCost: Money
+): { success: boolean; newMoney: Money } {
+  return applyMoneyDelta(currentMoney, {
+    gold: -itemCost.gold,
+    silver: -itemCost.silver,
+    copper: -itemCost.copper,
+  });
 }
