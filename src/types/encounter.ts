@@ -1,3 +1,9 @@
+export interface EncounterStatusEffect {
+  name: string;
+  duration?: number | null;
+  [key: string]: unknown;
+}
+
 export interface EncounterCombatant {
   id: string;
   encounter_id: string;
@@ -9,7 +15,7 @@ export interface EncounterCombatant {
   max_hp: number;
   current_wp: number | null;
   max_wp: number | null;
-  status_effects: unknown[]; // JSONB array
+  status_effects: EncounterStatusEffect[];
   initiative_roll: number | null;
   is_active_turn: boolean;
   has_acted: boolean;

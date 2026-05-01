@@ -50,6 +50,9 @@ interface DataRow {
         HP?: number;
         ARMOR?: number;
         SIZE?: string;
+        IS_NPC?: boolean;
+        TYPE?: string;
+        WP?: number;
         [key: string]: unknown;
     };
     appearance?: unknown[];
@@ -170,7 +173,7 @@ const useGameDataManagement = () => {
             case 'kin': newEntry = { ...newEntry, description: '', key_attribute: '', typical_profession: '', kin_abilities: [] }; break;
             case 'profession': newEntry = { ...newEntry, description: '', key_attribute: '', skills: [] }; break;
             case 'skills': newEntry = { ...newEntry, description: '', attribute: null }; break;
-            case 'monsters': newEntry = { name: '', description: '', category: '', stats: { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10 }, attacks: [] }; break;
+            case 'monsters': newEntry = { name: '', description: '', category: '', effectsSummary: '', stats: { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10, WP: 0, IS_NPC: false, TYPE: '', SKILLS: '', HEROIC_ABILITIES: '', DAMAGE_BONUS: '', GEAR: '' }, attacks: [] }; break;
             case 'bio': newEntry = { name: '', appearance: [], mementos: [], flaws: [] }; break;
             default: break;
         }
@@ -431,8 +434,11 @@ export function GameDataManager() {
                 ];
             case 'monsters':
                 return [...baseCols,
+                    { header: 'Kind', accessor: (e) => e.stats?.IS_NPC ? <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs font-semibold uppercase">NPC</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-semibold uppercase">Monster</span> },
                     { header: 'Category', accessor: (e) => <span className="capitalize">{e.category}</span> },
+                    { header: 'Type', accessor: (e) => e.stats?.TYPE || <span className="text-gray-400">-</span> },
                     { header: 'HP', accessor: (e) => <span className="font-bold text-red-600">{e.stats?.HP}</span> },
+                    { header: 'WP', accessor: (e) => typeof e.stats?.WP === 'number' ? e.stats.WP : <span className="text-gray-400">-</span> },
                     { header: 'Armor', accessor: (e) => e.stats?.ARMOR as React.ReactNode },
                     { header: 'Size', accessor: (e) => e.stats?.SIZE as React.ReactNode },
                 ];

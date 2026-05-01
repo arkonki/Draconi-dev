@@ -11,6 +11,11 @@ import { PartyChat } from '../party/PartyChat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 import { fetchParties } from '../../lib/api/parties';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import {
+  hasEncounterStatusEffect,
+  POISONED_STATUS_EFFECT,
+  toggleEncounterStatusEffect,
+} from '../../lib/encounterStatusEffects';
 
 // --- HELPER: Editable Stat Box ---
 interface StatInputProps {
@@ -71,6 +76,8 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const isDefeated = isMonster && combatant.current_hp === 0;
   const isDying = isPlayer && combatant.current_hp === 0;
   const canEditStats = isMyCharacter;
+  const isPoisoned = hasEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT);
+  const canTogglePoison = isMyCharacter;
 
   let borderClass = isPlayer ? 'border-teal-600 bg-teal-50' : 'border-orange-700 bg-orange-50';
   if (isDefeated) borderClass = 'border-stone-400 bg-stone-200 opacity-70';
@@ -84,7 +91,27 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
       {isDefeated && <div className="absolute inset-0 flex items-center justify-center z-0 opacity-20"><span className="text-3xl font-black uppercase -rotate-12 text-black">Defeated</span></div>}
       <div className="relative z-10 flex justify-between items-start mb-2">
         <div className="flex-grow">
-          <p className={`font-bold leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>{combatant.display_name}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className={`font-bold leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-900'}`}>{combatant.display_name}</p>
+            <button
+              type="button"
+              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                isPoisoned
+                  ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                  : 'border-stone-200 bg-stone-100 text-stone-500'
+              } ${canTogglePoison ? 'hover:border-emerald-200 hover:text-emerald-700' : 'cursor-default'}`}
+              disabled={!canTogglePoison}
+              onClick={() => {
+                if (!canTogglePoison) return;
+                updateCombatant(combatant.id, {
+                  status_effects: toggleEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT),
+                });
+              }}
+              title={canTogglePoison ? `${isPoisoned ? 'Remove' : 'Apply'} poisoned status` : 'Poisoned status'}
+            >
+              Poisoned
+            </button>
+          </div>
           {isDying && <span className="text-xs font-bold text-red-600 flex items-center gap-1"><Skull size={12} /> DYING</span>}
         </div>
         <div className="flex items-center gap-2 ml-2">

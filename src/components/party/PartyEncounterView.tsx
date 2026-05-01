@@ -33,9 +33,28 @@ import {
 import { useDice } from '../dice/useDice';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
+import {
+  hasEncounterStatusEffect,
+  POISONED_STATUS_EFFECT,
+  toggleEncounterStatusEffect,
+} from '../../lib/encounterStatusEffects';
 
 // --- TYPES ---
-export interface MonsterStats { HP?: number; SIZE?: string; ARMOR?: number; FEROCITY?: number; MOVEMENT?: number;[key: string]: unknown; }
+export interface MonsterStats {
+  HP?: number;
+  WP?: number;
+  SIZE?: string;
+  ARMOR?: number;
+  FEROCITY?: number;
+  MOVEMENT?: number;
+  IS_NPC?: boolean;
+  TYPE?: string;
+  SKILLS?: string;
+  HEROIC_ABILITIES?: string;
+  DAMAGE_BONUS?: string;
+  GEAR?: string;
+  [key: string]: unknown;
+}
 export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values?: string; }
 export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
 interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
@@ -141,7 +160,9 @@ const getDefaultMonsterAttack = (monsterData?: MonsterData): MonsterAttack | nul
 // --- SUB-COMPONENTS ---
 const StatsTableView = ({ stats }: { stats: object }) => (
   <div className="grid grid-cols-3 gap-2 text-xs">
-    {Object.entries(stats).map(([key, value]) => (
+    {Object.entries(stats)
+      .filter(([key, value]) => key !== 'IS_NPC' && value !== '' && value !== null && value !== undefined)
+      .map(([key, value]) => (
       <div key={key} className="bg-white/50 p-1 rounded border border-stone-200 flex flex-col items-center">
         <span className="font-bold text-stone-500 uppercase text-[10px] truncate w-full text-center" title={key}>{key.replace(/_/g, ' ')}</span>
         <span className="font-mono font-bold text-stone-800">{String(value)}</span>
@@ -149,6 +170,35 @@ const StatsTableView = ({ stats }: { stats: object }) => (
     ))}
   </div>
 );
+
+const MonsterNpcDetails = ({ stats }: { stats?: MonsterStats }) => {
+  if (!stats?.IS_NPC) {
+    return null;
+  }
+
+  const sections = [
+    { label: 'Type', value: stats.TYPE },
+    { label: 'Skills', value: stats.SKILLS },
+    { label: 'Heroic Abilities', value: stats.HEROIC_ABILITIES },
+    { label: 'Damage Bonus', value: stats.DAMAGE_BONUS },
+    { label: 'Gear', value: stats.GEAR },
+  ].filter((section) => section.value && String(section.value).trim().length > 0);
+
+  if (sections.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {sections.map((section) => (
+        <div key={section.label} className="bg-stone-50 p-3 rounded border border-stone-200 text-sm">
+          <span className="text-xs font-bold text-stone-500 uppercase block mb-1">{section.label}</span>
+          <div className="whitespace-pre-wrap text-stone-800 leading-relaxed">{String(section.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 function AttackDescriptionRenderer({ description, attackName, onDamageRollComplete }: AttackDescriptionRendererProps) {
   const { toggleDiceRoller } = useDice();
@@ -634,6 +684,7 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
         {isMonster && monsterData ? (
           <div className="space-y-4">
             {monsterData.stats && <StatsTableView stats={monsterData.stats} />}
+            <MonsterNpcDetails stats={monsterData.stats} />
             {monsterData.effectsSummary && (<div className="bg-yellow-50 p-3 rounded border border-yellow-200 text-sm"><span className="text-xs font-bold text-yellow-800 uppercase block mb-1">Traits & Effects</span><MarkdownDiceRenderer text={monsterData.effectsSummary} contextLabel={monsterData.name} /></div>)}
             <div className="bg-stone-50 rounded-lg border border-stone-200 p-3">
               {displayedAttack ? (
@@ -684,6 +735,7 @@ interface DragonbaneCombatantCardProps {
   onSwapRequest: (id: string) => void;
   onFlipCard: (id: string, current: boolean) => void;
   onSaveStats: (id: string) => void;
+  onTogglePoison: (combatant: EncounterCombatant) => void;
   statsState: EditableCombatantStats;
   setStatsState: (value: EditableCombatantStats) => void;
   monsterData?: MonsterData;
@@ -694,7 +746,7 @@ interface DragonbaneCombatantCardProps {
   onOpenCharacterSheet: (combatant: EncounterCombatant) => void;
 }
 
-function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
+function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
   const initValue = combatant.initiative_roll ?? '-';
@@ -702,6 +754,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
   const isDying = !isMonster && combatant.current_hp === 0;
   const hpVal = statsState.current_hp ?? '';
   const wpVal = statsState.current_wp ?? '';
+  const isPoisoned = hasEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT);
 
   const isMyCharacter = myCharacterId && combatant.character_id === myCharacterId;
   const canEdit = isDM || isMyCharacter;
@@ -741,6 +794,23 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
           <div className="min-w-0 flex items-center gap-2">
             <p className={`font-bold truncate leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-800'}`}>{combatant.display_name}</p>
             <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400">{isMonster ? (monsterData?.name || 'Monster') : 'Player'}</span>
+            <button
+              type="button"
+              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                isPoisoned
+                  ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                  : 'border-stone-200 bg-stone-100 text-stone-500 hover:border-emerald-200 hover:text-emerald-700'
+              } ${canEdit ? '' : 'cursor-default'}`}
+              disabled={!canEdit}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!canEdit) return;
+                onTogglePoison(combatant);
+              }}
+              title={canEdit ? `${isPoisoned ? 'Remove' : 'Apply'} poisoned status` : 'Poisoned status'}
+            >
+              Poisoned
+            </button>
             {isMonster && isDM && (
               <span title="HP synced across all action cards">
                 <LinkIcon size={10} className="text-stone-300" />
@@ -1135,6 +1205,28 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (Object.keys(updates).length > 0) siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
   };
 
+  const handleTogglePoison = (combatant: EncounterCombatant) => {
+    const nextStatusEffects = toggleEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT);
+    let siblings = [combatant];
+
+    if (combatant.monster_id && combatantsData) {
+      siblings = getSiblings(combatant, combatantsData);
+    }
+
+    siblings.forEach((sibling) => {
+      updateCombatantMu.mutate({
+        id: sibling.id,
+        updates: { status_effects: nextStatusEffects },
+      });
+    });
+
+    appendLogMu.mutate({
+      type: 'generic',
+      ts: Date.now(),
+      message: `${combatant.display_name} ${hasEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT) ? 'is no longer poisoned' : 'is now poisoned'}.`,
+    });
+  };
+
   /*
   const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
@@ -1314,7 +1406,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
             </div>
           </div>
         </div>

@@ -20,6 +20,13 @@ const createEmptyStats = (): MonsterStats => ({
   MOVEMENT: 0,
   ARMOR: 0,
   HP: 0,
+  WP: 0,
+  IS_NPC: false,
+  TYPE: '',
+  SKILLS: '',
+  HEROIC_ABILITIES: '',
+  DAMAGE_BONUS: '',
+  GEAR: '',
 });
 
 const createEmptyAttack = (): MonsterAttackEntry => ({
@@ -37,33 +44,28 @@ const createEmptyEffect = (): MonsterEffectEntry => ({
   description: '',
 });
 
-export function MonsterForm({ entry, onChange }: MonsterFormProps) {
-  const [monsterData, setMonsterData] = useState<MonsterData>({
-    ...entry,
-    stats: entry.stats || createEmptyStats(),
-    attacks: (entry.attacks || []).map((attack) => ({
-      ...attack,
-      id: attack.id || crypto.randomUUID(),
-      effects: (attack.effects || []).map((effect) => ({
-        ...effect,
-        id: effect.id || crypto.randomUUID(),
-      })),
+const normalizeMonsterData = (entry: MonsterData): MonsterData => ({
+  ...entry,
+  effectsSummary: entry.effectsSummary || '',
+  stats: {
+    ...createEmptyStats(),
+    ...(entry.stats || {}),
+  },
+  attacks: (entry.attacks || []).map((attack) => ({
+    ...attack,
+    id: attack.id || crypto.randomUUID(),
+    effects: (attack.effects || []).map((effect) => ({
+      ...effect,
+      id: effect.id || crypto.randomUUID(),
     })),
-  });
+  })),
+});
+
+export function MonsterForm({ entry, onChange }: MonsterFormProps) {
+  const [monsterData, setMonsterData] = useState<MonsterData>(normalizeMonsterData(entry));
 
   useEffect(() => {
-    setMonsterData({
-      ...entry,
-      stats: entry.stats || createEmptyStats(),
-      attacks: (entry.attacks || []).map((attack) => ({
-        ...attack,
-        id: attack.id || crypto.randomUUID(),
-        effects: (attack.effects || []).map((effect) => ({
-          ...effect,
-          id: effect.id || crypto.randomUUID(),
-        })),
-      })),
-    });
+    setMonsterData(normalizeMonsterData(entry));
   }, [entry]);
 
   const handleInputChange = useCallback(
@@ -149,6 +151,8 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
     [monsterData.attacks, handleInputChange]
   );
 
+  const isNpcMonster = Boolean(monsterData.stats.IS_NPC);
+
   return (
     <div className="space-y-6">
       {/* Basic Info */}
@@ -181,86 +185,224 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
         />
       </div>
 
-      {/* Stats Section */}
-<div className="p-4 border rounded-md shadow-sm">
-  <h3 className="text-lg font-semibold mb-3 text-gray-800">Statistics</h3>
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-    {/* Ferocity */}
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">Ferocity</label>
-      <input
-        type="number"
-        value={monsterData.stats.FEROCITY}
-        onChange={(e) => handleStatsChange('FEROCITY', parseInt(e.target.value, 10) || 0)}
-        className="w-full px-3 py-2 border rounded-md"
-      />
-    </div>
-    {/* Size */}
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
-      <select
-        value={monsterData.stats.SIZE}
-        onChange={(e) => handleStatsChange('SIZE', e.target.value as MonsterData['stats']['SIZE'])}
-        className="w-full px-3 py-2 border rounded-md"
-      >
-        {MONSTER_SIZES.map((size) => (
-          <option key={size} value={size}>{size}</option>
-        ))}
-      </select>
-    </div>
-    {/* Movement */}
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">Movement</label>
-      <input
-        type="number"
-        value={monsterData.stats.MOVEMENT}
-        onChange={(e) => handleStatsChange('MOVEMENT', parseInt(e.target.value, 10) || 0)}
-        className="w-full px-3 py-2 border rounded-md"
-      />
-    </div>
-    {/* Armor */}
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">Armor</label>
-      <input
-        type="number"
-        value={monsterData.stats.ARMOR}
-        onChange={(e) => handleStatsChange('ARMOR', parseInt(e.target.value, 10) || 0)}
-        className="w-full px-3 py-2 border rounded-md"
-      />
-    </div>
-    {/* HP */}
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">HP</label>
-      <input
-        type="number"
-        value={monsterData.stats.HP}
-        onChange={(e) => handleStatsChange('HP', parseInt(e.target.value, 10) || 0)}
-        className="w-full px-3 py-2 border rounded-md"
-      />
-    </div>
-  </div>
+      <div className="p-4 border rounded-md shadow-sm bg-amber-50/60 border-amber-200">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800">Entry Style</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Turn this on for humanoid or named NPC-style enemies that use skills, gear, and heroic abilities instead of a pure bestiary profile.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={isNpcMonster}
+              onChange={(e) => handleStatsChange('IS_NPC', e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            NPC monster
+          </label>
+        </div>
+      </div>
 
-  {/* Effect Text Entry */}
-  <div className="mt-4">
-    <label className="block text-sm font-medium text-gray-700 mb-1">Effects Summary</label>
-    <textarea
-      value={monsterData.effectsSummary || ''}
-      onChange={(e) => handleInputChange('effectsSummary', e.target.value)}
-      rows={3}
-      placeholder="Describe any special effects or abilities here..."
-      className="w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-    />
-  </div>
-</div>
+      {isNpcMonster ? (
+        <div className="p-4 border rounded-md shadow-sm">
+          <h3 className="text-lg font-semibold mb-3 text-gray-800">NPC Monster Profile</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <input
+                type="text"
+                value={monsterData.stats.TYPE || ''}
+                onChange={(e) => handleStatsChange('TYPE', e.target.value)}
+                placeholder="e.g., Veteran Guard, Cultist, Mercenary"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Damage Bonus</label>
+              <input
+                type="text"
+                value={monsterData.stats.DAMAGE_BONUS || ''}
+                onChange={(e) => handleStatsChange('DAMAGE_BONUS', e.target.value)}
+                placeholder="e.g., +D4"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">HP</label>
+              <input
+                type="number"
+                value={monsterData.stats.HP}
+                onChange={(e) => handleStatsChange('HP', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">WP</label>
+              <input
+                type="number"
+                value={monsterData.stats.WP || 0}
+                onChange={(e) => handleStatsChange('WP', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
+              <textarea
+                value={monsterData.stats.SKILLS || ''}
+                onChange={(e) => handleStatsChange('SKILLS', e.target.value)}
+                rows={3}
+                placeholder="One line or comma-separated list of notable skills"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Heroic Abilities</label>
+              <textarea
+                value={monsterData.stats.HEROIC_ABILITIES || ''}
+                onChange={(e) => handleStatsChange('HEROIC_ABILITIES', e.target.value)}
+                rows={3}
+                placeholder="List heroic abilities or signature talents"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Gear</label>
+              <textarea
+                value={monsterData.stats.GEAR || ''}
+                onChange={(e) => handleStatsChange('GEAR', e.target.value)}
+                rows={3}
+                placeholder="Weapons, armor, consumables, valuables, and other carried gear"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 pt-5 border-t">
+            <h4 className="text-base font-semibold mb-3 text-gray-800">Optional Combat Extras</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Armor</label>
+                <input
+                  type="number"
+                  value={monsterData.stats.ARMOR}
+                  onChange={(e) => handleStatsChange('ARMOR', parseInt(e.target.value, 10) || 0)}
+                  className="w-full px-3 py-2 border rounded-md"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Movement</label>
+                <input
+                  type="number"
+                  value={monsterData.stats.MOVEMENT}
+                  onChange={(e) => handleStatsChange('MOVEMENT', parseInt(e.target.value, 10) || 0)}
+                  className="w-full px-3 py-2 border rounded-md"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ferocity</label>
+                <input
+                  type="number"
+                  value={monsterData.stats.FEROCITY}
+                  onChange={(e) => handleStatsChange('FEROCITY', parseInt(e.target.value, 10) || 0)}
+                  className="w-full px-3 py-2 border rounded-md"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
+                <select
+                  value={monsterData.stats.SIZE}
+                  onChange={(e) => handleStatsChange('SIZE', e.target.value as MonsterData['stats']['SIZE'])}
+                  className="w-full px-3 py-2 border rounded-md"
+                >
+                  {MONSTER_SIZES.map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 border rounded-md shadow-sm">
+          <h3 className="text-lg font-semibold mb-3 text-gray-800">Statistics</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ferocity</label>
+              <input
+                type="number"
+                value={monsterData.stats.FEROCITY}
+                onChange={(e) => handleStatsChange('FEROCITY', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
+              <select
+                value={monsterData.stats.SIZE}
+                onChange={(e) => handleStatsChange('SIZE', e.target.value as MonsterData['stats']['SIZE'])}
+                className="w-full px-3 py-2 border rounded-md"
+              >
+                {MONSTER_SIZES.map((size) => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Movement</label>
+              <input
+                type="number"
+                value={monsterData.stats.MOVEMENT}
+                onChange={(e) => handleStatsChange('MOVEMENT', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Armor</label>
+              <input
+                type="number"
+                value={monsterData.stats.ARMOR}
+                onChange={(e) => handleStatsChange('ARMOR', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">HP</label>
+              <input
+                type="number"
+                value={monsterData.stats.HP}
+                onChange={(e) => handleStatsChange('HP', parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 border rounded-md shadow-sm">
+        <label className="block text-sm font-medium text-gray-700 mb-1">Effects Summary</label>
+        <textarea
+          value={monsterData.effectsSummary || ''}
+          onChange={(e) => handleInputChange('effectsSummary', e.target.value)}
+          rows={3}
+          placeholder="Describe any special effects, traits, or passive abilities here..."
+          className="w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
 
       {/* Attacks Section */}
       <div className="p-4 border rounded-md shadow-sm">
         <div className="flex justify-between items-center mb-3">
-          <h3 className="text-lg font-semibold text-gray-800">Attacks (D6 Rollable Table)</h3>
+          <h3 className="text-lg font-semibold text-gray-800">Attacks {isNpcMonster ? '(Optional)' : '(D6 Rollable Table)'}</h3>
           <Button variant="secondary" size="sm" icon={PlusCircle} onClick={addAttack}>Add Attack</Button>
         </div>
         {monsterData.attacks.length === 0 && (
-          <p className="text-gray-500">No attacks defined. Click "Add Attack" to create one.</p>
+          <p className="text-gray-500">
+            {isNpcMonster
+              ? 'No attacks defined. Leave this empty for manual combat handling, or add attacks if this NPC should use a monster-style attack table.'
+              : 'No attacks defined. Click "Add Attack" to create one.'}
+          </p>
         )}
         {monsterData.attacks.map((attack, attackIndex) => (
           <div key={attack.id} className="p-3 border rounded-md mb-4 bg-gray-50">
