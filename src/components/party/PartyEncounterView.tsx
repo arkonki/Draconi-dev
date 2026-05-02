@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAllEncountersForParty,
@@ -50,13 +51,46 @@ export interface MonsterStats {
   IS_NPC?: boolean;
   TYPE?: string;
   SKILLS?: string;
+  SKILL_ENTRIES?: Array<{
+    skill_id: string;
+    name: string;
+    level: number;
+    attribute?: string | null;
+  }>;
   HEROIC_ABILITIES?: string;
+  HEROIC_ABILITY_ITEMS?: Array<{
+    ability_id: string;
+    name: string;
+    description?: string;
+    willpower_cost?: number | null;
+  }>;
   DAMAGE_BONUS?: string;
+  DAMAGE_BONUS_CONFIG?: {
+    attribute: 'STR' | 'AGL' | 'INT' | 'CHA' | 'CON' | 'WIL';
+    die: 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
+  } | null;
   GEAR?: string;
+  GEAR_ITEMS?: MonsterGearItem[];
   [key: string]: unknown;
 }
 export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values?: string; }
 export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
+export interface MonsterGearItem {
+  item_id: string;
+  name: string;
+  category?: string;
+  quantity: number;
+  description?: string;
+  damage?: string;
+  armor_rating?: number | string;
+  range?: string | number;
+  grip?: string;
+  durability?: number | string;
+  features?: string | string[];
+  effect?: string;
+  skill?: string;
+}
+type WeaponAttribute = 'STR' | 'AGL';
 interface PartyEncounterViewProps { partyId: string; partyMembers: Character[]; isDM: boolean; }
 interface EditableCombatantStats { current_hp: string; current_wp: string; initiative_roll?: string; }
 interface AttackDescriptionRendererProps {
@@ -157,11 +191,332 @@ const getDefaultMonsterAttack = (monsterData?: MonsterData): MonsterAttack | nul
   return attacks.find((attack) => !(attack.roll_values ?? '').trim()) ?? null;
 };
 
+const weaponSkillAttributeMap: Record<string, WeaponAttribute> = {
+  axes: 'STR',
+  axe: 'STR',
+  bows: 'AGL',
+  bow: 'AGL',
+  brawling: 'STR',
+  crossbows: 'AGL',
+  crossbow: 'AGL',
+  hammers: 'STR',
+  hammer: 'STR',
+  knives: 'AGL',
+  knife: 'AGL',
+  slings: 'AGL',
+  sling: 'AGL',
+  spears: 'STR',
+  spear: 'STR',
+  staves: 'AGL',
+  staff: 'AGL',
+  swords: 'STR',
+  sword: 'STR',
+};
+
+const parseBaseWeaponSkillName = (skillNameWithAttr: string | null | undefined): string | null => {
+  if (!skillNameWithAttr) {
+    return null;
+  }
+
+  return skillNameWithAttr.split('(')[0].trim();
+};
+
+const NPC_STRUCTURED_HIDDEN_KEYS = [
+  'TYPE',
+  'SKILLS',
+  'SKILL_ENTRIES',
+  'HEROIC_ABILITIES',
+  'HEROIC_ABILITY_ITEMS',
+  'DAMAGE_BONUS',
+  'DAMAGE_BONUS_CONFIG',
+  'GEAR',
+  'GEAR_ITEMS',
+];
+
+const getMonsterDamageBonusLabel = (stats?: MonsterStats) => {
+  const config = stats?.DAMAGE_BONUS_CONFIG;
+  if (config?.attribute && config?.die) {
+    return `${config.attribute} +${config.die.toUpperCase()}`;
+  }
+
+  const legacyBonus = stats?.DAMAGE_BONUS?.trim();
+  return legacyBonus ? legacyBonus : null;
+};
+
+const getMonsterSkillDisplay = (stats?: MonsterStats) => {
+  if (stats?.SKILL_ENTRIES?.length) {
+    return stats.SKILL_ENTRIES.map((entry) => `${entry.name} ${entry.level}`);
+  }
+
+  const legacySkills = stats?.SKILLS?.trim();
+  return legacySkills ? [legacySkills] : [];
+};
+
+const getMonsterSkillEntries = (stats?: MonsterStats) => {
+  if (stats?.SKILL_ENTRIES?.length) {
+    return stats.SKILL_ENTRIES.map((entry) => ({
+      skill_id: entry.skill_id,
+      name: entry.name,
+      level: typeof entry.level === 'number' ? entry.level : parseInt(String(entry.level), 10) || 1,
+      attribute: entry.attribute ?? null,
+    }));
+  }
+
+  return getMonsterSkillDisplay(stats).flatMap((entry, index) =>
+    entry
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, lineIndex) => {
+        const match = line.match(/^(.*?)(?:\s+(\d+))?$/);
+        return {
+          skill_id: `legacy-skill-${index}-${lineIndex}`,
+          name: match?.[1]?.trim() || line,
+          level: match?.[2] ? parseInt(match[2], 10) : 1,
+          attribute: null,
+        };
+      })
+  );
+};
+
+const getMonsterHeroicAbilityDisplay = (stats?: MonsterStats) => {
+  if (stats?.HEROIC_ABILITY_ITEMS?.length) {
+    return stats.HEROIC_ABILITY_ITEMS.map((entry) =>
+      entry.willpower_cost != null
+        ? `${entry.name} (WP ${entry.willpower_cost})`
+        : entry.name
+    );
+  }
+
+  const legacyAbilities = stats?.HEROIC_ABILITIES?.trim();
+  return legacyAbilities ? [legacyAbilities] : [];
+};
+
+const getMonsterHeroicAbilityEntries = (stats?: MonsterStats) => {
+  if (stats?.HEROIC_ABILITY_ITEMS?.length) {
+    return stats.HEROIC_ABILITY_ITEMS.map((entry) => ({
+      ability_id: entry.ability_id,
+      name: entry.name,
+      description: entry.description,
+      willpower_cost: entry.willpower_cost,
+    }));
+  }
+
+  return getMonsterHeroicAbilityDisplay(stats).flatMap((entry, index) =>
+    entry
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, lineIndex) => ({
+        ability_id: `legacy-ability-${index}-${lineIndex}`,
+        name: line,
+      }))
+  );
+};
+
+const parseMonsterDamageBonus = (stats?: MonsterStats) => {
+  const config = stats?.DAMAGE_BONUS_CONFIG;
+  if (config?.attribute && config?.die) {
+    return {
+      attribute: config.attribute,
+      die: config.die.toLowerCase(),
+    };
+  }
+
+  const legacyBonus = stats?.DAMAGE_BONUS?.trim();
+  if (!legacyBonus) {
+    return null;
+  }
+
+  const match = legacyBonus.match(/^(STR|AGL|INT|CHA|CON|WIL)\s*\+\s*(D\d+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    attribute: match[1].toUpperCase(),
+    die: match[2].toLowerCase(),
+  };
+};
+
+const getGearWeaponAttribute = (gearItem: MonsterGearItem): WeaponAttribute | null => {
+  const rawSkill = parseBaseWeaponSkillName(typeof gearItem.skill === 'string' ? gearItem.skill : null);
+  const normalizedSkill = rawSkill?.toLowerCase();
+  if (normalizedSkill) {
+    if (normalizedSkill in weaponSkillAttributeMap) {
+      return weaponSkillAttributeMap[normalizedSkill];
+    }
+
+    const matchedSkill = Object.entries(weaponSkillAttributeMap).find(([skillName]) =>
+      normalizedSkill === skillName ||
+      normalizedSkill.includes(skillName) ||
+      skillName.includes(normalizedSkill)
+    );
+    if (matchedSkill) {
+      return matchedSkill[1];
+    }
+  }
+
+  const normalizedCategory = gearItem.category?.trim().toUpperCase();
+  if (normalizedCategory?.includes('RANGED')) {
+    return 'AGL';
+  }
+  if (normalizedCategory?.includes('MELEE')) {
+    return 'STR';
+  }
+
+  return null;
+};
+
+const getMonsterGearDamageFormula = (gearItem: MonsterGearItem, stats?: MonsterStats) => {
+  const baseDamage = gearItem.damage?.trim();
+  if (!baseDamage) {
+    return null;
+  }
+
+  const features = gearItem.features;
+  const featuresStr = Array.isArray(features) ? features.join(' ') : (features || '');
+  const hasNoDamageBonus = featuresStr.toUpperCase().includes('NO DAMAGE BONUS');
+  const parsedBonus = parseMonsterDamageBonus(stats);
+  const weaponAttribute = getGearWeaponAttribute(gearItem);
+
+  if (hasNoDamageBonus || !parsedBonus || !weaponAttribute || parsedBonus.attribute !== weaponAttribute) {
+    return {
+      formula: baseDamage.toLowerCase().replace(/\s/g, ''),
+      display: baseDamage.toUpperCase(),
+      appliedBonus: null,
+    };
+  }
+
+  return {
+    formula: `${baseDamage.toLowerCase().replace(/\s/g, '')}+${parsedBonus.die}`,
+    display: `${baseDamage.toUpperCase()} + ${parsedBonus.die.toUpperCase()}`,
+    appliedBonus: parsedBonus,
+  };
+};
+
+const isValidDiceType = (value: string): value is 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20' => {
+  return ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(value);
+};
+
+const buildMonsterGearDamageRoll = (gearItem: MonsterGearItem, stats?: MonsterStats) => {
+  const damageConfig = getMonsterGearDamageFormula(gearItem, stats);
+  const baseDamage = gearItem.damage?.trim();
+
+  if (!damageConfig || !baseDamage) {
+    return null;
+  }
+
+  const dicePool: Array<'d4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20'> = [];
+  const formulaParts: string[] = [];
+  const baseMatch = baseDamage.match(/(\d+)?d(\d+)/i);
+
+  if (baseMatch) {
+    const numDice = baseMatch[1] ? parseInt(baseMatch[1], 10) : 1;
+    const dieType = `d${baseMatch[2]}`.toLowerCase();
+    if (isValidDiceType(dieType)) {
+      for (let i = 0; i < numDice; i += 1) {
+        dicePool.push(dieType);
+      }
+      formulaParts.push(`${numDice > 1 ? numDice : ''}${dieType.toUpperCase()}`);
+    }
+  }
+
+  if (damageConfig.appliedBonus?.die && isValidDiceType(damageConfig.appliedBonus.die)) {
+    dicePool.push(damageConfig.appliedBonus.die);
+    formulaParts.push(`${damageConfig.appliedBonus.die.toUpperCase()} (${damageConfig.appliedBonus.attribute})`);
+  }
+
+  if (dicePool.length === 0) {
+    return null;
+  }
+
+  return {
+    ...damageConfig,
+    dicePool,
+    description: `Damage: ${gearItem.name} (${formulaParts.join(' + ')})`,
+  };
+};
+
+const getEffectiveMonsterWp = (
+  combatantWp?: number | null,
+  baseMonsterWp?: number | null,
+  pendingWp?: number | null
+) => {
+  if (typeof pendingWp === 'number' && !Number.isNaN(pendingWp)) {
+    return pendingWp;
+  }
+
+  if (typeof combatantWp === 'number' && !Number.isNaN(combatantWp)) {
+    return combatantWp;
+  }
+
+  if (typeof baseMonsterWp === 'number' && !Number.isNaN(baseMonsterWp)) {
+    return baseMonsterWp;
+  }
+
+  return 0;
+};
+
+const formatGearFeatures = (features: string | string[] | undefined) => {
+  if (!features) return '';
+  return Array.isArray(features) ? features.join(', ') : features;
+};
+
+const parseNumericValue = (value: number | string | undefined) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
+};
+
+const getEquippedArmorValue = (gearItems?: MonsterGearItem[], stats?: MonsterStats) => {
+  const armorFromGear = (gearItems || []).reduce((total, gearItem) => {
+    const armor = parseNumericValue(gearItem.armor_rating);
+    const quantity = Math.max(1, gearItem.quantity || 1);
+    return total + (armor > 0 ? armor * quantity : 0);
+  }, 0);
+
+  if (armorFromGear > 0) {
+    return armorFromGear;
+  }
+
+  return parseNumericValue(stats?.ARMOR);
+};
+
+const createMonsterGearAttackDescription = (gearItem: MonsterGearItem, stats?: MonsterStats) => {
+  const damageRoll = buildMonsterGearDamageRoll(gearItem, stats);
+  const details = [
+    damageRoll?.display ? `Damage: ${damageRoll.display}` : (gearItem.damage ? `Damage: ${gearItem.damage}` : null),
+    gearItem.range ? `Range: ${gearItem.range}` : null,
+    gearItem.grip ? `Grip: ${gearItem.grip}` : null,
+    gearItem.durability ? `Durability: ${gearItem.durability}` : null,
+    gearItem.skill ? `Skill: ${gearItem.skill}` : null,
+    formatGearFeatures(gearItem.features) ? `Features: ${formatGearFeatures(gearItem.features)}` : null,
+    gearItem.effect ? `Effect: ${gearItem.effect}` : null,
+    gearItem.description ? gearItem.description : null,
+  ].filter(Boolean);
+
+  return details.join('\n');
+};
+
 // --- SUB-COMPONENTS ---
-const StatsTableView = ({ stats }: { stats: object }) => (
+const StatsTableView = ({ stats, hiddenKeys = [] }: { stats: object; hiddenKeys?: string[] }) => (
   <div className="grid grid-cols-3 gap-2 text-xs">
     {Object.entries(stats)
-      .filter(([key, value]) => key !== 'IS_NPC' && value !== '' && value !== null && value !== undefined)
+      .filter(([key, value]) =>
+        key !== 'IS_NPC'
+        && !hiddenKeys.includes(key)
+        && value !== ''
+        && value !== null
+        && value !== undefined
+      )
       .map(([key, value]) => (
       <div key={key} className="bg-white/50 p-1 rounded border border-stone-200 flex flex-col items-center">
         <span className="font-bold text-stone-500 uppercase text-[10px] truncate w-full text-center" title={key}>{key.replace(/_/g, ' ')}</span>
@@ -171,38 +526,339 @@ const StatsTableView = ({ stats }: { stats: object }) => (
   </div>
 );
 
-const MonsterNpcDetails = ({ stats }: { stats?: MonsterStats }) => {
+const MonsterNpcDetails = ({
+  stats,
+  onRollSkill,
+}: {
+  stats?: MonsterStats;
+  onRollSkill?: (skill: { skill_id: string; name: string; level: number; attribute?: string | null }) => void;
+}) => {
   if (!stats?.IS_NPC) {
     return null;
   }
 
-  const sections = [
-    { label: 'Type', value: stats.TYPE },
-    { label: 'Skills', value: stats.SKILLS },
-    { label: 'Heroic Abilities', value: stats.HEROIC_ABILITIES },
-    { label: 'Damage Bonus', value: stats.DAMAGE_BONUS },
-    { label: 'Gear', value: stats.GEAR },
-  ].filter((section) => section.value && String(section.value).trim().length > 0);
+  const skills = getMonsterSkillEntries(stats);
+  const damageBonus = getMonsterDamageBonusLabel(stats);
+  const hasDamageBonus = Boolean(damageBonus);
+  const hasGearNotes = Boolean(stats.GEAR && stats.GEAR.trim().length > 0);
 
-  if (sections.length === 0) {
+  if (!hasDamageBonus && !hasGearNotes && skills.length === 0) {
     return null;
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {sections.map((section) => (
-        <div key={section.label} className="bg-stone-50 p-3 rounded border border-stone-200 text-sm">
-          <span className="text-xs font-bold text-stone-500 uppercase block mb-1">{section.label}</span>
-          <div className="whitespace-pre-wrap text-stone-800 leading-relaxed">{String(section.value)}</div>
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {hasDamageBonus ? (
+          <div className="bg-stone-50 p-3 rounded border border-stone-200 text-sm">
+            <span className="text-xs font-bold text-stone-500 uppercase block mb-1">Damage Bonus</span>
+            <div className="inline-flex items-center rounded bg-red-50 px-2 py-1 text-sm font-semibold text-red-700">
+              {damageBonus}
+            </div>
+            <div className="mt-2 text-[11px] text-stone-500">
+              Applied automatically when equipped gear uses the same attribute.
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {skills.length > 0 ? (
+        <div className="bg-stone-50 p-3 rounded border border-stone-200 text-sm">
+          <span className="text-xs font-bold text-stone-500 uppercase block mb-2">Skills</span>
+          <div className="flex flex-wrap gap-2">
+            {skills.map((skill) => (
+              onRollSkill ? (
+                <button
+                  key={skill.skill_id}
+                  type="button"
+                  onClick={() => onRollSkill(skill)}
+                  className="rounded border border-stone-200 bg-white px-2.5 py-1.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50"
+                  title={`Roll ${skill.name} ${skill.level}`}
+                >
+                  <div className="font-semibold text-stone-900">{skill.name}</div>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
+                    <span className="rounded bg-stone-100 px-1.5 py-0.5 font-bold text-stone-700">Lvl {skill.level}</span>
+                    {skill.attribute ? <span>{skill.attribute}</span> : null}
+                  </div>
+                </button>
+              ) : (
+                <div key={skill.skill_id} className="rounded border border-stone-200 bg-white px-2.5 py-1.5">
+                  <div className="font-semibold text-stone-900">{skill.name}</div>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
+                    <span className="rounded bg-stone-100 px-1.5 py-0.5 font-bold text-stone-700">Lvl {skill.level}</span>
+                    {skill.attribute ? <span>{skill.attribute}</span> : null}
+                  </div>
+                </div>
+              )
+            ))}
+          </div>
         </div>
-      ))}
+      ) : null}
+
+      {hasGearNotes ? (
+        <div className="bg-stone-50 p-3 rounded border border-stone-200 text-sm">
+          <span className="text-xs font-bold text-stone-500 uppercase block mb-1">Gear Notes</span>
+          <div className="whitespace-pre-wrap text-stone-800 leading-relaxed">{stats.GEAR}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const MonsterEquippedGear = ({
+  gearItems,
+  stats,
+  currentWp,
+  onUseAttack,
+  onUseHeroicAbility,
+}: {
+  gearItems?: MonsterGearItem[];
+  stats?: MonsterStats;
+  currentWp?: number | null;
+  onUseAttack?: (gearItem: MonsterGearItem, result?: { total: number | null; formula: string }) => void;
+  onUseHeroicAbility?: (ability: { ability_id: string; name: string; description?: string; willpower_cost?: number | null }) => void;
+}) => {
+  const heroicAbilities = getMonsterHeroicAbilityEntries(stats);
+  const armorValue = getEquippedArmorValue(gearItems, stats);
+  const [activeTooltip, setActiveTooltip] = useState<{
+    key: string;
+    text: string;
+    top: number;
+    left: number;
+    placement: 'top' | 'bottom';
+  } | null>(null);
+
+  useEffect(() => {
+    const closeTooltipOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-npc-info-tooltip="true"]')) {
+        setActiveTooltip(null);
+      }
+    };
+
+    const closeTooltipOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveTooltip(null);
+      }
+    };
+
+    const closeTooltipOnScroll = () => setActiveTooltip(null);
+
+    document.addEventListener('pointerdown', closeTooltipOnOutsideClick);
+    document.addEventListener('keydown', closeTooltipOnEscape);
+    window.addEventListener('scroll', closeTooltipOnScroll, true);
+    window.addEventListener('resize', closeTooltipOnScroll);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeTooltipOnOutsideClick);
+      document.removeEventListener('keydown', closeTooltipOnEscape);
+      window.removeEventListener('scroll', closeTooltipOnScroll, true);
+      window.removeEventListener('resize', closeTooltipOnScroll);
+    };
+  }, []);
+
+  const getTooltipLayout = (triggerEl: HTMLElement | null) => {
+    if (!triggerEl || typeof window === 'undefined') {
+      return null;
+    }
+
+    const rect = triggerEl.getBoundingClientRect();
+    const width = 256;
+    const margin = 12;
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.min(Math.max(centerX, margin + width / 2), window.innerWidth - margin - width / 2);
+    const estimatedHeight = 240;
+    const showAbove = window.innerHeight - rect.bottom < estimatedHeight && rect.top > estimatedHeight;
+    const placement = showAbove ? 'top' as const : 'bottom' as const;
+    const top = placement === 'top'
+      ? Math.max(margin + estimatedHeight, rect.top - 8)
+      : Math.min(window.innerHeight - margin - estimatedHeight, rect.bottom + 8);
+
+    return { left, placement, top };
+  };
+
+  const showTooltip = (triggerEl: HTMLElement, tooltipKey: string, text: string) => {
+    const layout = getTooltipLayout(triggerEl);
+    if (!layout || !text) {
+      return;
+    }
+    setActiveTooltip({ key: tooltipKey, text, top: layout.top, left: layout.left, placement: layout.placement });
+  };
+
+  const hideTooltip = (tooltipKey: string) => {
+    setActiveTooltip((previous) => (previous?.key === tooltipKey ? null : previous));
+  };
+
+  const toggleTooltip = (event: React.MouseEvent<HTMLButtonElement>, tooltipKey: string, text: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const triggerEl = event.currentTarget;
+    setActiveTooltip((previous) => {
+      if (previous?.key === tooltipKey) {
+        return null;
+      }
+      const layout = getTooltipLayout(triggerEl);
+      if (!layout || !text) {
+        return null;
+      }
+      return { key: tooltipKey, text, top: layout.top, left: layout.left, placement: layout.placement };
+    });
+  };
+
+  const renderTooltipTrigger = (text: string | null, tooltipKey: string) => {
+    if (!text) {
+      return null;
+    }
+
+    const isActive = activeTooltip?.key === tooltipKey;
+
+    return (
+      <div className="relative inline-flex items-center" data-npc-info-tooltip="true">
+        <button
+          type="button"
+          aria-label="Show details"
+          aria-expanded={isActive}
+          onClick={(event) => toggleTooltip(event, tooltipKey, text)}
+          onMouseEnter={(event) => showTooltip(event.currentTarget, tooltipKey, text)}
+          onMouseLeave={() => hideTooltip(tooltipKey)}
+          onFocus={(event) => showTooltip(event.currentTarget, tooltipKey, text)}
+          onBlur={() => hideTooltip(tooltipKey)}
+          className={`inline-flex items-center rounded-full p-1 transition-colors ${
+            isActive ? 'bg-stone-200 text-stone-700' : 'text-stone-400 hover:bg-stone-200 hover:text-stone-700'
+          }`}
+        >
+          <AlertCircle size={14} />
+        </button>
+      </div>
+    );
+  };
+
+  if ((!gearItems || gearItems.length === 0) && heroicAbilities.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      {gearItems && gearItems.length > 0 ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">Equipped Gear</div>
+            <div className="rounded bg-stone-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-stone-600">
+              Armor {armorValue}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {gearItems.map((gearItem) => (
+              <div key={gearItem.item_id} className="rounded border border-stone-200 bg-stone-50 px-3 py-2">
+                {(() => {
+                  const damageConfig = getMonsterGearDamageFormula(gearItem, stats);
+                  const tooltipText = [
+                    createMonsterGearAttackDescription(gearItem),
+                    damageConfig?.appliedBonus
+                      ? `NPC damage bonus applied: ${damageConfig.appliedBonus.attribute} + ${damageConfig.appliedBonus.die.toUpperCase()}`
+                      : null,
+                    damageConfig?.display ? `Effective Damage: ${damageConfig.display}` : null,
+                  ].filter(Boolean).join('\n\n');
+
+                  return (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="truncate font-semibold text-stone-900">
+                          {gearItem.name}
+                          {gearItem.quantity > 1 ? ` x${gearItem.quantity}` : ''}
+                        </div>
+                        {renderTooltipTrigger(tooltipText || null, `gear-${gearItem.item_id}`)}
+                        {damageConfig?.display ? (
+                          <span className="rounded bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                            {damageConfig.display}
+                          </span>
+                        ) : null}
+                      </div>
+                      {damageConfig?.formula && onUseAttack ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={Dices}
+                          onClick={() => onUseAttack(gearItem)}
+                        >
+                          Use
+                        </Button>
+                      ) : null}
+                    </div>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {heroicAbilities.length > 0 ? (
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">Heroic Abilities</div>
+          <div className="space-y-2">
+            {heroicAbilities.map((ability) => {
+              const cost = ability.willpower_cost ?? 0;
+              const canAfford = cost <= 0 || (currentWp ?? 0) >= cost;
+              const tooltipText = [
+                cost > 0 ? `WP Cost: ${cost}` : 'Passive / Free',
+                ability.description || null,
+              ].filter(Boolean).join('\n\n');
+
+              return (
+                <div key={ability.ability_id} className="rounded border border-stone-200 bg-stone-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="truncate font-semibold text-stone-900">{ability.name}</div>
+                      {renderTooltipTrigger(tooltipText || null, `ability-${ability.ability_id}`)}
+                      {ability.willpower_cost != null ? (
+                        <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                          WP {ability.willpower_cost}
+                        </span>
+                      ) : null}
+                    </div>
+                    {onUseHeroicAbility ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={Zap}
+                        disabled={!canAfford}
+                        onClick={() => onUseHeroicAbility(ability)}
+                      >
+                        Use
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+      {activeTooltip && typeof document !== 'undefined' ? createPortal(
+        <div
+          data-npc-info-tooltip="true"
+          style={{ top: `${activeTooltip.top}px`, left: `${activeTooltip.left}px` }}
+          className={`fixed z-[110] w-64 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 overflow-y-auto rounded-lg bg-stone-900 p-3 text-xs leading-relaxed text-white shadow-2xl ${
+            activeTooltip.placement === 'top' ? '-translate-y-full' : ''
+          }`}
+        >
+          {activeTooltip.placement === 'bottom' ? (
+            <div className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-stone-900" />
+          ) : (
+            <div className="absolute bottom-0 left-1/2 h-3 w-3 -translate-x-1/2 translate-y-1/2 rotate-45 bg-stone-900" />
+          )}
+          <div className="whitespace-pre-wrap">{activeTooltip.text}</div>
+        </div>,
+        document.body
+      ) : null}
     </div>
   );
 };
 
 function AttackDescriptionRenderer({ description, attackName, onDamageRollComplete }: AttackDescriptionRendererProps) {
   const { toggleDiceRoller } = useDice();
-  const diceRegex = /(\d*d\d+\s*[+-]?\s*\d*)/gi;
+  const diceRegex = /((?:\d*d\d+|\d+)(?:\s*[+-]\s*(?:\d*d\d+|\d+))*)/gi;
   const parts = description.split(diceRegex);
   return (<p className="text-stone-800 mt-1 leading-relaxed">{parts.map((part, index) => {
     if (part.match(diceRegex) && part.match(/[dD]/)) {
@@ -232,7 +888,7 @@ function AttackDescriptionRenderer({ description, attackName, onDamageRollComple
 function MarkdownDiceRenderer({ text, contextLabel }: { text: string; contextLabel: string; }) {
   const { toggleDiceRoller } = useDice();
   if (!text) return null;
-  const diceRegex = /(\d*d\d+\s*[+-]?\s*\d*)/gi;
+  const diceRegex = /((?:\d*d\d+|\d+)(?:\s*[+-]\s*(?:\d*d\d+|\d+))*)/gi;
   const parts = text.split(diceRegex);
   const applyMarkdown = (str: string) => { return str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>'); };
   return (<div className="whitespace-pre-wrap leading-relaxed">{parts.map((part, index) => {
@@ -546,7 +1202,32 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
     }
   }, [isOpen, tab]);
   if (!isOpen) return null;
-  const filteredMonsters = allMonsters ? allMonsters.filter((m) => m.name.toLowerCase().includes(monsterSearch.toLowerCase()) || (m.category && m.category.toLowerCase().includes(monsterSearch.toLowerCase()))).slice(0, 20) : [];
+  const normalizedSearch = monsterSearch.trim().toLowerCase();
+  const filteredMonsters = allMonsters
+    ? allMonsters
+        .filter((monster) => {
+          if (!normalizedSearch) {
+            return true;
+          }
+
+          const searchHaystack = [
+            monster.name,
+            monster.category,
+            monster.stats?.TYPE,
+            monster.stats?.IS_NPC ? 'npc' : 'monster',
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+          return searchHaystack.includes(normalizedSearch);
+        })
+        .slice(0, 20)
+    : [];
+  const selectedMonster = selectedMonsterId ? allMonsters.find((monster) => monster.id === selectedMonsterId) : null;
+  const selectedMonsterHiddenStats = selectedMonster?.stats?.IS_NPC
+    ? NPC_STRUCTURED_HIDDEN_KEYS
+    : ['GEAR_ITEMS'];
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden border border-stone-200">
@@ -554,7 +1235,127 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
         <div className="flex border-b"><button className={`flex-1 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${tab === 'party' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`} onClick={() => setTab('party')}>Party Members</button><button className={`flex-1 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${tab === 'monsters' ? 'bg-white border-b-2 border-orange-600 text-orange-600' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`} onClick={() => setTab('monsters')}>Monsters & NPCs</button></div>
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50/50">
           {tab === 'party' && (<div className="space-y-2">{availablePartyMembers.length === 0 ? <p className="text-center text-stone-400 py-8 italic">All party members added.</p> : availablePartyMembers.map((char) => (<div key={char.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700"><User size={16} /></div><span className="font-bold text-stone-800">{char.name}</span></div><Button size="sm" onClick={() => onAddParty(char.id)} icon={PlusCircle}>Add</Button></div>))}</div>)}
-          {tab === 'monsters' && (<div className="flex flex-col h-full gap-4"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" /><input ref={monsterSearchInputRef} type="text" placeholder="Search monsters..." className="w-full pl-9 pr-4 py-2 border rounded shadow-sm focus:ring-2 focus:ring-orange-500 outline-none" value={monsterSearch} onChange={(e) => setMonsterSearch(e.target.value)} /></div><div className="flex-grow overflow-hidden flex flex-col md:flex-row gap-4"><div className="flex-1 overflow-y-auto border rounded bg-white divide-y">{filteredMonsters.map((m) => (<button type="button" key={m.id} className={`w-full p-3 cursor-pointer hover:bg-orange-50 text-left ${selectedMonsterId === m.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''}`} onClick={() => setSelectedMonsterId(m.id)}><p className="font-bold text-sm">{m.name}</p><p className="text-[10px] text-stone-500">{m.category}</p></button>))}</div>{selectedMonsterId && (<div className="w-full md:w-64 bg-white p-4 border rounded shadow-sm flex flex-col gap-3 flex-shrink-0 h-fit"><h4 className="font-bold text-stone-800 border-b pb-2">{allMonsters.find((m) => m.id === selectedMonsterId)?.name}</h4><div><label htmlFor="encounter-monster-count" className="text-[10px] font-bold text-stone-500 uppercase">Count</label><input id="encounter-monster-count" type="number" min="1" className="w-full p-1.5 border rounded text-sm" value={monsterCount} onChange={(e) => setMonsterCount(Math.max(1, parseInt(e.target.value) || 1))} /></div><div><label htmlFor="encounter-monster-name" className="text-[10px] font-bold text-stone-500 uppercase">Name (Opt)</label><input id="encounter-monster-name" type="text" placeholder="e.g. Boss" className="w-full p-1.5 border rounded text-sm" value={monsterCustomName} onChange={(e) => setMonsterCustomName(e.target.value)} /></div><Button className="w-full mt-2" onClick={() => { onAddMonster(selectedMonsterId, monsterCount, monsterCustomName); setMonsterCount(1); setMonsterCustomName(''); }} icon={PlusCircle}>Add to Fight</Button></div>)}</div></div>)}
+          {tab === 'monsters' && (
+            <div className="flex flex-col h-full gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" />
+                <input
+                  ref={monsterSearchInputRef}
+                  type="text"
+                  placeholder="Search monsters, NPCs, categories, or type..."
+                  className="w-full pl-9 pr-4 py-2 border rounded shadow-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                  value={monsterSearch}
+                  onChange={(e) => setMonsterSearch(e.target.value)}
+                />
+              </div>
+              <div className="text-[11px] text-stone-500">
+                NPC entries are highlighted in amber and show their type before you add them to the fight.
+              </div>
+              <div className="flex-grow min-h-0 overflow-hidden flex flex-col md:flex-row gap-4">
+                <div className="flex-1 min-h-0 overflow-y-auto border rounded bg-white divide-y">
+                  {filteredMonsters.map((monster) => {
+                    const isNpcMonster = Boolean(monster.stats?.IS_NPC);
+                    const damageBonusLabel = getMonsterDamageBonusLabel(monster.stats);
+                    return (
+                      <button
+                        type="button"
+                        key={monster.id}
+                        className={`w-full p-3 cursor-pointer text-left transition-colors ${
+                          selectedMonsterId === monster.id
+                            ? isNpcMonster
+                              ? 'bg-amber-50 border-l-4 border-amber-500'
+                              : 'bg-orange-50 border-l-4 border-orange-500'
+                            : isNpcMonster
+                              ? 'hover:bg-amber-50'
+                              : 'hover:bg-orange-50'
+                        }`}
+                        onClick={() => setSelectedMonsterId(monster.id)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-bold text-sm text-stone-900">{monster.name}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-stone-500">
+                              <span>{monster.category || 'Uncategorized'}</span>
+                              {monster.stats?.TYPE ? <span>• {monster.stats.TYPE}</span> : null}
+                            </div>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                              isNpcMonster
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {isNpcMonster ? 'NPC' : 'Monster'}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-stone-600">
+                          <span className="rounded bg-stone-100 px-1.5 py-0.5">HP {monster.stats?.HP ?? 0}</span>
+                          {typeof monster.stats?.WP === 'number' && monster.stats.WP > 0 ? (
+                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">WP {monster.stats.WP}</span>
+                          ) : null}
+                          {damageBonusLabel ? (
+                            <span className="rounded bg-red-50 px-1.5 py-0.5 text-red-700">DMG {damageBonusLabel}</span>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredMonsters.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-stone-400 italic">
+                      No monsters or NPCs matched your search.
+                    </div>
+                  ) : null}
+                </div>
+                {selectedMonster && (
+                  <div className="w-full md:w-80 md:min-w-80 min-h-0 md:max-h-full bg-white border rounded shadow-sm flex flex-col flex-shrink-0 overflow-hidden">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+                      <div className="border-b pb-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="font-bold text-stone-800">{selectedMonster.name}</h4>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                              selectedMonster.stats?.IS_NPC
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {selectedMonster.stats?.IS_NPC ? 'NPC' : 'Monster'}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-stone-500">
+                          {selectedMonster.category || 'Uncategorized'}
+                          {selectedMonster.stats?.TYPE ? ` • ${selectedMonster.stats.TYPE}` : ''}
+                        </div>
+                      </div>
+
+                      {selectedMonster.stats ? <StatsTableView stats={selectedMonster.stats} hiddenKeys={selectedMonsterHiddenStats} /> : null}
+                      <MonsterNpcDetails stats={selectedMonster.stats} />
+
+                      {selectedMonster.effectsSummary ? (
+                        <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm">
+                          <span className="text-xs font-bold text-yellow-800 uppercase block mb-1">Traits & Effects</span>
+                          <MarkdownDiceRenderer text={selectedMonster.effectsSummary} contextLabel={selectedMonster.name} />
+                        </div>
+                      ) : null}
+
+                      <div>
+                        <label htmlFor="encounter-monster-count" className="text-[10px] font-bold text-stone-500 uppercase">Count</label>
+                        <input id="encounter-monster-count" type="number" min="1" className="w-full p-1.5 border rounded text-sm" value={monsterCount} onChange={(e) => setMonsterCount(Math.max(1, parseInt(e.target.value) || 1))} />
+                      </div>
+                      <div>
+                        <label htmlFor="encounter-monster-name" className="text-[10px] font-bold text-stone-500 uppercase">Name (Opt)</label>
+                        <input id="encounter-monster-name" type="text" placeholder={selectedMonster.stats?.IS_NPC ? 'e.g. Captain Rusk' : 'e.g. Boss'} className="w-full p-1.5 border rounded text-sm" value={monsterCustomName} onChange={(e) => setMonsterCustomName(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="border-t bg-white p-4">
+                      <Button className="w-full" onClick={() => { onAddMonster(selectedMonster.id, monsterCount, monsterCustomName); setMonsterCount(1); setMonsterCustomName(''); }} icon={PlusCircle}>Add to Fight</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <div className="p-3 border-t bg-stone-50 flex justify-end"><Button onClick={onClose} variant="secondary">Done</Button></div>
       </div>
@@ -640,22 +1441,32 @@ function RollTablesModal({ isOpen, onClose, partyId }: RollTablesModalProps) {
   );
 }
 
-function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onWait, onOpenCharacterSheet, isDM }: {
+function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onUseHeroicAbility, onWait, onOpenCharacterSheet, isDM }: {
   combatant: EncounterCombatant,
   monsterData?: MonsterData,
   currentAttack?: MonsterAttack | null,
   onRollAttack: () => void,
   onEndTurn: () => void,
   onOpenAttackModal: (result?: { total: number | null; formula: string }, attackName?: string) => void,
+  onUseHeroicAbility?: (ability: { ability_id: string; name: string; description?: string; willpower_cost?: number | null }) => void,
   onWait: () => void,
   onOpenCharacterSheet?: () => void,
   isDM: boolean
 }) {
+  const { toggleDiceRoller } = useDice();
   const isMonster = !!combatant.monster_id;
   const canControl = isDM || (!isMonster);
   const hasAttackTable = hasRollableMonsterAttacks(monsterData);
   const defaultAttack = !currentAttack ? getDefaultMonsterAttack(monsterData) : null;
   const displayedAttack = currentAttack || defaultAttack;
+  const effectiveWp = getEffectiveMonsterWp(combatant.current_wp, monsterData?.stats?.WP);
+  const spotlightStats = monsterData?.stats
+    ? {
+        ...monsterData.stats,
+        HP: combatant.current_hp,
+        ...(effectiveWp > 0 || monsterData.stats.WP != null ? { WP: effectiveWp } : {}),
+      }
+    : undefined;
   const attackHeading = currentAttack
     ? 'Active Action (Rolled)'
     : defaultAttack
@@ -683,8 +1494,60 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
       <div className="p-4">
         {isMonster && monsterData ? (
           <div className="space-y-4">
-            {monsterData.stats && <StatsTableView stats={monsterData.stats} />}
-            <MonsterNpcDetails stats={monsterData.stats} />
+            {spotlightStats && <StatsTableView stats={spotlightStats} hiddenKeys={monsterData.stats?.IS_NPC ? NPC_STRUCTURED_HIDDEN_KEYS : ['GEAR_ITEMS']} />}
+            <MonsterNpcDetails
+              stats={monsterData.stats}
+              onRollSkill={canControl ? (skill) => {
+                toggleDiceRoller?.({
+                  initialDice: ['d20'],
+                  rollMode: 'skillCheck',
+                  targetValue: skill.level,
+                  description: `${combatant.display_name}: ${skill.name}`,
+                  skillName: skill.name,
+                });
+              } : undefined}
+            />
+            <MonsterEquippedGear
+              gearItems={monsterData.stats?.GEAR_ITEMS}
+              stats={monsterData.stats}
+              currentWp={effectiveWp}
+              onUseAttack={(gearItem, result) => {
+                const damageConfig = getMonsterGearDamageFormula(gearItem, monsterData.stats);
+                const damageRoll = buildMonsterGearDamageRoll(gearItem, monsterData.stats);
+                if (result) {
+                  onOpenAttackModal(result, gearItem.name);
+                  return;
+                }
+
+                if (damageRoll?.dicePool.length) {
+                  toggleDiceRoller?.({
+                    rollMode: 'attackDamage',
+                    initialDice: damageRoll.dicePool,
+                    description: damageRoll.description,
+                    onRollComplete: (rollResult) => {
+                      const total = typeof rollResult.finalOutcome === 'number' ? rollResult.finalOutcome : null;
+                      onOpenAttackModal({ total, formula: damageRoll.display }, gearItem.name);
+                    },
+                  });
+                  return;
+                }
+
+                if (damageConfig?.formula) {
+                  toggleDiceRoller?.({
+                    dice: damageConfig.formula,
+                    label: `${gearItem.name} - Damage`,
+                    onRollComplete: (rollResult) => {
+                      const total = typeof rollResult.finalOutcome === 'number' ? rollResult.finalOutcome : null;
+                      onOpenAttackModal({ total, formula: damageConfig.display }, gearItem.name);
+                    },
+                  });
+                  return;
+                }
+
+                onOpenAttackModal(undefined, gearItem.name);
+              }}
+              onUseHeroicAbility={isDM ? onUseHeroicAbility : undefined}
+            />
             {monsterData.effectsSummary && (<div className="bg-yellow-50 p-3 rounded border border-yellow-200 text-sm"><span className="text-xs font-bold text-yellow-800 uppercase block mb-1">Traits & Effects</span><MarkdownDiceRenderer text={monsterData.effectsSummary} contextLabel={monsterData.name} /></div>)}
             <div className="bg-stone-50 rounded-lg border border-stone-200 p-3">
               {displayedAttack ? (
@@ -772,8 +1635,10 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
     }
   };
 
-  const maxWp = combatant.max_wp || combatant.character?.max_wp || 0;
-  const showWp = !isMonster || maxWp > 0;
+  const baseMaxWp = combatant.max_wp || combatant.character?.max_wp || 0;
+  const npcMaxWp = monsterData?.stats?.WP || combatant.current_wp || 0;
+  const maxWp = isMonster ? npcMaxWp : baseMaxWp;
+  const showWp = !isMonster || maxWp > 0 || (combatant.current_wp ?? 0) > 0;
 
   return (
     <div className={`relative flex items-center gap-3 p-2 pr-3 rounded-lg border shadow-sm transition-all cursor-pointer overflow-hidden ${isDefeated ? 'bg-stone-200 border-stone-400 opacity-80' : hasActed ? 'bg-stone-100 border-stone-200 opacity-60 grayscale' : isSelected ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-stone-200 hover:border-stone-300 hover:shadow-md'} ${isSwapSource ? 'ring-2 ring-purple-500 bg-purple-50 animate-pulse' : ''}`} onClick={() => onSelect(combatant.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(combatant.id); } }} role="button" tabIndex={0}>
@@ -1110,7 +1975,8 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (!combatants) return;
     const init: Record<string, EditableCombatantStats> = {};
     combatants.forEach(c => {
-      const maxWp = c.max_wp || c.character?.max_wp || 0;
+      const monsterWp = c.monster_id ? (monstersById.get(c.monster_id || '')?.stats?.WP || 0) : 0;
+      const maxWp = c.monster_id ? monsterWp : (c.max_wp || c.character?.max_wp || 0);
       init[c.id] = {
         current_hp: String(c.current_hp ?? 0),
         current_wp: maxWp > 0 ? String(c.current_wp ?? c.character?.current_wp ?? maxWp) : String(c.current_wp ?? ''),
@@ -1118,7 +1984,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
       };
     });
     setEditingStats(init);
-  }, [combatants]);
+  }, [combatants, monstersById]);
 
   // FIX: ROBUST AUTO-SELECTION
   useEffect(() => {
@@ -1227,6 +2093,68 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     });
   };
 
+  const handleUseMonsterHeroicAbility = (
+    combatant: EncounterCombatant,
+    ability: { ability_id: string; name: string; description?: string; willpower_cost?: number | null }
+  ) => {
+    const cost = ability.willpower_cost ?? 0;
+    const currentWp = getEffectiveMonsterWp(
+      combatant.current_wp,
+      combatant.monster_id ? monstersById.get(combatant.monster_id)?.stats?.WP : null,
+      Number.parseInt(editingStats[combatant.id]?.current_wp ?? '', 10)
+    );
+
+    if (cost > 0 && currentWp < cost) {
+      setFeedbackToast({ id: Date.now(), text: `Not enough WP for ${ability.name}.`, type: 'error' });
+      setTimeout(() => setFeedbackToast(null), 2500);
+      return;
+    }
+
+    const updatedWp = Math.max(0, currentWp - cost);
+    let siblings = [combatant];
+    if (combatant.monster_id && combatantsData) {
+      siblings = getSiblings(combatant, combatantsData);
+    }
+
+    siblings.forEach((sibling) => {
+      updateCombatantMu.mutate({
+        id: sibling.id,
+        updates: { current_wp: updatedWp },
+      });
+    });
+
+    setEditingStats((previous) => ({
+      ...previous,
+      [combatant.id]: {
+        ...(previous[combatant.id] || { current_hp: String(combatant.current_hp ?? 0), current_wp: String(currentWp) }),
+        current_wp: String(updatedWp),
+      },
+    }));
+
+    if (cost > 0) {
+      appendLogMu.mutate({
+        type: 'wp_change',
+        ts: Date.now(),
+        who: combatant.id,
+        name: combatant.display_name,
+        delta: -cost,
+      });
+    }
+
+    appendLogMu.mutate({
+      type: 'generic',
+      ts: Date.now(),
+      message: `${combatant.display_name} used ${ability.name}${cost > 0 ? ` for ${cost} WP` : ''}.`,
+    });
+
+    setFeedbackToast({
+      id: Date.now(),
+      text: cost > 0 ? `${ability.name} used. ${updatedWp} WP left.` : `${ability.name} activated.`,
+      type: 'success',
+    });
+    setTimeout(() => setFeedbackToast(null), 2500);
+  };
+
   /*
   const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
@@ -1264,6 +2192,31 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
     setFeedbackToast({ id: Date.now(), text: `${m.name} has no attack entry for roll ${roll}.`, type: 'error' });
     setTimeout(() => setFeedbackToast(null), 3000);
+  };
+
+  const handlePrepareGearAttack = (
+    combatantId: string,
+    gearItem: MonsterGearItem,
+    result?: { total: number | null; formula: string }
+  ) => {
+    setCurrentMonsterAttacks((previous) => ({
+      ...previous,
+      [combatantId]: {
+        name: gearItem.name,
+        description: createMonsterGearAttackDescription(gearItem, monstersById.get(combatants.find((combatant) => combatant.id === combatantId)?.monster_id || '')?.stats),
+        effects: [],
+      },
+    }));
+
+    setCurrentMonsterAttackContexts((previous) => ({
+      ...previous,
+      [combatantId]: {
+        roll: previous[combatantId]?.roll ?? 0,
+        attackName: gearItem.name,
+        damage: result?.total ?? null,
+        damageFormula: result?.formula ?? null,
+      },
+    }));
   };
 
   const handleMonsterDamageRollComplete = (combatantId: string, attackName: string, result: { total: number | null; formula: string }) => {
@@ -1393,11 +2346,19 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                 onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData as MonsterData)}
                 onEndTurn={() => handleFlip(activeCombatant.id, false)}
                 onOpenAttackModal={(result, attackName) => {
-                  if (result && activeCombatant.monster_id) {
-                    handleMonsterDamageRollComplete(activeCombatant.id, attackName || currentMonsterAttacks[activeCombatant.id]?.name || 'Attack', result);
+                  const resolvedAttackName = attackName || currentMonsterAttacks[activeCombatant.id]?.name || 'Attack';
+                  if (activeCombatant.monster_id) {
+                    const gearMatch = activeCombatantMonsterData?.stats?.GEAR_ITEMS?.find((gearItem) => gearItem.name === resolvedAttackName);
+                    if (gearMatch) {
+                      handlePrepareGearAttack(activeCombatant.id, gearMatch, result);
+                    } else
+                    if (result) {
+                      handleMonsterDamageRollComplete(activeCombatant.id, resolvedAttackName, result);
+                    }
                   }
                   setIsAttackModalOpen(true);
                 }}
+                onUseHeroicAbility={(ability) => handleUseMonsterHeroicAbility(activeCombatant, ability)}
                 onWait={() => setIsWaitModalOpen(true)}
                 onOpenCharacterSheet={() => handleOpenCharacterSheet(activeCombatant)}
                 isDM={isDM}
