@@ -920,9 +920,12 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
       {/* Attacks Section */}
       <div className="p-4 border rounded-md shadow-sm">
         <div className="flex justify-between items-center mb-3">
-          <h3 className="text-lg font-semibold text-gray-800">Attacks {isNpcMonster ? '(Optional)' : '(D6 Rollable Table)'}</h3>
+          <h3 className="text-lg font-semibold text-gray-800">Attacks {isNpcMonster ? '(Optional)' : '(D4/D6/D8 Rollable Table)'}</h3>
           <Button variant="secondary" size="sm" icon={PlusCircle} onClick={addAttack}>Add Attack</Button>
         </div>
+        <p className="text-sm text-gray-500 mb-3">
+          Highest attack roll value determines the table die automatically: `1-4` uses D4, `1-6` uses D6, and `1-8` uses D8.
+        </p>
         {monsterData.attacks.length === 0 && (
           <p className="text-gray-500">
             {isNpcMonster
@@ -935,7 +938,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
               <input
                 type="text"
-                placeholder="Roll Values (e.g., 1, 2-3)"
+                placeholder="Roll Values (e.g., 1, 2-3, 7-8)"
                 value={attack.roll_values}
                 onChange={(e) => updateAttack(attackIndex, 'roll_values', e.target.value)}
                 className="px-3 py-2 border rounded-md"

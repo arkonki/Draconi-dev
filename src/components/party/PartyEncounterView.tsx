@@ -41,6 +41,7 @@ import {
   POISONED_STATUS_EFFECT,
   toggleEncounterStatusEffect,
 } from '../../lib/encounterStatusEffects';
+import { type MonsterAttackTableDie, rollMonsterAttackTable } from '../../lib/monsterAttackTable';
 import { resolveMonsterFerocity } from '../../lib/monsterFerocity';
 
 // --- TYPES ---
@@ -103,6 +104,7 @@ interface AttackDescriptionRendererProps {
 }
 interface MonsterAttackResolutionContext {
   roll: number;
+  tableDie: MonsterAttackTableDie;
   attackName: string;
   damage: number | null;
   damageFormula: string | null;
@@ -113,7 +115,7 @@ interface CombatLogEntry {
   round?: number;
   name?: string;
   delta?: number;
-  attack?: { name?: string };
+  attack?: { name?: string; tableDie?: MonsterAttackTableDie };
   roll?: number;
   attacker?: string;
   target?: string;
@@ -980,7 +982,7 @@ function LogEntry({ entry }: { entry: CombatLogEntry }) {
       );
       break;
     }
-    case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}</div>{entry.message ? <div className="text-xs text-orange-800 mt-1">{entry.message}</div> : null}</div>); break;
+    case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}{entry.attack?.tableDie ? ` on ${entry.attack.tableDie.toUpperCase()}` : ''}</div>{entry.message ? <div className="text-xs text-orange-800 mt-1">{entry.message}</div> : null}</div>); break;
     case 'attack_resolve': content = (<span className="text-stone-700"><Crosshair size={12} className="inline mr-1" /><strong>{entry.attacker}</strong> dealt {entry.damage} damage to <strong>{entry.target}</strong></span>); break;
     default: content = <span>{entry.message || JSON.stringify(entry)}</span>;
   }
@@ -1176,7 +1178,7 @@ function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName,
         <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-4">
           {attackContext ? (
             <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-              <div className="font-semibold">Attack table roll: {attackContext.roll} ({attackContext.attackName})</div>
+              <div className="font-semibold">Attack table roll: {attackContext.roll} on {attackContext.tableDie.toUpperCase()} ({attackContext.attackName})</div>
               {attackContext.damageFormula ? (
                 <div className="text-xs text-orange-700">
                   Last damage roll {attackContext.damageFormula}
@@ -2337,7 +2339,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   const handleRollMonsterAttack = (id: string, m: MonsterData) => {
     if (!m.attacks?.length) return;
-    const roll = Math.floor(Math.random() * 6) + 1;
+    const { die: tableDie, roll } = rollMonsterAttackTable(m.attacks);
     const attack = m.attacks.find((candidate) => matchesMonsterAttackRoll(candidate.roll_values, roll)) ?? getDefaultMonsterAttack(m);
     if (attack) {
       setCurrentMonsterAttacks(p => ({ ...p, [id]: attack }));
@@ -2345,6 +2347,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         ...previous,
         [id]: {
           roll,
+          tableDie,
           attackName: attack.name,
           damage: null,
           damageFormula: null,
@@ -2356,14 +2359,14 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         who: id,
         name: m.name,
         roll,
-        attack: { name: attack.name },
+        attack: { name: attack.name, tableDie },
       });
       setSelectedActorId(id);
       setIsAttackModalOpen(true);
       return;
     }
 
-    setFeedbackToast({ id: Date.now(), text: `${m.name} has no attack entry for roll ${roll}.`, type: 'error' });
+    setFeedbackToast({ id: Date.now(), text: `${m.name} has no attack entry for roll ${roll} on ${tableDie.toUpperCase()}.`, type: 'error' });
     setTimeout(() => setFeedbackToast(null), 3000);
   };
 
@@ -2385,6 +2388,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
       ...previous,
       [combatantId]: {
         roll: previous[combatantId]?.roll ?? 0,
+        tableDie: previous[combatantId]?.tableDie ?? 'd6',
         attackName: gearItem.name,
         damage: result?.total ?? null,
         damageFormula: result?.formula ?? null,
@@ -2397,6 +2401,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
       ...previous,
       [combatantId]: {
         roll: previous[combatantId]?.roll ?? 0,
+        tableDie: previous[combatantId]?.tableDie ?? 'd6',
         attackName,
         damage: result.total,
         damageFormula: result.formula,

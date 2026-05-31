@@ -68,10 +68,10 @@ export interface MonsterEffectEntry {
   description: string;
 }
 
-// An attack, which could be part of a D6 rollable table of attacks
+// An attack, which could be part of a D4/D6/D8 rollable table of attacks
 export interface MonsterAttackEntry {
   id?: string; // For React key prop during rendering
-  roll_values?: string; // e.g., "1", "2-3", "4-6". If undefined, it's a single unconditional attack.
+  roll_values?: string; // e.g., "1", "2-3", "4-6", "7-8". If undefined, it's a single unconditional attack.
   name: string;
   description: string;
   effects?: MonsterEffectEntry[]; // Optional list of effects, which themselves can form a D6 table.
@@ -84,7 +84,7 @@ export interface MonsterData {
   description?: string;
   category?: string; // e.g., "Undead", "Beast", "Humanoid"
   stats: MonsterStats;
-  attacks: MonsterAttackEntry[]; // This is the D6 rollable table of attacks.
+  attacks: MonsterAttackEntry[]; // This is the D4/D6/D8 rollable table of attacks.
   effectsSummary?: string;
   created_at?: string; // timestamptz
   updated_at?: string; // timestamptz
