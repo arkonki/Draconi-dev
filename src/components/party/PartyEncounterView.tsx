@@ -23,6 +23,7 @@ import { fetchAllMonsters } from '../../lib/api/monsters';
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
+import { TextWithDice } from '../shared/TextWithDice';
 import { CharacterSheet } from '../character/CharacterSheet';
 import { RandomTableManager } from '../tools/RandomTableManager';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
@@ -35,6 +36,7 @@ import { useDice } from '../dice/useDice';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
 import {
+  FEAR_STATUS_EFFECT,
   hasEncounterStatusEffect,
   POISONED_STATUS_EFFECT,
   toggleEncounterStatusEffect,
@@ -131,6 +133,58 @@ interface PersistedEncounterViewState {
 
 const ENCOUNTER_VIEW_STATE_STORAGE_PREFIX = 'partyEncounterViewState';
 const getEncounterViewStateStorageKey = (partyId: string) => `${ENCOUNTER_VIEW_STATE_STORAGE_PREFIX}:${partyId}`;
+
+const FEAR_ATTACK_QUICK_INFO =
+  'When struck by a fear attack you must immediately make a roll against WIL. The roll can be pushed (optional rule) and does not count as an action.';
+
+const FEAR_EFFECT_ROWS = [
+  {
+    roll: '1',
+    title: 'Enfeebled.',
+    description:
+      'The fear drains your energy and determination. You lose 2D6 WP (to a minimum of zero) and become Disheartened.',
+  },
+  {
+    roll: '2',
+    title: 'Shaken.',
+    description: 'You suffer the Scared condition.',
+  },
+  {
+    roll: '3',
+    title: 'Panting.',
+    description: 'The intense fear leaves you out of breath and makes you Exhausted.',
+  },
+  {
+    roll: '4',
+    title: 'Pale.',
+    description:
+      'Your face turns white as a sheet. You and all player characters within 10 meters and in sight of you become Scared.',
+  },
+  {
+    roll: '5',
+    title: 'Scream.',
+    description:
+      'You scream in horror, which causes all player characters who hear the sound to immediately suffer a fear attack as well. Each person only ever needs to make one WIL roll to resist the same fear attack.',
+  },
+  {
+    roll: '6',
+    title: 'Rage.',
+    description:
+      'Your fear turns to anger, and you are forced to attack its source on your next turn - in melee combat if possible. You also become Angry.',
+  },
+  {
+    roll: '7',
+    title: 'Paralyzed.',
+    description:
+      'You are petrified with terror and unable to move. You cannot perform any action or movement on your next turn. Make another WIL roll on each subsequent turn (not an action) to break the paralysis.',
+  },
+  {
+    roll: '8',
+    title: 'Wild Panic.',
+    description:
+      'In a fit of utter panic, you flee the scene as fast as you can. On your next turn you must dash away from the source of your fear. Make another WIL roll on each subsequent turn (not an action) to stop running and act normally again.',
+  },
+];
 
 // --- HELPER: SYNC LOGIC ---
 const getSiblings = (target: EncounterCombatant, allCombatants: EncounterCombatant[]) => {
@@ -938,6 +992,76 @@ function CombatLogView({ log }: { log: CombatLogEntry[] }) {
   return (<div className="space-y-1 divide-y divide-gray-100">{log.slice().reverse().map((entry, index) => (<LogEntry key={index} entry={entry} />))}</div>);
 }
 
+function FearQuickReferenceContent() {
+  return (
+    <>
+      <div className="p-4 bg-amber-50 border-b border-amber-200">
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-amber-100 text-amber-700 shrink-0">
+            <ShieldAlert size={18} />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-bold text-stone-900 uppercase tracking-wider text-sm">Fear Quick Reference</h3>
+            <p className="text-sm text-amber-900 leading-relaxed">
+              <TextWithDice text={FEAR_ATTACK_QUICK_INFO} contextLabel="Fear Attack" />
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-stone-50 text-stone-500 text-xs font-semibold uppercase tracking-wide">
+            <tr>
+              <th className="px-4 py-3 w-14">D8</th>
+              <th className="px-4 py-3">Effect</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-100">
+            {FEAR_EFFECT_ROWS.map((effect) => (
+              <tr key={effect.roll} className="align-top">
+                <td className="px-4 py-3 font-mono font-bold text-stone-700">{effect.roll}</td>
+                <td className="px-4 py-3 text-stone-700 leading-relaxed">
+                  <span className="font-semibold text-stone-900 mr-1">{effect.title}</span>
+                  <TextWithDice text={effect.description} contextLabel={`Fear ${effect.roll}`} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+interface FearReferenceModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+function FearReferenceModal({ isOpen, onClose }: FearReferenceModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[65] p-2 md:p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-amber-200 flex flex-col">
+        <div className="p-3 md:p-4 border-b bg-stone-800 text-white flex justify-between items-center">
+          <div>
+            <h3 className="text-base md:text-lg font-bold font-serif">Fear Quick Reference</h3>
+            <p className="text-xs text-stone-300">Roll against WIL, then apply the D8 outcome</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close fear reference">
+            <XCircle size={24} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-white">
+          <FearQuickReferenceContent />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- MODAL: WAIT / SWAP TURN ---
 interface WaitTurnModalProps {
   isOpen: boolean;
@@ -1599,6 +1723,7 @@ interface DragonbaneCombatantCardProps {
   onSwapRequest: (id: string) => void;
   onFlipCard: (id: string, current: boolean) => void;
   onSaveStats: (id: string) => void;
+  onToggleFear: (combatant: EncounterCombatant) => void;
   onTogglePoison: (combatant: EncounterCombatant) => void;
   statsState: EditableCombatantStats;
   setStatsState: (value: EditableCombatantStats) => void;
@@ -1610,7 +1735,7 @@ interface DragonbaneCombatantCardProps {
   onOpenCharacterSheet: (combatant: EncounterCombatant) => void;
 }
 
-function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
+function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onToggleFear, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
   const initValue = combatant.initiative_roll ?? '-';
@@ -1618,6 +1743,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
   const isDying = !isMonster && combatant.current_hp === 0;
   const hpVal = statsState.current_hp ?? '';
   const wpVal = statsState.current_wp ?? '';
+  const hasFear = hasEncounterStatusEffect(combatant.status_effects, FEAR_STATUS_EFFECT);
   const isPoisoned = hasEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT);
 
   const isMyCharacter = myCharacterId && combatant.character_id === myCharacterId;
@@ -1657,9 +1783,26 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
 
       <div className="relative z-10 flex-grow min-w-0">
         <div className="flex justify-between items-start mb-1">
-          <div className="min-w-0 flex items-center gap-2">
-            <p className={`font-bold truncate leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-800'}`}>{combatant.display_name}</p>
+          <div className="min-w-0 flex flex-wrap items-center gap-2">
+            <p className={`font-bold min-w-0 max-w-full truncate leading-tight ${hasActed || isDefeated ? 'text-stone-500 line-through' : 'text-stone-800'}`}>{combatant.display_name}</p>
             <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400">{isMonster ? (monsterData?.name || 'Monster') : 'Player'}</span>
+            <button
+              type="button"
+              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                hasFear
+                  ? 'border-amber-300 bg-amber-100 text-amber-800'
+                  : 'border-stone-200 bg-stone-100 text-stone-500 hover:border-amber-200 hover:text-amber-700'
+              } ${canEdit ? '' : 'cursor-default'}`}
+              disabled={!canEdit}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!canEdit) return;
+                onToggleFear(combatant);
+              }}
+              title={canEdit ? `${hasFear ? 'Remove' : 'Apply'} fear status` : 'Fear status'}
+            >
+              Fear
+            </button>
             <button
               type="button"
               className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -1756,6 +1899,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const [isInitModalOpen, setIsInitModalOpen] = useState(false);
   const [isAttackModalOpen, setIsAttackModalOpen] = useState(false);
   const [isWaitModalOpen, setIsWaitModalOpen] = useState(false); // NEW: Wait Modal State
+  const [isFearModalOpen, setIsFearModalOpen] = useState(false);
   const [isRollTablesModalOpen, setIsRollTablesModalOpen] = useState(false);
   const [isCharacterSheetModalOpen, setIsCharacterSheetModalOpen] = useState(false);
   const [showEncounterList, setShowEncounterList] = useState(false);
@@ -2076,8 +2220,14 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (Object.keys(updates).length > 0) siblings.forEach(sib => updateCombatantMu.mutate({ id: sib.id, updates }));
   };
 
-  const handleTogglePoison = (combatant: EncounterCombatant) => {
-    const nextStatusEffects = toggleEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT);
+  const handleToggleStatusEffect = (
+    combatant: EncounterCombatant,
+    effectName: string,
+    activeMessage: string,
+    inactiveMessage: string
+  ) => {
+    const nextStatusEffects = toggleEncounterStatusEffect(combatant.status_effects, effectName);
+    const hadEffect = hasEncounterStatusEffect(combatant.status_effects, effectName);
     let siblings = [combatant];
 
     if (combatant.monster_id && combatantsData) {
@@ -2094,8 +2244,26 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     appendLogMu.mutate({
       type: 'generic',
       ts: Date.now(),
-      message: `${combatant.display_name} ${hasEncounterStatusEffect(combatant.status_effects, POISONED_STATUS_EFFECT) ? 'is no longer poisoned' : 'is now poisoned'}.`,
+      message: `${combatant.display_name} ${hadEffect ? inactiveMessage : activeMessage}.`,
     });
+  };
+
+  const handleTogglePoison = (combatant: EncounterCombatant) => {
+    handleToggleStatusEffect(
+      combatant,
+      POISONED_STATUS_EFFECT,
+      'is now poisoned',
+      'is no longer poisoned'
+    );
+  };
+
+  const handleToggleFear = (combatant: EncounterCombatant) => {
+    handleToggleStatusEffect(
+      combatant,
+      FEAR_STATUS_EFFECT,
+      'is now affected by fear',
+      'is no longer affected by fear'
+    );
   };
 
   const handleUseMonsterHeroicAbility = (
@@ -2302,6 +2470,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                     <Button onClick={() => setIsRollTablesModalOpen(true)} icon={Dices} variant="secondary">Tables</Button>
                   </>
                 )}
+                <Button onClick={() => setIsFearModalOpen(true)} icon={ShieldAlert} variant="secondary">Fear</Button>
                 {encounterDetails?.status === 'planning' && isDM && <Button variant="primary" icon={Play} onClick={() => startEncounterMu.mutate()}>Start</Button>}
                 {encounterDetails?.status === 'active' && isDM && (
                   <>
@@ -2372,7 +2541,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onToggleFear={handleToggleFear} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
             </div>
           </div>
         </div>
@@ -2425,6 +2594,10 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         isOpen={isRollTablesModalOpen}
         onClose={() => setIsRollTablesModalOpen(false)}
         partyId={partyId}
+      />
+      <FearReferenceModal
+        isOpen={isFearModalOpen}
+        onClose={() => setIsFearModalOpen(false)}
       />
       {showEncounterList && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl space-y-4 max-h-[80vh] flex flex-col"><div className="flex items-center justify-between"><h3 className="text-xl font-semibold">All Encounters</h3><Button variant="ghost" size="sm" onClick={() => setShowEncounterList(false)} icon={XCircle}>Close</Button></div><div className="overflow-y-auto space-y-2 border-t pt-4">{(allEncounters ?? []).map(enc => (<div key={enc.id} className={`flex items-center justify-between p-3 rounded-md ${currentEncounterId === enc.id ? 'bg-blue-100' : 'bg-gray-50'}`}><div><p className="font-semibold">{enc.name}</p><p className="text-sm text-gray-600 capitalize">Status: {enc.status}</p></div><div className="flex items-center gap-2"><Button size="sm" onClick={() => setSelectedEncounterId(enc.id)} disabled={currentEncounterId === enc.id}>Select</Button><Button size="sm" variant="outline" icon={Copy} onClick={() => duplicateEncounterMu.mutate({ id: enc.id, name: enc.name })}>Copy</Button><Button size="sm" variant="danger" icon={Trash2} onClick={() => deleteEncounterMu.mutate(enc.id)}>Del</Button></div></div>))}</div></div></div>)}
     </div>

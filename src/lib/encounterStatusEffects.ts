@@ -1,6 +1,7 @@
 import type { EncounterStatusEffect } from '../types/encounter';
 
 export const POISONED_STATUS_EFFECT = 'Poisoned';
+export const FEAR_STATUS_EFFECT = 'Fear';
 
 const normalizeStatusEffectName = (name: string) => name.trim().toLowerCase();
 
