@@ -155,7 +155,7 @@
               // If they are not provided, default them to prevent DB errors if columns are NOT NULL
               // (though our schema has defaults for stats and attacks)
               const monsterEntry = editingEntry as MonsterData;
-              dataToSave.stats = monsterEntry.stats || { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 0 };
+              dataToSave.stats = monsterEntry.stats || { FEROCITY: 1, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 0 };
               dataToSave.attacks = monsterEntry.attacks || [];
 
               // Remove temporary client-side IDs from attacks and effects before saving

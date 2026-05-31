@@ -39,6 +39,7 @@ import {
   POISONED_STATUS_EFFECT,
   toggleEncounterStatusEffect,
 } from '../../lib/encounterStatusEffects';
+import { resolveMonsterFerocity } from '../../lib/monsterFerocity';
 
 // --- TYPES ---
 export interface MonsterStats {
@@ -46,7 +47,7 @@ export interface MonsterStats {
   WP?: number;
   SIZE?: string;
   ARMOR?: number;
-  FEROCITY?: number;
+  FEROCITY?: number | string;
   MOVEMENT?: number;
   IS_NPC?: boolean;
   TYPE?: string;
@@ -2046,7 +2047,11 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   const handleAddMonster = (id: string, count: number, customName: string) => {
     const m = id ? monstersById.get(id) : null;
-    const ferocity = m?.stats?.FEROCITY || 1;
+    const encounterPlayerCount = combatantsData?.filter((combatant) => combatant.is_player_character).length || 0;
+    const ferocity = resolveMonsterFerocity(
+      m?.stats?.FEROCITY,
+      encounterPlayerCount > 0 ? encounterPlayerCount : partyMembers.length
+    );
     const nameToUse = customName || m?.name || 'Monster';
     for (let i = 1; i <= count; i++) {
       const base = count > 1 ? `${nameToUse} ${i}` : nameToUse;

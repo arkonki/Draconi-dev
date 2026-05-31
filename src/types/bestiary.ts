@@ -42,7 +42,7 @@ export interface MonsterHeroicAbilityEntry {
 }
 
 export interface MonsterStats {
-  FEROCITY: number;
+  FEROCITY: number | string;
   SIZE: MonsterSize;
   MOVEMENT: number;
   ARMOR: number;

@@ -16,6 +16,11 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchItems, GameItem } from '../../../lib/api/items';
 import { supabase } from '../../../lib/supabase';
 import { fetchHeroicAbilities } from '../../../lib/api/abilities';
+import {
+  MONSTER_FEROCITY_PC_COUNT_MINUS_ONE,
+  coerceFixedMonsterFerocity,
+  isPcCountMinusOneFerocity,
+} from '../../../lib/monsterFerocity';
 import type { Ability, AttributeName, DiceType } from '../../../types/character';
 
 interface MonsterFormProps {
@@ -24,7 +29,7 @@ interface MonsterFormProps {
 }
 
 const createEmptyStats = (): MonsterStats => ({
-  FEROCITY: 0,
+  FEROCITY: 1,
   SIZE: 'Normal',
   MOVEMENT: 0,
   ARMOR: 0,
@@ -59,6 +64,47 @@ const createEmptyEffect = (): MonsterEffectEntry => ({
   name: '',
   description: '',
 });
+
+interface FerocityFieldProps {
+  value: MonsterStats['FEROCITY'];
+  onChange: (value: MonsterStats['FEROCITY']) => void;
+}
+
+function FerocityField({ value, onChange }: FerocityFieldProps) {
+  const isDynamic = isPcCountMinusOneFerocity(value);
+
+  return (
+    <div className="space-y-2">
+      <select
+        value={isDynamic ? MONSTER_FEROCITY_PC_COUNT_MINUS_ONE : 'fixed'}
+        onChange={(e) => {
+          if (e.target.value === MONSTER_FEROCITY_PC_COUNT_MINUS_ONE) {
+            onChange(MONSTER_FEROCITY_PC_COUNT_MINUS_ONE);
+            return;
+          }
+
+          onChange(coerceFixedMonsterFerocity(value));
+        }}
+        className="w-full px-3 py-2 border rounded-md"
+      >
+        <option value="fixed">Fixed value</option>
+        <option value={MONSTER_FEROCITY_PC_COUNT_MINUS_ONE}>
+          {MONSTER_FEROCITY_PC_COUNT_MINUS_ONE}
+        </option>
+      </select>
+
+      {!isDynamic && (
+        <input
+          type="number"
+          min={1}
+          value={coerceFixedMonsterFerocity(value)}
+          onChange={(e) => onChange(coerceFixedMonsterFerocity(e.target.value))}
+          className="w-full px-3 py-2 border rounded-md"
+        />
+      )}
+    </div>
+  );
+}
 
 const normalizeMonsterData = (entry: MonsterData): MonsterData => ({
   ...entry,
@@ -786,11 +832,9 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ferocity</label>
-                <input
-                  type="number"
+                <FerocityField
                   value={monsterData.stats.FEROCITY}
-                  onChange={(e) => handleStatsChange('FEROCITY', parseInt(e.target.value, 10) || 0)}
-                  className="w-full px-3 py-2 border rounded-md"
+                  onChange={(value) => handleStatsChange('FEROCITY', value)}
                 />
               </div>
               <div>
@@ -814,11 +858,9 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Ferocity</label>
-              <input
-                type="number"
+              <FerocityField
                 value={monsterData.stats.FEROCITY}
-                onChange={(e) => handleStatsChange('FEROCITY', parseInt(e.target.value, 10) || 0)}
-                className="w-full px-3 py-2 border rounded-md"
+                onChange={(value) => handleStatsChange('FEROCITY', value)}
               />
             </div>
             <div>

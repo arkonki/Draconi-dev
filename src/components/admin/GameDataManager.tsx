@@ -176,7 +176,7 @@ const useGameDataManagement = () => {
             case 'kin': newEntry = { ...newEntry, description: '', key_attribute: '', typical_profession: '', kin_abilities: [] }; break;
             case 'profession': newEntry = { ...newEntry, description: '', key_attribute: '', skills: [] }; break;
             case 'skills': newEntry = { ...newEntry, description: '', attribute: null }; break;
-            case 'monsters': newEntry = { name: '', description: '', category: '', effectsSummary: '', stats: { FEROCITY: 0, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10, WP: 0, IS_NPC: false, TYPE: '', SKILLS: '', SKILL_ENTRIES: [], HEROIC_ABILITIES: '', HEROIC_ABILITY_ITEMS: [], DAMAGE_BONUS: '', DAMAGE_BONUS_CONFIG: null, GEAR: '', GEAR_ITEMS: [] }, attacks: [] }; break;
+            case 'monsters': newEntry = { name: '', description: '', category: '', effectsSummary: '', stats: { FEROCITY: 1, SIZE: 'Normal', MOVEMENT: 0, ARMOR: 0, HP: 10, WP: 0, IS_NPC: false, TYPE: '', SKILLS: '', SKILL_ENTRIES: [], HEROIC_ABILITIES: '', HEROIC_ABILITY_ITEMS: [], DAMAGE_BONUS: '', DAMAGE_BONUS_CONFIG: null, GEAR: '', GEAR_ITEMS: [] }, attacks: [] }; break;
             case 'bio': newEntry = { name: '', appearance: [], mementos: [], flaws: [] }; break;
             default: break;
         }
