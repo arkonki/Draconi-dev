@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Plus, Trash2, CheckCircle2, Circle, AlertTriangle, ListTodo, CheckSquare, Square, X
@@ -17,6 +17,7 @@ import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- TYPES ---
 interface PartyTasksProps {
@@ -113,6 +114,27 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
     queryKey: ['partyTasks', partyId],
     queryFn: () => fetchTasks(partyId),
     enabled: !!partyId,
+  });
+
+  const taskBindings = useMemo(() => ([{
+    bindingId: 'party-tasks',
+    event: '*' as const,
+    schema: 'public' as const,
+    table: 'party_tasks',
+    filter: `party_id=eq.${partyId}`,
+  }]), [partyId]);
+
+  useRealtimeChannel({
+    key: `party-tasks:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: taskBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: () => {
+      void queryClient.invalidateQueries({ queryKey: ['partyTasks', partyId] });
+    },
+    onReconnect: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['partyTasks', partyId] });
+    },
   });
 
   // Mutations

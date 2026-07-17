@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { TimeTracker, TimeMarker } from '../../types/timeTracker';
 import type { LucideIcon } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- TYPES & CONSTANTS ---
 
@@ -55,6 +56,7 @@ const createDefaultGridState = (): TimeTracker['grid_state'] => {
 // --- COMPONENT ---
 
 export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: string) => void }) {
+  const queryClient = useQueryClient();
   const [tracker, setTracker] = useState<TimeTracker | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeShift, setActiveShift] = useState(1);
@@ -64,6 +66,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
   const [encounterResult, setEncounterResult] = useState<{ text: string, type: 'safe' | 'danger' } | null>(null);
   const hasHydratedPersistedStateRef = useRef(false);
   const hasRestoredShiftFromPersistenceRef = useRef(false);
+  const isFetchingTrackerRef = useRef(false);
 
   const { data: customTables } = useQuery({
     queryKey: ['randomTables', partyId],
@@ -145,9 +148,11 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
     }
   }, [customTables, selectedTableId]);
 
-  // Fetch or Create Tracker
-  useEffect(() => {
-    const fetchTracker = async () => {
+  // Fetch or create the single tracker for this party.
+  const fetchTracker = useCallback(async () => {
+    if (isFetchingTrackerRef.current) return;
+    isFetchingTrackerRef.current = true;
+    try {
       const { data, error } = await supabase
         .from('time_trackers')
         .select('*')
@@ -164,18 +169,69 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
       } else if (!error) {
         const defaultState = createDefaultGridState();
 
-        const { data: newData } = await supabase
+        const { data: newData, error: createError } = await supabase
           .from('time_trackers')
           .insert({ party_id: partyId, grid_state: defaultState })
           .select()
           .single();
 
-        if (newData) setTracker(newData as unknown as TimeTracker);
+        if (newData) {
+          setTracker(newData as unknown as TimeTracker);
+        } else if (createError?.code === '23505') {
+          const { data: concurrentTracker } = await supabase
+            .from('time_trackers')
+            .select('*')
+            .eq('party_id', partyId)
+            .single();
+          if (concurrentTracker) setTracker(concurrentTracker as unknown as TimeTracker);
+        }
         setLoading(false);
       }
-    };
-    fetchTracker();
+    } finally {
+      isFetchingTrackerRef.current = false;
+    }
   }, [partyId]);
+
+  useEffect(() => {
+    void fetchTracker();
+  }, [fetchTracker]);
+
+  const timeBindings = useMemo(() => ([
+    {
+      bindingId: 'time-tracker',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'time_trackers',
+      filter: `party_id=eq.${partyId}`,
+    },
+    {
+      bindingId: 'time-random-tables',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'random_tables',
+      filter: `party_id=eq.${partyId}`,
+    },
+  ]), [partyId]);
+
+  useRealtimeChannel({
+    key: `party-time:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: timeBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: (bindingId) => {
+      if (bindingId === 'time-tracker') {
+        void fetchTracker();
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ['randomTables', partyId] });
+    },
+    onReconnect: async () => {
+      await Promise.all([
+        fetchTracker(),
+        queryClient.invalidateQueries({ queryKey: ['randomTables', partyId] }),
+      ]);
+    },
+  });
 
   const saveTracker = async (newTracker: TimeTracker) => {
     setTracker(newTracker);

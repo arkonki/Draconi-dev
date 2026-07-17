@@ -88,6 +88,26 @@ npm run test:security
 
 Run it only against a local/disposable stack. It verifies user isolation, party membership, owner-only encounter actions, upsert conflicts, expired sessions, and projector token rejection.
 
+The broader workflow rehearsal creates isolated administrator content plus a two-user party, exercises the main shared tools and local object storage, and removes every generated record when it finishes:
+
+```bash
+WORKFLOW_TEST_PASSWORD='<current-admin-password>' \
+WORKFLOW_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:workflow
+```
+
+Run it only against a local/disposable stack. It verifies all administrator game-data editors, compendium entries/templates, party joining and character linking, chat permissions, inventory logs, tasks, time tracking, random tables, notes, story ideas, maps, uploads, and encounter operations.
+
+The realtime rehearsal verifies cursor initialization, historical-event replay prevention, authorized cross-user delivery, cross-party isolation, and insert/update/delete events for the shared party tools:
+
+```bash
+REALTIME_TEST_PASSWORD='<current-admin-password>' \
+REALTIME_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:realtime
+```
+
+Collaboration uses authorized 1.2-second event polling rather than a hosted WebSocket service. Chat, inventory, party/member state, encounters, maps, tasks, time tracking, random tables, party notes, and story-library changes refresh connected party views. Projector displays independently refresh every 1.5 seconds.
+
 The housekeeping rehearsal also requires a local/disposable stack because it inserts deliberately expired rows and invokes real retention cleanup:
 
 ```bash

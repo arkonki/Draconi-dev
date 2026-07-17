@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../../contexts/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saveStoryIdea, getStoryIdeasForParty, deleteStoryIdea, updateStoryIdea } from '../../lib/api/storyIdeas';
@@ -15,6 +15,7 @@ import {
 
 import MDEditor, { commands, ICommand } from '@uiw/react-md-editor';
 import { HomebrewRenderer } from '../compendium/HomebrewRenderer';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- CONSTANTS ---
 const QUICK_PROMPTS = [
@@ -213,6 +214,57 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
     queryKey: ['storyIdeas', partyId],
     queryFn: () => getStoryIdeasForParty(partyId),
     enabled: !!user,
+  });
+
+  useEffect(() => {
+    setSelectedIdea((current) => {
+      if (!current) return current;
+      return savedIdeas?.find((idea) => idea.id === current.id) || null;
+    });
+  }, [savedIdeas]);
+
+  const storyBindings = useMemo(() => ([
+    {
+      bindingId: 'story-ideas',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'story_ideas',
+      filter: `party_id=eq.${partyId}`,
+    },
+    {
+      bindingId: 'story-members',
+      event: '*' as const,
+      schema: 'public' as const,
+      table: 'party_members',
+      filter: `party_id=eq.${partyId}`,
+    },
+    {
+      bindingId: 'story-characters',
+      event: 'UPDATE' as const,
+      schema: 'public' as const,
+      table: 'characters',
+      filter: `party_id=eq.${partyId}`,
+    },
+  ]), [partyId]);
+
+  useRealtimeChannel({
+    key: `story-library:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: storyBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: (bindingId) => {
+      if (bindingId === 'story-ideas') {
+        void queryClient.invalidateQueries({ queryKey: ['storyIdeas', partyId] });
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ['partyCharactersDetail', partyId] });
+    },
+    onReconnect: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['storyIdeas', partyId] }),
+        queryClient.invalidateQueries({ queryKey: ['partyCharactersDetail', partyId] }),
+      ]);
+    },
   });
 
   // -- EFFECTS --

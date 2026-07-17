@@ -243,7 +243,9 @@ class LocalRealtimeChannel {
     callback: (payload: RealtimePostgresChangesPayload<QueryRow>) => void;
   }> = [];
   private timer: number | null = null;
-  private afterId = 0;
+  private afterId: number | null = null;
+  private inFlight = false;
+  private closed = false;
 
   on(
     _type: 'postgres_changes',
@@ -255,27 +257,40 @@ class LocalRealtimeChannel {
   }
 
   subscribe(callback?: (status: string) => void) {
-    window.setTimeout(() => callback?.('SUBSCRIBED'), 0);
-    this.timer = window.setInterval(() => void this.poll(callback), 1200);
+    this.closed = false;
+    void this.initialize(callback);
     return this as unknown as RealtimeChannel;
   }
 
   unsubscribe() {
+    this.closed = true;
     if (this.timer !== null) window.clearInterval(this.timer);
     this.timer = null;
     return Promise.resolve('ok');
   }
 
-  private async poll(statusCallback?: (status: string) => void) {
-    const result = await apiRequest<{ events: Array<Record<string, unknown>>; lastId: number }>('/realtime/events', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        afterId: this.afterId,
-        bindings: this.bindings.map(({ event, table, filter }) => ({ event, table, filter })),
-      }),
-    });
+  private async initialize(statusCallback?: (status: string) => void) {
+    const result = await this.fetchEvents(null);
+    if (this.closed) return;
     if (result.error || !result.data) {
+      statusCallback?.('CHANNEL_ERROR');
+      return;
+    }
+
+    this.afterId = result.data.lastId;
+    statusCallback?.('SUBSCRIBED');
+    this.timer = window.setInterval(() => void this.poll(statusCallback), 1200);
+  }
+
+  private async poll(statusCallback?: (status: string) => void) {
+    if (this.inFlight || this.afterId === null || this.closed) return;
+    this.inFlight = true;
+    const result = await this.fetchEvents(this.afterId);
+    this.inFlight = false;
+    if (this.closed) return;
+    if (result.error || !result.data) {
+      if (this.timer !== null) window.clearInterval(this.timer);
+      this.timer = null;
       statusCallback?.('CHANNEL_ERROR');
       return;
     }
@@ -293,6 +308,17 @@ class LocalRealtimeChannel {
         old: (event.old_record || {}) as QueryRow,
         errors: null,
       } as RealtimePostgresChangesPayload<QueryRow>);
+    });
+  }
+
+  private fetchEvents(afterId: number | null) {
+    return apiRequest<{ events: Array<Record<string, unknown>>; lastId: number }>('/realtime/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        afterId,
+        bindings: this.bindings.map(({ event, table, filter }) => ({ event, table, filter })),
+      }),
     });
   }
 }

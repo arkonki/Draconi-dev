@@ -197,14 +197,14 @@ export class RealtimeChannelManager {
 
     switch (status) {
       case 'SUBSCRIBED': {
-        const shouldNotifyReconnect = entry.status !== 'healthy' && entry.reconnectAttempt > 0;
+        const shouldReconcile = !entry.hasEverSubscribed || entry.status !== 'healthy' || entry.reconnectAttempt > 0;
         entry.hasEverSubscribed = true;
         entry.reconnectAttempt = 0;
         this.clearTimer(entry.degradedTimer);
         entry.degradedTimer = null;
         this.setStatus(entry, 'healthy');
 
-        if (shouldNotifyReconnect) {
+        if (shouldReconcile) {
           entry.subscribers.forEach((subscriber) => {
             void subscriber.onReconnect?.();
           });

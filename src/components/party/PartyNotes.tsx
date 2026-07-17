@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   Plus, Edit2, Trash2, Save, X, Tag, Book, Search, Filter, ChevronDown,
@@ -12,6 +12,7 @@ import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { useAuth } from '../../contexts/useAuth';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { sendMessage } from '../../lib/api/chat';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- UPDATED TYPE DEFINITION ---
 interface Note {
@@ -150,6 +151,33 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   }, [partyId]);
 
   useEffect(() => { loadNotes(); }, [loadNotes]);
+
+  useEffect(() => {
+    if (viewState !== 'view') return;
+    setSelectedNote((current) => {
+      if (!current) return current;
+      return notes.find((note) => note.id === current.id) || null;
+    });
+  }, [notes, viewState]);
+
+  const noteBindings = useMemo(() => ([{
+    bindingId: 'party-notes',
+    event: '*' as const,
+    schema: 'public' as const,
+    table: 'notes',
+    filter: `party_id=eq.${partyId}`,
+  }]), [partyId]);
+
+  useRealtimeChannel({
+    key: `party-notes:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: noteBindings,
+    fallbackRefetchMs: 15000,
+    onEvent: () => {
+      void loadNotes();
+    },
+    onReconnect: loadNotes,
+  });
 
   // Deep Linking Effect
   useEffect(() => {

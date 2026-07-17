@@ -83,6 +83,7 @@ async function preparePayload(table, input, client = pool) {
 }
 
 async function accessContext(user, client = pool) {
+  const ownedParties = await client.query('SELECT id FROM parties WHERE created_by = $1', [user.id]);
   const parties = await client.query(
       `SELECT p.id FROM parties p WHERE p.created_by = $1
        UNION SELECT pm.party_id FROM party_members pm WHERE pm.user_id = $1`, [user.id]);
@@ -108,6 +109,7 @@ async function accessContext(user, client = pool) {
   return {
     user,
     admin: user.role === 'admin',
+    ownedPartyIds: new Set(ownedParties.rows.map((row) => row.id)),
     partyIds: new Set(parties.rows.map((row) => row.id)),
     characterIds: new Set(characters.rows.map((row) => row.id)),
     mapParty: new Map(maps.rows.map((row) => [row.id, row.party_id])),
@@ -144,7 +146,16 @@ function canWrite(table, row, ctx, inserting = false) {
   if (REFERENCE_TABLES.has(table) || table === 'users') return table === 'users' && row.id === ctx.user.id;
   if (table === 'characters') return inserting ? row.user_id === ctx.user.id : row.user_id === ctx.user.id;
   if (table === 'parties') return row.created_by === ctx.user.id;
-  if (table === 'party_members') return ctx.characterIds.has(row.character_id) || partyAccess(ctx, row.party_id);
+  if (table === 'party_members') {
+    if (!partyAccess(ctx, row.party_id)) return false;
+    if (inserting) return ctx.characterIds.has(row.character_id);
+    return ctx.ownedPartyIds.has(row.party_id) || ctx.characterIds.has(row.character_id)
+      || row.user_id === ctx.user.id;
+  }
+  if (table === 'messages') {
+    return partyAccess(ctx, row.party_id)
+      && (row.user_id === ctx.user.id || ctx.ownedPartyIds.has(row.party_id));
+  }
   if (PARTY_SCOPED.has(table)) return partyAccess(ctx, row.party_id);
   if (table === 'notes') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
   if (table === 'compendium' || table === 'compendium_templates') return row.created_by === ctx.user.id;
@@ -359,12 +370,20 @@ export async function executeDataQuery(user, request) {
 }
 
 export async function authorizedChangeEvents(user, afterId, bindings) {
-  const ctx = await accessContext(user);
   const tables = [...new Set((bindings || []).map((binding) => binding.table).filter((table) => TABLES.has(table)))];
-  if (tables.length === 0) return [];
+  if (afterId === null || afterId === undefined) {
+    const { rows } = await pool.query('SELECT COALESCE(MAX(id), 0) AS last_id FROM app_change_events');
+    return { events: [], lastId: Number(rows[0].last_id) };
+  }
+
+  const cursor = Number(afterId);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) throw new HttpError(400, 'Invalid realtime event cursor');
+  if (tables.length === 0) return { events: [], lastId: cursor };
+
+  const ctx = await accessContext(user);
   const { rows } = await pool.query(
     `SELECT * FROM app_change_events WHERE id > $1 AND table_name = ANY($2::text[]) ORDER BY id ASC LIMIT 250`,
-    [Number(afterId) || 0, tables],
+    [cursor, tables],
   );
   const events = rows.filter((event) => {
     const row = event.new_record || event.old_record;
@@ -376,5 +395,5 @@ export async function authorizedChangeEvents(user, afterId, bindings) {
       return expected === undefined || String(row[column]) === expected;
     });
   });
-  return { events, lastId: rows.at(-1)?.id ?? (Number(afterId) || 0) };
+  return { events, lastId: Number(rows.at(-1)?.id ?? cursor) };
 }

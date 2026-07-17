@@ -149,7 +149,8 @@ export async function executeRpc(user, name, args = {}) {
       const first = rows.find((row) => row.id === args.id1);
       const second = rows.find((row) => row.id === args.id2);
       await client.query(
-        `UPDATE encounter_combatants SET initiative_roll = CASE id WHEN $1 THEN $3 WHEN $2 THEN $4 END
+        `UPDATE encounter_combatants SET initiative_roll = CASE id
+           WHEN $1 THEN $3::integer WHEN $2 THEN $4::integer END
          WHERE id = ANY($5::uuid[])`,
         [args.id1, args.id2, second.initiative_roll, first.initiative_roll, [args.id1, args.id2]],
       );

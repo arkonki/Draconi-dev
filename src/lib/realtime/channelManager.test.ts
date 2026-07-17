@@ -119,6 +119,7 @@ describe('RealtimeChannelManager', () => {
     });
 
     client.channels[0].emitStatus('SUBSCRIBED');
+    expect(onReconnect).toHaveBeenCalledTimes(1);
     client.channels[0].emitStatus('TIMED_OUT');
 
     vi.advanceTimersByTime(200);
@@ -130,7 +131,7 @@ describe('RealtimeChannelManager', () => {
     client.channels[1].emitStatus('SUBSCRIBED');
     await Promise.resolve();
 
-    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(2);
     expect(onStatus).toHaveBeenLastCalledWith('healthy');
   });
 

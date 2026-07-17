@@ -6,6 +6,7 @@ import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Plus, Trash2, Edit3, Save, X, Dices, Search } from 'lucide-react';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 interface RandomTableManagerProps {
     partyId: string;
@@ -25,6 +26,27 @@ export function RandomTableManager({ partyId, allowedCategoryKeywords = [] }: Ra
     const { data: tables, isLoading } = useQuery({
         queryKey: ['randomTables', partyId],
         queryFn: () => fetchRandomTables(partyId),
+    });
+
+    const tableBindings = useMemo(() => ([{
+        bindingId: 'random-tables',
+        event: '*' as const,
+        schema: 'public' as const,
+        table: 'random_tables',
+        filter: `party_id=eq.${partyId}`,
+    }]), [partyId]);
+
+    useRealtimeChannel({
+        key: `random-tables:${partyId}`,
+        scope: `party:${partyId}`,
+        bindings: tableBindings,
+        fallbackRefetchMs: 15000,
+        onEvent: () => {
+            void queryClient.invalidateQueries({ queryKey: ['randomTables', partyId] });
+        },
+        onReconnect: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['randomTables', partyId] });
+        },
     });
 
     const normalizedCategoryKeywords = useMemo(

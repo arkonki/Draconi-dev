@@ -51,7 +51,12 @@ Responsibilities are intentionally separated:
 - Checksum-verified, transaction-scoped incremental SQL migrations serialized by a PostgreSQL advisory lock at API startup.
 - Coordinated database/upload recovery through both CLI tooling and the administrator Settings console, including automatic pre-restore safety sets.
 - Repeatable API security coverage for cross-user isolation, party membership, owner-only mutations, upsert conflicts, session expiry, and projector-token expiry/revocation.
+- Cleanup-safe workflow coverage for every administrator game-data editor and the major party, storage, map, and encounter paths.
+- Replay-safe realtime cursor initialization, non-overlapping polling, reconnect reconciliation, and authorized event delivery tests.
+- Live refresh coverage for chat, inventory, membership/characters, encounters/combatants, maps, tasks, time tracking, random tables, party notes, and story ideas.
 - Configurable, advisory-locked retention cleanup for expired sessions and collaboration events, with bounded batches and administrator status/manual controls.
+- Party-workflow compatibility migration for text inventory actors and automatic synchronization between party membership and `characters.party_id`.
+- Party chat deletion enforcement that permits authors and party owners, plus explicit PostgreSQL typing for initiative swaps.
 
 ## Intentional differences and open work
 
@@ -59,7 +64,7 @@ Responsibilities are intentionally separated:
 - Web Push delivery is disabled. The local endpoint returns a clear `skipped` result, and the UI remains disabled unless a VAPID key is configured. A fully local push implementation would still require browser-reachable HTTPS and a Web Push delivery path.
 - No outbound email or automatic password-reset mail is sent. Administrators can create accounts and share temporary credentials; users can change their password after login.
 - Public registration defaults to disabled (`ALLOW_REGISTRATION=false`).
-- Collaboration currently polls an authorized PostgreSQL event log about once per second. This preserves the current refresh behavior without a realtime service; native WebSockets can replace it later if traffic warrants it.
+- Collaboration polls an authorized PostgreSQL event log every 1.2 seconds. Channels establish a current cursor without replaying retained history, reconcile state after initial connection/reconnection, prevent overlapping polls, and fall back to slower refetches while degraded. Native WebSockets can replace polling later if concurrent-user traffic warrants it.
 - Uploaded images are intentionally public once their URL is known, matching the old public `images` bucket behavior. Upload/list/delete operations require authentication.
 - The reference seed is a functional starter, not a complete rules compendium. Content must be reviewed and expanded by the application owner.
 - The legacy `supabase/` directory remains only as historical implementation evidence. Docker does not mount or execute it.
@@ -80,7 +85,8 @@ Responsibilities are intentionally separated:
 - Versioned incremental migrations are implemented. API startup and administrator restores apply them transactionally, serialize concurrent runners, and refuse changed or unknown applied migrations.
 - Expired-session and change-event retention is implemented and tested. Defaults retain expired sessions for 24 hours, change events for 14 days, and run at six-hour intervals in batches of at most 20,000 rows per table per pass.
 - Review the minimal reference seed and import any lawful source material available outside Supabase.
-- Exercise each admin editor and major party tool against disposable local data.
+- Administrator editors and the major party tools are exercised by a repeatable disposable workflow suite; the current Docker checkpoint passes it end to end.
+- Realtime delivery and authorization are covered by a disposable two-user/outsider rehearsal across the shared party tables; migration `0003_shared_tool_realtime.sql` adds the remaining change triggers and enforces one time tracker per party.
 - Replace the current compatibility query endpoint over time with explicit domain endpoints for the most security-sensitive workflows.
 
 ### Phase 3 — server deployment
@@ -119,6 +125,26 @@ npm run test:security
 ```
 
 This suite creates and removes disposable users and directly expires its own test rows, so it is intended for local or otherwise disposable environments.
+
+The broader administrator/party workflow rehearsal is:
+
+```bash
+WORKFLOW_TEST_PASSWORD='<current-admin-password>' \
+WORKFLOW_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:workflow
+```
+
+It creates unique administrator reference/compendium records, a two-user party, shared tool data, an uploaded file, and encounter data. It verifies CRUD, party linking, authorization, local storage, and encounter RPCs before deleting the generated rows and object.
+
+The realtime delivery rehearsal is:
+
+```bash
+REALTIME_TEST_PASSWORD='<current-admin-password>' \
+REALTIME_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:realtime
+```
+
+It proves that channel initialization does not replay historical events, new events reach authorized party members, outsiders receive no party records, invalid cursors are rejected, and the shared tools emit insert/update/delete events. It deletes its disposable users, party data, and matching change-log rows when complete.
 
 Retention cleanup has a separate local rehearsal:
 

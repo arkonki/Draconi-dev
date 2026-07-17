@@ -639,8 +639,15 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
     const selectedPin = pins.find(p => p.id === selectedPinId);
 
     const mapBindings = useMemo(() => (
-        activeMap?.id
-            ? [
+        [
+                {
+                    bindingId: 'party-maps',
+                    event: '*' as const,
+                    schema: 'public' as const,
+                    table: 'party_maps',
+                    filter: `party_id=eq.${partyId}`,
+                },
+                ...(activeMap?.id ? [
                 {
                     bindingId: 'map-pins',
                     event: '*' as const,
@@ -655,17 +662,21 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                     table: 'party_map_drawings',
                     filter: `map_id=eq.${activeMap.id}`,
                 },
-              ]
-            : []
-    ), [activeMap?.id]);
+              ] : []),
+            ]
+    ), [activeMap?.id, partyId]);
 
     useRealtimeChannel({
         key: `map-changes-${activeMap?.id ?? 'inactive'}`,
         scope: `party:${partyId}`,
         bindings: mapBindings,
-        enabled: Boolean(activeMap?.id),
+        enabled: Boolean(partyId),
         fallbackRefetchMs: 15000,
         onEvent: (bindingId) => {
+            if (bindingId === 'party-maps') {
+                void queryClient.invalidateQueries({ queryKey: ['party-maps', partyId] });
+                return;
+            }
             if (!activeMap?.id) {
                 return;
             }
