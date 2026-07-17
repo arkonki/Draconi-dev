@@ -1,6 +1,5 @@
-import type { RealtimeChannel, RealtimePostgresChangesPayload, SupabaseClient } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimeClient, RealtimePostgresChangesPayload } from '../localBackend.types';
 import { supabase } from '../supabase';
-import type { Database } from '../database.types';
 import type { LiveSyncStatus } from '../../contexts/LiveSyncContext';
 
 type ChannelLifecycleStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOSED';
@@ -74,12 +73,12 @@ function wait(ms: number) {
 }
 
 export class RealtimeChannelManager {
-  private readonly client: Pick<SupabaseClient<Database>, 'channel' | 'removeChannel'>;
+  private readonly client: RealtimeClient;
   private readonly options: Required<ChannelManagerOptions>;
   private readonly entries = new Map<string, ManagedEntry>();
 
   constructor(
-    client: Pick<SupabaseClient<Database>, 'channel' | 'removeChannel'> = supabase,
+    client: RealtimeClient = supabase,
     options: ChannelManagerOptions = {},
   ) {
     this.client = client;

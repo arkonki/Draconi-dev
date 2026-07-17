@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { User, Session } from '@supabase/supabase-js';
+import type { User, Session } from '../lib/localBackend.types';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from './useApp';
 import { signUp as supabaseSignUp, signIn as supabaseSignIn, signOut as supabaseSignOut } from '../lib/auth/auth';

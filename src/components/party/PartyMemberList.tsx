@@ -5,7 +5,6 @@ import { Button } from '../shared/Button';
 import { removePartyMember } from '../../lib/api/parties';
 import { mapCharacterData, updateCharacter } from '../../lib/api/characters';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../../lib/supabase';
 import type { Party } from '../../lib/api/parties';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../shared/DropdownMenu';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';

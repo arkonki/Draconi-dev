@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { User } from '@supabase/supabase-js';
+import type { User } from '../localBackend.types';
 
 // Define the structure for a Party Task
 export interface PartyTask {

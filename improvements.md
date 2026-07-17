@@ -73,7 +73,7 @@ This document outlines potential areas for improvement in the Dragonbane Charact
 
 *   **Input Sanitization:** While `rehype-sanitize` is used for Markdown, ensure all user inputs are properly validated and sanitized, especially data sent to Supabase. Use Zod for validation where possible.
 *   **Supabase RLS:** Double-check and ensure Row Level Security (RLS) policies in Supabase are correctly configured and enforced for all data access patterns. Frontend checks are not sufficient for security.
-*   **Environment Variables:** Ensure sensitive keys (`SUPABASE_KEY`) are not exposed client-side if they are admin/service keys. Use Supabase's anonymous key for client-side operations and secure operations via edge functions or server-side logic if necessary. Review the `.env` and `.env.example` setup.
+*   **Environment Variables:** Keep PostgreSQL and bootstrap administrator passwords server-side. Review the Docker `.env` contract and never expose database credentials in Vite variables.
 
 ## 12. Documentation & Code Comments
 

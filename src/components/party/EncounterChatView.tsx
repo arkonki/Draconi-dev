@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { MessageSquare, Dices, Loader2, X, Heart, ShieldAlert, RotateCcw, Skull, Zap, ChevronDown } from 'lucide-react';
 import { Button } from '../shared/Button';
-import { supabase } from '../../lib/supabase';
 import type { EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
 import { useAuth } from '../../contexts/useAuth';

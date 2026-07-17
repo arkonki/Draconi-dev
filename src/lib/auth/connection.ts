@@ -4,8 +4,8 @@ export async function checkConnection(timeout = 5000): Promise<boolean> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const response = await fetch(import.meta.env.VITE_SUPABASE_URL, {
-      method: 'HEAD',
+    const response = await fetch('/api/health', {
+      method: 'GET',
       signal: controller.signal
     });
 

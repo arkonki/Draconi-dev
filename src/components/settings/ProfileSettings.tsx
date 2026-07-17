@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/useAuth';
-import { User as AuthUser } from '@supabase/supabase-js';
+import type { User as AuthUser } from '../../lib/localBackend.types';
 import { User as UserIcon, Mail, Save, AlertCircle, CheckCircle, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { PasswordChangeForm } from './PasswordChangeForm';

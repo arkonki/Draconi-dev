@@ -37,7 +37,7 @@ class FakeClient {
   channels: FakeChannel[] = [];
   removedChannels: FakeChannel[] = [];
 
-  channel(_key: string) {
+  channel() {
     const channel = new FakeChannel();
     this.channels.push(channel);
     return channel as never;

@@ -126,6 +126,12 @@ export default defineConfig({
   ],
 
   server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
     cors: {
       origin: '*', 
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -163,8 +169,6 @@ export default defineConfig({
 
           const packageName = getNodeModulePackageName(id);
           if (!packageName) return;
-
-          if (packageName.startsWith('@supabase/')) return 'supabase';
 
           if (packageName === 'react' || packageName === 'react-dom' || packageName === 'scheduler') {
             return 'react-core';

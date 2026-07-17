@@ -76,6 +76,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ['server/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['src/sw.js'],
     languageOptions: {
       globals: {
@@ -84,6 +92,12 @@ export default tseslint.config(
     },
     rules: {
       'no-undef': 'off',
+    },
+  },
+  {
+    files: ['src/contexts/LiveSyncContext.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
   {

@@ -1,102 +1,66 @@
 # Dragonbane Character Manager
 
-This project is a web application designed to help players manage their characters, parties, and game-related information for the Dragonbane RPG system. It provides features for character creation, viewing character sheets, managing party inventory and notes, and accessing a game compendium.
+Dragonbane Character Manager is a self-hosted React application for characters, parties, encounters, maps, notes, shared inventory, and game reference data.
 
-## Features
+The application now runs without Supabase, Netlify, or another hosted backend. Its runtime is three local containers:
 
-*   **Character Management**: Create, view, and manage Dragonbane characters.
-    *   Step-by-step character creation wizard.
-    *   Detailed character sheet view including attributes, skills, spells, equipment, and conditions.
-    *   Experience and advancement tracking.
-*   **Party Management**: Organize and track party details.
-    *   View party members.
-    *   Shared party inventory.
-    *   Collaborative party notes (Markdown supported).
-*   **Compendium**: Access game rules, items, spells, kin, professions, etc.
-    *   View official game data.
-    *   (Admin) Manage compendium entries.
-    *   (Potential) Support for homebrew content rendering.
-*   **Authentication**: Secure user login and registration.
-*   **Settings**: Customize user profile, appearance, and notification preferences.
-*   **Admin Panel**: (For authorized users) Manage users, game data (items, spells, etc.), and potentially system settings.
-*   **Dice Roller**: Integrated dice rolling functionality.
+- PostgreSQL 16 stores application, identity, and session data.
+- A Node.js API provides authentication, authorization, data access, RPC operations, collaboration events, and local file storage.
+- Nginx serves the production React build and proxies `/api` to Node.
 
-## Tech Stack
+## Run locally with Docker
 
-*   **Frontend**: React, TypeScript, Vite
-*   **Styling**: Tailwind CSS, clsx, tailwind-merge
-*   **Routing**: React Router
-*   **State Management**:
-    *   TanStack Query (React Query): Server state management, caching, background updates.
-    *   Zustand: Complex client-side state (e.g., character creation wizard).
-    *   React Context API: Global state (Auth, App Settings, Session Timeout, Dice).
-*   **Backend**: Supabase (Database, Authentication, potentially Edge Functions)
-*   **Forms & Validation**: Zod
-*   **Markdown**: `react-markdown`, `remark-gfm`, `rehype-raw`, `rehype-sanitize`
-*   **Linting**: ESLint with plugins for React, JSX-A11y, TypeScript
-*   **Testing**: Vitest, React Testing Library, JSDOM
-*   **Deployment**: Netlify (inferred from `netlify.toml`)
+Prerequisites: Docker Desktop (or Docker Engine with Compose v2).
 
-## Prerequisites
+1. Copy the environment template and replace both example passwords:
 
-*   Node.js (LTS version recommended)
-*   npm (comes with Node.js)
-*   A Supabase project (for database and authentication)
+   ```bash
+   cp .env.example .env
+   ```
 
-## Setup and Installation
+2. Build and start the stack:
 
-1.  **Clone the repository** (or download the source code).
-2.  **Navigate to the project directory**:
-    ```bash
-    cd your-project-directory
-    ```
-3.  **Install dependencies**:
-    ```bash
-    npm install
-    ```
-4.  **Set up environment variables**:
-    *   Create a `.env` file in the root directory by copying the example:
-        ```bash
-        cp .env.example .env
-        ```
-    *   Open the `.env` file and replace the placeholder values with your actual Supabase URL and Anon Key:
-        ```env
-        VITE_SUPABASE_URL=YOUR_SUPABASE_URL
-        VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-        # Add any other required environment variables here (e.g., for SMTP if email features are used)
-        ```
-        *Note: The `.env` file is included in `.gitignore` and should not be committed to version control.*
+   ```bash
+   npm run docker:up
+   ```
 
-## Running the Application
+3. Open [http://localhost:8080](http://localhost:8080) and sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` configured in `.env`.
 
-*   **Development Server**: Starts the app in development mode with hot-reloading.
-    ```bash
-    npm run dev
-    ```
-    Access the application at the URL provided by Vite (usually `http://localhost:5173`).
+The first startup initializes the schema, loads a small reference/demo seed, and creates the bootstrap administrator. It does not restore any unavailable Supabase data.
 
-*   **Linting**: Checks the codebase for potential errors and style issues.
-    ```bash
-    npm run lint
-    ```
+Useful commands:
 
-*   **Testing**: Runs the automated tests using Vitest.
-    ```bash
-    npm run test
-    ```
+```bash
+npm run docker:logs       # follow all service logs
+npm run docker:down       # stop containers; keep database and files
+npm run docker:reset      # delete local database and file volumes
+docker compose ps         # show container health
+```
 
-*   **Production Build**: Creates an optimized build of the application in the `dist/` folder.
-    ```bash
-    npm run build
-    ```
+`docker:reset` permanently deletes the local Docker data volumes. The SQL initialization scripts run only when PostgreSQL starts with an empty volume.
 
-*   **Preview Production Build**: Serves the production build locally.
-    ```bash
-    npm run preview
-    ```
+## Local ports and persistence
 
-## Deployment
+| Service | Default address | Persistent volume |
+| --- | --- | --- |
+| Web app | `http://localhost:8080` | none |
+| Node API | `http://localhost:3000/api` | `storage_data` |
+| PostgreSQL | `localhost:5432` | `postgres_data` |
 
-This project includes a `netlify.toml` file, suggesting it's configured for deployment on Netlify. Ensure your Supabase environment variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) are correctly configured in your Netlify site's build & deploy settings.
+All ports are configurable in `.env`. Browser traffic normally uses the web address; Nginx routes its `/api` requests internally.
 
-The `netlify.toml` also includes security headers (like Content Security Policy). These might need adjustment based on specific deployment needs or third-party integrations.
+Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files must both be backed up before production deployment.
+
+## Development and verification
+
+Install frontend dependencies with `npm install`. With the Docker database and API running, `npm run dev` starts Vite with `/api` proxied to port 3000.
+
+```bash
+npm run build
+npm test -- --run
+npm run lint
+```
+
+The canonical fresh-database schema is [docker/postgres/001_schema.sql](docker/postgres/001_schema.sql). The clearly labeled starter reference data is in [docker/postgres/002_seed.sql](docker/postgres/002_seed.sql).
+
+See [docs/POSTGRES_TRANSITION.md](docs/POSTGRES_TRANSITION.md) for the audit, architecture decisions, limitations, and production transition plan.

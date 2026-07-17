@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type { RealtimePostgresChangesPayload } from '../lib/localBackend.types';
 import { realtimeChannelManager, type RealtimeBinding } from '../lib/realtime/channelManager';
 import { useLiveSync, type LiveSyncStatus } from '../contexts/LiveSyncContext';
 

@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { Session, User } from '@supabase/supabase-js';
+import type { Session, User } from '../localBackend.types';
 
 // REGISTRATION - Refactored to rely on Server-Side Triggers
 export async function signUp(email: string, password: string, username: string, role: 'player' | 'dm') {

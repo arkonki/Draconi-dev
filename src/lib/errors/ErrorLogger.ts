@@ -1,4 +1,4 @@
-import { User } from '@supabase/supabase-js';
+import type { User } from '../localBackend.types';
 
 interface ErrorContext {
   user?: User | null;
