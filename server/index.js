@@ -6,6 +6,18 @@ import { handleError, HttpError, readJson, routePath, sendJson } from './http.js
 import { projectorFunction } from './projector.js';
 import { executeRpc } from './rpc.js';
 import { listObjects, removeObjects, servePublicObject, uploadObject } from './storage.js';
+import {
+  beginApplicationRequest,
+  createAndDownloadBackup,
+  downloadStoredBackup,
+  endApplicationRequest,
+  listBackups,
+  maintenanceStatus,
+  recoveryDatabaseName,
+  restoreStagedBackup,
+  stageStoredBackup,
+  stageUploadedBackup,
+} from './recovery.js';
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -16,7 +28,22 @@ function matchPath(pathname, expression) {
 
 const server = http.createServer(async (request, response) => {
   const pathname = routePath(request);
+  let trackedRequest = false;
   try {
+    const maintenance = maintenanceStatus();
+    if (maintenance.active) {
+      if (pathname === '/api/health' && request.method === 'GET') {
+        sendJson(response, 200, { status: 'maintenance', operation: maintenance.operation, database: 'postgresql' });
+        return;
+      }
+      throw new HttpError(503, `Application is temporarily unavailable during ${maintenance.operation}`, 'MAINTENANCE_MODE');
+    }
+
+    if (pathname !== '/api/health') {
+      beginApplicationRequest();
+      trackedRequest = true;
+    }
+
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
         'access-control-allow-origin': '*',
@@ -30,6 +57,38 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/health' && request.method === 'GET') {
       await pool.query('SELECT 1');
       sendJson(response, 200, { status: 'ok', database: 'postgresql' });
+      return;
+    }
+
+    if (pathname === '/api/admin/recovery/backup' && request.method === 'POST') {
+      await createAndDownloadBackup(response, await currentUser(request));
+      return;
+    }
+    if (pathname === '/api/admin/recovery/backups' && request.method === 'GET') {
+      sendJson(response, 200, {
+        data: await listBackups(await currentUser(request)),
+        databaseName: recoveryDatabaseName(),
+      });
+      return;
+    }
+    const storedBackupMatch = matchPath(pathname, /^\/api\/admin\/recovery\/backups\/([^/]+)$/);
+    if (storedBackupMatch && request.method === 'GET') {
+      await downloadStoredBackup(response, await currentUser(request), storedBackupMatch[0]);
+      return;
+    }
+    if (pathname === '/api/admin/recovery/stage-upload' && request.method === 'POST') {
+      sendJson(response, 200, await stageUploadedBackup(request, await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/recovery/stage-server' && request.method === 'POST') {
+      const user = await currentUser(request);
+      const body = await readJson(request, 50_000);
+      sendJson(response, 200, await stageStoredBackup(user, body.filename));
+      return;
+    }
+    if (pathname === '/api/admin/recovery/restore' && request.method === 'POST') {
+      const user = await currentUser(request);
+      sendJson(response, 200, await restoreStagedBackup(user, await readJson(request, 50_000)));
       return;
     }
 
@@ -114,7 +173,14 @@ const server = http.createServer(async (request, response) => {
 
     throw new HttpError(404, 'Endpoint not found');
   } catch (error) {
-    handleError(response, error);
+    if (response.headersSent) {
+      console.error(error);
+      response.destroy();
+    } else {
+      handleError(response, error);
+    }
+  } finally {
+    if (trackedRequest) endApplicationRequest();
   }
 });
 
@@ -124,11 +190,32 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Dragonbane local API listening on port ${PORT}`);
 });
 
-async function shutdown() {
-  server.close();
-  await pool.end();
-  process.exit(0);
+let shutdownStarted = false;
+
+async function shutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`Received ${signal}; waiting for active requests to finish...`);
+
+  const forceExit = setTimeout(() => {
+    console.error('Graceful shutdown timed out.');
+    process.exit(1);
+  }, 8_000);
+  forceExit.unref();
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+      server.closeIdleConnections?.();
+    });
+    await pool.end();
+    clearTimeout(forceExit);
+    process.exit(0);
+  } catch (error) {
+    console.error('Graceful shutdown failed:', error);
+    process.exit(1);
+  }
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

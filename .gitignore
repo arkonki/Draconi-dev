@@ -43,6 +43,9 @@ dist-ssr
 /dist
 /netlify/functions
 
+# Local database and uploaded-file backups
+/backups
+
 # Typescript cache
 *.tsbuildinfo
 

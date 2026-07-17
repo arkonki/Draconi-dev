@@ -38,6 +38,15 @@ function authHeaders(extra: HeadersInit = {}) {
   return headers;
 }
 
+export function authenticatedApiFetch(path: string, init: RequestInit = {}) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return fetch(`${API_BASE}${normalizedPath}`, { ...init, headers: authHeaders(init.headers) });
+}
+
+export function clearLocalSession() {
+  storeSession(null);
+}
+
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<{ data: T | null; error: LocalApiError | null; status: number }> {
   try {
     const response = await fetch(`${API_BASE}${path}`, { ...init, headers: authHeaders(init.headers) });

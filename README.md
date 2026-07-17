@@ -37,7 +37,7 @@ npm run docker:reset      # delete local database and file volumes
 docker compose ps         # show container health
 ```
 
-`docker:reset` permanently deletes the local Docker data volumes. The SQL initialization scripts run only when PostgreSQL starts with an empty volume.
+`docker:reset` permanently deletes the local PostgreSQL, upload, and retained-backup Docker volumes. Download any recovery set you need to keep before using it. The SQL initialization scripts run only when PostgreSQL starts with an empty volume.
 
 ## Local ports and persistence
 
@@ -46,10 +46,21 @@ docker compose ps         # show container health
 | Web app | `http://localhost:8080` | none |
 | Node API | `http://localhost:3000/api` | `storage_data` |
 | PostgreSQL | `localhost:5432` | `postgres_data` |
+| Server recovery sets | Admin Settings | `backup_data` |
 
 All ports are configurable in `.env`. Browser traffic normally uses the web address; Nginx routes its `/api` requests internally.
 
-Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files must both be backed up before production deployment.
+Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files are captured together by the recovery commands:
+
+```bash
+npm run backup
+npm run backup:verify -- backups/<UTC-timestamp>
+npm run restore -- backups/<UTC-timestamp>
+```
+
+Backup creation briefly pauses API writes for consistency. Verification restores into a temporary database without changing live data. A real restore validates the set, requires an exact confirmation, and creates an automatic pre-restore safety backup. See the [backup and restore runbook](docs/BACKUP_RESTORE.md) before using this with production data.
+
+Administrators can also open **Settings → Backup & Restore** to create/download backups, access retained server copies, validate uploads, and run a password-confirmed restore.
 
 ## Development and verification
 

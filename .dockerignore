@@ -6,6 +6,7 @@ node_modules
 dist
 dev-dist
 coverage
+backups
 logs
 *.log
 supabase/.temp

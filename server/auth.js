@@ -81,8 +81,13 @@ export async function currentUser(request, required = true) {
     if (required) throw new HttpError(401, 'Session has expired', 'SESSION_EXPIRED');
     return null;
   }
-  void pool.query('UPDATE app_sessions SET last_seen_at = now() WHERE token_hash = $1', [hashToken(token)]);
+  await pool.query('UPDATE app_sessions SET last_seen_at = now() WHERE token_hash = $1', [hashToken(token)]);
   return rows[0];
+}
+
+export async function verifyUserPassword(userId, password) {
+  const { rows } = await pool.query('SELECT password_hash FROM app_credentials WHERE user_id = $1', [userId]);
+  return Boolean(rows[0] && verifyPassword(String(password || ''), rows[0].password_hash));
 }
 
 export async function signIn({ email, password }) {

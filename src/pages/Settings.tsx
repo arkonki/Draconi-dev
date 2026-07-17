@@ -8,7 +8,8 @@ import {
   ChevronRight,
   Sword,
   Bell, // Ensure Bell is imported
-  ArrowLeft
+  ArrowLeft,
+  Database
 } from 'lucide-react';
 
 // Import your sub-components
@@ -18,6 +19,7 @@ import { NotificationSettings } from '../components/settings/NotificationSetting
 import { LocalizationSettings } from '../components/settings/LocalizationSettings';
 import { AdminSettings } from '../components/settings/AdminSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
+import { RecoverySettings } from '../components/settings/RecoverySettings';
 
 type SettingsSection = 
   | 'profile'
@@ -25,7 +27,8 @@ type SettingsSection =
   | 'notifications'
   | 'localization'
   | 'admin'
-  | 'game-data';
+  | 'game-data'
+  | 'recovery';
 
 interface SettingsMenuItem {
   id: SettingsSection;
@@ -58,6 +61,14 @@ const menuItems: SettingsMenuItem[] = [
     label: 'Game Data',
     icon: Sword,
     description: 'Edit spells, items, and monsters',
+    adminOnly: true,
+    category: 'admin'
+  },
+  {
+    id: 'recovery',
+    label: 'Backup & Restore',
+    icon: Database,
+    description: 'Create and restore recovery sets',
     adminOnly: true,
     category: 'admin'
   },
@@ -103,7 +114,7 @@ export function Settings() {
 
   // Render Content Switcher
   const renderSettingsContent = () => {
-    if (['admin', 'game-data'].includes(activeSection) && !isAdmin()) {
+    if (['admin', 'game-data', 'recovery'].includes(activeSection) && !isAdmin()) {
       return <Navigate to="/settings" replace />;
     }
 
@@ -113,6 +124,7 @@ export function Settings() {
       case 'notifications': return <NotificationSettings />;
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
+      case 'recovery': return <RecoverySettings />;
       case 'admin': return <AdminSettings />;
       default: return <ProfileSettings />;
     }

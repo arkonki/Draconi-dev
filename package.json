@@ -11,6 +11,10 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:reset": "docker compose down -v",
+    "backup": "sh scripts/backup.sh",
+    "backup:verify": "sh scripts/verify-backup.sh",
+    "restore": "sh scripts/restore.sh",
+    "test:recovery": "node scripts/recovery-smoke.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest"

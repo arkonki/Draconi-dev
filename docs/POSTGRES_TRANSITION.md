@@ -71,6 +71,7 @@ Responsibilities are intentionally separated:
 
 ### Phase 2 — content and operational hardening
 
+- Use the coordinated PostgreSQL/upload backup tools and administrator Settings recovery console. CLI and UI backup/restore paths are implemented and validated; production scheduling and off-machine copying remain deployment work.
 - Review the minimal reference seed and import any lawful source material available outside Supabase.
 - Exercise each admin editor and major party tool against disposable local data.
 - Add API integration tests for user isolation, party membership, DM-only mutations, upsert conflicts, expired sessions, and invalid projector tokens.
@@ -90,18 +91,20 @@ Responsibilities are intentionally separated:
 ### Phase 4 — cutover and recovery discipline
 
 - Freeze schema changes during the first production cutover.
-- Take an initial database dump and file-volume snapshot immediately after the production seed/content import.
+- Take an initial coordinated database and file-volume backup immediately after the production seed/content import.
 - Schedule automatic local backups and copy encrypted backup sets to a second machine or offline medium. Avoiding third-party runtime services must not mean keeping only one copy of the data.
 - Practice a restore into a separate database before declaring backups reliable.
 - Monitor disk space, container health, failed logins, PostgreSQL errors, and backup age.
 
-Recommended database backup command:
+The implemented recovery workflow captures PostgreSQL and uploaded files together, generates a manifest and SHA-256 checksums, and briefly pauses API writes to keep both resources consistent:
 
 ```bash
-docker compose exec -T db pg_dump -U dragonbane -d dragonbane -Fc > dragonbane.dump
+npm run backup
+npm run backup:verify -- backups/<UTC-timestamp>
+npm run restore -- backups/<UTC-timestamp>
 ```
 
-Uploaded files require a separate snapshot/export of the `storage_data` volume.
+Administrators can perform the equivalent packaged workflow through **Settings → Backup & Restore**. See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) for safety behavior, off-machine copy requirements, verification details, and both recovery procedures.
 
 ## Acceptance checklist
 
@@ -114,4 +117,4 @@ Uploaded files require a separate snapshot/export of the `storage_data` volume.
 - Projector tokens load public display state and respect expiry/revocation.
 - An uploaded file can be fetched through its local public URL and deleted.
 - Another non-admin user cannot edit records outside their ownership/party scope.
-- Database and upload backups restore successfully on a separate test stack.
+- Database and upload backups pass checksum/archive validation and restore successfully into an isolated verification database and temporary file directory.

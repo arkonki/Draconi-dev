@@ -30,7 +30,9 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-dragonbane}:${POSTGRES_PASSWORD:-dragonbane-local-password}@db:5432/${POSTGRES_DB:-dragonbane}
       STORAGE_ROOT: /data/storage
+      BACKUP_ROOT: /data/backups
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-25000000}
+      MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-1073741824}
       SESSION_DAYS: ${SESSION_DAYS:-14}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
@@ -38,6 +40,7 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
     volumes:
       - storage_data:/data/storage
+      - backup_data:/data/backups
     depends_on:
       db:
         condition: service_healthy
@@ -61,3 +64,4 @@ services:
 volumes:
   postgres_data:
   storage_data:
+  backup_data:
