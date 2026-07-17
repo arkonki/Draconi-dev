@@ -48,6 +48,9 @@ Responsibilities are intentionally separated:
 - Local `images` upload, list, delete, and public-read routes with path traversal protection.
 - PostgreSQL change-event triggers and authorized browser polling for the existing collaborative refresh hooks.
 - Canonical schema and idempotent reference seed for a clean database.
+- Checksum-verified, transaction-scoped incremental SQL migrations serialized by a PostgreSQL advisory lock at API startup.
+- Coordinated database/upload recovery through both CLI tooling and the administrator Settings console, including automatic pre-restore safety sets.
+- Repeatable API security coverage for cross-user isolation, party membership, owner-only mutations, upsert conflicts, session expiry, and projector-token expiry/revocation.
 
 ## Intentional differences and open work
 
@@ -69,14 +72,14 @@ Responsibilities are intentionally separated:
 - Containerize PostgreSQL, Node, and the frontend proxy.
 - Verify a clean database startup and end-to-end authenticated smoke flow.
 
-### Phase 2 — content and operational hardening
+### Phase 2 — content and operational hardening (in progress)
 
 - Use the coordinated PostgreSQL/upload backup tools and administrator Settings recovery console. CLI and UI backup/restore paths are implemented and validated; production scheduling and off-machine copying remain deployment work.
+- API security integration tests for user isolation, party membership, owner-only mutations, upsert conflicts, expired sessions, and invalid projector tokens are implemented and passing against the Docker stack.
+- Versioned incremental migrations are implemented. API startup and administrator restores apply them transactionally, serialize concurrent runners, and refuse changed or unknown applied migrations.
 - Review the minimal reference seed and import any lawful source material available outside Supabase.
 - Exercise each admin editor and major party tool against disposable local data.
-- Add API integration tests for user isolation, party membership, DM-only mutations, upsert conflicts, expired sessions, and invalid projector tokens.
 - Replace the current compatibility query endpoint over time with explicit domain endpoints for the most security-sensitive workflows.
-- Add versioned incremental migrations for every schema change after this baseline; do not edit an already-deployed initialization script.
 - Define retention/cleanup for `app_sessions` and `app_change_events`.
 
 ### Phase 3 — server deployment
@@ -105,6 +108,16 @@ npm run restore -- backups/<UTC-timestamp>
 ```
 
 Administrators can perform the equivalent packaged workflow through **Settings → Backup & Restore**. See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) for safety behavior, off-machine copy requirements, verification details, and both recovery procedures.
+
+The repeatable local authorization/session/projector rehearsal is:
+
+```bash
+SECURITY_TEST_PASSWORD='<current-admin-password>' \
+SECURITY_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:security
+```
+
+This suite creates and removes disposable users and directly expires its own test rows, so it is intended for local or otherwise disposable environments.
 
 ## Acceptance checklist
 

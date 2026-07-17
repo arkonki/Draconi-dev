@@ -3,6 +3,7 @@ import { bootstrapAdmin, currentUser, publicUser, sessionForRequest, signIn, sig
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
 import { handleError, HttpError, readJson, routePath, sendJson } from './http.js';
+import { runMigrations } from './migrations.js';
 import { projectorFunction } from './projector.js';
 import { executeRpc } from './rpc.js';
 import { listObjects, removeObjects, servePublicObject, uploadObject } from './storage.js';
@@ -185,6 +186,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 await waitForDatabase();
+await runMigrations();
 await bootstrapAdmin();
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Dragonbane local API listening on port ${PORT}`);

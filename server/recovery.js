@@ -19,7 +19,9 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { pool } from './db.js';
 import { verifyUserPassword } from './auth.js';
+import { clearDataSchemaCache } from './data.js';
 import { HttpError } from './http.js';
+import { runMigrations } from './migrations.js';
 
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || '/data/storage');
 const BACKUP_ROOT = path.resolve(process.env.BACKUP_ROOT || '/data/backups');
@@ -305,7 +307,11 @@ async function validateBackupPackage(packagePath, { keepExtracted = false } = {}
 
     await validateTarArchive(path.join(extractedDirectory, 'storage.tar.gz'));
     keepDirectory = keepExtracted;
-    return { manifest, extractedDirectory: keepExtracted ? extractedDirectory : null };
+    return {
+      manifest,
+      extractedDirectory: keepExtracted ? extractedDirectory : null,
+      hasMigrationTable: restoreCatalog.stdout.includes('TABLE public app_schema_migrations'),
+    };
   } finally {
     if (!keepDirectory) await rm(extractedDirectory, { recursive: true, force: true });
   }
@@ -490,6 +496,11 @@ export async function restoreStagedBackup(user, { restoreToken, confirmation, pa
       '--exit-on-error',
       path.join(validation.extractedDirectory, 'database.dump'),
     ], { maxOutputBytes: 20_000_000 });
+    if (!validation.hasMigrationTable) {
+      await pool.query('DROP TABLE IF EXISTS app_schema_migrations');
+    }
+    await runMigrations();
+    clearDataSchemaCache();
     await replaceStorage(path.join(validation.extractedDirectory, 'storage.tar.gz'));
 
     const criticalTables = await pool.query(

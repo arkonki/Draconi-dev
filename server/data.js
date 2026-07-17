@@ -23,6 +23,10 @@ const PARTY_SCOPED = new Set([
 
 const columnCache = new Map();
 
+export function clearDataSchemaCache() {
+  columnCache.clear();
+}
+
 function assertTable(table) {
   if (!TABLES.has(table)) throw new HttpError(400, `Unknown table: ${table}`);
 }

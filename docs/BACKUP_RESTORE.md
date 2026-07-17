@@ -23,7 +23,7 @@ From this page an administrator can:
 
 Validation checks the outer archive paths and file types, SHA-256 payload checksums, manifest version, PostgreSQL restore catalog and critical tables, and the nested storage archive. A validated restore token expires after 15 minutes.
 
-Backup and restore enter maintenance mode and drain requests that were already active. Restore validates the selected set again, creates and validates a `pre-restore-*` safety set, restores PostgreSQL in a single transaction, replaces uploaded files, and checks critical tables before reporting success. The initiating browser clears its local session and returns to sign-in after a successful restore.
+Backup and restore enter maintenance mode and drain requests that were already active. Restore validates the selected set again, creates and validates a `pre-restore-*` safety set, restores PostgreSQL in a single transaction, applies all pending application migrations, clears cached schema metadata, replaces uploaded files, and checks critical tables before reporting success. Backups created before migration tracking was introduced are re-baselined automatically. The initiating browser clears its local session and returns to sign-in after a successful restore.
 
 Retained server sets are convenient rollback copies, but they remain on the same server. Use **Download** and copy important sets to an encrypted second machine or offline disk. `npm run docker:reset` deletes the `backup_data` volume along with the live database and uploaded files.
 

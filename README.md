@@ -74,4 +74,16 @@ npm run lint
 
 The canonical fresh-database schema is [docker/postgres/001_schema.sql](docker/postgres/001_schema.sql). The clearly labeled starter reference data is in [docker/postgres/002_seed.sql](docker/postgres/002_seed.sql).
 
+Every schema change after that baseline belongs in a new `server/migrations/NNNN_description.sql` file. API startup applies pending migrations transactionally under a PostgreSQL advisory lock and verifies the checksum of every previously applied file. Never edit or renumber a migration after it has reached a persistent database. Administrator restores also run pending migrations before the application leaves maintenance mode.
+
+The local security integration rehearsal creates and removes disposable accounts and directly expires test sessions in PostgreSQL:
+
+```bash
+SECURITY_TEST_PASSWORD='<current-admin-password>' \
+SECURITY_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:security
+```
+
+Run it only against a local/disposable stack. It verifies user isolation, party membership, owner-only encounter actions, upsert conflicts, expired sessions, and projector token rejection.
+
 See [docs/POSTGRES_TRANSITION.md](docs/POSTGRES_TRANSITION.md) for the audit, architecture decisions, limitations, and production transition plan.
