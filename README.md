@@ -62,6 +62,8 @@ Backup creation briefly pauses API writes for consistency. Verification restores
 
 Administrators can also open **Settings → Backup & Restore** to create/download backups, access retained server copies, validate uploads, and run a password-confirmed restore.
 
+For long-running installations, the API removes expired sessions after a 24-hour grace period and collaboration change events after 14 days. Cleanup runs every six hours in bounded batches. Administrators can inspect pending rows and trigger an immediate pass under **Settings → Admin Panel → Maintenance**. These defaults are configurable through the `HOUSEKEEPING_*`, `EXPIRED_SESSION_RETENTION_HOURS`, and `CHANGE_EVENT_RETENTION_DAYS` values in `.env`; set `HOUSEKEEPING_INTERVAL_MINUTES=0` to disable only the automatic schedule.
+
 ## Development and verification
 
 Install frontend dependencies with `npm install`. With the Docker database and API running, `npm run dev` starts Vite with `/api` proxied to port 3000.
@@ -85,5 +87,13 @@ npm run test:security
 ```
 
 Run it only against a local/disposable stack. It verifies user isolation, party membership, owner-only encounter actions, upsert conflicts, expired sessions, and projector token rejection.
+
+The housekeeping rehearsal also requires a local/disposable stack because it inserts deliberately expired rows and invokes real retention cleanup:
+
+```bash
+HOUSEKEEPING_TEST_PASSWORD='<current-admin-password>' \
+HOUSEKEEPING_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:housekeeping
+```
 
 See [docs/POSTGRES_TRANSITION.md](docs/POSTGRES_TRANSITION.md) for the audit, architecture decisions, limitations, and production transition plan.

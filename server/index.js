@@ -3,6 +3,12 @@ import { bootstrapAdmin, currentUser, publicUser, sessionForRequest, signIn, sig
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
 import { handleError, HttpError, readJson, routePath, sendJson } from './http.js';
+import {
+  housekeepingStatus,
+  runHousekeepingNow,
+  startHousekeeping,
+  stopHousekeeping,
+} from './housekeeping.js';
 import { runMigrations } from './migrations.js';
 import { projectorFunction } from './projector.js';
 import { executeRpc } from './rpc.js';
@@ -58,6 +64,15 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/health' && request.method === 'GET') {
       await pool.query('SELECT 1');
       sendJson(response, 200, { status: 'ok', database: 'postgresql' });
+      return;
+    }
+
+    if (pathname === '/api/admin/housekeeping' && request.method === 'GET') {
+      sendJson(response, 200, await housekeepingStatus(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/housekeeping/run' && request.method === 'POST') {
+      sendJson(response, 200, await runHousekeepingNow(await currentUser(request)));
       return;
     }
 
@@ -191,6 +206,7 @@ await bootstrapAdmin();
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Dragonbane local API listening on port ${PORT}`);
 });
+startHousekeeping();
 
 let shutdownStarted = false;
 
@@ -206,10 +222,10 @@ async function shutdown(signal) {
   forceExit.unref();
 
   try {
-    await new Promise((resolve, reject) => {
+    await Promise.all([new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
       server.closeIdleConnections?.();
-    });
+    }), stopHousekeeping()]);
     await pool.end();
     clearTimeout(forceExit);
     process.exit(0);

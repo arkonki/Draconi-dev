@@ -51,6 +51,7 @@ Responsibilities are intentionally separated:
 - Checksum-verified, transaction-scoped incremental SQL migrations serialized by a PostgreSQL advisory lock at API startup.
 - Coordinated database/upload recovery through both CLI tooling and the administrator Settings console, including automatic pre-restore safety sets.
 - Repeatable API security coverage for cross-user isolation, party membership, owner-only mutations, upsert conflicts, session expiry, and projector-token expiry/revocation.
+- Configurable, advisory-locked retention cleanup for expired sessions and collaboration events, with bounded batches and administrator status/manual controls.
 
 ## Intentional differences and open work
 
@@ -77,10 +78,10 @@ Responsibilities are intentionally separated:
 - Use the coordinated PostgreSQL/upload backup tools and administrator Settings recovery console. CLI and UI backup/restore paths are implemented and validated; production scheduling and off-machine copying remain deployment work.
 - API security integration tests for user isolation, party membership, owner-only mutations, upsert conflicts, expired sessions, and invalid projector tokens are implemented and passing against the Docker stack.
 - Versioned incremental migrations are implemented. API startup and administrator restores apply them transactionally, serialize concurrent runners, and refuse changed or unknown applied migrations.
+- Expired-session and change-event retention is implemented and tested. Defaults retain expired sessions for 24 hours, change events for 14 days, and run at six-hour intervals in batches of at most 20,000 rows per table per pass.
 - Review the minimal reference seed and import any lawful source material available outside Supabase.
 - Exercise each admin editor and major party tool against disposable local data.
 - Replace the current compatibility query endpoint over time with explicit domain endpoints for the most security-sensitive workflows.
-- Define retention/cleanup for `app_sessions` and `app_change_events`.
 
 ### Phase 3 — server deployment
 
@@ -118,6 +119,16 @@ npm run test:security
 ```
 
 This suite creates and removes disposable users and directly expires its own test rows, so it is intended for local or otherwise disposable environments.
+
+Retention cleanup has a separate local rehearsal:
+
+```bash
+HOUSEKEEPING_TEST_PASSWORD='<current-admin-password>' \
+HOUSEKEEPING_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhost:5432/dragonbane' \
+npm run test:housekeeping
+```
+
+It verifies administrator-only access, configuration visibility, pending-row counts, and deletion of eligible session/event sentinels.
 
 ## Acceptance checklist
 
