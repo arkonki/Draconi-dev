@@ -213,7 +213,7 @@ CREATE TABLE characters (
   profession text,
   key_attribute text,
   magic_school uuid REFERENCES magic_schools(id) ON DELETE SET NULL,
-  age integer,
+  age text,
   appearance text,
   background text,
   notes text,

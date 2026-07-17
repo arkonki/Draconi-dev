@@ -1,7 +1,7 @@
 // src/lib/api/characters.ts
 
 import { supabase } from '../supabase';
-import { Character } from '../../types/character';
+import { AgeCategory, Character } from '../../types/character';
 
 // Select all columns, plus join party_members to find the party_id if the direct column is empty
 const CHARACTER_SELECT_QUERY = `
@@ -20,7 +20,7 @@ interface CharacterRow {
   name?: string | null;
   kin?: string | null;
   profession?: string | null;
-  age?: number | null;
+  age?: AgeCategory | null;
   appearance?: string | null;
   background?: string | null;
   notes?: string | null;

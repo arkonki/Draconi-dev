@@ -5,14 +5,33 @@ export interface Kin {
   id: string;
   name: string;
   description: string;
-  heroic_ability: string | null; // UPDATED: Use correct column name
+  heroic_ability: string | null;
+  abilities?: Array<string | { name?: string; description?: string; willpower_points?: number }>;
+  kin_abilities?: Array<string | { name?: string; description?: string; willpower_points?: number }>;
   created_at?: string;
+}
+
+function parseAbilityList(value: string | null | undefined): string[] {
+  if (!value) return [];
+  return value.split(',').map((name) => name.trim()).filter(Boolean);
+}
+
+export function getKinAbilityNames(kin: Pick<Kin, 'heroic_ability' | 'abilities' | 'kin_abilities'>): string[] {
+  const explicitNames = parseAbilityList(kin.heroic_ability);
+  if (explicitNames.length > 0) return [...new Set(explicitNames)];
+
+  const configuredAbilities = [...(kin.abilities || []), ...(kin.kin_abilities || [])];
+  const fallbackNames = configuredAbilities.flatMap((ability) => {
+    if (typeof ability === 'string') return parseAbilityList(ability);
+    return parseAbilityList(ability.name || ability.description);
+  });
+  return [...new Set(fallbackNames)];
 }
 
 export async function fetchKinList(): Promise<Kin[]> {
   const { data, error } = await supabase
     .from('kin')
-    .select('id, name, description, heroic_ability'); // UPDATED: Select correct column
+    .select('id, name, description, heroic_ability, abilities, kin_abilities');
 
   if (error) {
     console.error('Error fetching kin list:', error);

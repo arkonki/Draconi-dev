@@ -4,6 +4,7 @@
 
 export type AttributeName = 'STR' | 'AGL' | 'INT' | 'CHA' | 'CON' | 'WIL';
 export type DiceType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
+export type AgeCategory = 'Young' | 'Adult' | 'Old';
 
 // --- CURRENCY & ECONOMY ---
 
@@ -189,7 +190,7 @@ export interface Character {
   name: string;
   kin: string;
   profession: string;
-  age?: number;
+  age?: AgeCategory;
   appearance?: string;
   background?: string;
   notes?: string;

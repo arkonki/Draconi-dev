@@ -2,19 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { Ability } from '../../../types/character';
-import { fetchKinList, fetchAbilityDetailsByNames, Kin } from '../../../lib/api/kin';
+import { fetchKinList, fetchAbilityDetailsByNames, getKinAbilityNames, Kin } from '../../../lib/api/kin';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { ChevronRight, ArrowLeft, CheckCircle2, User, Sparkles, Footprints } from 'lucide-react';
-
-// Helper function to parse the heroic_ability string
-const parseAbilityNames = (abilityString: string | null | undefined): string[] => {
-  if (!abilityString) return [];
-  return abilityString
-    .split(',')
-    .map(name => name.trim())
-    .filter(name => name);
-};
 
 // Helper to determine movement speed based on Dragonbane Rules
 const getMovementSpeed = (kinName: string) => {
@@ -45,7 +36,7 @@ export function KinSelection() {
       if (currentKin) {
         setSelectedKinId(currentKin.id);
         // Ensure store is synced
-        const abilityNames = parseAbilityNames(currentKin.heroic_ability);
+        const abilityNames = getKinAbilityNames(currentKin);
         if (JSON.stringify(character.kinAbilityNames) !== JSON.stringify(abilityNames)) {
            updateCharacter({ kinAbilityNames: abilityNames });
         }
@@ -55,7 +46,7 @@ export function KinSelection() {
 
   const handleKinSelect = (kin: Kin) => {
     setSelectedKinId(kin.id);
-    const abilityNames = parseAbilityNames(kin.heroic_ability);
+    const abilityNames = getKinAbilityNames(kin);
     updateCharacter({ kin: kin.name, kinAbilityNames: abilityNames });
     setIsMobileDetailView(true); // Switch to detail view on mobile
   };
@@ -78,7 +69,7 @@ export function KinSelection() {
     isLoading: detailsLoading,
     error: detailsError,
   } = useQuery<Ability[], Error>({
-    queryKey: ['abilityDetails', abilityNamesFromStore.sort().join(',')],
+    queryKey: ['abilityDetails', [...abilityNamesFromStore].sort().join(',')],
     queryFn: () => fetchAbilityDetailsByNames(abilityNamesFromStore),
     enabled: abilityNamesFromStore.length > 0,
     staleTime: 10 * 60 * 1000,
