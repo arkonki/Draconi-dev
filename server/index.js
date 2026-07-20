@@ -13,6 +13,7 @@ import { runMigrations } from './migrations.js';
 import { projectorFunction } from './projector.js';
 import { executeRpc } from './rpc.js';
 import { listObjects, removeObjects, servePublicObject, uploadObject } from './storage.js';
+import { isApiPath, serveFrontend } from './static.js';
 import {
   beginApplicationRequest,
   createAndDownloadBackup,
@@ -185,6 +186,10 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 200, { data: await removeObjects(bucket, (await readJson(request)).paths) });
         return;
       }
+    }
+
+    if (!isApiPath(pathname) && await serveFrontend(request, response)) {
+      return;
     }
 
     throw new HttpError(404, 'Endpoint not found');
