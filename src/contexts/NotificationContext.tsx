@@ -8,7 +8,7 @@ import {
   defaultSettings,
 } from './NotificationContextStore';
 
-const ICON_PATH = '/icons/icon-192x192.png';
+const ICON_PATH = `${import.meta.env.BASE_URL}icons/icon-192x192.png`;
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -26,8 +26,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [settings]);
 
   useEffect(() => {
-    diceAudio.current = new Audio('/sounds/dice-roll.mp3');
-    notifAudio.current = new Audio('/sounds/notification.mp3');
+    diceAudio.current = new Audio(`${import.meta.env.BASE_URL}sounds/dice-roll.mp3`);
+    notifAudio.current = new Audio(`${import.meta.env.BASE_URL}sounds/notification.mp3`);
   }, []);
 
   const refreshPushSubscriptionState = useCallback(async () => {

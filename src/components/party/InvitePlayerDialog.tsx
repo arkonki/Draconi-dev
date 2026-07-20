@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '../shared/Button';
 import { Input } from '../shared/Input';
 import { X, Copy, Check, Link as LinkIcon } from 'lucide-react'; // Renamed Link to avoid conflict
+import { getAbsoluteAppUrl } from '../../lib/appUrl';
 
 interface InvitePlayerDialogProps {
   isOpen: boolean;
@@ -14,7 +15,7 @@ export function InvitePlayerDialog({ isOpen, onClose, inviteCode }: InvitePlayer
   const [copied, setCopied] = useState(false);
   // Construct the invite link only if the inviteCode is available.
   const inviteLink = inviteCode 
-    ? `${window.location.origin}/party/join/${inviteCode}` 
+    ? getAbsoluteAppUrl(`party/join/${inviteCode}`)
     : '';
 
   const handleCopy = () => {

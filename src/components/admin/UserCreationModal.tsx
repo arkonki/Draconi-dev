@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { User, Copy, Check, AlertCircle, X } from 'lucide-react';
 import { Button } from '../shared/Button';
+import { getAbsoluteAppUrl } from '../../lib/appUrl';
 
 interface UserCreationModalProps {
   onClose: () => void;
@@ -92,7 +93,7 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
       if (updateError) throw updateError;
 
       // Generate the sign-in link
-      const signInUrl = new URL(window.location.origin);
+      const signInUrl = new URL(getAbsoluteAppUrl());
       signInUrl.searchParams.set('email', email);
       signInUrl.searchParams.set('password', tempPassword);
       setSignInLink(signInUrl.toString());

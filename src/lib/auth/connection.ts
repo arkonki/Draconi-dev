@@ -3,8 +3,9 @@ export async function checkConnection(timeout = 5000): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || `${import.meta.env.BASE_URL}api`).replace(/\/$/, '');
 
-    const response = await fetch('/api/health', {
+    const response = await fetch(`${apiBase}/health`, {
       method: 'GET',
       signal: controller.signal
     });

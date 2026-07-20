@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/useAuth';
 import { MarkdownRenderer } from '../components/shared/MarkdownRenderer';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { Button } from '../components/shared/Button';
+import { getAbsoluteAppUrl } from '../lib/appUrl';
 
 // --- TYPES ---
 interface Note {
@@ -230,7 +231,7 @@ export function Notes() {
 
   const handleCopyLink = () => {
     if (!selectedNote || !selectedNote.party_id) return;
-    const url = `${window.location.origin}/adventure-party/${selectedNote.party_id}?noteId=${selectedNote.id}`;
+    const url = getAbsoluteAppUrl(`adventure-party/${selectedNote.party_id}?noteId=${selectedNote.id}`);
     navigator.clipboard.writeText(url).then(() => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);

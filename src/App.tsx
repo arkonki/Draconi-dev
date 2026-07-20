@@ -17,7 +17,7 @@ function App() {
   const isProduction = import.meta.env.PROD;
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ErrorBoundary>
         <AppProvider>
           <AuthProvider>

@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import type { PartyDisplaySession, PartyDisplaySlot, PlayerDisplayState } from '../../types/projectorDisplay';
+import { getAbsoluteAppUrl } from '../appUrl';
 
 const DISPLAY_TOKEN_STORAGE_PREFIX = 'party-display-token';
 const PROJECTOR_IMAGE_FOLDER = 'ProjectorDisplays';
@@ -52,7 +53,7 @@ export function clearStoredPartyDisplayToken(partyId: string) {
 }
 
 export function buildPartyDisplayUrl(sessionToken: string) {
-  return `${window.location.origin}/d/${sessionToken}`;
+  return getAbsoluteAppUrl(`d/${sessionToken}`);
 }
 
 function normalizePartyDisplaySession(value: unknown): PartyDisplaySession | null {

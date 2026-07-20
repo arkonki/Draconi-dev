@@ -19,6 +19,7 @@ import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
 import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
+import { getAbsoluteAppUrl } from '../lib/appUrl';
 
 type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 const VALID_PARTY_TABS: Tab[] = ['members', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
@@ -167,7 +168,7 @@ export function PartyView() {
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
   const isPartyOwner = user && party && user.id === party.created_by && isDM();
-  const joinLink = party?.invite_code ? `${window.location.origin}/party/join/${party.invite_code}` : '';
+  const joinLink = party?.invite_code ? getAbsoluteAppUrl(`party/join/${party.invite_code}`) : '';
 
   if (isLoading) return <div className="flex justify-center items-center h-96"><LoadingSpinner size="lg" /></div>;
   if (error) return <div className="p-8"><ErrorMessage message={error.message} /></div>;

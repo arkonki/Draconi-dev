@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PartyMap, MapPin as MapPinType, MapDrawing } from '../../types/atlas';
 import { useAuth } from '../../contexts/useAuth';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { getAbsoluteAppUrl } from '../../lib/appUrl';
 
 interface AtlasViewProps {
     partyId: string;
@@ -207,7 +208,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
 
     const handleCopyLink = () => {
         if (!pin.note_id) return;
-        const url = `${window.location.origin}/adventure-party/${partyId}?noteId=${pin.note_id}`;
+        const url = getAbsoluteAppUrl(`adventure-party/${partyId}?noteId=${pin.note_id}`);
         navigator.clipboard.writeText(url).then(() => {
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);

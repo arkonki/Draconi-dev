@@ -33,7 +33,8 @@ self.addEventListener('message', (event) => {
 
 clientsClaim();
 
-const APP_ICON = '/icons/icon-192x192.png';
+const APP_BASE = import.meta.env.BASE_URL;
+const APP_ICON = `${APP_BASE}icons/icon-192x192.png`;
 
 // 2. Google Fonts Caching (Migrated from your vite config)
 // Cache Google Fonts Stylesheets
@@ -91,7 +92,7 @@ self.addEventListener('push', (event) => {
     badge: payload.badge || APP_ICON,
     tag: payload.tag || 'default-notification',
     renotify: payload.renotify ?? true,
-    data: payload.data || { url: payload.url || '/' },
+    data: payload.data || { url: payload.url || APP_BASE },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -101,7 +102,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const relativeTargetUrl = event.notification.data?.url || '/';
+  const relativeTargetUrl = event.notification.data?.url || APP_BASE;
   const targetUrl = new URL(relativeTargetUrl, self.location.origin).toString();
 
   event.waitUntil(

@@ -74,6 +74,10 @@ else
   [[ "${actual_remote}" == "${REPOSITORY_URL}" ]] \
     || fail "Unexpected origin in ${APP_DIR}: ${actual_remote:-missing}"
 
+  # The repository tracks a small part of dist. Discard only prior generated
+  # build output before checking for real source changes.
+  git -C "${APP_DIR}" restore --worktree -- dist
+
   if [[ -n "$(git -C "${APP_DIR}" status --porcelain --untracked-files=no)" ]]; then
     fail "Tracked local changes exist in ${APP_DIR}; commit or remove them before deploying"
   fi
@@ -131,12 +135,24 @@ EOF
     || fail "Unable to connect to PostgreSQL using DATABASE_URL"
 fi
 
+# Build for the directory where this deployment is published. Override these
+# in production.env when deploying at a domain root or another URL path.
+export VITE_BASE_PATH="${VITE_BASE_PATH:-/draconi/}"
+export VITE_API_BASE_URL="${VITE_API_BASE_URL:-${VITE_BASE_PATH}api}"
+[[ "${VITE_BASE_PATH}" == /*/ ]] || fail "VITE_BASE_PATH must begin and end with /"
+
 printf 'Installing frontend dependencies and building...\n'
-npm --prefix "${APP_DIR}" ci
-COMMIT_REF="${commit_ref}" npm --prefix "${APP_DIR}" run build
+(
+  cd "${APP_DIR}"
+  npm ci --include=dev
+  COMMIT_REF="${commit_ref}" npm run build
+)
 
 printf 'Installing production API dependencies...\n'
-npm --prefix "${APP_DIR}/server" ci --omit=dev
+(
+  cd "${APP_DIR}/server"
+  npm ci --omit=dev
+)
 
 mkdir -p "${PUBLIC_DIR}"
 if [[ "${NO_RESTART}" == true ]]; then

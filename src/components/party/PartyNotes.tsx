@@ -13,6 +13,7 @@ import { useAuth } from '../../contexts/useAuth';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { sendMessage } from '../../lib/api/chat';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { getAbsoluteAppUrl } from '../../lib/appUrl';
 
 // --- UPDATED TYPE DEFINITION ---
 interface Note {
@@ -286,7 +287,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
 
   const handleCopyLink = () => {
     if (!selectedNote || !partyId) return;
-    const url = `${window.location.origin}/adventure-party/${partyId}?noteId=${selectedNote.id}`;
+    const url = getAbsoluteAppUrl(`adventure-party/${partyId}?noteId=${selectedNote.id}`);
     navigator.clipboard.writeText(url).then(() => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
