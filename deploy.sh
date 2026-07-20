@@ -139,7 +139,8 @@ fi
 # override these in production.env only when publishing below another path.
 export VITE_BASE_PATH="${VITE_BASE_PATH:-/}"
 export VITE_API_BASE_URL="${VITE_API_BASE_URL:-${VITE_BASE_PATH}api}"
-[[ "${VITE_BASE_PATH}" == /*/ ]] || fail "VITE_BASE_PATH must begin and end with /"
+[[ "${VITE_BASE_PATH}" == "/" || "${VITE_BASE_PATH}" == /*/ ]] \
+  || fail "VITE_BASE_PATH must be / or begin and end with /"
 
 printf 'Installing frontend dependencies and building...\n'
 (
