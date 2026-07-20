@@ -13,6 +13,7 @@ import { ErrorMessage } from '../shared/ErrorMessage';
 import { applyMoneyDelta, formatCost, subtractCost, parseCost } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
+import { formatItemAttackRange } from '../../lib/itemRange';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
@@ -297,12 +298,12 @@ const formatCleanCost = (costStr: string | undefined): string => {
     return parts.length > 0 ? parts.join(', ') : 'Free';
 };
 
-const getCompactStats = (item: GameItem) => {
+const getCompactStats = (item: GameItem, characterStrength?: number | null) => {
     const stats: { label: string, value: string | number, color?: string }[] = [];
     if (item.damage) stats.push({ label: 'Dmg', value: item.damage, color: 'text-red-600' });
     if (item.armor_rating) stats.push({ label: 'AR', value: item.armor_rating, color: 'text-blue-600' });
     if (item.grip) stats.push({ label: 'Grip', value: item.grip });
-    if (item.range) stats.push({ label: 'Rng', value: item.range });
+    if (item.range) stats.push({ label: 'Rng', value: formatItemAttackRange(item.range, characterStrength) });
     if (item.durability) stats.push({ label: 'Dur', value: item.durability });
     if (item.strength_requirement) stats.push({ label: 'STR', value: item.strength_requirement });
     if (item.weight !== undefined && item.weight !== null) stats.push({ label: 'W', value: item.weight });
@@ -311,8 +312,8 @@ const getCompactStats = (item: GameItem) => {
 
 // --- COMPONENTS ---
 
-const ShopItemCard = ({ item, onBuy }: { item: GameItem, onBuy: (item: GameItem) => void }) => {
-    const stats = getCompactStats(item);
+const ShopItemCard = ({ item, onBuy, characterStrength }: { item: GameItem, onBuy: (item: GameItem) => void, characterStrength?: number | null }) => {
+    const stats = getCompactStats(item, characterStrength);
     const cleanCost = formatCleanCost(item.cost);
     const featuresList = Array.isArray(item.features) ? item.features.join(', ') : item.features;
 
@@ -822,7 +823,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             )}
                             {itemDetails?.range && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium" title="Range">
-                                    <Target size={10} /> {itemDetails.range}
+                                    <Target size={10} /> {formatItemAttackRange(itemDetails.range, getStrengthFromCharacter(character))}
                                 </span>
                             )}
                         </div>
@@ -1117,7 +1118,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                         {allGameItems
                                             .filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase()))
                                             .sort((a, b) => a.name.localeCompare(b.name))
-                                            .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)
+                                            .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} characterStrength={getStrengthFromCharacter(character)} />)
                                         }
                                         {allGameItems.filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase())).length === 0 && (
                                             <div className="col-span-full text-center py-10 text-gray-400">
@@ -1210,7 +1211,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                                 case 'name-asc': default: return a.name.localeCompare(b.name);
                                                             }
                                                         })
-                                                        .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} />)
+                                                        .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} characterStrength={getStrengthFromCharacter(character)} />)
                                                     }
                                                 </div>
                                             </div>

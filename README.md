@@ -62,6 +62,8 @@ Backup creation briefly pauses API writes for consistency. Verification restores
 
 Administrators can also open **Settings → Backup & Restore** to create/download backups, access retained server copies, validate uploads, and run a password-confirmed restore.
 
+The **Settings → Game Data** item and spell tabs support add-only bulk imports from CSV or Excel (`.xlsx`). Each importer provides a CSV template, previews up to 1,000 rows, resolves spell school names to database IDs, and validates the entire file before a transactional save. Duplicate or invalid rows block the import without changing existing game data.
+
 For long-running installations, the API removes expired sessions after a 24-hour grace period and collaboration change events after 14 days. Cleanup runs every six hours in bounded batches. Administrators can inspect pending rows and trigger an immediate pass under **Settings → Admin Panel → Maintenance**. These defaults are configurable through the `HOUSEKEEPING_*`, `EXPIRED_SESSION_RETENTION_HOURS`, and `CHANGE_EVENT_RETENTION_DAYS` values in `.env`; set `HOUSEKEEPING_INTERVAL_MINUTES=0` to disable only the automatic schedule.
 
 ## Development and verification

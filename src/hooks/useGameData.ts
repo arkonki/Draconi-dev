@@ -3,7 +3,7 @@
       import { supabase } from '../lib/supabase';
       import { MonsterData } from '../types/bestiary'; // Import MonsterData
 
-      export type DataCategory = 'spells' | 'items' | 'abilities' | 'kin' | 'profession' | 'skills' | 'monsters'; // Added 'monsters'
+      export type DataCategory = 'spells' | 'items' | 'abilities' | 'kin' | 'profession' | 'skills' | 'monsters' | 'bio';
 
       // Make GameDataEntry a union of all possible types
       export type GameDataEntry =
@@ -283,6 +283,8 @@
           loadEntries(newCategory);
         }, [activeCategory, loadEntries]);
 
+        const reloadEntries = useCallback(() => loadEntries(activeCategory), [activeCategory, loadEntries]);
+
         useEffect(() => {
           console.log(`[useGameData] Initial load effect for category: ${initialCategory}`);
           try {
@@ -301,6 +303,7 @@
             error,
             activeCategory,
             switchCategory,
+            reloadEntries,
             handleSave,
             handleDelete
         };

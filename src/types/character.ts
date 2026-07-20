@@ -32,7 +32,7 @@ export interface WeaponEntry {
   name: string;
   damage?: string;
   grip?: string;
-  range?: string;
+  range?: string | number;
   durability?: string | number;
   features?: string[];
 }
@@ -65,7 +65,7 @@ export interface GameItem {
   requirement?: string;
   damage?: string;
   armor_rating?: number | string;
-  range?: string;
+  range?: string | number;
   grip?: string;
   durability?: number | string;
   features?: string | string[];

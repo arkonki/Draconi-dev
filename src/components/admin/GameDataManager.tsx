@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
-    Wand2, Sword, Shield, Search, Filter, Plus, Save, X, Edit2, Trash2, Users, Briefcase, Scroll, Skull, BookUser
+    Wand2, Sword, Shield, Search, Filter, Plus, Save, X, Edit2, Trash2, Users, Briefcase, Scroll, Skull, BookUser,
+    FileUp, CheckCircle2
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ItemForm } from './Forms/ItemForm';
@@ -12,12 +13,13 @@ import { SpellForm } from './Forms/SpellForm';
 import { SkillForm } from './Forms/SkillForm';
 import { MonsterForm } from './Forms/MonsterForm';
 import { BioForm } from './Forms/BioForm';
-import { useGameData } from '../../hooks/useGameData';
+import { useGameData, type DataCategory } from '../../hooks/useGameData';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { isSkillNameRequirement } from '../../types/character';
+import { GameDataImportModal } from './GameDataImportModal';
 
 // --- CONSTANTS ---
-const CATEGORIES = [
+const CATEGORIES: Array<{ id: DataCategory; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'items', label: 'Items', icon: Sword },
     { id: 'spells', label: 'Spells', icon: Wand2 },
     { id: 'abilities', label: 'Abilities', icon: Shield },
@@ -109,7 +111,8 @@ const useGameDataManagement = () => {
     const [monsterCategories, setMonsterCategories] = useState<string[]>([]);
 
     const {
-        entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData, switchCategory, activeCategory
+        entries, loading, error: loadError, handleSave: saveData, handleDelete: deleteData,
+        switchCategory, reloadEntries, activeCategory
     } = useGameData('items');
 
     const fetchData = useCallback(async (category: string, setter: React.Dispatch<React.SetStateAction<string[]>>) => {
@@ -206,17 +209,23 @@ const useGameDataManagement = () => {
         setSaveError(null);
     }, []);
 
+    const reloadActiveCategory = useCallback(async () => {
+        await reloadEntries();
+        if (activeCategory === 'items') await fetchData('game_items', setItemCategories);
+        if (activeCategory === 'spells') await fetchMagicSchools();
+    }, [activeCategory, fetchData, fetchMagicSchools, reloadEntries]);
+
     return {
         editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
         selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
         entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
-        handleFieldChange, createNewEntry, filteredEntries, closeModal
+        handleFieldChange, createNewEntry, filteredEntries, closeModal, reloadActiveCategory
     };
 };
 
 // --- COMPONENTS ---
 
-const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCategory: string, switchCategory: (cat: string) => void, loading: boolean }) => (
+const CategoryTabs = ({ activeCategory, switchCategory, loading }: { activeCategory: DataCategory, switchCategory: (cat: DataCategory) => void, loading: boolean }) => (
     <div className="flex gap-1 border-b border-gray-200 overflow-x-auto hide-scrollbar px-2 pt-2">
         {CATEGORIES.map(({ id: cat, label, icon: Icon }) => (
             <button key={cat} onClick={() => switchCategory(cat)}
@@ -377,17 +386,26 @@ const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError,
 };
 
 export function GameDataManager() {
+    const [importOpen, setImportOpen] = useState(false);
+    const [importNotice, setImportNotice] = useState<string | null>(null);
     const {
         editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
         selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
         entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
-        handleFieldChange, createNewEntry, filteredEntries, closeModal
+        handleFieldChange, createNewEntry, filteredEntries, closeModal, reloadActiveCategory
     } = useGameDataManagement();
 
+    const importableCategory = activeCategory === 'items' || activeCategory === 'spells' ? activeCategory : null;
+    const handleCategorySwitch = useCallback((category: DataCategory) => {
+        setImportOpen(false);
+        setImportNotice(null);
+        switchCategory(category);
+    }, [switchCategory]);
+
     const currentSubCategories = useMemo(() => {
-        if (activeCategory === 'items') return itemCategories.sort();
+        if (activeCategory === 'items') return [...itemCategories].sort();
         if (activeCategory === 'spells') return ['General', ...magicSchools.map((s) => s.name)].sort();
-        if (activeCategory === 'monsters') return monsterCategories.sort();
+        if (activeCategory === 'monsters') return [...monsterCategories].sort();
         return [];
     }, [activeCategory, itemCategories, magicSchools, monsterCategories]);
 
@@ -412,7 +430,7 @@ export function GameDataManager() {
             case 'items':
                 return [...baseCols,
                     { header: 'Category', accessor: (e) => <span className="capitalize">{e.category}</span> },
-                    { header: 'Cost', accessor: (e) => `${e.cost}g` },
+                    { header: 'Cost', accessor: (e) => e.cost ? String(e.cost) : <span className="text-gray-400">-</span> },
                     { header: 'Weight', accessor: (e) => e.weight as React.ReactNode },
                 ];
             case 'abilities':
@@ -460,17 +478,42 @@ export function GameDataManager() {
         <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6 md:space-y-8 min-h-[calc(100vh-4rem)]">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-200 pb-6">
                 <div><h1 className="text-3xl font-bold text-gray-900 tracking-tight">Game Data</h1><p className="text-gray-500 mt-1">Manage core rules, items, and compendium data.</p></div>
-                <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading} className="shadow-sm w-full md:w-auto justify-center">Add Entry</Button>
+                <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+                    {importableCategory && (
+                        <Button variant="outline" icon={FileUp} onClick={() => setImportOpen(true)} disabled={loading} className="w-full justify-center sm:w-auto">
+                            Import CSV / Excel
+                        </Button>
+                    )}
+                    <Button variant="primary" icon={Plus} onClick={createNewEntry} disabled={loading} className="shadow-sm w-full md:w-auto justify-center">Add Entry</Button>
+                </div>
             </div>
             {loadError && <ErrorMessage message={`Error loading data: ${loadError}`} />}
+            {importNotice && (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800" role="status">
+                    <span className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5" />{importNotice}</span>
+                    <button type="button" onClick={() => setImportNotice(null)} aria-label="Dismiss import result" className="rounded p-1 hover:bg-green-100"><X className="h-4 w-4" /></button>
+                </div>
+            )}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="bg-gray-50 border-b border-gray-200"><CategoryTabs activeCategory={activeCategory} switchCategory={switchCategory} loading={loading} /></div>
+                <div className="bg-gray-50 border-b border-gray-200"><CategoryTabs activeCategory={activeCategory} switchCategory={handleCategorySwitch} loading={loading} /></div>
                 <div className="p-4 bg-white border-b border-gray-100"><SearchAndFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} activeCategory={activeCategory} loading={loading} currentSubCategories={currentSubCategories} selectedSubCategory={selectedSubCategory} setSelectedSubCategory={setSelectedSubCategory}/></div>
                 <div>
                     {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries as DataRow[]} onEdit={(entry) => { setSaveError(null); setEditingEntry(entry); }} onDelete={handleDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
                 </div>
             </div>
             {editingEntry && <EditModal entry={editingEntry} onClose={closeModal} onSave={handleSave} loading={loading} activeCategory={activeCategory} saveError={saveError} onFieldChange={handleFieldChange} magicSchools={magicSchools} />}
+            {importOpen && importableCategory && (
+                <GameDataImportModal
+                    category={importableCategory}
+                    existingEntries={entries as DataRow[]}
+                    magicSchools={magicSchools}
+                    onClose={() => setImportOpen(false)}
+                    onImported={async (count) => {
+                        await reloadActiveCategory();
+                        setImportNotice(`${count} ${importableCategory === 'items' ? 'items' : 'spells'} imported successfully.`);
+                    }}
+                />
+            )}
         </div>
     );
 }

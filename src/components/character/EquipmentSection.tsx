@@ -10,6 +10,7 @@ import type { RollHistoryEntry } from '../dice/diceTypes';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { sendMessage } from '../../lib/api/chat';
+import { formatItemAttackRange, type ItemRangeValue } from '../../lib/itemRange';
 
 // --- HELPER FUNCTIONS ---
 const skillAttributeMap: Record<string, AttributeName> = { 
@@ -359,12 +360,21 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
     }, 120);
   };
 
-  const handleAttackRoll = (weaponName: string, skillName: string, skillValue: number, isAffected: boolean, damageDiceString?: string) => {
+  const handleAttackRoll = (
+    weaponName: string,
+    skillName: string,
+    skillValue: number,
+    isAffected: boolean,
+    damageDiceString?: string,
+    range?: ItemRangeValue,
+  ) => {
+    const rangeDisplay = formatItemAttackRange(range, character.attributes?.STR, '');
+    const rangeSuffix = rangeDisplay ? ` · Range: ${rangeDisplay}` : '';
     toggleDiceRoller({
       initialDice: ['d20'],
       rollMode: 'skillCheck',
       targetValue: skillValue,
-      description: `Attack: ${weaponName} (${skillName})`,
+      description: `Attack: ${weaponName} (${skillName})${rangeSuffix}`,
       requiresBane: isAffected,
       skillName,
       postRollAction: damageDiceString
@@ -380,7 +390,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
       onRollComplete: (resultEntry: RollCompletionData) => {
         const rollValue = resultEntry.results?.[0]?.value;
         const wasSuccessful = resultEntry.isSuccess === true;
-        void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful && damageDiceString ? ' Damage roll is ready.' : ''}`);
+        void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}${rangeDisplay ? `, range ${rangeDisplay}` : ''}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful && damageDiceString ? ' Damage roll is ready.' : ''}`);
       }
     });
   };
@@ -483,6 +493,8 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                 let enhancedBonus = '';
                 if (note?.enhanced && note.bonus) enhancedBonus = ` ${note.bonus}`;
                 const damageValue = weapon.damage || weaponDetails?.damage;
+                const rangeValue = weaponDetails?.range ?? weapon.range;
+                const rangeDisplay = formatItemAttackRange(rangeValue, character.attributes?.STR);
 
                 return (
                   <div key={`mobile-${weapon.name}-${index}`} className={`rounded-md border p-3 ${isBroken ? 'bg-red-50 border-red-200' : 'bg-[#f9f7f2] border-stone-200'}`}>
@@ -514,7 +526,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                       </div>
                       <div className="bg-white border border-stone-200 rounded p-2">
                         <div className="uppercase text-stone-400 font-bold">Range</div>
-                        <div className="text-stone-700">{weapon.range || weaponDetails?.range || '-'}</div>
+                        <div className="text-stone-700">{rangeDisplay}</div>
                       </div>
                       <div className="bg-white border border-stone-200 rounded p-2">
                         <div className="uppercase text-stone-400 font-bold">Damage</div>
@@ -528,7 +540,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {displayName && skillValue !== null && !isBroken && (
-                        <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, damageValue)} className={`flex-1 min-w-[132px] flex items-center justify-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
+                        <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, damageValue, rangeValue)} className={`flex-1 min-w-[132px] flex items-center justify-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
                           <Crosshair className="w-4 h-4" />
                           <span className="text-xs font-bold uppercase">Attack {skillValue}</span>
                         </button>
@@ -590,6 +602,8 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
 
                     let enhancedBonus = '';
                     if (note?.enhanced && note.bonus) enhancedBonus = ` ${note.bonus}`;
+                    const rangeValue = weaponDetails?.range ?? weapon.range;
+                    const rangeDisplay = formatItemAttackRange(rangeValue, character.attributes?.STR);
 
                     return (
                       <tr key={`${weapon.name}-${index}`} className={`group transition-colors ${isBroken ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#f9f7f2]'}`}>
@@ -611,7 +625,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                           {isBroken && <span className="text-[9px] block text-red-600 font-bold tracking-wider mt-0.5">BROKEN</span>}
                         </td>
                         <td className="px-3 py-2 text-stone-600 text-xs">{weapon.grip || weaponDetails?.grip || '-'}</td>
-                        <td className="px-3 py-2 text-stone-600 text-xs">{weapon.range || weaponDetails?.range || '-'}</td>
+                        <td className="px-3 py-2 text-stone-600 text-xs">{rangeDisplay}</td>
                         <td className="px-3 py-2 font-bold text-stone-800">
                           {isBroken ? <span className="text-red-400">-</span> : (
                               <>{weapon.damage || weaponDetails?.damage || '-'}{attributeBonus && <span className="ml-1 text-xs text-[#8b2e2e] font-bold">{attributeBonus}</span>}{enhancedBonus && <span className="ml-1 text-xs text-amber-600 font-bold">{enhancedBonus}</span>}</>
@@ -622,7 +636,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                         <td className="px-3 py-2 text-right">
                           <div className="flex items-center justify-end gap-2 flex-wrap">
                             {displayName && skillValue !== null && !isBroken && (
-                              <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, weapon.damage || weaponDetails?.damage)} className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
+                              <button onClick={() => handleAttackRoll(weapon.name, displayName, skillValue!, isAffected, weapon.damage || weaponDetails?.damage, rangeValue)} className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors shadow-sm touch-manipulation ${isAffected ? 'bg-red-50 border-red-300 text-red-700' : 'bg-[#e8d5b5] border-[#d4c5a3] text-[#5c4d3c] hover:bg-[#d4c5a3] active:bg-[#c4b593]'}`}>
                                 <Crosshair className="w-4 h-4" /><div className="flex flex-col items-start leading-none -mt-0.5"><span className="text-[9px] uppercase font-bold tracking-wider opacity-70">{displayName}</span><span className="text-sm font-bold">Roll {skillValue}</span></div>
                               </button>
                             )}

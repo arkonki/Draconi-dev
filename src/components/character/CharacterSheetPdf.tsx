@@ -3,6 +3,7 @@ import { Document, Page, Text, View, StyleSheet, Svg, Path } from '@react-pdf/re
 import { AttributeName, Character } from '../../types/character';
 import { GameItem } from '../../lib/api/items'; // Ensure this type is imported
 import { calculateMovement } from '../../lib/movement';
+import { formatItemAttackRange } from '../../lib/itemRange';
 
 // --- STYLES (Unchanged) ---
 const styles = StyleSheet.create({
@@ -368,9 +369,13 @@ export const DragonbanePdfDocument = ({ character, allItems }: { character: Char
 
            <View>
                 <View style={styles.tableHeader}><Text style={styles.colName}>Weapon</Text><Text style={styles.colSmall}>Grip</Text><Text style={styles.colSmall}>Range</Text><Text style={styles.colMed}>Damage</Text><Text style={styles.colSmall}>Dur</Text><Text style={styles.colFeat}>Features</Text></View>
-                {(character.equipment?.equipped?.weapons || []).map((w, i) => (
-                    <View key={i} style={styles.tableRow}><Text style={styles.colName}>{w.name}</Text><Text style={styles.colSmall}>{w.grip}</Text><Text style={styles.colSmall}>{w.range}</Text><Text style={styles.colMed}>{w.damage}</Text><Text style={styles.colSmall}>{w.durability}</Text><Text style={styles.colFeat}>{Array.isArray(w.features) ? w.features.join(', ') : w.features}</Text></View>
-                ))}
+                {(character.equipment?.equipped?.weapons || []).map((w, i) => {
+                    const itemDetails = itemsByName.get(normalizeItemName(w.name));
+                    const range = itemDetails?.range ?? w.range;
+                    return (
+                      <View key={i} style={styles.tableRow}><Text style={styles.colName}>{w.name}</Text><Text style={styles.colSmall}>{w.grip}</Text><Text style={styles.colSmall}>{formatItemAttackRange(range, character.attributes?.STR)}</Text><Text style={styles.colMed}>{w.damage}</Text><Text style={styles.colSmall}>{w.durability}</Text><Text style={styles.colFeat}>{Array.isArray(w.features) ? w.features.join(', ') : w.features}</Text></View>
+                    );
+                })}
                 <View style={styles.tableRow}><Text style={styles.colName}> </Text></View>
                 <View style={styles.tableRow}><Text style={styles.colName}> </Text></View>
            </View>

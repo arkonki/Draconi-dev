@@ -8,6 +8,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { Button } from '../shared/Button';
 import { useDice } from '../dice/useDice'; // Import Dice Context
+import { formatItemAttackRange, type ItemRangeValue } from '../../lib/itemRange';
 
 interface EquipmentModalProps {
   character: Character;
@@ -122,7 +123,7 @@ export function EquipmentModal({ character, onClose, onUpdate }: EquipmentModalP
     return baneMatch ? baneMatch[1] : null;
   };
 
-  const handleAttackClick = (weaponName: string, damageFormula: string | undefined) => {
+  const handleAttackClick = (weaponName: string, damageFormula: string | undefined, range?: ItemRangeValue) => {
     const skillName = getWeaponSkill(weaponName);
     // Try to find the skill level in the character's skill list
     // Handles case sensitivity if DB stores them differently
@@ -132,7 +133,7 @@ export function EquipmentModal({ character, onClose, onUpdate }: EquipmentModalP
       || 0;
 
     rollDice({
-      label: `Attack: ${weaponName}`,
+      label: `Attack: ${weaponName} · Range: ${formatItemAttackRange(range, character.attributes?.STR)}`,
       skillName: skillName,
       target: skillLevel,
       damageFormula: damageFormula || '1d6', // Fallback damage
@@ -268,11 +269,13 @@ export function EquipmentModal({ character, onClose, onUpdate }: EquipmentModalP
                   {(character.equipment.equipped.weapons || []).map((weapon, index) => {
                      const weaponDetails = findItemDetails(weapon.name);
                      const damage = weaponDetails?.damage || weapon.damage || 'N/A';
+                     const range = weaponDetails?.range ?? weapon.range;
+                     const rangeDisplay = formatItemAttackRange(range, character.attributes?.STR);
                      return (
                        <tr key={index} className="hover:bg-stone-50 transition-colors">
                          <td className="px-4 py-3 font-bold text-stone-800">{weapon.name}</td>
                          <td className="px-4 py-3 text-stone-600">{weaponDetails?.grip || weapon.grip || '-'}</td>
-                         <td className="px-4 py-3 text-stone-600">{weaponDetails?.range || weapon.range || '-'}</td>
+                         <td className="px-4 py-3 text-stone-600">{rangeDisplay}</td>
                          <td className="px-4 py-3 font-bold text-red-700">{damage}</td>
                          <td className="px-4 py-3 text-stone-600">{weaponDetails?.durability || weapon.durability || '-'}</td>
                          <td className="px-4 py-3">
@@ -290,7 +293,7 @@ export function EquipmentModal({ character, onClose, onUpdate }: EquipmentModalP
                              <Button
                                variant="primary"
                                size="sm"
-                               onClick={() => handleAttackClick(weapon.name, damage)}
+                               onClick={() => handleAttackClick(weapon.name, damage, range)}
                                className="flex items-center gap-2 px-3 bg-red-700 hover:bg-red-800 border-red-900"
                              >
                                <Dices size={16} />

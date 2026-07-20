@@ -18,7 +18,7 @@ export interface ItemFormEntry {
   encumbrance_modifier?: number;
   is_container?: boolean;
   container_capacity?: number;
-  consumable?: boolean;
+  is_consumable?: boolean;
   effect?: string;
   features?: string[];
   [key: string]: unknown;
@@ -129,7 +129,8 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Range</label>
-                <input type="text" value={itemData.range || ''} onChange={(e) => onChange('range', e.target.value)} placeholder="Enter range value or STR" className="w-full px-3 py-2 border rounded-md" />
+                <input type="text" value={itemData.range || ''} onChange={(e) => onChange('range', e.target.value)} placeholder="Enter range, STR, or STRx2" className="w-full px-3 py-2 border rounded-md" />
+                <p className="mt-1 text-xs text-gray-500">Use STR for the wielder's current Strength, or a multiplier such as STRx2.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Damage</label>
