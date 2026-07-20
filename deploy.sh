@@ -135,9 +135,9 @@ EOF
     || fail "Unable to connect to PostgreSQL using DATABASE_URL"
 fi
 
-# Build for the directory where this deployment is published. Override these
-# in production.env when deploying at a domain root or another URL path.
-export VITE_BASE_PATH="${VITE_BASE_PATH:-/draconi/}"
+# Build for the public URL. Production uses draconi.ee at the domain root;
+# override these in production.env only when publishing below another path.
+export VITE_BASE_PATH="${VITE_BASE_PATH:-/}"
 export VITE_API_BASE_URL="${VITE_API_BASE_URL:-${VITE_BASE_PATH}api}"
 [[ "${VITE_BASE_PATH}" == /*/ ]] || fail "VITE_BASE_PATH must begin and end with /"
 

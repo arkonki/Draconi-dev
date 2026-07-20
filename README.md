@@ -50,6 +50,10 @@ docker compose ps         # show container health
 
 All ports are configurable in `.env`. Browser traffic normally uses the web address; Nginx routes its `/api` requests internally.
 
+For the production domain `https://draconi.ee`, build the frontend with
+`VITE_BASE_PATH=/` and `VITE_API_BASE_URL=/api`. The deployment script reads
+these values from the production environment and defaults to the same paths.
+
 Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files are captured together by the recovery commands:
 
 ```bash
