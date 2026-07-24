@@ -11,6 +11,36 @@ const DEFAULT_SLOTS = [
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 
+const PROJECTOR_ENCOUNTER_CONDITIONS = new Map([
+  ['poisoned', 'poisoned'],
+  ['fear', 'fear'],
+]);
+
+export function mergeProjectorCharacterState(character, combatant) {
+  const conditions = character.conditions && typeof character.conditions === 'object'
+    ? { ...character.conditions }
+    : {};
+  const statusEffects = Array.isArray(combatant?.status_effects) ? combatant.status_effects : [];
+
+  for (const effect of statusEffects) {
+    const name = typeof effect === 'string'
+      ? effect
+      : effect && typeof effect === 'object' && typeof effect.name === 'string'
+        ? effect.name
+        : '';
+    const condition = PROJECTOR_ENCOUNTER_CONDITIONS.get(name.trim().toLowerCase());
+    if (condition) conditions[condition] = true;
+  }
+
+  return {
+    currentHp: combatant?.current_hp ?? character.current_hp,
+    maxHp: combatant?.max_hp ?? character.max_hp,
+    currentWp: combatant?.current_wp ?? character.current_wp,
+    maxWp: combatant?.max_wp ?? character.max_wp,
+    conditions,
+  };
+}
+
 async function requireOwner(client, user, partyId) {
   const { rows } = await client.query('SELECT * FROM parties WHERE id = $1', [partyId]);
   if (!rows[0] || user.role !== 'admin' && rows[0].created_by !== user.id) throw new HttpError(403, 'Only the party owner can manage its display');
@@ -115,7 +145,7 @@ export async function getPlayerDisplayState(token) {
     session.display_map_id
       ? pool.query('SELECT * FROM party_maps WHERE id = $1 AND party_id = $2', [session.display_map_id, session.party_id])
       : pool.query('SELECT * FROM party_maps WHERE party_id = $1 AND is_active = true ORDER BY updated_at DESC LIMIT 1', [session.party_id]),
-    pool.query("SELECT name, current_round FROM encounters WHERE party_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1", [session.party_id]),
+    pool.query("SELECT id, name, current_round FROM encounters WHERE party_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1", [session.party_id]),
     pool.query('SELECT * FROM party_display_slots WHERE session_id = $1 ORDER BY sort_order', [session.id]),
   ]);
   const party = partyResult.rows[0];
@@ -130,6 +160,17 @@ export async function getPlayerDisplayState(token) {
     ? (await pool.query('SELECT id, name, portrait_url, current_hp, max_hp, current_wp, max_wp, conditions FROM characters WHERE id = ANY($1::uuid[])', [ids])).rows
     : [];
   const byId = new Map(characters.map((character) => [character.id, character]));
+  const encounterCombatants = encounter && ids.length
+    ? (await pool.query(
+      `SELECT character_id, current_hp, max_hp, current_wp, max_wp, status_effects
+       FROM encounter_combatants
+       WHERE encounter_id = $1 AND character_id = ANY($2::uuid[])`,
+      [encounter.id, ids],
+    )).rows
+    : [];
+  const combatantByCharacterId = new Map(
+    encounterCombatants.map((combatant) => [combatant.character_id, combatant]),
+  );
   return {
     party,
     displayImageUrl: session.display_image_url ?? null,
@@ -146,15 +187,16 @@ export async function getPlayerDisplayState(token) {
     encounter: { isActive: Boolean(encounter), name: encounter?.name ?? null, round: encounter?.current_round ?? null },
     slots: slots.map((slot) => {
       const character = byId.get(slot.character_id);
+      const synchronizedState = character
+        ? mergeProjectorCharacterState(character, combatantByCharacterId.get(character.id))
+        : null;
       return {
         corner: slot.corner,
         rotationDeg: slot.rotation_deg,
         sortOrder: slot.sort_order,
         character: character ? {
           id: character.id, name: character.name, portraitUrl: character.portrait_url,
-          currentHp: character.current_hp, maxHp: character.max_hp,
-          currentWp: character.current_wp, maxWp: character.max_wp,
-          conditions: character.conditions || {},
+          ...synchronizedState,
         } : null,
       };
     }),

@@ -13,6 +13,8 @@ const CONDITION_STYLES: Record<string, string> = {
   angry: 'bg-red-100 text-red-900 border-red-200',
   scared: 'bg-sky-100 text-sky-900 border-sky-200',
   disheartened: 'bg-slate-100 text-slate-900 border-slate-300',
+  poisoned: 'bg-emerald-100 text-emerald-900 border-emerald-200',
+  fear: 'bg-cyan-100 text-cyan-900 border-cyan-200',
 };
 
 function GridOverlay({

@@ -281,6 +281,7 @@ try {
 
   const encounter = await insert(owner.token, 'encounters', {
     party_id: party.id, name: `Workflow Encounter ${suffix}`, description: 'Disposable encounter',
+    status: 'active',
   });
   await rpc(member.token, 'add_character_to_encounter', {
     p_encounter_id: encounter.id, p_character_id: memberCharacter.id, p_initiative_roll: 7,
@@ -288,6 +289,39 @@ try {
   const characterCombatant = await rpc(owner.token, 'add_character_to_encounter', {
     p_encounter_id: encounter.id, p_character_id: memberCharacter.id, p_initiative_roll: 7,
   });
+  await update(owner.token, 'encounter_combatants', characterCombatant.id, {
+    current_hp: 9, max_hp: 13, current_wp: 5, max_wp: 7,
+  });
+  const [characterAfterCombatUpdate] = await dataQuery(member.token, {
+    table: 'characters', filters: [{ operator: 'eq', column: 'id', value: memberCharacter.id }],
+  });
+  assert.deepEqual(
+    {
+      current_hp: characterAfterCombatUpdate.current_hp,
+      max_hp: characterAfterCombatUpdate.max_hp,
+      current_wp: characterAfterCombatUpdate.current_wp,
+      max_wp: characterAfterCombatUpdate.max_wp,
+    },
+    { current_hp: 9, max_hp: 13, current_wp: 5, max_wp: 7 },
+    'Active encounter HP/WP did not synchronize to the character',
+  );
+  await update(member.token, 'characters', memberCharacter.id, {
+    current_hp: 8, max_hp: 14, current_wp: 4, max_wp: 8,
+  });
+  const [combatantAfterCharacterUpdate] = await dataQuery(owner.token, {
+    table: 'encounter_combatants',
+    filters: [{ operator: 'eq', column: 'id', value: characterCombatant.id }],
+  });
+  assert.deepEqual(
+    {
+      current_hp: combatantAfterCharacterUpdate.current_hp,
+      max_hp: combatantAfterCharacterUpdate.max_hp,
+      current_wp: combatantAfterCharacterUpdate.current_wp,
+      max_wp: combatantAfterCharacterUpdate.max_wp,
+    },
+    { current_hp: 8, max_hp: 14, current_wp: 4, max_wp: 8 },
+    'Character HP/WP did not synchronize to the active encounter',
+  );
   const monsterCombatant = await rpc(owner.token, 'add_monster_to_encounter', {
     p_encounter_id: encounter.id, p_monster_id: monster.id, p_custom_name: `Encounter Monster ${suffix}`,
     p_initiative_roll: 4,
@@ -346,6 +380,7 @@ try {
     notesAndStoryTools: 'passed',
     mapsAndStorage: 'passed',
     encounterTools: 'passed',
+    encounterVitalsSync: 'passed',
     disposableCleanup: 'passed',
   }, null, 2));
 } finally {

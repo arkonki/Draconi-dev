@@ -298,6 +298,43 @@ function applyOwnership(table, payload, user) {
   return row;
 }
 
+const ENCOUNTER_VITAL_FIELDS = ['current_hp', 'max_hp', 'current_wp', 'max_wp'];
+
+async function synchronizeActiveEncounterVitals(table, rows, prepared, client) {
+  const fields = ENCOUNTER_VITAL_FIELDS.filter((field) =>
+    Object.prototype.hasOwnProperty.call(prepared, field));
+  if (fields.length === 0) return;
+
+  const assignments = fields
+    .map((field, index) => `"${field}" = $${index + 1}`)
+    .join(', ');
+
+  if (table === 'encounter_combatants') {
+    for (const row of rows) {
+      if (!row.character_id) continue;
+      await client.query(
+        `UPDATE characters SET ${assignments} WHERE id = $${fields.length + 1}`,
+        [...fields.map((field) => row[field]), row.character_id],
+      );
+    }
+    return;
+  }
+
+  if (table === 'characters') {
+    for (const row of rows) {
+      await client.query(
+        `UPDATE encounter_combatants AS combatant
+         SET ${assignments}
+         FROM encounters AS encounter
+         WHERE combatant.encounter_id = encounter.id
+           AND encounter.status = 'active'
+           AND combatant.character_id = $${fields.length + 1}`,
+        [...fields.map((field) => row[field]), row.id],
+      );
+    }
+  }
+}
+
 async function insertOne(table, input, ctx, client, onConflict) {
   const owned = applyOwnership(table, input, ctx.user);
   let prepared = await preparePayload(table, owned, client);
@@ -363,6 +400,7 @@ export async function executeDataQuery(user, request) {
         `UPDATE "${table}" SET ${assignments} WHERE id = ANY($${keys.length + 1}::uuid[]) RETURNING *`,
         [...keys.map((key) => prepared[key]), ids],
       );
+      await synchronizeActiveEncounterVitals(table, rows, prepared, client);
       return rows.map((row) => outwardAliases(table, row));
     }
     throw new HttpError(400, `Unsupported action: ${action}`);
