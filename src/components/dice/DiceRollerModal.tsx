@@ -7,10 +7,17 @@ import { useDice } from './useDice';
 import { useNotifications } from '../../contexts/useNotifications';
 import { 
   Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
-  ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle
+  ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle,
+  AlertTriangle, CheckCircle2, CircleHelp, RotateCcw
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
+import {
+  getAvailablePushRollConditions,
+  getPushRollAvailability,
+  PUSH_ROLL_CONDITIONS,
+  type PushRollConditionKey,
+} from './pushRoll';
 
 const DiceIcon = ({ type }: { type: DiceType }) => (
   <span className="font-semibold text-xs uppercase">{type}</span>
@@ -31,7 +38,7 @@ function Loader2({ className }: { className?: string }) {
 
 export function DiceRollerModal() {
   const { id: urlPartyId } = useParams<{ id: string }>(); 
-  const { user } = useAuth();
+  const { user, isPlayer } = useAuth();
   
   // 2. GET PLAY SOUND
   const { playSound } = useNotifications();
@@ -40,11 +47,13 @@ export function DiceRollerModal() {
     markSkillThisSession, 
     performRest, 
     setInitiativeForCombatant,
+    updateConditions,
+    isSaving: isSavingCharacter,
     character: currentCharacter 
   } = useCharacterSheetStore();
 
   const { 
-    showDiceRoller, toggleDiceRoller, currentConfig, dicePool, addDie, 
+    showDiceRoller, closeDiceRoller, currentConfig, dicePool, addDie,
     removeLastDie, clearDicePool, isBoonActive, isBaneActive, setBoon, 
     setBane, addRollToHistory, rollHistory, clearHistory,
     shareRollToParty 
@@ -63,8 +72,13 @@ export function DiceRollerModal() {
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
   const [lastRolledEntry, setLastRolledEntry] = useState<RollHistoryEntry | null>(null); 
   const [pendingPostRollAction, setPendingPostRollAction] = useState<PostRollAction | null>(null);
+  const [pushRollStage, setPushRollStage] = useState<'idle' | 'choose-condition' | 'ready'>('idle');
+  const [selectedPushCondition, setSelectedPushCondition] = useState<PushRollConditionKey | null>(null);
+  const [pushRollError, setPushRollError] = useState<string | null>(null);
+  const [hasPushedCurrentTest, setHasPushedCurrentTest] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingCompletionRef = useRef<(() => void) | null>(null);
 
   const rollMode = currentConfig?.rollMode;
   const isSkillCheck = rollMode === 'skillCheck';
@@ -74,6 +88,24 @@ export function DiceRollerModal() {
   const isAdvancementRoll = rollMode === 'advancementRoll';
   const isInitiative = rollMode === 'initiative';
   const isRest = rollMode === 'rest';
+
+  const discardPendingCompletion = useCallback(() => {
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current);
+      completionTimeoutRef.current = null;
+    }
+    pendingCompletionRef.current = null;
+  }, []);
+
+  const flushPendingCompletion = useCallback(() => {
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current);
+      completionTimeoutRef.current = null;
+    }
+    const completion = pendingCompletionRef.current;
+    pendingCompletionRef.current = null;
+    completion?.();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -98,12 +130,20 @@ export function DiceRollerModal() {
     else { setBane(true); setModifierCount(1); }
   };
 
-  const handleRoll = useCallback(() => {
+  const handleRoll = useCallback((isPushedRoll = false) => {
     if (dicePool.length === 0) return;
+
+    if (!isPushedRoll) {
+      flushPendingCompletion();
+    }
 
     // 3. TRIGGER SOUND IMMEDIATELY
     playSound('dice');
 
+    setHasPushedCurrentTest(isPushedRoll);
+    setPushRollStage('idle');
+    setSelectedPushCondition(null);
+    setPushRollError(null);
     setIsRolling(true);
     setResults([]);
     setBoonResults([]);
@@ -205,8 +245,9 @@ export function DiceRollerModal() {
             }
         }
 
+        const baseDescription = currentConfig?.description || `${dicePool.join(', ')} Roll`;
         const historyEntryData: Omit<RollHistoryEntry, 'id' | 'timestamp'> = {
-          description: currentConfig?.description || `${dicePool.join(', ')} Roll`,
+          description: isPushedRoll ? `Pushed: ${baseDescription}` : baseDescription,
           dicePool: [...dicePool],
           results: currentResults,
           boonResults: currentBoonResults.length > 0 ? currentBoonResults : undefined,
@@ -231,19 +272,31 @@ export function DiceRollerModal() {
           if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
         };
 
-        if (isSkillCheck && currentConfig?.onRollComplete) {
-          if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
-          completionTimeoutRef.current = setTimeout(() => {
-            runCompletionCallbacks();
-            completionTimeoutRef.current = null;
-          }, SKILL_CHECK_RESULT_DISPLAY_MS);
+        const pushAvailability = getPushRollAvailability({
+          isSkillCheck,
+          isPlayer: isPlayer(),
+          isFailure: success === false,
+          isDemon: crit && success === false,
+          hasCharacter: Boolean(currentCharacter),
+          hasAlreadyPushed: isPushedRoll,
+          conditions: currentCharacter?.conditions,
+        });
+
+        if (isSkillCheck && (currentConfig?.onRollComplete || currentConfig?.onRoll)) {
+          pendingCompletionRef.current = runCompletionCallbacks;
+          if (!pushAvailability.canPush) {
+            if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+            completionTimeoutRef.current = setTimeout(() => {
+              flushPendingCompletion();
+            }, SKILL_CHECK_RESULT_DISPLAY_MS);
+          }
         } else {
           runCompletionCallbacks();
         }
       }
     }, 60);
 
-  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, rollMode, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll, playSound]);
+  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll, playSound, flushPendingCompletion, isPlayer, currentCharacter]);
 
   useEffect(() => {
     if (!showDiceRoller) {
@@ -251,13 +304,42 @@ export function DiceRollerModal() {
       setIsCritical(false); setIsSuccess(undefined); setShowHistory(false); setIsRolling(false);
       setLastRolledEntry(null);
       setPendingPostRollAction(null);
+      setPushRollStage('idle');
+      setSelectedPushCondition(null);
+      setPushRollError(null);
+      setHasPushedCurrentTest(false);
       if (intervalRef.current) clearInterval(intervalRef.current);
-      if (completionTimeoutRef.current) {
-        clearTimeout(completionTimeoutRef.current);
-        completionTimeoutRef.current = null;
-      }
+      flushPendingCompletion();
     }
-  }, [showDiceRoller]);
+  }, [showDiceRoller, flushPendingCompletion]);
+
+  const handleClose = useCallback(() => {
+    if (pushRollStage === 'ready') return;
+    closeDiceRoller();
+    flushPendingCompletion();
+  }, [closeDiceRoller, flushPendingCompletion, pushRollStage]);
+
+  const handleTakePushCondition = async (condition: PushRollConditionKey) => {
+    if (!currentCharacter || currentCharacter.conditions?.[condition]) return;
+
+    setPushRollError(null);
+    try {
+      await updateConditions({
+        ...currentCharacter.conditions,
+        [condition]: true,
+      });
+      discardPendingCompletion();
+      setSelectedPushCondition(condition);
+      setPushRollStage('ready');
+    } catch (error) {
+      setPushRollError(error instanceof Error ? error.message : 'Could not save the condition.');
+    }
+  };
+
+  const handlePushReroll = () => {
+    if (!selectedPushCondition || isSavingCharacter) return;
+    handleRoll(true);
+  };
 
   const handleShare = async (entry: RollHistoryEntry) => {
     if (effectivePartyId && user && shareRollToParty) {
@@ -273,6 +355,23 @@ export function DiceRollerModal() {
   };
 
   if (!showDiceRoller) return null;
+
+  const availablePushConditions = getAvailablePushRollConditions(currentCharacter?.conditions);
+  const pushAvailability = getPushRollAvailability({
+    isSkillCheck,
+    isPlayer: isPlayer(),
+    isFailure: isSuccess === false,
+    isDemon: isCritical && isSuccess === false,
+    hasCharacter: Boolean(currentCharacter),
+    hasAlreadyPushed: hasPushedCurrentTest,
+    conditions: currentCharacter?.conditions,
+  });
+  const shouldShowPushAction =
+    isSkillCheck
+    && isSuccess === false
+    && isPlayer()
+    && Boolean(currentCharacter)
+    && !hasPushedCurrentTest;
 
   const getModalTitle = () => {
     if (currentConfig?.description) return currentConfig.description;
@@ -307,7 +406,12 @@ export function DiceRollerModal() {
           <div className="dice-modal-title flex items-center gap-2 text-indigo-700">
             {getIconForMode()} {getModalTitle()}
           </div>
-          <button onClick={() => toggleDiceRoller()} className="dice-modal-close text-gray-400 hover:text-gray-700 transition-colors">
+          <button
+            onClick={handleClose}
+            disabled={pushRollStage === 'ready'}
+            title={pushRollStage === 'ready' ? 'Complete the pushed roll before closing.' : 'Close dice roller'}
+            className="dice-modal-close text-gray-400 hover:text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-30"
+          >
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -346,6 +450,90 @@ export function DiceRollerModal() {
                     </li>
                   ))}
               </ul>
+            </div>
+          ) : pushRollStage !== 'idle' ? (
+            <div className="dice-modal-push-condition flex flex-col h-full animate-in slide-in-from-right-4 duration-200">
+              {pushRollStage === 'choose-condition' ? (
+                <>
+                  <div className="text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                      <AlertTriangle className="h-6 w-6" />
+                    </div>
+                    <h3 className="mt-3 text-lg font-bold text-stone-900">Take a condition</h3>
+                    <p className="mt-1 text-sm text-stone-600">
+                      Choose one new condition as the cost of pushing this test.
+                    </p>
+                    <div className="group relative mx-auto mt-3 inline-flex">
+                      <button
+                        type="button"
+                        aria-label="Why must I describe the condition?"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      >
+                        <CircleHelp className="h-4 w-4" />
+                        How does this condition apply?
+                      </button>
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 hidden w-64 -translate-x-1/2 rounded-lg bg-stone-900 p-3 text-left text-xs font-normal leading-relaxed text-white shadow-xl group-hover:block group-focus-within:block"
+                      >
+                        Describe to the table how the attempted action makes your character
+                        exhausted, sickly, dazed, angry, scared, or disheartened. The explanation
+                        should fit what just happened in the story.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                    {PUSH_ROLL_CONDITIONS.map((condition) => {
+                      const alreadyActive = !availablePushConditions.some(
+                        (available) => available.key === condition.key,
+                      );
+                      return (
+                        <button
+                          key={condition.key}
+                          type="button"
+                          disabled={alreadyActive || isSavingCharacter}
+                          onClick={() => handleTakePushCondition(condition.key)}
+                          className={`rounded-lg border p-3 text-left transition-colors ${
+                            alreadyActive
+                              ? 'cursor-not-allowed border-stone-200 bg-stone-100 opacity-55'
+                              : 'border-stone-200 bg-white hover:border-amber-400 hover:bg-amber-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-stone-900">{condition.label}</span>
+                            <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-600">
+                              {condition.attribute}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs leading-snug text-stone-600">
+                            {alreadyActive ? 'Already active' : condition.description}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {pushRollError && (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      {pushRollError}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="m-auto w-full rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+                  <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
+                  <h3 className="mt-3 text-lg font-bold text-emerald-950">Condition taken</h3>
+                  <p className="mt-1 text-sm text-emerald-800">
+                    {PUSH_ROLL_CONDITIONS.find(
+                      (condition) => condition.key === selectedPushCondition,
+                    )?.label ?? 'Condition'} is now active. You must keep the new result.
+                  </p>
+                  <p className="mt-3 text-xs text-emerald-700">
+                    Describe how the condition resulted from the action, then roll the test again.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="dice-modal-roller flex flex-col h-full">
@@ -411,6 +599,29 @@ export function DiceRollerModal() {
                                 <Share size={12} /> Share to Chat
                             </button>
                         )}
+
+                        {shouldShowPushAction && (
+                          <div className="mt-4 border-t border-indigo-100 pt-4">
+                            <span title={pushAvailability.reason}>
+                              <Button
+                                onClick={() => {
+                                  setPushRollError(null);
+                                  setPushRollStage('choose-condition');
+                                }}
+                                disabled={!pushAvailability.canPush}
+                                size="sm"
+                                className="bg-amber-600 text-white hover:bg-amber-700"
+                              >
+                                <RotateCcw className="mr-1.5 h-4 w-4" />
+                                Push Roll
+                              </Button>
+                            </span>
+                            <p className="mt-2 text-xs text-stone-600">
+                              {pushAvailability.reason
+                                || 'Take a new condition, explain how it applies, and reroll the test.'}
+                            </p>
+                          </div>
+                        )}
                      </div>
                    )}
                 </div>
@@ -446,7 +657,7 @@ export function DiceRollerModal() {
                         <Button
                           onClick={() => {
                             setPendingPostRollAction(null);
-                            toggleDiceRoller();
+                            handleClose();
                           }}
                           variant="outline"
                           size="sm"
@@ -465,10 +676,47 @@ export function DiceRollerModal() {
         {/* Footer */}
         <div className="dice-modal-footer p-4 border-t flex justify-between items-center bg-gray-50">
           <div className="dice-modal-footer-actions">
-            <Button onClick={() => setShowHistory(!showHistory)} variant="ghost" size="sm" className="text-gray-500 hover:text-gray-800"><History className="w-4 h-4 mr-1" /> {showHistory ? 'Roller' : 'History'}</Button>
-            {!showHistory && !controlsDisabled && dicePool.length > 0 && <Button onClick={clearDicePool} variant="ghost" size="sm" className="ml-2 text-red-400 hover:text-red-600">Clear</Button>}
+            {pushRollStage === 'choose-condition' ? (
+              <Button
+                onClick={() => {
+                  setPushRollError(null);
+                  setPushRollStage('idle');
+                }}
+                variant="ghost"
+                size="sm"
+                disabled={isSavingCharacter}
+                className="text-gray-500 hover:text-gray-800"
+              >
+                Back
+              </Button>
+            ) : pushRollStage === 'idle' ? (
+              <>
+                <Button onClick={() => setShowHistory(!showHistory)} variant="ghost" size="sm" className="text-gray-500 hover:text-gray-800"><History className="w-4 h-4 mr-1" /> {showHistory ? 'Roller' : 'History'}</Button>
+                {!showHistory && !controlsDisabled && dicePool.length > 0 && finalOutcome === null && <Button onClick={clearDicePool} variant="ghost" size="sm" className="ml-2 text-red-400 hover:text-red-600">Clear</Button>}
+              </>
+            ) : (
+              <span className="text-xs font-semibold text-emerald-700">
+                Pushed test
+              </span>
+            )}
           </div>
-          {!showHistory && <Button onClick={handleRoll} disabled={dicePool.length === 0 || isRolling} size="lg" className={`dice-modal-roll-button w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>}
+          {!showHistory && pushRollStage === 'ready' ? (
+            <Button
+              onClick={handlePushReroll}
+              disabled={isSavingCharacter}
+              size="lg"
+              className="dice-modal-roll-button w-36 bg-emerald-600 text-white shadow-lg hover:bg-emerald-700 hover:scale-105"
+            >
+              <RotateCcw className="mr-2 h-5 w-5" />
+              Roll Again
+            </Button>
+          ) : !showHistory && pushRollStage === 'idle' && isSkillCheck && finalOutcome !== null && !isRolling ? (
+            <Button onClick={handleClose} size="lg" className="dice-modal-roll-button w-32 bg-stone-700 text-white shadow-lg hover:bg-stone-800">
+              Done
+            </Button>
+          ) : !showHistory && pushRollStage === 'idle' ? (
+            <Button onClick={() => handleRoll(false)} disabled={dicePool.length === 0 || isRolling} size="lg" className={`dice-modal-roll-button w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>
+          ) : null}
         </div>
       </div>
       <style>{`

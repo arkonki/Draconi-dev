@@ -180,7 +180,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   const [nextCastHasBane, setNextCastHasBane] = useState(false);
   const [pendingDragonCast, setPendingDragonCast] = useState<PendingDragonCast | null>(null);
 
-  const { toggleDiceRoller } = useDice();
+  const { toggleDiceRoller, closeDiceRoller } = useDice();
   const { character, updateCharacterData, isSaving, setActiveStatusMessage } = useCharacterSheetStore();
   const { learnedSpells, loading: spellsLoading } = useSpells(character?.id);
 
@@ -435,7 +435,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
           }
           await logCombatEvent(`✨ **Cast ${spell.name}** encountered an error after check success.`);
         } finally {
-          toggleDiceRoller();
+          closeDiceRoller();
           setCastingSpellId(null);
         }
       }

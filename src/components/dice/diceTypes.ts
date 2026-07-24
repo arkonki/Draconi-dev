@@ -63,6 +63,7 @@ export interface DiceContextType {
   isBoonActive: boolean;
   isBaneActive: boolean;
   toggleDiceRoller: (config?: RollConfig) => void;
+  closeDiceRoller: () => void;
   addDie: (die: DiceType) => void;
   removeLastDie: (die?: DiceType) => void;
   clearDicePool: () => void;

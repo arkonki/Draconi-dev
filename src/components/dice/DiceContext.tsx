@@ -62,6 +62,14 @@ export function DiceProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const closeDiceRoller = useCallback(() => {
+    setShowDiceRoller(false);
+    setCurrentConfig(null);
+    setDicePool([]);
+    setIsBoonActive(false);
+    setIsBaneActive(false);
+  }, []);
+
   const addDie = useCallback((die: DiceType) => {
     if (currentConfig?.rollMode && ['deathRoll', 'recoveryRoll', 'rallyRoll', 'advancementRoll', 'initiative'].includes(currentConfig.rollMode)) {
         return;
@@ -175,6 +183,7 @@ export function DiceProvider({ children }: { children: React.ReactNode }) {
       isBoonActive,
       isBaneActive,
       toggleDiceRoller,
+      closeDiceRoller,
       addDie,
       removeLastDie,
       clearDicePool,
