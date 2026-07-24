@@ -174,13 +174,13 @@ export async function fetchCharacterById(id: string, userId: string): Promise<Ch
 
     if (error) {
       console.error('Error fetching character:', error);
-      return null;
+      throw new Error(error.message || 'Failed to fetch character');
     }
 
     return data ? mapCharacterData(data) : null;
   } catch (err) {
     console.error("Unexpected error in fetchCharacterById:", err);
-    return null;
+    throw err instanceof Error ? err : new Error('Failed to fetch character');
   }
 }
 
