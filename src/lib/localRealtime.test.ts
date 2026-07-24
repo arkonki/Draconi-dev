@@ -321,4 +321,64 @@ describe('local realtime transport', () => {
 
     await channel.unsubscribe();
   });
+
+  it('closes a cancelled connecting WebSocket only after its handshake completes', async () => {
+    class ConnectingWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static instances: ConnectingWebSocket[] = [];
+
+      readyState = ConnectingWebSocket.CONNECTING;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      readonly sent: string[] = [];
+      readonly closeCalls: Array<{ code?: number; reason?: string }> = [];
+
+      constructor(readonly url: string) {
+        ConnectingWebSocket.instances.push(this);
+      }
+
+      send(message: string) {
+        this.sent.push(message);
+      }
+
+      close(code?: number, reason?: string) {
+        this.closeCalls.push({ code, reason });
+        this.readyState = ConnectingWebSocket.CLOSED;
+        this.onclose?.();
+      }
+
+      open() {
+        this.readyState = ConnectingWebSocket.OPEN;
+        this.onopen?.();
+      }
+    }
+
+    vi.stubGlobal('WebSocket', ConnectingWebSocket);
+    vi.stubGlobal('fetch', vi.fn());
+    window.localStorage.setItem('dragonbane_local_session', JSON.stringify({
+      access_token: 'socket-token',
+    }));
+
+    const channel = supabase
+      .channel('cancelled-connecting-websocket-test')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'messages',
+      }, vi.fn())
+      .subscribe();
+
+    const socket = ConnectingWebSocket.instances[0];
+    await channel.unsubscribe();
+
+    expect(socket.closeCalls).toEqual([]);
+    socket.open();
+    expect(socket.closeCalls).toEqual([{
+      code: 1000,
+      reason: 'No realtime subscribers',
+    }]);
+    expect(socket.sent).toEqual([]);
+  });
 });

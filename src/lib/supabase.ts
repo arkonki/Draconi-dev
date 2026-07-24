@@ -375,7 +375,7 @@ class LocalRealtimeTransport {
 
     this.socketConnectTimer = window.setTimeout(() => {
       if (this.socket === socket && !this.socketSubscribed) {
-        socket.close();
+        this.closeSocketWhenReady(socket, 1000, 'Realtime connection timeout');
       }
     }, REALTIME_SOCKET_CONNECT_TIMEOUT_MS);
 
@@ -464,6 +464,18 @@ class LocalRealtimeTransport {
     if (this.socketConnectTimer !== null) {
       window.clearTimeout(this.socketConnectTimer);
       this.socketConnectTimer = null;
+    }
+  }
+
+  private closeSocketWhenReady(socket: WebSocket, code: number, reason: string) {
+    if (socket.readyState === WebSocket.CONNECTING) {
+      // Calling close() while CONNECTING makes Chromium report a failed
+      // WebSocket even when component cleanup intentionally cancelled it.
+      socket.onopen = () => socket.close(code, reason);
+      return;
+    }
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.close(code, reason);
     }
   }
 
@@ -605,8 +617,11 @@ class LocalRealtimeTransport {
 
   private stop() {
     this.socketGeneration += 1;
-    this.socket?.close(1000, 'No realtime subscribers');
+    const socket = this.socket;
     this.socket = null;
+    if (socket) {
+      this.closeSocketWhenReady(socket, 1000, 'No realtime subscribers');
+    }
     this.socketAuthenticated = false;
     this.socketSubscribed = false;
     this.socketFailures = 0;
