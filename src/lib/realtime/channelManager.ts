@@ -40,6 +40,7 @@ interface ManagedEntry {
   reconnectAttempt: number;
   reconnectTimer: number | null;
   degradedTimer: number | null;
+  disconnectTimer: number | null;
   fallbackTimers: Map<string, number>;
   hasEverSubscribed: boolean;
 }
@@ -48,6 +49,7 @@ interface ChannelManagerOptions {
   baseReconnectMs?: number;
   maxReconnectMs?: number;
   degradedAfterMs?: number;
+  disconnectGraceMs?: number;
   jitterRatio?: number;
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
 }
@@ -56,6 +58,7 @@ const DEFAULT_MANAGER_OPTIONS: Required<ChannelManagerOptions> = {
   baseReconnectMs: 1000,
   maxReconnectMs: 15000,
   degradedAfterMs: 6000,
+  disconnectGraceMs: 250,
   jitterRatio: 0.25,
   logger: console,
 };
@@ -119,10 +122,15 @@ export class RealtimeChannelManager {
     const existing = this.entries.get(key);
 
     if (existing) {
+      this.clearTimer(existing.disconnectTimer);
+      existing.disconnectTimer = null;
       if (existing.bindingSignature !== bindingSignature) {
         this.options.logger.warn(`[realtime] Channel "${key}" was requested with a different binding set. Keeping the first definition.`);
       }
 
+      if (existing.status !== 'healthy' && existing.reconnectTimer === null) {
+        this.connect(existing);
+      }
       return existing;
     }
 
@@ -137,6 +145,7 @@ export class RealtimeChannelManager {
       reconnectAttempt: 0,
       reconnectTimer: null,
       degradedTimer: null,
+      disconnectTimer: null,
       fallbackTimers: new Map(),
       hasEverSubscribed: false,
     };
@@ -312,15 +321,22 @@ export class RealtimeChannelManager {
     entry.reconnectTimer = null;
     entry.degradedTimer = null;
 
-    entry.fallbackTimers.forEach((timer) => window.clearInterval(timer));
-    entry.fallbackTimers.clear();
+    if (entry.disconnectTimer === null) {
+      entry.disconnectTimer = window.setTimeout(() => {
+        entry.disconnectTimer = null;
+        if (entry.subscribers.size > 0 || this.entries.get(key) !== entry) {
+          return;
+        }
 
-    if (entry.channel) {
-      void this.client.removeChannel(entry.channel);
-      entry.channel = null;
+        entry.fallbackTimers.forEach((timer) => window.clearInterval(timer));
+        entry.fallbackTimers.clear();
+        if (entry.channel) {
+          void this.client.removeChannel(entry.channel);
+          entry.channel = null;
+        }
+        this.entries.delete(key);
+      }, this.options.disconnectGraceMs);
     }
-
-    this.entries.delete(key);
   }
 
   private readonly handleOnline = () => {

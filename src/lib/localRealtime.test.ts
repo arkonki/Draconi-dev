@@ -381,4 +381,76 @@ describe('local realtime transport', () => {
     }]);
     expect(socket.sent).toEqual([]);
   });
+
+  it('reuses a connecting WebSocket when a realtime subscriber immediately returns', async () => {
+    class ReusableConnectingWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static instances: ReusableConnectingWebSocket[] = [];
+
+      readyState = ReusableConnectingWebSocket.CONNECTING;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      readonly sent: string[] = [];
+      readonly closeCalls: Array<{ code?: number; reason?: string }> = [];
+
+      constructor(readonly url: string) {
+        ReusableConnectingWebSocket.instances.push(this);
+      }
+
+      send(message: string) {
+        this.sent.push(message);
+      }
+
+      close(code?: number, reason?: string) {
+        this.closeCalls.push({ code, reason });
+        this.readyState = ReusableConnectingWebSocket.CLOSED;
+        this.onclose?.();
+      }
+
+      open() {
+        this.readyState = ReusableConnectingWebSocket.OPEN;
+        this.onopen?.();
+      }
+    }
+
+    vi.stubGlobal('WebSocket', ReusableConnectingWebSocket);
+    vi.stubGlobal('fetch', vi.fn());
+    window.localStorage.setItem('dragonbane_local_session', JSON.stringify({
+      access_token: 'socket-token',
+    }));
+
+    const first = supabase
+      .channel('first-connecting-websocket-test')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'messages',
+      }, vi.fn())
+      .subscribe();
+    const socket = ReusableConnectingWebSocket.instances[0];
+    await first.unsubscribe();
+
+    const second = supabase
+      .channel('second-connecting-websocket-test')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'messages',
+      }, vi.fn())
+      .subscribe();
+
+    expect(ReusableConnectingWebSocket.instances).toHaveLength(1);
+    socket.open();
+    expect(socket.closeCalls).toEqual([]);
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: 'authenticate',
+      accessToken: 'socket-token',
+    });
+
+    await second.unsubscribe();
+    expect(socket.closeCalls).toEqual([{
+      code: 1000,
+      reason: 'No realtime subscribers',
+    }]);
+  });
 });

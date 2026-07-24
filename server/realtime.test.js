@@ -7,9 +7,25 @@ import { attachRealtimeServer, REALTIME_SOCKET_PATH } from './realtime.js';
 
 const cleanup = [];
 
-async function nextMessage(socket) {
-  const [data] = await once(socket, 'message');
-  return JSON.parse(data.toString());
+function nextMessage(socket, predicate = () => true) {
+  return new Promise((resolve, reject) => {
+    const handleMessage = (data) => {
+      const message = JSON.parse(data.toString());
+      if (!predicate(message)) return;
+      cleanupListeners();
+      resolve(message);
+    };
+    const handleError = (error) => {
+      cleanupListeners();
+      reject(error);
+    };
+    const cleanupListeners = () => {
+      socket.off('message', handleMessage);
+      socket.off('error', handleError);
+    };
+    socket.on('message', handleMessage);
+    socket.on('error', handleError);
+  });
 }
 
 afterEach(async () => {
@@ -66,7 +82,10 @@ describe('realtime WebSocket server', () => {
       new_record: { id: 'message-11', party_id: 'party-1' },
       old_record: null,
     }];
-    const delivery = nextMessage(socket);
+    const delivery = nextMessage(
+      socket,
+      (message) => message.events?.some((event) => event.id === 11),
+    );
     notifyChange();
     await expect(delivery).resolves.toMatchObject({
       type: 'events',

@@ -381,6 +381,12 @@ class LocalRealtimeTransport {
 
     socket.onopen = () => {
       if (this.socket !== socket || generation !== this.socketGeneration) return;
+      if (this.channels.size === 0) {
+        this.clearSocketConnectTimer();
+        this.socket = null;
+        socket.close(1000, 'No realtime subscribers');
+        return;
+      }
       socket.send(JSON.stringify({ type: 'authenticate', accessToken: token }));
     };
     socket.onmessage = (event) => {
@@ -616,16 +622,21 @@ class LocalRealtimeTransport {
   }
 
   private stop() {
-    this.socketGeneration += 1;
     const socket = this.socket;
-    this.socket = null;
-    if (socket) {
-      this.closeSocketWhenReady(socket, 1000, 'No realtime subscribers');
+    const keepConnectingSocket = Boolean(
+      socket && typeof WebSocket !== 'undefined' && socket.readyState === WebSocket.CONNECTING,
+    );
+    if (!keepConnectingSocket) {
+      this.socketGeneration += 1;
+      this.socket = null;
+      if (socket) {
+        this.closeSocketWhenReady(socket, 1000, 'No realtime subscribers');
+      }
+      this.clearSocketConnectTimer();
     }
     this.socketAuthenticated = false;
     this.socketSubscribed = false;
     this.socketFailures = 0;
-    this.clearSocketConnectTimer();
     if (this.socketReconnectTimer !== null) {
       window.clearTimeout(this.socketReconnectTimer);
       this.socketReconnectTimer = null;

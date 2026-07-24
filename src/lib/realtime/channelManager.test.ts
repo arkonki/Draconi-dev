@@ -95,7 +95,38 @@ describe('RealtimeChannelManager', () => {
     expect(client.removedChannels).toHaveLength(0);
 
     subscriptionB.unsubscribe();
+    expect(client.removedChannels).toHaveLength(0);
+    vi.advanceTimersByTime(250);
     expect(client.removedChannels).toHaveLength(1);
+  });
+
+  it('reuses a channel when a subscriber returns during the disconnect grace period', () => {
+    const client = new FakeClient();
+    const manager = new RealtimeChannelManager(client as never, {
+      disconnectGraceMs: 250,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    const first = manager.subscribe({
+      key: 'party-chat',
+      bindings: TEST_BINDINGS,
+      onEvent: vi.fn(),
+    });
+    first.unsubscribe();
+
+    const second = manager.subscribe({
+      key: 'party-chat',
+      bindings: TEST_BINDINGS,
+      onEvent: vi.fn(),
+    });
+    vi.advanceTimersByTime(250);
+
+    expect(client.channels).toHaveLength(1);
+    expect(client.removedChannels).toHaveLength(0);
+
+    second.unsubscribe();
+    vi.advanceTimersByTime(250);
+    expect(client.removedChannels).toEqual([client.channels[0]]);
   });
 
   it('transitions to degraded and reconnects after a timeout', async () => {
