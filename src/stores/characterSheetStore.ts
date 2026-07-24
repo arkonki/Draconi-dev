@@ -174,7 +174,12 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       if (!characterData) {
         throw new Error(`Character with ID ${id} not found.`);
       }
-      set({ character: characterData, isLoading: false, markedSkillsThisSession: new Set(characterData.marked_skills || []) });
+      set({
+        character: characterData,
+        isLoading: false,
+        error: null,
+        markedSkillsThisSession: new Set(characterData.marked_skills || []),
+      });
       if (characterData?.party_id) {
         get().fetchActiveEncounter(characterData.party_id, characterData.id);
       } else {
@@ -295,8 +300,13 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       const items = await fetchItems();
       set({ allGameItems: items, isLoadingGameItems: false });
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load game items';
-      set({ isLoadingGameItems: false, error: errorMessage });
+      const errorMessage = err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+          ? String(err.message)
+          : 'Failed to load game items';
+      console.error('Failed to load character-sheet game items:', errorMessage);
+      set({ isLoadingGameItems: false });
     }
   },
 
@@ -308,8 +318,13 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       if (error) throw error;
       set({ allHeroicAbilities: data || [], isLoadingAbilities: false });
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load heroic abilities';
-      set({ isLoadingAbilities: false, error: errorMessage });
+      const errorMessage = err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+          ? String(err.message)
+          : 'Failed to load heroic abilities';
+      console.error('Failed to load character-sheet heroic abilities:', errorMessage);
+      set({ isLoadingAbilities: false });
     }
   },
 
