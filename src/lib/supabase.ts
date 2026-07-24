@@ -250,8 +250,7 @@ interface LocalRealtimeBinding {
   callback: (payload: RealtimePostgresChangesPayload<QueryRow>) => void;
 }
 
-const REALTIME_POLL_MS = 1200;
-const REALTIME_SERVER_WAIT_MS = 20_000;
+const REALTIME_POLL_MS = 4000;
 const REALTIME_RETRY_BASE_MS = 500;
 const REALTIME_MAX_RETRY_MS = 5_000;
 const REALTIME_FAILURES_BEFORE_DEGRADED = 3;
@@ -341,7 +340,6 @@ class LocalRealtimeTransport {
       body: JSON.stringify({
         afterId: requestedAfterId,
         bindings: this.activeBindings(),
-        waitMs: REALTIME_SERVER_WAIT_MS,
       }),
       signal: controller.signal,
     });

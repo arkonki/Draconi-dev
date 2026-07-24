@@ -160,13 +160,7 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/realtime/events' && request.method === 'POST') {
       const user = await currentUser(request);
       const body = await readJson(request);
-      const result = await authorizedChangeEvents(user, body.afterId, body.bindings, {
-        waitMs: body.waitMs,
-        isCancelled: () => request.destroyed || response.destroyed,
-      });
-      if (!request.destroyed && !response.destroyed) {
-        sendJson(response, 200, result);
-      }
+      sendJson(response, 200, await authorizedChangeEvents(user, body.afterId, body.bindings));
       return;
     }
 

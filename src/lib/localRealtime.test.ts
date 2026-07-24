@@ -55,9 +55,8 @@ describe('local realtime transport', () => {
     expect(onEvent).not.toHaveBeenCalled();
     const initialization = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(initialization.afterId).toBeNull();
-    expect(initialization.waitMs).toBe(20_000);
 
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4000);
 
     const poll = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(poll.afterId).toBe(41);
@@ -87,7 +86,7 @@ describe('local realtime transport', () => {
       .subscribe(onStatus);
 
     await flushPromises();
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4000);
     expect(onStatus).not.toHaveBeenCalledWith('CHANNEL_ERROR');
 
     await vi.advanceTimersByTimeAsync(500);
@@ -110,12 +109,12 @@ describe('local realtime transport', () => {
 
     const channel = supabase.channel('local-realtime-overlap-test').subscribe();
     await flushPromises();
-    await vi.advanceTimersByTimeAsync(2400);
+    await vi.advanceTimersByTimeAsync(8000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     resolvePoll?.(jsonResponse({ events: [], lastId: 7 }));
     await flushPromises();
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4000);
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
     await channel.unsubscribe();
@@ -165,7 +164,7 @@ describe('local realtime transport', () => {
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const poll = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
@@ -212,7 +211,7 @@ describe('local realtime transport', () => {
       .subscribe();
 
     await flushPromises();
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4000);
 
     expect(onAnyMessage).toHaveBeenCalledTimes(1);
     expect(onOtherPartyMessage).not.toHaveBeenCalled();

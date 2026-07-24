@@ -22,18 +22,6 @@ const PARTY_SCOPED = new Set([
 ]);
 
 const columnCache = new Map();
-const MAX_REALTIME_WAIT_MS = 20_000;
-const REALTIME_RECHECK_MS = 750;
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function normalizeRealtimeWaitMs(value) {
-  const waitMs = Number(value);
-  if (!Number.isFinite(waitMs) || waitMs <= 0) return 0;
-  return Math.min(Math.floor(waitMs), MAX_REALTIME_WAIT_MS);
-}
 
 export function clearDataSchemaCache() {
   columnCache.clear();
@@ -381,7 +369,7 @@ export async function executeDataQuery(user, request) {
   });
 }
 
-export async function authorizedChangeEvents(user, afterId, bindings, options = {}) {
+export async function authorizedChangeEvents(user, afterId, bindings) {
   const tables = [...new Set((bindings || []).map((binding) => binding.table).filter((table) => TABLES.has(table)))];
   if (afterId === null || afterId === undefined) {
     const { rows } = await pool.query('SELECT COALESCE(MAX(id), 0) AS last_id FROM app_change_events');
@@ -393,32 +381,19 @@ export async function authorizedChangeEvents(user, afterId, bindings, options = 
   if (tables.length === 0) return { events: [], lastId: cursor };
 
   const ctx = await accessContext(user);
-  const waitMs = normalizeRealtimeWaitMs(options.waitMs);
-  const deadline = Date.now() + waitMs;
-  let currentCursor = cursor;
-
-  while (true) {
-    const { rows } = await pool.query(
-      `SELECT * FROM app_change_events WHERE id > $1 AND table_name = ANY($2::text[]) ORDER BY id ASC LIMIT 250`,
-      [currentCursor, tables],
-    );
-    const events = rows.filter((event) => {
-      const row = event.new_record || event.old_record;
-      if (!row || !canRead(event.table_name, row, ctx)) return false;
-      return bindings.some((binding) => {
-        if (binding.table !== event.table_name) return false;
-        if (!binding.filter) return true;
-        const [column, expected] = String(binding.filter).split('=eq.');
-        return expected === undefined || String(row[column]) === expected;
-      });
+  const { rows } = await pool.query(
+    `SELECT * FROM app_change_events WHERE id > $1 AND table_name = ANY($2::text[]) ORDER BY id ASC LIMIT 250`,
+    [cursor, tables],
+  );
+  const events = rows.filter((event) => {
+    const row = event.new_record || event.old_record;
+    if (!row || !canRead(event.table_name, row, ctx)) return false;
+    return bindings.some((binding) => {
+      if (binding.table !== event.table_name) return false;
+      if (!binding.filter) return true;
+      const [column, expected] = String(binding.filter).split('=eq.');
+      return expected === undefined || String(row[column]) === expected;
     });
-    const lastId = Number(rows.at(-1)?.id ?? currentCursor);
-
-    if (events.length > 0 || Date.now() >= deadline || options.isCancelled?.()) {
-      return { events, lastId };
-    }
-
-    currentCursor = lastId;
-    await delay(Math.min(REALTIME_RECHECK_MS, Math.max(1, deadline - Date.now())));
-  }
+  });
+  return { events, lastId: Number(rows.at(-1)?.id ?? cursor) };
 }
