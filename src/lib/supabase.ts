@@ -251,6 +251,10 @@ interface LocalRealtimeBinding {
 }
 
 const REALTIME_POLL_MS = 1200;
+const REALTIME_SERVER_WAIT_MS = 20_000;
+const REALTIME_RETRY_BASE_MS = 500;
+const REALTIME_MAX_RETRY_MS = 5_000;
+const REALTIME_FAILURES_BEFORE_DEGRADED = 3;
 
 function bindingMatchesEvent(binding: LocalRealtimeBinding, event: LocalRealtimeEvent) {
   if (binding.table !== event.table_name || (binding.event !== '*' && binding.event !== event.event_type)) {
@@ -281,6 +285,7 @@ class LocalRealtimeTransport {
   private state: 'idle' | 'connecting' | 'subscribed' | 'error' = 'idle';
   private requestGeneration = 0;
   private requestController: AbortController | null = null;
+  private consecutiveFailures = 0;
 
   register(channel: LocalRealtimeChannel) {
     this.channels.add(channel);
@@ -307,12 +312,16 @@ class LocalRealtimeTransport {
       return;
     }
 
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.state = 'connecting';
     await this.requestEvents(true);
   }
 
   private async poll() {
-    if (this.inFlight || this.channels.size === 0 || this.state !== 'subscribed') {
+    if (this.inFlight || this.channels.size === 0 || this.state === 'idle') {
       return;
     }
 
@@ -332,6 +341,7 @@ class LocalRealtimeTransport {
       body: JSON.stringify({
         afterId: requestedAfterId,
         bindings: this.activeBindings(),
+        waitMs: REALTIME_SERVER_WAIT_MS,
       }),
       signal: controller.signal,
     });
@@ -349,11 +359,20 @@ class LocalRealtimeTransport {
     }
 
     if (result.error || !result.data) {
-      this.state = 'error';
-      this.notifyAll('CHANNEL_ERROR');
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= REALTIME_FAILURES_BEFORE_DEGRADED && this.state !== 'error') {
+        this.state = 'error';
+        this.notifyAll('CHANNEL_ERROR');
+      }
+      const retryDelay = Math.min(
+        REALTIME_MAX_RETRY_MS,
+        REALTIME_RETRY_BASE_MS * (2 ** (this.consecutiveFailures - 1)),
+      );
+      this.schedulePoll(retryDelay);
       return;
     }
 
+    this.consecutiveFailures = 0;
     this.afterId = result.data.lastId;
     if (requestedAfterId !== null) {
       result.data.events.forEach((event) => this.dispatch(event));
@@ -391,12 +410,12 @@ class LocalRealtimeTransport {
     [...this.channels].forEach((channel) => channel.notifyStatus(status));
   }
 
-  private schedulePoll() {
+  private schedulePoll(delay = REALTIME_POLL_MS) {
     if (this.timer !== null) {
       window.clearTimeout(this.timer);
     }
 
-    if (this.channels.size === 0 || this.state !== 'subscribed') {
+    if (this.channels.size === 0 || this.state === 'idle') {
       this.timer = null;
       return;
     }
@@ -404,7 +423,7 @@ class LocalRealtimeTransport {
     this.timer = window.setTimeout(() => {
       this.timer = null;
       void this.poll();
-    }, REALTIME_POLL_MS);
+    }, delay);
   }
 
   private stop() {
@@ -414,6 +433,7 @@ class LocalRealtimeTransport {
     this.inFlight = false;
     this.state = 'idle';
     this.afterId = null;
+    this.consecutiveFailures = 0;
 
     if (this.timer !== null) {
       window.clearTimeout(this.timer);

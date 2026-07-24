@@ -55,6 +55,7 @@ describe('local realtime transport', () => {
     expect(onEvent).not.toHaveBeenCalled();
     const initialization = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(initialization.afterId).toBeNull();
+    expect(initialization.waitMs).toBe(20_000);
 
     await vi.advanceTimersByTimeAsync(1200);
 
@@ -66,6 +67,32 @@ describe('local realtime transport', () => {
       eventType: 'INSERT',
       new: { id: 'message-42', content: 'New event' },
     });
+
+    await channel.unsubscribe();
+  });
+
+  it('recovers an isolated transport failure without degrading every channel', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ events: [], lastId: 50 }))
+      .mockRejectedValueOnce(new TypeError('HTTP/2 stream failed'))
+      .mockResolvedValueOnce(jsonResponse({ events: [], lastId: 50 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onStatus = vi.fn();
+    const channel = supabase
+      .channel('local-realtime-transient-failure-test')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'messages',
+      }, vi.fn())
+      .subscribe(onStatus);
+
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(onStatus).not.toHaveBeenCalledWith('CHANNEL_ERROR');
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(onStatus).not.toHaveBeenCalledWith('CHANNEL_ERROR');
 
     await channel.unsubscribe();
   });
