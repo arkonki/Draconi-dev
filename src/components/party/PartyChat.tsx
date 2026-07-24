@@ -3,7 +3,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
 // 1. Import deleteMessage
-import { getPartyMessages, sendMessage, deleteMessage, Message } from '../../lib/api/chat';
+import {
+  appendMessageIfMissing,
+  getPartyMessages,
+  sendMessage,
+  deleteMessage,
+  Message,
+} from '../../lib/api/chat';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -106,10 +112,10 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
         const incoming = payload.new as Message;
         if (incoming.content.includes(`<<<POKE:${user?.id}>>>`)) triggerShake();
 
-        queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => {
-          if (oldData.find((msg) => msg.id === incoming.id)) return oldData;
-          return [...oldData, incoming];
-        });
+        queryClient.setQueryData(
+          ['messages', partyId],
+          (oldData: Message[] = []) => appendMessageIfMissing(oldData, incoming),
+        );
         return;
       }
 
@@ -222,7 +228,10 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
 
     try {
       const sentMessage = await sendMessage(partyId, user.id, finalContent);
-      queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => { return [...oldData, sentMessage]; });
+      queryClient.setQueryData(
+        ['messages', partyId],
+        (oldData: Message[] = []) => appendMessageIfMissing(oldData, sentMessage),
+      );
       scrollToBottom();
     } catch (error) {
       console.error('Failed to send message', error);

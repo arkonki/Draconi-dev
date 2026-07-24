@@ -8,6 +8,12 @@ export interface Message {
   created_at: string;
 }
 
+export function appendMessageIfMissing(messages: Message[], incoming: Message) {
+  return messages.some((message) => message.id === incoming.id)
+    ? messages
+    : [...messages, incoming];
+}
+
 export async function getPartyMessages(partyId: string) {
   const { data, error } = await supabase
     .from('messages')
