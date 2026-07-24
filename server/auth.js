@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
 import { getBearerToken, HttpError } from './http.js';
 
@@ -12,16 +13,27 @@ function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 
-export function hashPassword(password) {
-  if (typeof password !== 'string' || password.length < 8) {
-    throw new HttpError(400, 'Password must contain at least 8 characters');
-  }
+function encodeScryptPassword(password) {
   const salt = randomBytes(16).toString('hex');
   const derived = scryptSync(password, salt, 64).toString('hex');
   return `scrypt$${salt}$${derived}`;
 }
 
+export function hashPassword(password) {
+  if (typeof password !== 'string' || password.length < 8) {
+    throw new HttpError(400, 'Password must contain at least 8 characters');
+  }
+  return encodeScryptPassword(password);
+}
+
 export function verifyPassword(password, encoded) {
+  if (/^\$2[aby]\$\d{2}\$/.test(String(encoded || ''))) {
+    try {
+      return bcrypt.compareSync(String(password || ''), encoded);
+    } catch {
+      return false;
+    }
+  }
   const [algorithm, salt, expectedHex] = String(encoded || '').split('$');
   if (algorithm !== 'scrypt' || !salt || !expectedHex) return false;
   const expected = Buffer.from(expectedHex, 'hex');
@@ -102,6 +114,12 @@ export async function signIn({ email, password }) {
     throw new HttpError(400, 'Invalid login credentials', 'INVALID_CREDENTIALS');
   }
   const session = await withTransaction(async (client) => {
+    if (!String(user.password_hash).startsWith('scrypt$')) {
+      await client.query(
+        'UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2',
+        [encodeScryptPassword(String(password || '')), user.id],
+      );
+    }
     await client.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
     return createSession(client, user);
   });
