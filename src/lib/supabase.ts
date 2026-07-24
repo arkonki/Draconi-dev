@@ -235,17 +235,199 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
   }
 }
 
-class LocalRealtimeChannel {
-  private bindings: Array<{
-    event: string;
-    table: string;
-    filter?: string;
-    callback: (payload: RealtimePostgresChangesPayload<QueryRow>) => void;
-  }> = [];
+interface LocalRealtimeEvent {
+  table_name: string;
+  event_type: 'INSERT' | 'UPDATE' | 'DELETE';
+  created_at: string;
+  new_record?: QueryRow | null;
+  old_record?: QueryRow | null;
+}
+
+interface LocalRealtimeBinding {
+  event: string;
+  table: string;
+  filter?: string;
+  callback: (payload: RealtimePostgresChangesPayload<QueryRow>) => void;
+}
+
+const REALTIME_POLL_MS = 1200;
+
+function bindingMatchesEvent(binding: LocalRealtimeBinding, event: LocalRealtimeEvent) {
+  if (binding.table !== event.table_name || (binding.event !== '*' && binding.event !== event.event_type)) {
+    return false;
+  }
+
+  if (!binding.filter) {
+    return true;
+  }
+
+  const separator = '=eq.';
+  const separatorIndex = binding.filter.indexOf(separator);
+  if (separatorIndex === -1) {
+    return true;
+  }
+
+  const column = binding.filter.slice(0, separatorIndex);
+  const expected = binding.filter.slice(separatorIndex + separator.length);
+  const row = event.new_record || event.old_record;
+  return Boolean(row && String(row[column]) === expected);
+}
+
+class LocalRealtimeTransport {
+  private channels = new Set<LocalRealtimeChannel>();
   private timer: number | null = null;
   private afterId: number | null = null;
   private inFlight = false;
-  private closed = false;
+  private state: 'idle' | 'connecting' | 'subscribed' | 'error' = 'idle';
+  private requestGeneration = 0;
+  private requestController: AbortController | null = null;
+
+  register(channel: LocalRealtimeChannel) {
+    this.channels.add(channel);
+
+    if (this.state === 'subscribed') {
+      channel.notifyStatus('SUBSCRIBED');
+      return;
+    }
+
+    if (!this.inFlight) {
+      void this.connect();
+    }
+  }
+
+  unregister(channel: LocalRealtimeChannel) {
+    this.channels.delete(channel);
+    if (this.channels.size === 0) {
+      this.stop();
+    }
+  }
+
+  private async connect() {
+    if (this.inFlight || this.channels.size === 0) {
+      return;
+    }
+
+    this.state = 'connecting';
+    await this.requestEvents(true);
+  }
+
+  private async poll() {
+    if (this.inFlight || this.channels.size === 0 || this.state !== 'subscribed') {
+      return;
+    }
+
+    await this.requestEvents(false);
+  }
+
+  private async requestEvents(isConnection: boolean) {
+    const generation = this.requestGeneration;
+    const requestedAfterId = this.afterId;
+    const controller = new AbortController();
+    this.requestController = controller;
+    this.inFlight = true;
+
+    const result = await apiRequest<{ events: LocalRealtimeEvent[]; lastId: number }>('/realtime/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        afterId: requestedAfterId,
+        bindings: this.activeBindings(),
+      }),
+      signal: controller.signal,
+    });
+
+    if (generation !== this.requestGeneration) {
+      return;
+    }
+
+    this.requestController = null;
+    this.inFlight = false;
+
+    if (this.channels.size === 0) {
+      this.stop();
+      return;
+    }
+
+    if (result.error || !result.data) {
+      this.state = 'error';
+      this.notifyAll('CHANNEL_ERROR');
+      return;
+    }
+
+    this.afterId = result.data.lastId;
+    if (requestedAfterId !== null) {
+      result.data.events.forEach((event) => this.dispatch(event));
+    }
+
+    const recovered = this.state !== 'subscribed';
+    this.state = 'subscribed';
+    if (isConnection || recovered) {
+      this.notifyAll('SUBSCRIBED');
+    }
+    this.schedulePoll();
+  }
+
+  private activeBindings() {
+    const bindings = new Map<string, Omit<LocalRealtimeBinding, 'callback'>>();
+
+    this.channels.forEach((channel) => {
+      channel.getBindings().forEach(({ event, table, filter }) => {
+        const binding = { event, table, filter };
+        const key = JSON.stringify(binding);
+        if (!bindings.has(key)) {
+          bindings.set(key, binding);
+        }
+      });
+    });
+
+    return [...bindings.values()];
+  }
+
+  private dispatch(event: LocalRealtimeEvent) {
+    [...this.channels].forEach((channel) => channel.dispatch(event));
+  }
+
+  private notifyAll(status: string) {
+    [...this.channels].forEach((channel) => channel.notifyStatus(status));
+  }
+
+  private schedulePoll() {
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+    }
+
+    if (this.channels.size === 0 || this.state !== 'subscribed') {
+      this.timer = null;
+      return;
+    }
+
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      void this.poll();
+    }, REALTIME_POLL_MS);
+  }
+
+  private stop() {
+    this.requestGeneration += 1;
+    this.requestController?.abort();
+    this.requestController = null;
+    this.inFlight = false;
+    this.state = 'idle';
+    this.afterId = null;
+
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
+const localRealtimeTransport = new LocalRealtimeTransport();
+
+class LocalRealtimeChannel {
+  private bindings: LocalRealtimeBinding[] = [];
+  private statusCallback?: (status: string) => void;
+  private subscribed = false;
 
   on(
     _type: 'postgres_changes',
@@ -257,48 +439,44 @@ class LocalRealtimeChannel {
   }
 
   subscribe(callback?: (status: string) => void) {
-    this.closed = false;
-    void this.initialize(callback);
+    this.statusCallback = callback;
+    if (!this.subscribed) {
+      this.subscribed = true;
+      localRealtimeTransport.register(this);
+    }
     return this as unknown as RealtimeChannel;
   }
 
   unsubscribe() {
-    this.closed = true;
-    if (this.timer !== null) window.clearInterval(this.timer);
-    this.timer = null;
+    if (this.subscribed) {
+      this.subscribed = false;
+      localRealtimeTransport.unregister(this);
+    }
+    this.statusCallback = undefined;
     return Promise.resolve('ok');
   }
 
-  private async initialize(statusCallback?: (status: string) => void) {
-    const result = await this.fetchEvents(null);
-    if (this.closed) return;
-    if (result.error || !result.data) {
-      statusCallback?.('CHANNEL_ERROR');
-      return;
-    }
-
-    this.afterId = result.data.lastId;
-    statusCallback?.('SUBSCRIBED');
-    this.timer = window.setInterval(() => void this.poll(statusCallback), 1200);
+  getBindings() {
+    return this.bindings;
   }
 
-  private async poll(statusCallback?: (status: string) => void) {
-    if (this.inFlight || this.afterId === null || this.closed) return;
-    this.inFlight = true;
-    const result = await this.fetchEvents(this.afterId);
-    this.inFlight = false;
-    if (this.closed) return;
-    if (result.error || !result.data) {
-      if (this.timer !== null) window.clearInterval(this.timer);
-      this.timer = null;
-      statusCallback?.('CHANNEL_ERROR');
+  notifyStatus(status: string) {
+    if (this.subscribed) {
+      this.statusCallback?.(status);
+    }
+  }
+
+  dispatch(event: LocalRealtimeEvent) {
+    if (!this.subscribed) {
       return;
     }
-    this.afterId = result.data.lastId;
-    result.data.events.forEach((event) => {
-      const binding = this.bindings.find((candidate) =>
-        candidate.table === event.table_name && (candidate.event === '*' || candidate.event === event.event_type));
-      if (!binding) return;
+
+    const binding = this.bindings.find((candidate) => bindingMatchesEvent(candidate, event));
+    if (!binding) {
+      return;
+    }
+
+    try {
       binding.callback({
         schema: 'public',
         table: String(event.table_name),
@@ -308,18 +486,9 @@ class LocalRealtimeChannel {
         old: (event.old_record || {}) as QueryRow,
         errors: null,
       } as RealtimePostgresChangesPayload<QueryRow>);
-    });
-  }
-
-  private fetchEvents(afterId: number | null) {
-    return apiRequest<{ events: Array<Record<string, unknown>>; lastId: number }>('/realtime/events', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        afterId,
-        bindings: this.bindings.map(({ event, table, filter }) => ({ event, table, filter })),
-      }),
-    });
+    } catch (error) {
+      console.error('Realtime event callback failed:', error);
+    }
   }
 }
 

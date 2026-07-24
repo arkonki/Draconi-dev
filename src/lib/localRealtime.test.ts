@@ -93,4 +93,104 @@ describe('local realtime transport', () => {
 
     await channel.unsubscribe();
   });
+
+  it('multiplexes multiple channels through one polling request', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ events: [], lastId: 20 }))
+      .mockResolvedValueOnce(jsonResponse({
+        events: [
+          {
+            id: 21,
+            table_name: 'messages',
+            event_type: 'INSERT',
+            created_at: '2026-07-24T00:00:00.000Z',
+            new_record: { id: 'message-21', party_id: 'party-1' },
+            old_record: null,
+          },
+          {
+            id: 22,
+            table_name: 'encounters',
+            event_type: 'UPDATE',
+            created_at: '2026-07-24T00:00:01.000Z',
+            new_record: { id: 'encounter-22', party_id: 'party-1' },
+            old_record: { id: 'encounter-22', party_id: 'party-1' },
+          },
+        ],
+        lastId: 22,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onMessage = vi.fn();
+    const onEncounter = vi.fn();
+    const messageChannel = supabase
+      .channel('shared-message-channel')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'messages', filter: 'party_id=eq.party-1',
+      }, onMessage)
+      .subscribe();
+    const encounterChannel = supabase
+      .channel('shared-encounter-channel')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'encounters', filter: 'party_id=eq.party-1',
+      }, onEncounter)
+      .subscribe();
+
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1200);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const poll = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(poll.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'INSERT', table: 'messages', filter: 'party_id=eq.party-1' }),
+      expect.objectContaining({ event: '*', table: 'encounters', filter: 'party_id=eq.party-1' }),
+    ]));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onEncounter).toHaveBeenCalledTimes(1);
+
+    await messageChannel.unsubscribe();
+    await encounterChannel.unsubscribe();
+  });
+
+  it('applies each channel filter when a shared poll returns an event', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ events: [], lastId: 30 }))
+      .mockResolvedValueOnce(jsonResponse({
+        events: [{
+          id: 31,
+          table_name: 'messages',
+          event_type: 'INSERT',
+          created_at: '2026-07-24T00:00:00.000Z',
+          new_record: { id: 'message-31', party_id: 'party-1' },
+          old_record: null,
+        }],
+        lastId: 31,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onAnyMessage = vi.fn();
+    const onOtherPartyMessage = vi.fn();
+    const globalChannel = supabase
+      .channel('global-message-channel')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'messages',
+      }, onAnyMessage)
+      .subscribe();
+    const partyChannel = supabase
+      .channel('other-party-message-channel')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'messages', filter: 'party_id=eq.party-2',
+      }, onOtherPartyMessage)
+      .subscribe();
+
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1200);
+
+    expect(onAnyMessage).toHaveBeenCalledTimes(1);
+    expect(onOtherPartyMessage).not.toHaveBeenCalled();
+
+    await globalChannel.unsubscribe();
+    await partyChannel.unsubscribe();
+  });
 });

@@ -162,6 +162,30 @@ describe('RealtimeChannelManager', () => {
     expect(onStatus).toHaveBeenLastCalledWith('degraded');
   });
 
+  it('cancels a scheduled reconnect when the shared transport recovers', () => {
+    const client = new FakeClient();
+    const manager = new RealtimeChannelManager(client as never, {
+      baseReconnectMs: 300,
+      maxReconnectMs: 300,
+      degradedAfterMs: 200,
+      jitterRatio: 0,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    manager.subscribe({
+      key: 'party-chat',
+      bindings: TEST_BINDINGS,
+      onEvent: vi.fn(),
+    });
+
+    client.channels[0].emitStatus('SUBSCRIBED');
+    client.channels[0].emitStatus('CHANNEL_ERROR');
+    client.channels[0].emitStatus('SUBSCRIBED');
+
+    vi.advanceTimersByTime(300);
+    expect(client.channels).toHaveLength(1);
+  });
+
   it('dispatches realtime events to every subscriber on a shared channel', () => {
     const client = new FakeClient();
     const firstHandler = vi.fn();

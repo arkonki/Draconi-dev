@@ -200,6 +200,8 @@ export class RealtimeChannelManager {
         const shouldReconcile = !entry.hasEverSubscribed || entry.status !== 'healthy' || entry.reconnectAttempt > 0;
         entry.hasEverSubscribed = true;
         entry.reconnectAttempt = 0;
+        this.clearTimer(entry.reconnectTimer);
+        entry.reconnectTimer = null;
         this.clearTimer(entry.degradedTimer);
         entry.degradedTimer = null;
         this.setStatus(entry, 'healthy');
