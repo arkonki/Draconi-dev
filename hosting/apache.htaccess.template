@@ -1,0 +1,25 @@
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Preserve bearer/session authorization headers for the Node API.
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # WebSocket upgrades must use the ws proxy handler before the HTTP API rule.
+  RewriteCond %{HTTP:Upgrade} =websocket [NC]
+  RewriteCond %{HTTP:Connection} upgrade [NC]
+  RewriteRule ^api/realtime/socket$ ws://__DRACONI_API_HOST__:__DRACONI_API_PORT__/api/realtime/socket [P,L,NE]
+
+  # Keep API traffic same-origin while the Node process listens privately.
+  RewriteRule ^api(?:/(.*))?$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/api/$1 [P,QSA,L,NE]
+
+  # Stop inherited parent rewrites for known build files and directories.
+  RewriteRule ^index\.html$ - [END]
+  RewriteRule ^(?:assets|icons|sounds)/ - [END]
+  RewriteRule ^(?:manifest\.webmanifest|sw\.js|dragonbane-icon\.png|cors\.ts|_redirects)$ - [END]
+
+  # React Router fallback for client-side routes.
+  RewriteRule ^ index.html [END]
+</IfModule>

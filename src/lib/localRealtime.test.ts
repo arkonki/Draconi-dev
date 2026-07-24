@@ -16,6 +16,7 @@ async function flushPromises() {
 describe('local realtime transport', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', undefined);
     window.localStorage.clear();
   });
 
@@ -218,5 +219,101 @@ describe('local realtime transport', () => {
 
     await globalChannel.unsubscribe();
     await partyChannel.unsubscribe();
+  });
+
+  it('uses one authenticated WebSocket and delivers pushed events without polling', async () => {
+    class FakeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static instances: FakeWebSocket[] = [];
+
+      readonly sent: string[] = [];
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+
+      constructor(readonly url: string) {
+        FakeWebSocket.instances.push(this);
+      }
+
+      send(message: string) {
+        this.sent.push(message);
+      }
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.();
+      }
+
+      open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.();
+      }
+
+      receive(message: unknown) {
+        this.onmessage?.({ data: JSON.stringify(message) });
+      }
+    }
+
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    window.localStorage.setItem('dragonbane_local_session', JSON.stringify({
+      access_token: 'socket-token',
+    }));
+
+    const onEvent = vi.fn();
+    const onStatus = vi.fn();
+    const channel = supabase
+      .channel('websocket-realtime-test')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'messages', filter: 'party_id=eq.party-1',
+      }, onEvent)
+      .subscribe(onStatus);
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    const socket = FakeWebSocket.instances[0];
+    expect(socket.url).toBe('ws://localhost:3000/api/realtime/socket');
+
+    socket.open();
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: 'authenticate',
+      accessToken: 'socket-token',
+    });
+
+    socket.receive({ type: 'authenticated' });
+    expect(JSON.parse(socket.sent[1])).toMatchObject({
+      type: 'subscribe',
+      afterId: null,
+      bindings: [expect.objectContaining({ table: 'messages', filter: 'party_id=eq.party-1' })],
+    });
+
+    socket.receive({ type: 'subscribed', events: [], lastId: 70 });
+    expect(onStatus).toHaveBeenCalledWith('SUBSCRIBED');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    socket.receive({
+      type: 'events',
+      events: [{
+        id: 71,
+        table_name: 'messages',
+        event_type: 'INSERT',
+        created_at: '2026-07-24T00:00:00.000Z',
+        new_record: { id: 'message-71', party_id: 'party-1' },
+        old_record: null,
+      }],
+      lastId: 71,
+    });
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0][0]).toMatchObject({
+      table: 'messages',
+      eventType: 'INSERT',
+      new: { id: 'message-71' },
+    });
+
+    await channel.unsubscribe();
   });
 });

@@ -79,6 +79,10 @@ async function createSession(client, user) {
 
 export async function currentUser(request, required = true) {
   const token = getBearerToken(request);
+  return authenticateAccessToken(token, required);
+}
+
+export async function authenticateAccessToken(token, required = true) {
   if (!token) {
     if (required) throw new HttpError(401, 'Authentication required', 'AUTH_REQUIRED');
     return null;

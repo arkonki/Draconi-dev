@@ -26,8 +26,10 @@ import {
   stageStoredBackup,
   stageUploadedBackup,
 } from './recovery.js';
+import { attachRealtimeServer } from './realtime.js';
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.ELKDATA_APP_IP || process.env.DRACONI_HOST || '0.0.0.0';
 
 function matchPath(pathname, expression) {
   const match = pathname.match(expression);
@@ -208,8 +210,9 @@ const server = http.createServer(async (request, response) => {
 await waitForDatabase();
 await runMigrations();
 await bootstrapAdmin();
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Dragonbane local API listening on port ${PORT}`);
+const realtimeServer = await attachRealtimeServer(server);
+server.listen(PORT, HOST, () => {
+  console.log(`Dragonbane local API listening on ${HOST}:${PORT}`);
 });
 startHousekeeping();
 
@@ -230,7 +233,7 @@ async function shutdown(signal) {
     await Promise.all([new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
       server.closeIdleConnections?.();
-    }), stopHousekeeping()]);
+    }), stopHousekeeping(), realtimeServer.close()]);
     await pool.end();
     clearTimeout(forceExit);
     process.exit(0);

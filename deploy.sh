@@ -51,7 +51,7 @@ while (($# > 0)); do
   shift
 done
 
-for command_name in git npm rsync; do
+for command_name in git npm rsync sed; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "Required command not found: ${command_name}"
 done
 
@@ -126,8 +126,11 @@ EOF
   export PORT="${PORT:-3000}"
   export STORAGE_ROOT="${STORAGE_ROOT:-${DATA_DIR}/storage}"
   export BACKUP_ROOT="${BACKUP_ROOT:-${DATA_DIR}/backups}"
+  readonly API_PROXY_HOST="${ELKDATA_APP_IP:-127.0.0.1}"
 
   [[ "${STORAGE_ROOT}" != "${BACKUP_ROOT}" ]] || fail "STORAGE_ROOT and BACKUP_ROOT must be different"
+  [[ "${PORT}" =~ ^[0-9]+$ ]] || fail "PORT must be numeric"
+  [[ "${API_PROXY_HOST}" =~ ^[A-Za-z0-9.-]+$ ]] || fail "ELKDATA_APP_IP must be an IPv4 address or hostname"
   mkdir -p "${STORAGE_ROOT}" "${BACKUP_ROOT}"
   chmod 700 "${STORAGE_ROOT}" "${BACKUP_ROOT}"
 
@@ -179,7 +182,7 @@ else
     --time
 fi
 
-health_url="http://127.0.0.1:${PORT}/api/health"
+health_url="http://${API_PROXY_HOST}:${PORT}/api/health"
 healthy=false
 for _attempt in {1..20}; do
   if curl --fail --silent --show-error "${health_url}" >/dev/null 2>&1; then
@@ -190,6 +193,16 @@ for _attempt in {1..20}; do
 done
 
 [[ "${healthy}" == true ]] || fail "API health check failed: ${health_url}"
+
+apache_template="${APP_DIR}/hosting/apache.htaccess.template"
+[[ -f "${apache_template}" ]] || fail "Apache proxy template is missing: ${apache_template}"
+apache_config_next="${PUBLIC_DIR}/.htaccess.draconi-next"
+sed \
+  -e "s/__DRACONI_API_HOST__/${API_PROXY_HOST}/g" \
+  -e "s/__DRACONI_API_PORT__/${PORT}/g" \
+  "${apache_template}" > "${apache_config_next}"
+chmod 644 "${apache_config_next}"
+mv "${apache_config_next}" "${PUBLIC_DIR}/.htaccess"
 
 printf 'Publishing frontend to %s...\n' "${PUBLIC_DIR}"
 rsync -a --delete-delay \

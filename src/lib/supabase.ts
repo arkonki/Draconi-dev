@@ -236,6 +236,7 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
 }
 
 interface LocalRealtimeEvent {
+  id: number;
   table_name: string;
   event_type: 'INSERT' | 'UPDATE' | 'DELETE';
   created_at: string;
@@ -254,6 +255,24 @@ const REALTIME_POLL_MS = 4000;
 const REALTIME_RETRY_BASE_MS = 500;
 const REALTIME_MAX_RETRY_MS = 5_000;
 const REALTIME_FAILURES_BEFORE_DEGRADED = 3;
+const REALTIME_SOCKET_RECONNECT_BASE_MS = 1000;
+const REALTIME_SOCKET_MAX_RECONNECT_MS = 30_000;
+const REALTIME_SOCKET_CONNECT_TIMEOUT_MS = 8000;
+
+type LocalRealtimeServerMessage =
+  | { type: 'authenticated' }
+  | { type: 'subscribed'; events: LocalRealtimeEvent[]; lastId: number }
+  | { type: 'events'; events: LocalRealtimeEvent[]; lastId: number }
+  | { type: 'error'; error?: LocalApiError };
+
+function realtimeSocketUrl() {
+  const apiUrl = new URL(API_BASE, window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/realtime/socket`;
+  apiUrl.search = '';
+  apiUrl.hash = '';
+  return apiUrl.toString();
+}
 
 function bindingMatchesEvent(binding: LocalRealtimeBinding, event: LocalRealtimeEvent) {
   if (binding.table !== event.table_name || (binding.event !== '*' && binding.event !== event.event_type)) {
@@ -285,17 +304,26 @@ class LocalRealtimeTransport {
   private requestGeneration = 0;
   private requestController: AbortController | null = null;
   private consecutiveFailures = 0;
+  private pollingActive = false;
+  private socket: WebSocket | null = null;
+  private socketGeneration = 0;
+  private socketAuthenticated = false;
+  private socketSubscribed = false;
+  private socketFailures = 0;
+  private socketReconnectTimer: number | null = null;
+  private socketConnectTimer: number | null = null;
 
   register(channel: LocalRealtimeChannel) {
     this.channels.add(channel);
 
     if (this.state === 'subscribed') {
       channel.notifyStatus('SUBSCRIBED');
-      return;
     }
 
-    if (!this.inFlight) {
-      void this.connect();
+    if (this.channels.size === 1 && !this.socket && !this.inFlight && !this.pollingActive) {
+      this.start();
+    } else if (this.socketAuthenticated) {
+      this.sendSocketSubscription();
     }
   }
 
@@ -303,24 +331,166 @@ class LocalRealtimeTransport {
     this.channels.delete(channel);
     if (this.channels.size === 0) {
       this.stop();
+    } else if (this.socketAuthenticated) {
+      this.sendSocketSubscription();
     }
   }
 
-  private async connect() {
-    if (this.inFlight || this.channels.size === 0) {
+  private start() {
+    if (typeof WebSocket === 'undefined' || !storedSession()?.access_token) {
+      this.startPolling();
+      return;
+    }
+    this.connectSocket();
+  }
+
+  private connectSocket() {
+    if (this.channels.size === 0 || this.socket) {
+      return;
+    }
+    if (this.socketReconnectTimer !== null) {
+      window.clearTimeout(this.socketReconnectTimer);
+      this.socketReconnectTimer = null;
+    }
+
+    const token = storedSession()?.access_token;
+    if (!token || typeof WebSocket === 'undefined') {
+      this.startPolling();
       return;
     }
 
+    const generation = ++this.socketGeneration;
+    this.socketAuthenticated = false;
+    this.socketSubscribed = false;
+    if (this.state !== 'subscribed') this.state = 'connecting';
+
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(realtimeSocketUrl());
+    } catch {
+      this.handleSocketClose(generation);
+      return;
+    }
+    this.socket = socket;
+
+    this.socketConnectTimer = window.setTimeout(() => {
+      if (this.socket === socket && !this.socketSubscribed) {
+        socket.close();
+      }
+    }, REALTIME_SOCKET_CONNECT_TIMEOUT_MS);
+
+    socket.onopen = () => {
+      if (this.socket !== socket || generation !== this.socketGeneration) return;
+      socket.send(JSON.stringify({ type: 'authenticate', accessToken: token }));
+    };
+    socket.onmessage = (event) => {
+      if (this.socket !== socket || generation !== this.socketGeneration) return;
+      try {
+        this.handleSocketMessage(JSON.parse(String(event.data)) as LocalRealtimeServerMessage);
+      } catch {
+        socket.close(1002, 'Invalid realtime message');
+      }
+    };
+    socket.onerror = () => {
+      // The close event owns fallback and reconnect scheduling.
+    };
+    socket.onclose = () => {
+      if (this.socket !== socket || generation !== this.socketGeneration) return;
+      this.socket = null;
+      this.handleSocketClose(generation);
+    };
+  }
+
+  private handleSocketMessage(message: LocalRealtimeServerMessage) {
+    if (message.type === 'authenticated') {
+      this.socketAuthenticated = true;
+      this.sendSocketSubscription();
+      return;
+    }
+
+    if (message.type === 'error') {
+      this.socket?.close(1011, message.error?.message || 'Realtime server error');
+      return;
+    }
+
+    if (message.type === 'subscribed') {
+      const recovered = this.state !== 'subscribed';
+      this.applyEvents(message.events, message.lastId, this.afterId !== null);
+      this.socketSubscribed = true;
+      this.socketFailures = 0;
+      this.clearSocketConnectTimer();
+      this.stopPolling();
+      this.state = 'subscribed';
+      if (recovered) this.notifyAll('SUBSCRIBED');
+      return;
+    }
+
+    if (message.type === 'events') {
+      this.applyEvents(message.events, message.lastId, true);
+    }
+  }
+
+  private sendSocketSubscription() {
+    if (!this.socketAuthenticated || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.socket.send(JSON.stringify({
+      type: 'subscribe',
+      afterId: this.afterId,
+      bindings: this.activeBindings(),
+    }));
+  }
+
+  private handleSocketClose(generation: number) {
+    if (generation !== this.socketGeneration) return;
+    this.clearSocketConnectTimer();
+    this.socketAuthenticated = false;
+    this.socketSubscribed = false;
+    if (this.channels.size === 0) return;
+
+    this.socketFailures += 1;
+    this.startPolling();
+    const reconnectDelay = Math.min(
+      REALTIME_SOCKET_MAX_RECONNECT_MS,
+      REALTIME_SOCKET_RECONNECT_BASE_MS * (2 ** Math.min(this.socketFailures - 1, 5)),
+    );
+    this.socketReconnectTimer = window.setTimeout(() => {
+      this.socketReconnectTimer = null;
+      this.connectSocket();
+    }, reconnectDelay);
+  }
+
+  private clearSocketConnectTimer() {
+    if (this.socketConnectTimer !== null) {
+      window.clearTimeout(this.socketConnectTimer);
+      this.socketConnectTimer = null;
+    }
+  }
+
+  private startPolling() {
+    if (this.pollingActive || this.channels.size === 0) return;
+    this.pollingActive = true;
+    if (!this.inFlight) {
+      void this.requestEvents(this.afterId === null);
+    }
+  }
+
+  private stopPolling() {
+    if (!this.pollingActive && !this.inFlight && this.timer === null) return;
+    this.pollingActive = false;
+    this.requestGeneration += 1;
+    this.requestController?.abort();
+    this.requestController = null;
+    this.inFlight = false;
+    this.consecutiveFailures = 0;
     if (this.timer !== null) {
       window.clearTimeout(this.timer);
       this.timer = null;
     }
-    this.state = 'connecting';
-    await this.requestEvents(true);
   }
 
   private async poll() {
-    if (this.inFlight || this.channels.size === 0 || this.state === 'idle') {
+    if (!this.pollingActive || this.inFlight || this.channels.size === 0 || this.state === 'idle') {
       return;
     }
 
@@ -371,10 +541,7 @@ class LocalRealtimeTransport {
     }
 
     this.consecutiveFailures = 0;
-    this.afterId = result.data.lastId;
-    if (requestedAfterId !== null) {
-      result.data.events.forEach((event) => this.dispatch(event));
-    }
+    this.applyEvents(result.data.events, result.data.lastId, requestedAfterId !== null);
 
     const recovered = this.state !== 'subscribed';
     this.state = 'subscribed';
@@ -382,6 +549,18 @@ class LocalRealtimeTransport {
       this.notifyAll('SUBSCRIBED');
     }
     this.schedulePoll();
+  }
+
+  private applyEvents(events: LocalRealtimeEvent[], lastId: number, shouldDispatch: boolean) {
+    const previousCursor = this.afterId;
+    if (shouldDispatch) {
+      events.forEach((event) => {
+        if (previousCursor === null || event.id > previousCursor) {
+          this.dispatch(event);
+        }
+      });
+    }
+    this.afterId = previousCursor === null ? lastId : Math.max(previousCursor, lastId);
   }
 
   private activeBindings() {
@@ -413,7 +592,7 @@ class LocalRealtimeTransport {
       window.clearTimeout(this.timer);
     }
 
-    if (this.channels.size === 0 || this.state === 'idle') {
+    if (!this.pollingActive || this.channels.size === 0 || this.state === 'idle') {
       this.timer = null;
       return;
     }
@@ -425,18 +604,20 @@ class LocalRealtimeTransport {
   }
 
   private stop() {
-    this.requestGeneration += 1;
-    this.requestController?.abort();
-    this.requestController = null;
-    this.inFlight = false;
+    this.socketGeneration += 1;
+    this.socket?.close(1000, 'No realtime subscribers');
+    this.socket = null;
+    this.socketAuthenticated = false;
+    this.socketSubscribed = false;
+    this.socketFailures = 0;
+    this.clearSocketConnectTimer();
+    if (this.socketReconnectTimer !== null) {
+      window.clearTimeout(this.socketReconnectTimer);
+      this.socketReconnectTimer = null;
+    }
+    this.stopPolling();
     this.state = 'idle';
     this.afterId = null;
-    this.consecutiveFailures = 0;
-
-    if (this.timer !== null) {
-      window.clearTimeout(this.timer);
-      this.timer = null;
-    }
   }
 }
 
