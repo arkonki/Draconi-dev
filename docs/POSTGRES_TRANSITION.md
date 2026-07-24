@@ -46,13 +46,13 @@ Responsibilities are intentionally separated:
 - Encounter, party-join, stat-advancement, and test-connection RPCs.
 - Projector session creation, layout updates, renewal, revocation, and public token state.
 - Local `images` upload, list, delete, and public-read routes with path traversal protection.
-- PostgreSQL change-event triggers and authorized browser polling for the existing collaborative refresh hooks.
+- PostgreSQL change-event triggers, `LISTEN/NOTIFY`, and an authenticated first-party WebSocket for the existing collaborative refresh hooks.
 - Canonical schema and idempotent reference seed for a clean database.
 - Checksum-verified, transaction-scoped incremental SQL migrations serialized by a PostgreSQL advisory lock at API startup.
 - Coordinated database/upload recovery through both CLI tooling and the administrator Settings console, including automatic pre-restore safety sets.
 - Repeatable API security coverage for cross-user isolation, party membership, owner-only mutations, upsert conflicts, session expiry, and projector-token expiry/revocation.
 - Cleanup-safe workflow coverage for every administrator game-data editor and the major party, storage, map, and encounter paths.
-- Replay-safe realtime cursor initialization, non-overlapping polling, reconnect reconciliation, and authorized event delivery tests.
+- Replay-safe realtime cursor initialization, WebSocket reconnect reconciliation, polling fallback, and authorized event delivery tests.
 - Live refresh coverage for chat, inventory, membership/characters, encounters/combatants, maps, tasks, time tracking, random tables, party notes, and story ideas.
 - Configurable, advisory-locked retention cleanup for expired sessions and collaboration events, with bounded batches and administrator status/manual controls.
 - Party-workflow compatibility migration for text inventory actors and automatic synchronization between party membership and `characters.party_id`.
@@ -64,7 +64,7 @@ Responsibilities are intentionally separated:
 - Web Push delivery is disabled. The local endpoint returns a clear `skipped` result, and the UI remains disabled unless a VAPID key is configured. A fully local push implementation would still require browser-reachable HTTPS and a Web Push delivery path.
 - No outbound email or automatic password-reset mail is sent. Administrators can create accounts and share temporary credentials; users can change their password after login.
 - Public registration defaults to disabled (`ALLOW_REGISTRATION=false`).
-- Collaboration polls an authorized PostgreSQL event log every 1.2 seconds. Channels establish a current cursor without replaying retained history, reconcile state after initial connection/reconnection, prevent overlapping polls, and fall back to slower refetches while degraded. Native WebSockets can replace polling later if concurrent-user traffic warrants it.
+- Collaboration uses an authenticated WebSocket backed by PostgreSQL `LISTEN/NOTIFY` and the durable authorized event log. Channels establish a current cursor without replaying retained history and replay missed events after reconnecting. One shared four-second HTTP poll is retained only as a fallback when the WebSocket upgrade path is unavailable.
 - Uploaded images are intentionally public once their URL is known, matching the old public `images` bucket behavior. Upload/list/delete operations require authentication.
 - The reference seed is a functional starter, not a complete rules compendium. Content must be reviewed and expanded by the application owner.
 - The legacy `supabase/` directory remains only as historical implementation evidence. Docker does not mount or execute it.
@@ -86,7 +86,7 @@ Responsibilities are intentionally separated:
 - Expired-session and change-event retention is implemented and tested. Defaults retain expired sessions for 24 hours, change events for 14 days, and run at six-hour intervals in batches of at most 20,000 rows per table per pass.
 - Review the minimal reference seed and import any lawful source material available outside Supabase.
 - Administrator editors and the major party tools are exercised by a repeatable disposable workflow suite; the current Docker checkpoint passes it end to end.
-- Realtime delivery and authorization are covered by a disposable two-user/outsider rehearsal across the shared party tables; migration `0003_shared_tool_realtime.sql` adds the remaining change triggers and enforces one time tracker per party.
+- Realtime delivery and authorization are covered by a disposable two-user/outsider rehearsal across the shared party tables; migration `0003_shared_tool_realtime.sql` adds the remaining change triggers and enforces one time tracker per party, while migration `0005_realtime_notifications.sql` wakes the WebSocket hub after committed changes.
 - Replace the current compatibility query endpoint over time with explicit domain endpoints for the most security-sensitive workflows.
 
 ### Phase 3 — server deployment

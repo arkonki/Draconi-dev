@@ -314,6 +314,11 @@ describe('local realtime transport', () => {
       new: { id: 'message-71' },
     });
 
+    socket.close();
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ afterId: 71 });
+
     await channel.unsubscribe();
   });
 });

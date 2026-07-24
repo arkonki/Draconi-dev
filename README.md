@@ -53,6 +53,10 @@ All ports are configurable in `.env`. Browser traffic normally uses the web addr
 For the production domain `https://draconi.ee`, build the frontend with
 `VITE_BASE_PATH=/` and `VITE_API_BASE_URL=/api`. The deployment script reads
 these values from the production environment and defaults to the same paths.
+It also renders the Apache proxy configuration, including the WebSocket
+upgrade route, from `hosting/apache.htaccess.template`. On Veebimajutus,
+`ELKDATA_APP_IP` is used automatically when the hosting panel supplies it;
+otherwise Node binds to all interfaces and Apache reaches it on localhost.
 
 Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files are captured together by the recovery commands:
 
@@ -104,7 +108,7 @@ npm run test:workflow
 
 Run it only against a local/disposable stack. It verifies all administrator game-data editors, compendium entries/templates, party joining and character linking, chat permissions, inventory logs, tasks, time tracking, random tables, notes, story ideas, maps, uploads, and encounter operations.
 
-The realtime rehearsal verifies cursor initialization, historical-event replay prevention, authorized cross-user delivery, cross-party isolation, and insert/update/delete events for the shared party tools:
+The realtime rehearsal verifies cursor initialization, historical-event replay prevention, authenticated WebSocket delivery, authorized cross-user delivery, cross-party isolation, and insert/update/delete events for the shared party tools:
 
 ```bash
 REALTIME_TEST_PASSWORD='<current-admin-password>' \
@@ -112,7 +116,14 @@ REALTIME_TEST_DATABASE_URL='postgresql://dragonbane:<postgres-password>@localhos
 npm run test:realtime
 ```
 
-Collaboration uses authorized 1.2-second event polling rather than a hosted WebSocket service. Chat, inventory, party/member state, encounters, maps, tasks, time tracking, random tables, party notes, and story-library changes refresh connected party views. Projector displays independently refresh every 1.5 seconds.
+Collaboration uses a first-party authenticated WebSocket connected to the Node
+API. PostgreSQL `LISTEN/NOTIFY` wakes the server when the durable change-event
+log receives a row, and clients retain their cursor so reconnects replay missed
+authorized events. A shared four-second HTTP poll remains available only as a
+fallback when the WebSocket upgrade path is unavailable. Chat, inventory,
+party/member state, encounters, maps, tasks, time tracking, random tables,
+party notes, and story-library changes refresh connected party views.
+Projector displays independently refresh every 1.5 seconds.
 
 The housekeeping rehearsal also requires a local/disposable stack because it inserts deliberately expired rows and invokes real retention cleanup:
 

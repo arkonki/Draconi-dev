@@ -1,8 +1,10 @@
-/* global fetch */
+/* global fetch, WebSocket */
 import assert from 'node:assert/strict';
 import console from 'node:console';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
+import { clearTimeout, setTimeout } from 'node:timers';
+import { URL } from 'node:url';
 import pg from 'pg';
 
 const { Client } = pg;
@@ -26,6 +28,48 @@ const testEmails = Object.values(accounts).map((account) => account.email);
 const database = new Client({ connectionString: databaseUrl });
 const recordIds = new Set();
 let partyId = null;
+let memberRealtimeSocket = null;
+
+function websocketUrl(path) {
+  const url = new URL(`${apiBase}${path}`);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+}
+
+function waitForSocketMessage(socket, predicate, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.removeEventListener('message', handleMessage);
+      reject(new Error('Timed out waiting for realtime WebSocket message'));
+    }, timeoutMs);
+
+    const handleMessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (!predicate(message)) return;
+      clearTimeout(timeout);
+      socket.removeEventListener('message', handleMessage);
+      resolve(message);
+    };
+    socket.addEventListener('message', handleMessage);
+  });
+}
+
+async function openRealtimeSocket(token, afterId, bindings) {
+  const socket = new WebSocket(websocketUrl('/realtime/socket'));
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', () => reject(new Error('Unable to open realtime WebSocket')), { once: true });
+  });
+
+  const authenticated = waitForSocketMessage(socket, (message) => message.type === 'authenticated');
+  socket.send(JSON.stringify({ type: 'authenticate', accessToken: token }));
+  await authenticated;
+
+  const subscribed = waitForSocketMessage(socket, (message) => message.type === 'subscribed');
+  socket.send(JSON.stringify({ type: 'subscribe', afterId, bindings }));
+  await subscribed;
+  return socket;
+}
 
 async function jsonRequest(path, { token, ...init } = {}) {
   const headers = { ...(init.headers || {}) };
@@ -121,10 +165,21 @@ try {
   assert.equal(memberBaseline.events.some((event) => event.record_id === historicalMessage.id), false);
   await realtime(member.token, 'not-a-cursor', messageBindings, 400);
 
+  memberRealtimeSocket = await openRealtimeSocket(member.token, memberBaseline.lastId, messageBindings);
+  const pushedMessagePromise = waitForSocketMessage(
+    memberRealtimeSocket,
+    (message) => message.type === 'events' && message.events?.some((event) => event.table_name === 'messages'),
+  );
   const liveMessage = await insert(owner.token, 'messages', {
     party_id: party.id,
     content: `Live message ${suffix}`,
   });
+  const pushedMessage = await pushedMessagePromise;
+  assert.equal(
+    pushedMessage.events.some((event) => event.record_id === liveMessage.id),
+    true,
+    'WebSocket did not push the live message',
+  );
   const memberDelivery = await realtime(member.token, memberBaseline.lastId, messageBindings);
   const deliveredMessage = memberDelivery.events.find((event) => event.record_id === liveMessage.id);
   assert.equal(deliveredMessage?.table_name, 'messages');
@@ -205,12 +260,14 @@ try {
     cursorInitialization: 'passed',
     historicalReplayPrevention: 'passed',
     invalidCursorRejection: 'passed',
+    websocketDelivery: 'passed',
     authorizedDelivery: 'passed',
     crossPartyIsolation: 'passed',
     sharedToolInsertEvents: 'passed',
     updateAndDeleteEvents: 'passed',
   }, null, 2));
 } finally {
+  memberRealtimeSocket?.close();
   try {
     await database.query('DELETE FROM users WHERE email = ANY($1::text[])', [testEmails]);
     const ids = [...recordIds];

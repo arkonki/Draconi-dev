@@ -28,6 +28,7 @@ services:
       - "${API_PORT:-3000}:3000"
     environment:
       PORT: 3000
+      DRACONI_HOST: ${DRACONI_HOST:-0.0.0.0}
       DATABASE_URL: postgresql://${POSTGRES_USER:-dragonbane}:${POSTGRES_PASSWORD:-dragonbane-local-password}@db:5432/${POSTGRES_DB:-dragonbane}
       STORAGE_ROOT: /data/storage
       BACKUP_ROOT: /data/backups
