@@ -9,5 +9,5 @@ COPY package.json ./application-package.json
 COPY server ./server
 COPY --chmod=755 server/docker-entrypoint.sh /usr/local/bin/dragonbane-entrypoint
 
-EXPOSE 3000
+EXPOSE 3000 3100
 ENTRYPOINT ["dragonbane-entrypoint"]

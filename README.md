@@ -2,17 +2,20 @@
 
 Dragonbane Character Manager is a self-hosted React application for characters, parties, encounters, maps, notes, shared inventory, and game reference data.
 
-The application now runs without Supabase, Netlify, or another hosted backend. Its runtime is three local containers:
+The application now runs without Supabase, Netlify, or another hosted backend. Its runtime is four local containers:
 
 - PostgreSQL 16 stores application, identity, and session data.
 - A Node.js API provides authentication, authorization, data access, RPC operations, collaboration events, and local file storage.
+- A thin MCP server exposes controlled Dragonbane tools and resources through the versioned API.
 - Nginx serves the production React build and proxies `/api` to Node.
 
 ## Run locally with Docker
 
 Prerequisites: Docker Desktop (or Docker Engine with Compose v2).
 
-1. Copy the environment template and replace both example passwords:
+1. Copy the environment template and replace the example passwords and
+   development token. Keep the password inside `DATABASE_URL` in sync with
+   `POSTGRES_PASSWORD` if you plan to run Node directly on the host:
 
    ```bash
    cp .env.example .env
@@ -45,10 +48,144 @@ docker compose ps         # show container health
 | --- | --- | --- |
 | Web app | `http://localhost:8080` | none |
 | Node API | `http://localhost:3000/api` | `storage_data` |
+| Helper API documentation | `http://localhost:3000/docs` | none |
+| MCP Streamable HTTP | `http://localhost:3100/mcp` | none |
 | PostgreSQL | `localhost:5432` | `postgres_data` |
 | Server recovery sets | Admin Settings | `backup_data` |
 
 All ports are configurable in `.env`. Browser traffic normally uses the web address; Nginx routes its `/api` requests internally.
+
+## Dragonbane Helper API and MCP MVP
+
+The Helper integration uses the existing data model instead of duplicating it:
+
+- `parties` are campaigns;
+- `characters` and active `encounter_combatants` are actors;
+- `encounters` are combats;
+- PostgreSQL remains the sole authoritative state store;
+- MCP calls the `/api/v1` REST contract and never accesses PostgreSQL directly.
+
+The current MVP provides the read-only MCP tools `list_campaigns`,
+`get_campaign_state`, `get_actor`, `get_combat_state`, and
+`get_recent_events`. It also provides the modifying tools
+`apply_actor_changes` and `append_campaign_event`. Actor changes support HP,
+WP, conditions, and quantity changes for existing character inventory items.
+
+Every modifying call:
+
+- requires the latest campaign revision through `If-Match`;
+- requires a unique `Idempotency-Key`;
+- runs in one PostgreSQL transaction;
+- increments the campaign revision exactly once;
+- records immutable campaign events;
+- returns structured state and the resulting revision.
+
+If another client changes campaign state first, the API returns HTTP 409 with
+`REVISION_CONFLICT`. Read the state again and reassess instead of retrying the
+old arguments.
+
+### Environment variables
+
+Set these values in `.env` in addition to the normal database and administrator
+settings:
+
+```dotenv
+AUTH_MODE=development_token
+DEVELOPMENT_TOKEN=replace-with-a-separate-long-random-token
+DEVELOPMENT_USER_EMAIL=admin@example.com
+HELPER_RATE_LIMIT_PER_MINUTE=120
+MCP_PORT=3100
+```
+
+Generate a suitable local token with `openssl rand -base64 32`. The configured
+email must already exist in `users`; on a fresh installation it should match
+`ADMIN_EMAIL`. The server derives identity and permissions from that user and
+never accepts a user ID from an MCP tool argument.
+
+Restart the stack after changing these values:
+
+```bash
+docker compose up --build -d
+```
+
+Database migrations are applied automatically when the API starts. Never edit
+an applied migration; add the next numbered file under `server/migrations`.
+
+### REST API and OpenAPI
+
+The complete OpenAPI 3.1 document and the self-contained documentation page are
+available at:
+
+```text
+http://localhost:3000/openapi.json
+http://localhost:3000/docs
+```
+
+Example read:
+
+```bash
+export DRACONI_DEV_TOKEN='<value from DEVELOPMENT_TOKEN>'
+curl http://localhost:3000/api/v1/campaigns \
+  -H "Authorization: Bearer $DRACONI_DEV_TOKEN"
+```
+
+Example idempotent damage write:
+
+```bash
+curl -X POST \
+  http://localhost:3000/api/v1/campaigns/<campaign-id>/actors/<actor-id>/changes \
+  -H "Authorization: Bearer $DRACONI_DEV_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'If-Match: "42"' \
+  -H 'Idempotency-Key: combat-round-3-goblin-hit-1' \
+  --data '{"reason":"Goblin longsword hit","changes":[{"type":"damage","amount":6,"damage_type":"slashing"}]}'
+```
+
+The same idempotency key may be retried only with identical arguments. The
+original response is returned without applying the change twice.
+
+### MCP development and testing
+
+The Docker stack starts the MCP endpoint at
+`http://localhost:3100/mcp`. It uses Streamable HTTP and expects the same bearer
+token. Inspect it locally with the MCP Inspector and configure its Authorization
+header as `Bearer <DEVELOPMENT_TOKEN>`:
+
+```bash
+npx @modelcontextprotocol/inspector@latest
+```
+
+The disposable integration rehearsal creates a temporary campaign and actor,
+tests damage, idempotent replay, revision conflict, event ordering, OpenAPI, and
+MCP discovery, then removes its test data:
+
+```bash
+docker compose exec -T \
+  -e MCP_SMOKE_URL=http://mcp:3100/mcp \
+  api node server/helper/smoke.mjs
+```
+
+It is intended for a local stack. `npm run test:helper-api` runs the same script
+from the host when `DATABASE_URL`, `DEVELOPMENT_TOKEN`, and
+`DEVELOPMENT_USER_EMAIL` are exported.
+
+### Development-mode security limitations
+
+`development_token` mode uses one long-lived secret with all permissions of the
+mapped local user. Keep it out of source control, logs, screenshots, browser
+code, and public endpoints. Use it only on localhost or a private development
+network. Rotate it by changing `.env` and restarting the API.
+
+Do not expose this MVP as a public ChatGPT plugin yet. A production ChatGPT
+connection requires a public HTTPS `/mcp` endpoint and OAuth 2.1 authorization
+with PKCE, protected-resource discovery, campaign scopes, and per-user consent.
+That is the next authentication phase; no OpenAI API key is needed or used by
+the Helper itself. Production should also reverse-proxy `/mcp` to the MCP
+service, retain request logs without tokens, and keep rate limiting enabled.
+
+See [docs/HELPER_MCP.md](docs/HELPER_MCP.md) for the architecture, data-model
+mapping, consistency rules, deliberate MVP limits, and the next implementation
+phases.
 
 For the production domain `https://draconi.ee`, build the frontend with
 `VITE_BASE_PATH=/` and `VITE_API_BASE_URL=/api`. The deployment script reads
@@ -80,8 +217,9 @@ Install frontend dependencies with `npm install`. With the Docker database and A
 
 ```bash
 npm run build
-npm test -- --run
 npm run lint
+npm run typecheck
+npm test
 ```
 
 The canonical fresh-database schema is [docker/postgres/001_schema.sql](docker/postgres/001_schema.sql). The clearly labeled starter reference data is in [docker/postgres/002_seed.sql](docker/postgres/002_seed.sql).

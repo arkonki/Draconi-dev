@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "server": "node server/index.js",
+    "server": "node --env-file-if-exists=.env server/index.js",
+    "mcp": "node --env-file-if-exists=.env server/mcp/index.js",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
@@ -23,9 +24,11 @@
     "test:security": "node scripts/security-smoke.mjs",
     "test:workflow": "node scripts/workflow-smoke.mjs",
     "test:housekeeping": "node scripts/housekeeping-smoke.mjs",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "test:helper-api": "node --env-file-if-exists=.env server/helper/smoke.mjs",
+    "lint": "eslint . --ext js,mjs,ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "^3.1.0",

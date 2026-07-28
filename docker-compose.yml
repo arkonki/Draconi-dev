@@ -44,6 +44,10 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      AUTH_MODE: ${AUTH_MODE:-development_token}
+      DEVELOPMENT_TOKEN: ${DEVELOPMENT_TOKEN:-}
+      DEVELOPMENT_USER_EMAIL: ${DEVELOPMENT_USER_EMAIL:-}
+      HELPER_RATE_LIMIT_PER_MINUTE: ${HELPER_RATE_LIMIT_PER_MINUTE:-120}
     volumes:
       - storage_data:/data/storage
       - backup_data:/data/backups
@@ -52,6 +56,27 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  mcp:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-3100}:3100"
+    environment:
+      DRACONI_SERVICE: mcp
+      MCP_PORT: 3100
+      DRACONI_MCP_HOST: ${DRACONI_MCP_HOST:-0.0.0.0}
+      API_BASE_URL: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/health/live"]
       interval: 10s
       timeout: 3s
       retries: 10

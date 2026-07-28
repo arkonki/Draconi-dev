@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { bootstrapAdmin, currentUser, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
@@ -27,6 +28,7 @@ import {
   stageUploadedBackup,
 } from './recovery.js';
 import { attachRealtimeServer } from './realtime.js';
+import { handleHelperApiRequest } from './helper/api.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.ELKDATA_APP_IP || process.env.DRACONI_HOST || '0.0.0.0';
@@ -38,10 +40,24 @@ function matchPath(pathname, expression) {
 
 const server = http.createServer(async (request, response) => {
   const pathname = routePath(request);
+  const suppliedRequestId = String(request.headers['x-request-id'] || '');
+  request.requestId = /^[0-9a-f-]{36}$/i.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
+  response.setHeader('x-request-id', request.requestId);
   let trackedRequest = false;
   try {
     const maintenance = maintenanceStatus();
     if (maintenance.active) {
+      if (pathname === '/health/live' && request.method === 'GET') {
+        sendJson(response, 200, { status: 'live' });
+        return;
+      }
+      if (pathname === '/health/ready' && request.method === 'GET') {
+        sendJson(response, 503, {
+          error: { code: 'NOT_READY', message: 'Application maintenance is active.' },
+          meta: { requestId: request.requestId },
+        });
+        return;
+      }
       if (pathname === '/api/health' && request.method === 'GET') {
         sendJson(response, 200, { status: 'maintenance', operation: maintenance.operation, database: 'postgresql' });
         return;
@@ -49,7 +65,7 @@ const server = http.createServer(async (request, response) => {
       throw new HttpError(503, `Application is temporarily unavailable during ${maintenance.operation}`, 'MAINTENANCE_MODE');
     }
 
-    if (pathname !== '/api/health') {
+    if (pathname !== '/api/health' && pathname !== '/health/live' && pathname !== '/health/ready') {
       beginApplicationRequest();
       trackedRequest = true;
     }
@@ -57,10 +73,14 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
         'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'authorization, content-type, x-upsert',
-        'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'access-control-allow-headers': 'authorization, content-type, x-upsert, if-match, idempotency-key, x-request-id, x-helper-client',
+        'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       });
       response.end();
+      return;
+    }
+
+    if (await handleHelperApiRequest(request, response)) {
       return;
     }
 
