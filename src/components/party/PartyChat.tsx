@@ -15,6 +15,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MessageContent } from './MessageContent';
 import type { Character } from '../../types/character';
+import type { CampaignMembership } from '../../lib/api/parties';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
@@ -29,10 +30,12 @@ const getAvatarColor = (userId: string) => {
 
 interface PartyChatProps {
   partyId: string;
-  members: Character[]; 
+  members: Character[];
+  campaignMembers?: CampaignMembership[];
+  readOnly?: boolean;
 }
 
-export function PartyChat({ partyId, members }: PartyChatProps) {
+export function PartyChat({ partyId, members, campaignMembers = [], readOnly = false }: PartyChatProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -263,8 +266,13 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
 
   const getSenderInfo = (userId: string) => {
     if (userId === user?.id) return { name: 'You', initials: 'ME' };
-    const member = members.find(m => m.user_id === userId || m.id === userId); 
-    const name = member?.name || 'Unknown';
+    const member = members.find(m => m.user_id === userId || m.id === userId);
+    const campaignMember = campaignMembers.find((entry) => entry.user_id === userId);
+    const fullName = [campaignMember?.users?.first_name, campaignMember?.users?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const name = member?.name || fullName || campaignMember?.users?.username || 'Unknown';
     const initials = name.substring(0, 2).toUpperCase();
     return { name, initials };
   };
@@ -398,6 +406,12 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
 
       {/* Input Area */}
       <div className="bg-white border-t border-gray-200 p-3 sm:p-4 z-20">
+        {readOnly ? (
+          <div className="rounded-lg bg-gray-50 px-4 py-3 text-center text-sm text-gray-500">
+            You are an observer in this campaign. Chat is available in read-only mode.
+          </div>
+        ) : (
+          <>
         <div className="flex items-center gap-2 mb-2 px-1">
            <button type="button" onClick={() => insertText('**', true)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded" title="Bold"><Bold size={16}/></button>
            <button type="button" onClick={() => insertText('*', true)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded" title="Italic"><Italic size={16}/></button>
@@ -432,6 +446,8 @@ export function PartyChat({ partyId, members }: PartyChatProps) {
             {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-0.5" />}
           </Button>
         </form>
+          </>
+        )}
       </div>
     </div>
   );

@@ -209,10 +209,10 @@ export function NotificationController() {
             table: 'encounters',
           },
           {
-            bindingId: 'party-member-insert',
+            bindingId: 'campaign-member-insert',
             event: 'INSERT' as const,
             schema: 'public' as const,
-            table: 'party_members',
+            table: 'campaign_memberships',
             filter: `user_id=eq.${user.id}`,
           },
         ]
@@ -271,7 +271,7 @@ export function NotificationController() {
         return;
       }
 
-      if (bindingId === 'party-member-insert') {
+      if (bindingId === 'campaign-member-insert') {
         playSound('notification');
         await sendDesktopNotification({
           title: 'Party Invite',

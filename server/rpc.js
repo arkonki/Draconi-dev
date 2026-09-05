@@ -1,17 +1,12 @@
 import { withTransaction } from './db.js';
+import { loadCampaignAccess } from './campaignRoles.js';
 import { HttpError } from './http.js';
 
-async function requirePartyAccess(client, user, partyId, ownerOnly = false) {
-  const { rows } = await client.query(
-    `SELECT p.created_by,
-       EXISTS (SELECT 1 FROM party_members pm WHERE pm.party_id = p.id AND pm.user_id = $2) AS member
-     FROM parties p WHERE p.id = $1`,
-    [partyId, user.id],
-  );
-  const party = rows[0];
-  const allowed = user.role === 'admin' || party?.created_by === user.id || (!ownerOnly && party?.member);
+async function requirePartyAccess(client, user, partyId, gmOnly = false) {
+  const access = await loadCampaignAccess(client, user, partyId);
+  const allowed = access?.canRead && (!gmOnly || access.isGm);
   if (!allowed) throw new HttpError(403, 'Permission denied');
-  return party;
+  return access.campaign;
 }
 
 async function requireEncounterAccess(client, user, encounterId, ownerOnly = false) {

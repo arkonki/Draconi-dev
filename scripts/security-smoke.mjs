@@ -21,6 +21,7 @@ const accounts = {
   owner: { email: `security-owner-${suffix}@example.com`, username: `security-owner-${suffix}`, role: 'player' },
   member: { email: `security-member-${suffix}@example.com`, username: `security-member-${suffix}`, role: 'player' },
   dm: { email: `security-dm-${suffix}@example.com`, username: `security-dm-${suffix}`, role: 'dm' },
+  observer: { email: `security-observer-${suffix}@example.com`, username: `security-observer-${suffix}`, role: 'player' },
 };
 const testEmails = Object.values(accounts).map((account) => account.email);
 const database = new Client({ connectionString: databaseUrl });
@@ -88,12 +89,16 @@ try {
   const owner = await signIn(accounts.owner);
   const member = await signIn(accounts.member);
   const dm = await signIn(accounts.dm);
+  const observer = await signIn(accounts.observer);
 
   const [ownerCharacter] = await dataQuery(owner.token, {
     table: 'characters', action: 'insert', payload: { name: `Owner Hero ${suffix}` },
   });
   const [memberCharacter] = await dataQuery(member.token, {
     table: 'characters', action: 'insert', payload: { name: `Member Hero ${suffix}` },
+  });
+  const [observerCharacter] = await dataQuery(observer.token, {
+    table: 'characters', action: 'insert', payload: { name: `Observer Hero ${suffix}` },
   });
 
   assert.deepEqual(await dataQuery(member.token, {
@@ -124,16 +129,63 @@ try {
   });
   assert.equal(memberParties.length, 1);
 
+  await dataQuery(owner.token, {
+    table: 'campaign_memberships', action: 'insert',
+    payload: { party_id: party.id, user_id: dm.id, role: 'gm' },
+  });
+  await dataQuery(owner.token, {
+    table: 'campaign_memberships', action: 'insert',
+    payload: { party_id: party.id, user_id: observer.id, role: 'observer' },
+  });
+  await dataQuery(owner.token, {
+    table: 'party_members', action: 'insert',
+    payload: { party_id: party.id, character_id: observerCharacter.id },
+  });
+
+  const dmParties = await dataQuery(dm.token, {
+    table: 'parties', filters: [{ operator: 'eq', column: 'id', value: party.id }],
+  });
+  assert.equal(dmParties[0]?.campaign_role, 'gm');
+  const observerParties = await dataQuery(observer.token, {
+    table: 'parties', filters: [{ operator: 'eq', column: 'id', value: party.id }],
+  });
+  assert.equal(observerParties[0]?.campaign_role, 'observer');
+
+  const [playerMessage] = await dataQuery(member.token, {
+    table: 'messages', action: 'insert', payload: { party_id: party.id, content: `Player chat ${suffix}` },
+  });
+  const gmMessages = await dataQuery(dm.token, {
+    table: 'messages', filters: [{ operator: 'eq', column: 'id', value: playerMessage.id }],
+  });
+  assert.equal(gmMessages[0]?.content, `Player chat ${suffix}`);
+  const observerMessages = await dataQuery(observer.token, {
+    table: 'messages', filters: [{ operator: 'eq', column: 'id', value: playerMessage.id }],
+  });
+  assert.equal(observerMessages.length, 1);
+  await dataQuery(observer.token, {
+    table: 'messages', action: 'insert', payload: { party_id: party.id, content: 'Observer cannot post' },
+  }, 403);
+  await dataQuery(observer.token, {
+    table: 'characters', action: 'update',
+    filters: [{ operator: 'eq', column: 'id', value: observerCharacter.id }],
+    payload: { name: 'Observer cannot edit campaign character' },
+  }, 403);
+  await dataQuery(member.token, {
+    table: 'campaign_memberships', action: 'update',
+    filters: [{ operator: 'eq', column: 'user_id', value: dm.id }],
+    payload: { role: 'player' },
+  }, 403);
+
   const [encounter] = await dataQuery(owner.token, {
     table: 'encounters', action: 'insert', payload: { party_id: party.id, name: `Security Encounter ${suffix}` },
   });
   await rpc(member.token, 'advance_encounter_round', { p_encounter_id: encounter.id }, 403);
-  await rpc(dm.token, 'advance_encounter_round', { p_encounter_id: encounter.id }, 403);
+  await rpc(dm.token, 'advance_encounter_round', { p_encounter_id: encounter.id });
   await rpc(owner.token, 'advance_encounter_round', { p_encounter_id: encounter.id });
   const [advancedEncounter] = await dataQuery(owner.token, {
     table: 'encounters', filters: [{ operator: 'eq', column: 'id', value: encounter.id }],
   });
-  assert.equal(advancedEncounter.current_round, 1);
+  assert.equal(advancedEncounter.current_round, 2);
 
   const [initialSettings] = await dataQuery(owner.token, {
     table: 'user_notification_settings', action: 'upsert', onConflict: 'user_id',
@@ -186,6 +238,9 @@ try {
   console.log(JSON.stringify({
     userIsolation: 'passed',
     partyMembership: 'passed',
+    campaignRoles: 'passed',
+    gmChatVisibility: 'passed',
+    observerReadOnly: 'passed',
     ownerOnlyMutations: 'passed',
     upsertConflicts: 'passed',
     expiredSessions: 'passed',

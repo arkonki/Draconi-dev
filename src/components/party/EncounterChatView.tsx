@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { PartyChat } from '../party/PartyChat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
 import { fetchParties } from '../../lib/api/parties';
+import type { CampaignMembership, CampaignRole } from '../../lib/api/parties';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import {
   hasEncounterStatusEffect,
@@ -144,6 +145,8 @@ interface PartySummary {
   id: string;
   name: string;
   members: Character[];
+  campaignRole: CampaignRole;
+  campaignMembers: CampaignMembership[];
 }
 
 interface IncomingMessage {
@@ -168,19 +171,13 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
       if (!user) return [];
 
       try {
-        const [dmParties, playerParties] = await Promise.all([
-          fetchParties(user.id, true),
-          fetchParties(user.id, false)
-        ]);
-
-        // Merge and deduplicate by ID
-        const allParties = [...dmParties, ...playerParties];
-        const uniqueParties = Array.from(new Map(allParties.map(p => [p.id, p])).values());
-
-        return uniqueParties.map(p => ({
+        const parties = await fetchParties(user.id);
+        return parties.map(p => ({
           id: p.id,
           name: p.name,
-          members: p.members
+          members: p.members,
+          campaignRole: p.campaign_role,
+          campaignMembers: p.campaign_memberships,
         }));
       } catch (err) {
         console.error("Error fetching parties for chat:", err);
@@ -318,6 +315,8 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
   const partyFromList = myParties.find(p => p.id === selectedPartyId);
   const currentPartyName = partyFromList?.name || forcedPartyName || 'Party View';
   const currentPartyMembers = partyFromList?.members || forcedMembers || [];
+  const currentCampaignMembers = partyFromList?.campaignMembers || [];
+  const isChatReadOnly = partyFromList?.campaignRole === 'observer';
 
   const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => (a.initiative_roll ?? 1000) - (b.initiative_roll ?? 1000));
 
@@ -431,7 +430,12 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
               {/* --- TAB 2: CHAT --- */}
               {activeTab === 'chat' && selectedPartyId && (
                 <div className="h-full flex flex-col">
-                  <PartyChat partyId={selectedPartyId} members={currentPartyMembers} />
+                  <PartyChat
+                    partyId={selectedPartyId}
+                    members={currentPartyMembers}
+                    campaignMembers={currentCampaignMembers}
+                    readOnly={isChatReadOnly}
+                  />
                 </div>
               )}
             </div>

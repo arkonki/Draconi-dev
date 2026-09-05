@@ -217,7 +217,7 @@ export async function listCampaigns(user, { status, limit, cursor }) {
   const values = [user.id];
   const clauses = [
     `(p.created_by = $1 OR $2::boolean OR EXISTS (
-       SELECT 1 FROM party_members pm WHERE pm.party_id = p.id AND pm.user_id = $1
+       SELECT 1 FROM campaign_memberships cm WHERE cm.party_id = p.id AND cm.user_id = $1
      ))`,
   ];
   values.push(user.role === 'admin');
@@ -231,11 +231,10 @@ export async function listCampaigns(user, { status, limit, cursor }) {
   }
   values.push(limit);
   const { rows } = await pool.query(
-    `SELECT p.*,
-       EXISTS (
-         SELECT 1 FROM party_members pm WHERE pm.party_id = p.id AND pm.user_id = $1
-       ) AS is_member
+    `SELECT p.*, cm.role AS campaign_role
      FROM parties p
+     LEFT JOIN campaign_memberships cm
+       ON cm.party_id = p.id AND cm.user_id = $1
      WHERE ${clauses.join(' AND ')}
      ORDER BY p.id
      LIMIT $${values.length}`,
@@ -246,7 +245,7 @@ export async function listCampaigns(user, { status, limit, cursor }) {
       campaign,
       campaign.created_by === user.id
         ? 'owner'
-        : user.role === 'admin' || (campaign.is_member && user.role === 'dm') ? 'gm' : 'player',
+        : user.role === 'admin' ? 'gm' : campaign.campaign_role,
     )),
     nextCursor: rows.length === limit ? rows.at(-1).id : null,
   };
@@ -1084,7 +1083,7 @@ export async function applyActorChanges(user, input, { sourceClient } = {}) {
   const operation = 'apply_actor_changes';
   return withTransaction(async (client) => {
     await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
-    const access = await requireCampaignAccess(client, user, input.campaign_id);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { write: true });
 
     const idem = await idempotentResult(
       client,

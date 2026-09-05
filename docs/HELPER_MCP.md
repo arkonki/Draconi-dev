@@ -36,9 +36,11 @@ transport remains available for local tunnel testing.
 | NPC or monster actor | active `encounter_combatants` |
 | Combat | `encounters` |
 | User identity | `users` plus `app_sessions` |
-| Owner | `parties.created_by` |
-| GM | owner, administrator, or a party member whose user role is `dm` |
-| Player | a user represented in `party_members` |
+| Campaign membership | `campaign_memberships` |
+| Owner | campaign creator with an `owner` membership |
+| GM | a user with a campaign-specific `gm` membership |
+| Player | a user with a campaign-specific `player` membership |
+| Observer | a user with a read-only `observer` membership |
 
 This avoids a second character, encounter, or identity system. Actor reads
 prefer active encounter HP/WP when a player character is in combat. Helper
@@ -76,15 +78,16 @@ comes from MCP arguments.
 Campaign access is checked on every endpoint:
 
 - administrators may access all campaigns;
-- owners have GM access;
-- `dm` users who are party members have GM access;
-- other party members have player access;
+- owners and campaign-specific GMs have GM access;
+- players have normal campaign and chat access;
+- observers have read-only campaign and chat access;
 - only GM access receives `gmContext`;
 - players may modify only their own player character;
 - appending narrative events requires GM access.
 
 OAuth scopes are enforced at the Helper REST boundary. The current campaign
-role mapping remains owner/GM/player; an explicit observer role is deferred.
+role is returned by Helper and MCP reads. The account-wide `users.role` value
+does not grant access to an unrelated campaign.
 
 ## MVP tools
 
@@ -166,12 +169,15 @@ session pointer while keeping its immutable event history.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
 - Roll modes and cryptographically recorded server rolls are not implemented.
-- Observer membership and more granular per-campaign OAuth grants are not yet
-  implemented.
+- Inviting a GM or observer without first joining as a player is not yet
+  implemented; owners can promote an existing campaign member in Campaign
+  Roles.
 
 ## Next phases
 
-1. Add an explicit campaign membership table for owner/GM/player/observer.
-2. Add player/server/mixed roll modes and immutable roll events.
-3. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
+The detailed, checkable roadmap is maintained in
+[Draconi MCP To-Do List](MCP_TODO.md).
+
+1. Add player/server/mixed roll modes and immutable roll events.
+2. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
    evaluations before enabling the public connector.

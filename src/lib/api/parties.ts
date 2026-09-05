@@ -9,7 +9,25 @@ export interface Party {
   created_by: string;
   created_at: string;
   invite_code?: string;
+  campaign_role: CampaignRole;
   members: Character[];
+  campaign_memberships: CampaignMembership[];
+}
+
+export type CampaignRole = 'owner' | 'gm' | 'player' | 'observer';
+
+export interface CampaignMembership {
+  id: string;
+  party_id: string;
+  user_id: string;
+  role: CampaignRole;
+  users?: {
+    id: string;
+    username: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    avatar_url?: string | null;
+  } | null;
 }
 
 interface PartyMemberJoinRow {
@@ -23,15 +41,17 @@ interface PartyRow {
   created_by: string;
   created_at: string;
   invite_code?: string;
+  campaign_role?: CampaignRole;
   members?: PartyMemberJoinRow[];
+  campaign_memberships?: CampaignMembership[];
 }
 
-export async function fetchParties(userId: string | undefined, isDM: boolean): Promise<Party[]> {
+export async function fetchParties(userId: string | undefined): Promise<Party[]> {
   if (!userId) {
     return [];
   }
 
-  let query = supabase.from('parties').select(`
+  const query = supabase.from('parties').select(`
     id,
     name,
     description,
@@ -44,12 +64,6 @@ export async function fetchParties(userId: string | undefined, isDM: boolean): P
     )
   `);
 
-  if (isDM) {
-    query = query.eq('created_by', userId);
-  } else {
-    query = query.eq('members.characters.user_id', userId);
-  }
-
   const { data: partiesData, error: partiesError } = await query
     .order('created_at', { ascending: false });
 
@@ -60,6 +74,8 @@ export async function fetchParties(userId: string | undefined, isDM: boolean): P
 
   const parties: Party[] = ((partiesData || []) as unknown as PartyRow[]).map((party) => ({
     ...party,
+    campaign_role: party.campaign_role || (party.created_by === userId ? 'owner' : 'player'),
+    campaign_memberships: party.campaign_memberships || [],
     members: (party.members || [])
       .map((m) => m.characters ? mapCharacterData(m.characters) : null)
       .filter((char): char is Character => !!char),
@@ -157,12 +173,29 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
 
   const party: Party = {
     ...(partyData as unknown as PartyRow),
+    campaign_role: partyData.campaign_role as CampaignRole,
+    campaign_memberships: (partyData.campaign_memberships || []) as CampaignMembership[],
     members: (partyData.members || [])
       .map((m: PartyMemberJoinRow) => m.characters ? mapCharacterData(m.characters) : null)
       .filter((char): char is Character => !!char),
   };
 
   return party;
+}
+
+export async function updateCampaignMemberRole(
+  partyId: string,
+  userId: string,
+  role: Exclude<CampaignRole, 'owner'>,
+): Promise<void> {
+  const { error } = await supabase
+    .from('campaign_memberships')
+    .update({ role })
+    .match({ party_id: partyId, user_id: userId });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update campaign role');
+  }
 }
 
 // REVERTED: Uses direct DB insert instead of RPC

@@ -1,10 +1,11 @@
 import { pool, withTransaction } from './db.js';
+import { canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
 
 const TABLES = new Set([
   'users', 'magic_schools', 'heroic_abilities', 'game_heroic_abilities', 'kin',
   'professions', 'game_skills', 'game_spells', 'game_items', 'monsters', 'bio_data',
-  'characters', 'parties', 'party_members', 'notes', 'messages', 'party_inventory',
+  'characters', 'parties', 'party_members', 'campaign_memberships', 'notes', 'messages', 'party_inventory',
   'party_inventory_log', 'party_tasks', 'time_trackers', 'random_tables', 'story_ideas',
   'compendium', 'compendium_templates', 'encounters', 'encounter_combatants',
   'party_maps', 'party_map_pins', 'party_map_drawings', 'party_display_sessions',
@@ -84,33 +85,40 @@ async function preparePayload(table, input, client = pool) {
 
 async function accessContext(user, client = pool) {
   const ownedParties = await client.query('SELECT id FROM parties WHERE created_by = $1', [user.id]);
-  const parties = await client.query(
-      `SELECT p.id FROM parties p WHERE p.created_by = $1
-       UNION SELECT pm.party_id FROM party_members pm WHERE pm.user_id = $1`, [user.id]);
+  const memberships = await client.query(
+    `SELECT p.id AS party_id,
+       CASE WHEN p.created_by = $1 THEN 'owner' ELSE cm.role END AS role
+     FROM parties p
+     LEFT JOIN campaign_memberships cm
+       ON cm.party_id = p.id AND cm.user_id = $1
+     WHERE p.created_by = $1 OR cm.user_id = $1`,
+    [user.id],
+  );
   const characters = await client.query('SELECT id FROM characters WHERE user_id = $1', [user.id]);
   const maps = await client.query(
       `SELECT m.id, m.party_id FROM party_maps m
        WHERE m.party_id IN (
          SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM party_members WHERE user_id = $1
+         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
        )`, [user.id]);
   const encounters = await client.query(
       `SELECT e.id, e.party_id FROM encounters e
        WHERE e.party_id IN (
          SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM party_members WHERE user_id = $1
+         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
        )`, [user.id]);
   const sessions = await client.query(
       `SELECT s.id, s.party_id FROM party_display_sessions s
        WHERE s.party_id IN (
          SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM party_members WHERE user_id = $1
+         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
        )`, [user.id]);
   return {
     user,
     admin: user.role === 'admin',
     ownedPartyIds: new Set(ownedParties.rows.map((row) => row.id)),
-    partyIds: new Set(parties.rows.map((row) => row.id)),
+    partyIds: new Set(memberships.rows.map((row) => row.party_id)),
+    partyRoles: new Map(memberships.rows.map((row) => [row.party_id, row.role])),
     characterIds: new Set(characters.rows.map((row) => row.id)),
     mapParty: new Map(maps.rows.map((row) => [row.id, row.party_id])),
     encounterParty: new Map(encounters.rows.map((row) => [row.id, row.party_id])),
@@ -122,6 +130,19 @@ function partyAccess(ctx, partyId) {
   return Boolean(partyId && ctx.partyIds.has(partyId));
 }
 
+function partyRole(ctx, partyId) {
+  if (ctx.ownedPartyIds.has(partyId)) return 'owner';
+  return ctx.partyRoles.get(partyId) || null;
+}
+
+function partyGmAccess(ctx, partyId) {
+  return ctx.admin || isCampaignGmRole(partyRole(ctx, partyId));
+}
+
+function partyWriteAccess(ctx, partyId) {
+  return ctx.admin || canCampaignRoleWrite(partyRole(ctx, partyId));
+}
+
 function canRead(table, row, ctx) {
   if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return true;
   if (table === 'characters') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
@@ -129,6 +150,7 @@ function canRead(table, row, ctx) {
   if (table === 'party_members') {
     return row.user_id === ctx.user.id || ctx.characterIds.has(row.character_id) || partyAccess(ctx, row.party_id);
   }
+  if (table === 'campaign_memberships') return partyAccess(ctx, row.party_id);
   if (PARTY_SCOPED.has(table)) return partyAccess(ctx, row.party_id);
   if (table === 'notes') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
   if (table === 'compendium') return row.is_public || row.created_by === ctx.user.id || partyAccess(ctx, row.party_id);
@@ -144,25 +166,34 @@ function canRead(table, row, ctx) {
 function canWrite(table, row, ctx, inserting = false) {
   if (ctx.admin) return true;
   if (REFERENCE_TABLES.has(table) || table === 'users') return table === 'users' && row.id === ctx.user.id;
-  if (table === 'characters') return inserting ? row.user_id === ctx.user.id : row.user_id === ctx.user.id;
+  if (table === 'characters') {
+    if (inserting) return row.user_id === ctx.user.id;
+    const canEditOwnCharacter = row.user_id === ctx.user.id
+      && (!row.party_id || partyWriteAccess(ctx, row.party_id));
+    return canEditOwnCharacter || partyGmAccess(ctx, row.party_id);
+  }
   if (table === 'parties') return row.created_by === ctx.user.id;
+  if (table === 'campaign_memberships') return ctx.admin || partyRole(ctx, row.party_id) === 'owner';
   if (table === 'party_members') {
-    if (!partyAccess(ctx, row.party_id)) return false;
-    if (inserting) return ctx.characterIds.has(row.character_id);
-    return ctx.ownedPartyIds.has(row.party_id) || ctx.characterIds.has(row.character_id)
+    if (!partyWriteAccess(ctx, row.party_id)) return false;
+    if (inserting) return partyGmAccess(ctx, row.party_id) || ctx.characterIds.has(row.character_id);
+    return partyGmAccess(ctx, row.party_id) || ctx.characterIds.has(row.character_id)
       || row.user_id === ctx.user.id;
   }
   if (table === 'messages') {
-    return partyAccess(ctx, row.party_id)
-      && (row.user_id === ctx.user.id || ctx.ownedPartyIds.has(row.party_id));
+    return partyWriteAccess(ctx, row.party_id)
+      && (row.user_id === ctx.user.id || partyGmAccess(ctx, row.party_id));
   }
-  if (PARTY_SCOPED.has(table)) return partyAccess(ctx, row.party_id);
-  if (table === 'notes') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
-  if (table === 'compendium' || table === 'compendium_templates') return row.created_by === ctx.user.id;
-  if (table === 'encounter_combatants') return partyAccess(ctx, ctx.encounterParty.get(row.encounter_id));
-  if (table === 'party_map_pins' || table === 'party_map_drawings') return partyAccess(ctx, ctx.mapParty.get(row.map_id));
-  if (table === 'party_display_sessions') return partyAccess(ctx, row.party_id);
-  if (table === 'party_display_slots') return partyAccess(ctx, ctx.sessionParty.get(row.session_id));
+  if (PARTY_SCOPED.has(table)) return partyWriteAccess(ctx, row.party_id);
+  if (table === 'notes') return partyWriteAccess(ctx, row.party_id) && (row.user_id === ctx.user.id || partyGmAccess(ctx, row.party_id));
+  if (table === 'compendium') {
+    return row.created_by === ctx.user.id && (!row.party_id || partyWriteAccess(ctx, row.party_id));
+  }
+  if (table === 'compendium_templates') return row.created_by === ctx.user.id;
+  if (table === 'encounter_combatants') return partyWriteAccess(ctx, ctx.encounterParty.get(row.encounter_id));
+  if (table === 'party_map_pins' || table === 'party_map_drawings') return partyWriteAccess(ctx, ctx.mapParty.get(row.map_id));
+  if (table === 'party_display_sessions') return partyGmAccess(ctx, row.party_id);
+  if (table === 'party_display_slots') return partyGmAccess(ctx, ctx.sessionParty.get(row.session_id));
   if (table === 'push_subscriptions' || table === 'user_notification_settings') return row.user_id === ctx.user.id;
   return false;
 }
@@ -229,7 +260,7 @@ function applyOrders(rows, orders = []) {
   });
 }
 
-async function enrichRows(table, rows, client = pool) {
+async function enrichRows(table, rows, client = pool, ctx = null) {
   if (rows.length === 0) return rows;
   if (table === 'characters') {
     const schools = await client.query('SELECT * FROM magic_schools');
@@ -242,11 +273,29 @@ async function enrichRows(table, rows, client = pool) {
     }));
   }
   if (table === 'parties') {
-    const result = await client.query(
+    const [memberResult, membershipResult] = await Promise.all([
+      client.query(
       `SELECT pm.*, row_to_json(c) AS characters
        FROM party_members pm JOIN characters c ON c.id = pm.character_id`,
-    );
-    return rows.map((row) => ({ ...row, members: result.rows.filter((member) => member.party_id === row.id) }));
+      ),
+      client.query(
+        `SELECT cm.*, jsonb_build_object(
+           'id', u.id,
+           'username', u.username,
+           'first_name', u.first_name,
+           'last_name', u.last_name,
+           'avatar_url', u.avatar_url
+         ) AS users
+         FROM campaign_memberships cm
+         JOIN users u ON u.id = cm.user_id`,
+      ),
+    ]);
+    return rows.map((row) => ({
+      ...row,
+      campaign_role: ctx?.admin && !ctx.partyRoles.has(row.id) ? 'gm' : partyRole(ctx, row.id),
+      members: memberResult.rows.filter((member) => member.party_id === row.id),
+      campaign_memberships: membershipResult.rows.filter((member) => member.party_id === row.id),
+    }));
   }
   if (table === 'party_members') {
     const parties = await client.query('SELECT * FROM parties');
@@ -259,6 +308,13 @@ async function enrichRows(table, rows, client = pool) {
       characters: characterMap.get(row.character_id) || null,
       character: characterMap.get(row.character_id) || null,
     }));
+  }
+  if (table === 'campaign_memberships') {
+    const users = await client.query(
+      'SELECT id, username, first_name, last_name, avatar_url FROM users',
+    );
+    const userMap = new Map(users.rows.map((row) => [row.id, row]));
+    return rows.map((row) => ({ ...row, users: userMap.get(row.user_id) || null }));
   }
   if (table === 'notes') {
     const characters = await client.query('SELECT id, name FROM characters');
@@ -283,13 +339,14 @@ async function enrichRows(table, rows, client = pool) {
 async function allAuthorizedRows(table, ctx, client = pool) {
   const { rows } = await client.query(`SELECT * FROM "${table}"`);
   const visible = rows.filter((row) => canRead(table, row, ctx)).map((row) => outwardAliases(table, row));
-  return enrichRows(table, visible, client);
+  return enrichRows(table, visible, client, ctx);
 }
 
 function applyOwnership(table, payload, user) {
   const row = { ...payload };
   if (table === 'characters') row.user_id = user.id;
   if (table === 'parties') row.created_by = user.id;
+  if (table === 'campaign_memberships') row.invited_by = user.id;
   if (table === 'notes' || table === 'messages' || table === 'story_ideas') row.user_id = user.id;
   if (table === 'party_tasks') row.created_by_user_id = user.id;
   if (table === 'compendium' || table === 'compendium_templates') row.created_by = user.id;

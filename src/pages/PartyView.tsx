@@ -18,6 +18,7 @@ import { EncounterChatView } from '../components/party/EncounterChatView';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
+import { CampaignRoleManager } from '../components/party/CampaignRoleManager';
 import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../lib/appUrl';
 
@@ -79,7 +80,7 @@ export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams(); // 2. Get Params
   const navigate = useNavigate();
-  const { user, isDM } = useAuth();
+  const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
 
   const [isInviteVisible, setIsInviteVisible] = useState(false);
@@ -87,6 +88,7 @@ export function PartyView() {
   const [dialogOpen, setDialogOpen] = useState<'deleteParty' | 'removeMember' | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
   const [isProjectorManagerOpen, setIsProjectorManagerOpen] = useState(false);
+  const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -124,6 +126,12 @@ export function PartyView() {
           schema: 'public' as const,
           table: 'messages',
           filter: `party_id=eq.${partyId}`,
+        }, {
+          bindingId: 'campaign-role-change',
+          event: '*' as const,
+          schema: 'public' as const,
+          table: 'campaign_memberships',
+          filter: `party_id=eq.${partyId}`,
         }]
       : []
   ), [partyId]);
@@ -134,7 +142,12 @@ export function PartyView() {
     bindings: badgeBindings,
     enabled: Boolean(partyId),
     fallbackRefetchMs: 20000,
-    onEvent: () => {
+    onEvent: (bindingId) => {
+      if (bindingId === 'campaign-role-change') {
+        void queryClient.invalidateQueries({ queryKey: ['party', partyId] });
+        void queryClient.invalidateQueries({ queryKey: ['parties'] });
+        return;
+      }
       setActiveTab((currentTab) => {
         if (currentTab !== 'chat') {
           setUnreadCount((prev) => prev + 1);
@@ -167,7 +180,8 @@ export function PartyView() {
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
-  const isPartyOwner = user && party && user.id === party.created_by && isDM();
+  const isPartyOwner = Boolean(user && party && (user.id === party.created_by || isAdmin()));
+  const isCampaignGM = Boolean(isPartyOwner || party?.campaign_role === 'gm');
   const joinLink = party?.invite_code ? getAbsoluteAppUrl(`party/join/${party.invite_code}`) : '';
 
   if (isLoading) return <div className="flex justify-center items-center h-96"><LoadingSpinner size="lg" /></div>;
@@ -188,7 +202,7 @@ export function PartyView() {
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
 
-  const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isPartyOwner);
+  const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isCampaignGM);
 
   // Helper function to get tab label
   const getTabLabel = (tabId: Tab): string => {
@@ -223,7 +237,7 @@ export function PartyView() {
               <p className="text-gray-500 mt-1 font-medium">A band of {party.members.length} brave adventurers.</p>
             </div>
 
-            {isPartyOwner && (
+            {isCampaignGM && (
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -243,21 +257,26 @@ export function PartyView() {
                   Invite
                 </Button>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                      <Trash2 className="w-4 h-4 mr-2" /> Disband Party
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {isPartyOwner && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem onSelect={() => setIsRoleManagerOpen(true)}>
+                        <Users className="w-4 h-4 mr-2" /> Campaign Roles
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                        <Trash2 className="w-4 h-4 mr-2" /> Disband Party
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             )}
           </div>
 
-          {isInviteVisible && isPartyOwner && (
+          {isInviteVisible && isCampaignGM && (
             <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg animate-in slide-in-from-top-2 fade-in">
               <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">Invite Link</h3>
               <div className="flex items-center gap-2">
@@ -352,7 +371,7 @@ export function PartyView() {
           <div className="p-6">
             <PartyMemberList
               party={party}
-              isDM={!!isPartyOwner}
+              isDM={isCampaignGM}
               currentUserId={user?.id}
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
@@ -362,7 +381,12 @@ export function PartyView() {
         {activeTab === 'chat' && (
           <Suspense fallback={lazyTabFallback}>
             <div className="p-6">
-              <PartyChat partyId={partyId!} members={party.members} />
+              <PartyChat
+                partyId={partyId!}
+                members={party.members}
+                campaignMembers={party.campaign_memberships}
+                readOnly={party.campaign_role === 'observer' && !isAdmin()}
+              />
             </div>
           </Suspense>
         )}
@@ -372,7 +396,7 @@ export function PartyView() {
           <Suspense fallback={lazyTabFallback}>
             <PartyNotes
               partyId={partyId!}
-              isDM={!!isPartyOwner}
+              isDM={isCampaignGM}
               openNoteId={noteIdFromUrl}
             />
           </Suspense>
@@ -381,21 +405,21 @@ export function PartyView() {
         {activeTab === 'atlas' && (
           <Suspense fallback={lazyTabFallback}>
             <div className="p-6">
-              <AtlasView partyId={partyId!} isDM={!!isPartyOwner} />
+              <AtlasView partyId={partyId!} isDM={isCampaignGM} />
             </div>
           </Suspense>
         )}
 
         {activeTab === 'tasks' && (
           <Suspense fallback={lazyTabFallback}>
-            <PartyTasks partyId={partyId!} isDM={!!isPartyOwner} />
+            <PartyTasks partyId={partyId!} isDM={isCampaignGM} />
           </Suspense>
         )}
 
         {activeTab === 'inventory' && (
           <Suspense fallback={lazyTabFallback}>
             <div className="p-6">
-              <PartyInventory partyId={partyId!} members={party.members} isDM={!!isPartyOwner} />
+              <PartyInventory partyId={partyId!} members={party.members} isDM={isCampaignGM} />
             </div>
           </Suspense>
         )}
@@ -410,7 +434,7 @@ export function PartyView() {
 
         {activeTab === 'encounter' && (
           <Suspense fallback={lazyTabFallback}>
-            <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={!!isPartyOwner} />
+            <PartyEncounterView partyId={partyId!} partyMembers={party.members} isDM={isCampaignGM} />
           </Suspense>
         )}
 
@@ -476,6 +500,11 @@ export function PartyView() {
         partyId={partyId!}
         partyName={party.name}
         partyMembers={party.members}
+      />
+      <CampaignRoleManager
+        party={party}
+        isOpen={isRoleManagerOpen}
+        onClose={() => setIsRoleManagerOpen(false)}
       />
       {partyId && <EncounterChatView forcedPartyId={partyId} forcedPartyName={party.name} forcedMembers={party.members} />}
     </div>

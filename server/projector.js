@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { pool, withTransaction } from './db.js';
+import { loadCampaignAccess } from './campaignRoles.js';
 import { HttpError } from './http.js';
 
 const DEFAULT_SLOTS = [
@@ -42,9 +43,9 @@ export function mergeProjectorCharacterState(character, combatant) {
 }
 
 async function requireOwner(client, user, partyId) {
-  const { rows } = await client.query('SELECT * FROM parties WHERE id = $1', [partyId]);
-  if (!rows[0] || user.role !== 'admin' && rows[0].created_by !== user.id) throw new HttpError(403, 'Only the party owner can manage its display');
-  return rows[0];
+  const access = await loadCampaignAccess(client, user, partyId);
+  if (!access?.isGm) throw new HttpError(403, 'Only a campaign GM can manage its display');
+  return access.campaign;
 }
 
 export async function projectorFunction(user, name, body) {

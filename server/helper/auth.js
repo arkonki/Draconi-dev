@@ -3,6 +3,7 @@ import { authenticateAccessToken } from '../auth.js';
 import { pool } from '../db.js';
 import { getBearerToken } from '../http.js';
 import { authenticateOAuthAccessToken } from '../oauth.js';
+import { loadCampaignAccess } from '../campaignRoles.js';
 import { HelperError } from './errors.js';
 
 const rateWindows = new Map();
@@ -85,30 +86,12 @@ export function enforceHelperRateLimit(request, user) {
   }
 }
 
-export async function requireCampaignAccess(client, user, campaignId, { gm = false } = {}) {
-  const { rows } = await client.query(
-    `SELECT p.*,
-       EXISTS (
-         SELECT 1 FROM party_members pm
-         WHERE pm.party_id = p.id AND pm.user_id = $2
-       ) AS is_member
-     FROM parties p
-     WHERE p.id = $1`,
-    [campaignId, user.id],
-  );
-  const campaign = rows[0];
-  if (!campaign) throw new HelperError(404, 'NOT_FOUND', 'Campaign not found.');
+export async function requireCampaignAccess(client, user, campaignId, { gm = false, write = false } = {}) {
+  const access = await loadCampaignAccess(client, user, campaignId);
+  if (!access) throw new HelperError(404, 'NOT_FOUND', 'Campaign not found.');
 
-  const isOwner = campaign.created_by === user.id;
-  const isAdmin = user.role === 'admin';
-  const isGm = isAdmin || isOwner || (campaign.is_member && user.role === 'dm');
-  const canRead = isGm || campaign.is_member;
-  if (!canRead || (gm && !isGm)) {
+  if (!access.canRead || (gm && !access.isGm) || (write && !access.canWrite)) {
     throw new HelperError(403, 'PERMISSION_DENIED', 'You do not have permission for this campaign operation.');
   }
-  return {
-    campaign,
-    role: isOwner ? 'owner' : isGm ? 'gm' : 'player',
-    isGm,
-  };
+  return access;
 }

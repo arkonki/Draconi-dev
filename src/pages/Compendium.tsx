@@ -102,11 +102,9 @@ export function Compendium() {
     queryKey: ['myPartiesShort', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase.from('party_members').select('parties(id, name)').eq('user_id', user.id);
+      const { data, error } = await supabase.from('parties').select('id, name');
       if (error) { console.error('Error fetching parties', error); return []; }
-      return data
-        .map((item: { parties: PartySummary | null }) => item.parties)
-        .filter((party): party is PartySummary => Boolean(party));
+      return data as PartySummary[];
     },
     enabled: !!user
   });

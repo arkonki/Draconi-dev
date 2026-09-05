@@ -27,7 +27,7 @@ export function AdventureParty() {
 
   const { data: parties = [], isLoading: isLoadingParties, error: errorParties } = useQuery<Party[], Error>({
     queryKey: ['parties', user?.id, isDM()],
-    queryFn: () => fetchParties(user?.id, isDM()),
+    queryFn: () => fetchParties(user?.id),
     enabled: !!user,
   });
 

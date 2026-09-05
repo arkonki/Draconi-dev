@@ -22,6 +22,7 @@ const testPassword = `Realtime-${suffix}-123!`;
 const accounts = {
   owner: { email: `realtime-owner-${suffix}@example.com`, username: `realtime-owner-${suffix}`, role: 'dm' },
   member: { email: `realtime-member-${suffix}@example.com`, username: `realtime-member-${suffix}`, role: 'player' },
+  gm: { email: `realtime-gm-${suffix}@example.com`, username: `realtime-gm-${suffix}`, role: 'player' },
   outsider: { email: `realtime-outsider-${suffix}@example.com`, username: `realtime-outsider-${suffix}`, role: 'player' },
 };
 const testEmails = Object.values(accounts).map((account) => account.email);
@@ -29,6 +30,7 @@ const database = new Client({ connectionString: databaseUrl });
 const recordIds = new Set();
 let partyId = null;
 let memberRealtimeSocket = null;
+let gmRealtimeSocket = null;
 
 function websocketUrl(path) {
   const url = new URL(`${apiBase}${path}`);
@@ -140,6 +142,7 @@ try {
 
   const owner = await signIn(accounts.owner);
   const member = await signIn(accounts.member);
+  const gm = await signIn(accounts.gm);
   const outsider = await signIn(accounts.outsider);
   const ownerCharacter = await insert(owner.token, 'characters', { name: `Realtime Owner ${suffix}` });
   const memberCharacter = await insert(member.token, 'characters', { name: `Realtime Member ${suffix}` });
@@ -150,6 +153,11 @@ try {
     invite_code: party.invite_code,
     character_id: memberCharacter.id,
   }), party.id);
+  await insert(owner.token, 'campaign_memberships', {
+    party_id: party.id,
+    user_id: gm.id,
+    role: 'gm',
+  });
 
   const historicalMessage = await insert(owner.token, 'messages', {
     party_id: party.id,
@@ -157,6 +165,7 @@ try {
   });
   const messageBindings = [binding('messages', party.id)];
   const memberBaseline = await realtime(member.token, null, messageBindings);
+  const gmBaseline = await realtime(gm.token, null, messageBindings);
   const outsiderBaseline = await realtime(outsider.token, null, messageBindings);
   assert.deepEqual(memberBaseline.events, []);
   assert.deepEqual(outsiderBaseline.events, []);
@@ -166,8 +175,13 @@ try {
   await realtime(member.token, 'not-a-cursor', messageBindings, 400);
 
   memberRealtimeSocket = await openRealtimeSocket(member.token, memberBaseline.lastId, messageBindings);
+  gmRealtimeSocket = await openRealtimeSocket(gm.token, gmBaseline.lastId, messageBindings);
   const pushedMessagePromise = waitForSocketMessage(
     memberRealtimeSocket,
+    (message) => message.type === 'events' && message.events?.some((event) => event.table_name === 'messages'),
+  );
+  const gmPushedMessagePromise = waitForSocketMessage(
+    gmRealtimeSocket,
     (message) => message.type === 'events' && message.events?.some((event) => event.table_name === 'messages'),
   );
   const liveMessage = await insert(owner.token, 'messages', {
@@ -175,10 +189,16 @@ try {
     content: `Live message ${suffix}`,
   });
   const pushedMessage = await pushedMessagePromise;
+  const gmPushedMessage = await gmPushedMessagePromise;
   assert.equal(
     pushedMessage.events.some((event) => event.record_id === liveMessage.id),
     true,
     'WebSocket did not push the live message',
+  );
+  assert.equal(
+    gmPushedMessage.events.some((event) => event.record_id === liveMessage.id),
+    true,
+    'Campaign GM did not receive the player chat message over WebSocket',
   );
   const memberDelivery = await realtime(member.token, memberBaseline.lastId, messageBindings);
   const deliveredMessage = memberDelivery.events.find((event) => event.record_id === liveMessage.id);
@@ -262,12 +282,14 @@ try {
     invalidCursorRejection: 'passed',
     websocketDelivery: 'passed',
     authorizedDelivery: 'passed',
+    campaignGmChatDelivery: 'passed',
     crossPartyIsolation: 'passed',
     sharedToolInsertEvents: 'passed',
     updateAndDeleteEvents: 'passed',
   }, null, 2));
 } finally {
   memberRealtimeSocket?.close();
+  gmRealtimeSocket?.close();
   try {
     await database.query('DELETE FROM users WHERE email = ANY($1::text[])', [testEmails]);
     const ids = [...recordIds];
