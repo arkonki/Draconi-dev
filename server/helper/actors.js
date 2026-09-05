@@ -69,7 +69,7 @@ function publicInventory(inventory) {
   });
 }
 
-function combineConditions(actorId, characterConditions, combatantEffects) {
+export function combineConditions(actorId, characterConditions, combatantEffects) {
   const byKey = new Map();
   for (const condition of activeConditionEntries(actorId, characterConditions)) byKey.set(condition.key, condition);
   for (const condition of activeConditionEntries(actorId, combatantEffects)) byKey.set(condition.key, condition);
@@ -169,7 +169,7 @@ export function actorForOutput(actor, { includeGm = true } = {}) {
   return output;
 }
 
-export async function loadActor(client, campaignId, actorId, { forUpdate = false } = {}) {
+export async function loadActor(client, campaignId, actorId, { forUpdate = false, combatId = null } = {}) {
   const lock = forUpdate ? 'FOR UPDATE OF c' : '';
   const { rows: characters } = await client.query(
     `SELECT c.*, p.helper_revision AS campaign_revision
@@ -185,10 +185,11 @@ export async function loadActor(client, campaignId, actorId, { forUpdate = false
        FROM encounter_combatants ec
        JOIN encounters e ON e.id = ec.encounter_id
        WHERE ec.character_id = $1 AND e.party_id = $2 AND e.status = 'active'
+         AND ($3::uuid IS NULL OR e.id = $3)
        ORDER BY e.updated_at DESC
        LIMIT 1
        ${forUpdate ? 'FOR UPDATE OF ec' : ''}`,
-      [actorId, campaignId],
+      [actorId, campaignId, combatId],
     );
     return characterActor(characters[0], combatants[0] || null);
   }
@@ -202,8 +203,9 @@ export async function loadActor(client, campaignId, actorId, { forUpdate = false
      JOIN parties p ON p.id = e.party_id
      LEFT JOIN monsters m ON m.id = ec.monster_id
      WHERE ec.id = $1 AND e.party_id = $2
+       AND ($3::uuid IS NULL OR e.id = $3)
      ${forUpdate ? 'FOR UPDATE OF ec' : ''}`,
-    [actorId, campaignId],
+    [actorId, campaignId, combatId],
   );
   if (!combatants[0]) throw new HelperError(404, 'NOT_FOUND', 'Actor not found.');
   return combatantActor(combatants[0]);

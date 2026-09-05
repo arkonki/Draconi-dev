@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { authenticateAccessToken } from '../auth.js';
 import { pool } from '../db.js';
 import { getBearerToken } from '../http.js';
+import { authenticateOAuthAccessToken } from '../oauth.js';
 import { HelperError } from './errors.js';
 
 const rateWindows = new Map();
@@ -31,8 +32,7 @@ async function developmentUser() {
   return rows[0];
 }
 
-export async function authenticateHelperRequest(request) {
-  const token = getBearerToken(request);
+export async function authenticateHelperToken(token) {
   if (!token) throw new HelperError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required.');
 
   const authMode = process.env.AUTH_MODE || 'development_token';
@@ -41,7 +41,23 @@ export async function authenticateHelperRequest(request) {
     return developmentUser();
   }
 
-  return authenticateAccessToken(token, true);
+  const sessionUser = await authenticateAccessToken(token, false);
+  if (sessionUser) return sessionUser;
+  const oauthUser = await authenticateOAuthAccessToken(token, false);
+  if (oauthUser) return oauthUser;
+  throw new HelperError(401, 'SESSION_EXPIRED', 'Authentication token is invalid or expired.');
+}
+
+export async function authenticateHelperRequest(request) {
+  return authenticateHelperToken(getBearerToken(request));
+}
+
+export function requireHelperScope(user, method) {
+  if (!user?.oauth_scopes) return;
+  const required = method === 'GET' || method === 'HEAD' ? 'draconi:read' : 'draconi:write';
+  if (!user.oauth_scopes.includes(required)) {
+    throw new HelperError(403, 'INSUFFICIENT_SCOPE', `OAuth scope ${required} is required.`);
+  }
 }
 
 export function enforceHelperRateLimit(request, user) {
@@ -96,4 +112,3 @@ export async function requireCampaignAccess(client, user, campaignId, { gm = fal
     isGm,
   };
 }
-

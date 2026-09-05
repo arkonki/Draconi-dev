@@ -1,32 +1,63 @@
 import { randomUUID } from 'node:crypto';
 import { pool } from '../db.js';
 import { readJson, routePath, sendJson } from '../http.js';
-import { authenticateHelperRequest, enforceHelperRateLimit } from './auth.js';
+import { authenticateHelperRequest, enforceHelperRateLimit, requireHelperScope } from './auth.js';
 import { asHelperError, HelperError, validationError } from './errors.js';
 import { documentationHtml, openApiDocument } from './openapi.js';
 import {
+  addEncounterParticipantsBodySchema,
+  addEncounterParticipantsInputSchema,
+  advanceCombatTurnBodySchema,
+  advanceCombatTurnInputSchema,
   appendCampaignEventBodySchema,
   appendCampaignEventInputSchema,
   applyActorChangesBodySchema,
   applyActorChangesInputSchema,
   campaignIdInputSchema,
+  completeSessionBodySchema,
+  completeSessionInputSchema,
+  createEncounterBodySchema,
+  createEncounterInputSchema,
+  endCombatBodySchema,
+  endCombatInputSchema,
   getActorInputSchema,
   getCampaignStateInputSchema,
   getCombatStateInputSchema,
+  getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getSessionHistoryInputSchema,
   idempotencyKeySchema,
   listCampaignsInputSchema,
+  resolveGameActionBodySchema,
+  resolveGameActionInputSchema,
+  removeEncounterParticipantBodySchema,
+  removeEncounterParticipantInputSchema,
   revisionSchema,
+  startCombatBodySchema,
+  startCombatInputSchema,
+  startSessionBodySchema,
+  startSessionInputSchema,
 } from './schemas.js';
 import {
+  addEncounterParticipants,
+  advanceCombatTurn,
   appendCampaignEvent,
   applyActorChanges,
+  completeSession,
+  createEncounter,
+  endCombat,
   getActor,
   getCampaignState,
   getCombatState,
+  getEncounterSetupOptions,
   getRecentEvents,
+  getSessionHistory,
   listActors,
   listCampaigns,
+  resolveGameAction,
+  removeEncounterParticipant,
+  startCombat,
+  startSession,
 } from './service.js';
 
 function matchPath(pathname, expression) {
@@ -154,6 +185,7 @@ export async function handleHelperApiRequest(request, response) {
   let resultingRevision;
   try {
     user = await authenticateHelperRequest(request);
+    requireHelperScope(user, request.method);
     enforceHelperRateLimit(request, user);
     const url = new URL(request.url, 'http://localhost');
 
@@ -184,6 +216,65 @@ export async function handleHelperApiRequest(request, response) {
       return true;
     }
 
+    const sessionsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/sessions$/);
+    if (sessionsMatch && request.method === 'GET') {
+      operation = 'get_session_history';
+      const input = parseSchema(getSessionHistoryInputSchema, {
+        campaign_id: sessionsMatch[0],
+        limit: url.searchParams.get('limit') || undefined,
+      });
+      campaignId = input.campaign_id;
+      const data = await getSessionHistory(user, campaignId, { limit: input.limit });
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const sessionStartMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/sessions\/start$/,
+    );
+    if (sessionStartMatch && request.method === 'POST') {
+      operation = 'start_session';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(startSessionBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(startSessionInputSchema, {
+        campaign_id: sessionStartMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await startSession(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const sessionCompleteMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/sessions\/([^/]+)\/complete$/,
+    );
+    if (sessionCompleteMatch && request.method === 'POST') {
+      operation = 'complete_session';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(completeSessionBodySchema, await readJson(request, 300_000));
+      const input = parseSchema(completeSessionInputSchema, {
+        campaign_id: sessionCompleteMatch[0],
+        session_id: sessionCompleteMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await completeSession(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     const actorsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/actors$/);
     if (actorsMatch && request.method === 'GET') {
       operation = 'list_actors';
@@ -191,6 +282,93 @@ export async function handleHelperApiRequest(request, response) {
       campaignId = input.campaign_id;
       const data = await listActors(user, campaignId);
       sendSuccess(response, requestId, data, data[0]?.revision);
+      return true;
+    }
+
+    const encounterOptionsMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/encounter-options$/,
+    );
+    if (encounterOptionsMatch && request.method === 'GET') {
+      operation = 'get_encounter_setup_options';
+      const input = parseSchema(getEncounterSetupOptionsInputSchema, {
+        campaign_id: encounterOptionsMatch[0],
+        monster_search: url.searchParams.get('monsterSearch') || undefined,
+        monster_limit: url.searchParams.get('monsterLimit') || undefined,
+      });
+      campaignId = input.campaign_id;
+      const data = await getEncounterSetupOptions(user, campaignId, {
+        monsterSearch: input.monster_search,
+        monsterLimit: input.monster_limit,
+      });
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const encountersMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/encounters$/);
+    if (encountersMatch && request.method === 'POST') {
+      operation = 'create_encounter';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(createEncounterBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(createEncounterInputSchema, {
+        campaign_id: encountersMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await createEncounter(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const encounterParticipantsMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/participants$/,
+    );
+    if (encounterParticipantsMatch && request.method === 'POST') {
+      operation = 'add_encounter_participants';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(addEncounterParticipantsBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(addEncounterParticipantsInputSchema, {
+        campaign_id: encounterParticipantsMatch[0],
+        combat_id: encounterParticipantsMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await addEncounterParticipants(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const encounterParticipantMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/participants\/([^/]+)$/,
+    );
+    if (encounterParticipantMatch && request.method === 'DELETE') {
+      operation = 'remove_encounter_participant';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(removeEncounterParticipantBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(removeEncounterParticipantInputSchema, {
+        campaign_id: encounterParticipantMatch[0],
+        combat_id: encounterParticipantMatch[1],
+        actor_id: encounterParticipantMatch[2],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await removeEncounterParticipant(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }
 
@@ -241,6 +419,98 @@ export async function handleHelperApiRequest(request, response) {
       campaignId = input.campaign_id;
       const data = await getCombatState(user, campaignId, input.combat_id);
       sendSuccess(response, requestId, data);
+      return true;
+    }
+
+    const combatStartMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/start$/,
+    );
+    if (combatStartMatch && request.method === 'POST') {
+      operation = 'start_combat';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(startCombatBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(startCombatInputSchema, {
+        campaign_id: combatStartMatch[0],
+        combat_id: combatStartMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await startCombat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const combatActionMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/actions$/,
+    );
+    if (combatActionMatch && request.method === 'POST') {
+      operation = 'resolve_game_action';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveGameActionBodySchema, await readJson(request, 250_000));
+      const input = parseSchema(resolveGameActionInputSchema, {
+        campaign_id: combatActionMatch[0],
+        combat_id: combatActionMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveGameAction(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const combatAdvanceMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/turns\/advance$/,
+    );
+    if (combatAdvanceMatch && request.method === 'POST') {
+      operation = 'advance_combat_turn';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(advanceCombatTurnBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(advanceCombatTurnInputSchema, {
+        campaign_id: combatAdvanceMatch[0],
+        combat_id: combatAdvanceMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await advanceCombatTurn(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const combatEndMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/combat\/([^/]+)\/end$/,
+    );
+    if (combatEndMatch && request.method === 'POST') {
+      operation = 'end_combat';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(endCombatBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(endCombatInputSchema, {
+        campaign_id: combatEndMatch[0],
+        combat_id: combatEndMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await endCombat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }
 

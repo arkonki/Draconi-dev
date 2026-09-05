@@ -34,6 +34,7 @@ let campaignId;
 let actorId;
 let combatId;
 let combatantId;
+let monsterId;
 let playerUserId;
 let mcpClient;
 
@@ -67,11 +68,18 @@ try {
 
     const encounter = await client.query(
       `INSERT INTO encounters (party_id, name, status, current_round)
-       VALUES ($1, 'Smoke combat', 'active', 1)
+       VALUES ($1, 'Smoke combat', 'planning', 0)
        RETURNING id`,
       [campaignId],
     );
     combatId = encounter.rows[0].id;
+    await client.query(
+      `INSERT INTO encounter_combatants (
+         encounter_id, character_id, is_player_character, display_name,
+         current_hp, max_hp, current_wp, max_wp
+       ) VALUES ($1, $2, true, 'Smoke Hero', 14, 14, 8, 8)`,
+      [combatId, actorId],
+    );
     const combatant = await client.query(
       `INSERT INTO encounter_combatants (
          encounter_id, is_player_character, display_name, current_hp, max_hp,
@@ -81,6 +89,13 @@ try {
       [combatId],
     );
     combatantId = combatant.rows[0].id;
+    const monster = await client.query(
+      `INSERT INTO monsters (created_by, name, category, stats)
+       VALUES ($1, $2, 'Smoke test', '{"HP":9,"WP":2,"FEROCITY":2}'::jsonb)
+       RETURNING id`,
+      [users[0].id, `Smoke Hydra ${randomUUID()}`],
+    );
+    monsterId = monster.rows[0].id;
   });
 
   const combatBefore = await pool.query(
@@ -208,6 +223,297 @@ try {
   assert(events.payload.data.length === 2, 'Expected exactly one damage event and one narrative event.');
   assert(events.payload.data[0].sequence > events.payload.data[1].sequence, 'Events are not ordered newest first.');
 
+  const sessionStarted = await api(
+    `/api/v1/campaigns/${campaignId}/sessions/start`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${appended.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-session-start-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        title: 'Smoke game session',
+        gm_notes: 'Disposable private session notes.',
+        opening_scene: { location: 'Smoke bridge', situation: 'Combat is imminent' },
+        reason: 'Automated session lifecycle test begins.',
+      }),
+    },
+  );
+  assert(sessionStarted.response.status === 200, `Session start failed: ${JSON.stringify(sessionStarted.payload)}`);
+  const sessionId = sessionStarted.payload.data.state_excerpt.session.id;
+  const startRevision = sessionStarted.payload.data.campaign_revision;
+  const startKey = `smoke-combat-start-${randomUUID()}`;
+  const startBody = {
+    initiatives: [
+      { actor_id: actorId, initiative: 1 },
+      { actor_id: combatantId, initiative: 2 },
+    ],
+    reason: 'Automated integration test starts combat.',
+  };
+  const started = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/start`,
+    {
+      method: 'POST',
+      headers: { 'if-match': `"${startRevision}"`, 'idempotency-key': startKey },
+      body: JSON.stringify(startBody),
+    },
+  );
+  assert(started.response.status === 200, `Combat start failed: ${JSON.stringify(started.payload)}`);
+  assert(started.payload.data.state_excerpt.combat.status === 'active', 'Combat did not become active.');
+  assert(started.payload.data.state_excerpt.combat.activeActorId === actorId, 'Combat selected the wrong first actor.');
+  const startedHero = started.payload.data.state_excerpt.combat.participants.find(({ actorId: id }) => id === actorId);
+  assert(startedHero.hp.current === 8, 'Combat start did not synchronize current character HP.');
+
+  const repeatedStart = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/start`,
+    {
+      method: 'POST',
+      headers: { 'if-match': `"${startRevision}"`, 'idempotency-key': startKey },
+      body: JSON.stringify(startBody),
+    },
+  );
+  assert(repeatedStart.response.status === 200, 'Idempotent combat start replay failed.');
+  assert(
+    repeatedStart.payload.data.event_ids[0] === started.payload.data.event_ids[0],
+    'Combat start replay returned a different event.',
+  );
+
+  const prematureAdvance = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/turns/advance`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${started.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-premature-advance-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Negative test before the active actor acts.' }),
+    },
+  );
+  assert(prematureAdvance.response.status === 409, 'Unresolved active turn was allowed to advance.');
+  assert(prematureAdvance.payload.error.code === 'INVALID_STATE', 'Premature advance returned the wrong error.');
+
+  const wrongActor = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${started.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-wrong-actor-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: combatantId,
+        action: 'Act out of turn',
+        outcome: 'automatic',
+        effects: [],
+        consume_turn: true,
+        reason: 'Negative test for active-turn enforcement.',
+      }),
+    },
+  );
+  assert(wrongActor.response.status === 409, 'A non-active actor was allowed to act.');
+  assert(wrongActor.payload.error.code === 'NOT_ACTORS_TURN', 'Out-of-turn action returned the wrong error.');
+
+  const heroAction = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${started.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-combat-action-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: actorId,
+        action: 'Sword attack',
+        outcome: 'success',
+        effects: [
+          { actor_id: combatantId, changes: [{ type: 'damage', amount: 2, damage_type: 'slashing' }] },
+          { actor_id: actorId, changes: [{ type: 'spend_wp', amount: 1 }] },
+        ],
+        consume_turn: true,
+        reason: 'Automated combat action test.',
+      }),
+    },
+  );
+  assert(heroAction.response.status === 200, `Combat action failed: ${JSON.stringify(heroAction.payload)}`);
+  const actionCombat = heroAction.payload.data.state_excerpt.combat;
+  assert(actionCombat.participants.find(({ actorId: id }) => id === combatantId).hp.current === 4, 'Atomic combat damage was not applied.');
+  assert(actionCombat.participants.find(({ actorId: id }) => id === actorId).wp.current === 6, 'Atomic combat WP cost was not applied.');
+  assert(actionCombat.participants.find(({ actorId: id }) => id === actorId).hasActed, 'Resolved action did not consume the turn.');
+
+  const advancedToGoblin = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/turns/advance`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${heroAction.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-combat-advance-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Hero turn completed.' }),
+    },
+  );
+  assert(advancedToGoblin.response.status === 200, `Combat advance failed: ${JSON.stringify(advancedToGoblin.payload)}`);
+  assert(advancedToGoblin.payload.data.state_excerpt.combat.activeActorId === combatantId, 'Turn did not advance to the goblin.');
+
+  const goblinAction = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${advancedToGoblin.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-goblin-action-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: combatantId,
+        action: 'Reposition',
+        outcome: 'automatic',
+        effects: [],
+        consume_turn: true,
+        reason: 'The goblin spends its action moving.',
+      }),
+    },
+  );
+  assert(goblinAction.response.status === 200, `Second combat action failed: ${JSON.stringify(goblinAction.payload)}`);
+
+  const nextRound = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/turns/advance`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${goblinAction.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-next-round-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'All living combatants have acted.' }),
+    },
+  );
+  assert(nextRound.response.status === 200, `Round advance failed: ${JSON.stringify(nextRound.payload)}`);
+  assert(nextRound.payload.data.state_excerpt.combat.round === 2, 'Combat did not advance to round 2.');
+  assert(nextRound.payload.data.state_excerpt.combat.activeActorId === actorId, 'New round selected the wrong first actor.');
+
+  const ended = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/end`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${nextRound.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-combat-end-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        outcome: 'victory',
+        summary: 'The disposable smoke-test battle is complete.',
+        reason: 'Automated combat lifecycle test completed.',
+      }),
+    },
+  );
+  assert(ended.response.status === 200, `Combat end failed: ${JSON.stringify(ended.payload)}`);
+  assert(ended.payload.data.state_excerpt.combat.status === 'completed', 'Combat did not become completed.');
+  assert(ended.payload.data.state_excerpt.combat.activeActorId === null, 'Ended combat retained an active actor.');
+
+  const sessionCompleted = await api(
+    `/api/v1/campaigns/${campaignId}/sessions/${sessionId}/complete`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${ended.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-session-complete-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        summary: 'The smoke-test heroes completed the disposable battle.',
+        unresolved_threads: ['A disposable unresolved smoke-test hook.'],
+        ending_scene: { location: 'Smoke bridge', situation: 'The battle is over' },
+        reason: 'Automated session lifecycle test ends.',
+      }),
+    },
+  );
+  assert(sessionCompleted.response.status === 200, `Session completion failed: ${JSON.stringify(sessionCompleted.payload)}`);
+  assert(sessionCompleted.payload.data.state_excerpt.session.status === 'completed', 'Session did not become completed.');
+  assert(sessionCompleted.payload.data.state_excerpt.campaign.activeSessionId === null, 'Completed session remained active.');
+  const sessionHistory = await api(`/api/v1/campaigns/${campaignId}/sessions?limit=5`);
+  assert(sessionHistory.response.status === 200, 'Session history failed.');
+  assert(
+    sessionHistory.payload.data.sessions.some(({ id, summary }) => id === sessionId && summary.includes('disposable battle')),
+    'Completed session summary was not returned by session history.',
+  );
+  const sessionCombatEvents = await pool.query(
+    `SELECT COUNT(*)::integer AS count
+     FROM campaign_events
+     WHERE campaign_id = $1 AND session_id = $2 AND type LIKE 'combat.%'`,
+    [campaignId, sessionId],
+  );
+  assert(sessionCombatEvents.rows[0].count > 0, 'Combat events were not attached to the active game session.');
+
+  const setupOptions = await api(
+    `/api/v1/campaigns/${campaignId}/encounter-options?monsterSearch=Smoke%20Hydra&monsterLimit=10`,
+  );
+  assert(setupOptions.response.status === 200, `Encounter options failed: ${JSON.stringify(setupOptions.payload)}`);
+  assert(
+    setupOptions.payload.data.characters.some(({ id }) => id === actorId),
+    'Encounter options omitted the campaign character.',
+  );
+  assert(
+    setupOptions.payload.data.monsters.some(({ id }) => id === monsterId),
+    'Encounter options omitted the matching monster.',
+  );
+
+  const preparedEncounter = await api(
+    `/api/v1/campaigns/${campaignId}/encounters`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${sessionCompleted.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-create-encounter-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        name: 'Prepared smoke combat',
+        description: 'Created through the Helper API.',
+        reason: 'Automated encounter preparation test.',
+      }),
+    },
+  );
+  assert(preparedEncounter.response.status === 200, `Encounter creation failed: ${JSON.stringify(preparedEncounter.payload)}`);
+  const preparedCombatId = preparedEncounter.payload.data.state_excerpt.combat.id;
+
+  const addedParticipants = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/participants`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${preparedEncounter.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-add-participants-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        character_ids: [actorId],
+        monsters: [{ monster_id: monsterId, count: 1, use_ferocity: true }],
+        reason: 'Add the hero and a ferocity-two monster.',
+      }),
+    },
+  );
+  assert(addedParticipants.response.status === 200, `Adding participants failed: ${JSON.stringify(addedParticipants.payload)}`);
+  const preparedParticipants = addedParticipants.payload.data.state_excerpt.combat.participants;
+  assert(preparedParticipants.length === 3, 'Monster ferocity did not expand into two action participants.');
+  assert(
+    preparedParticipants.some(({ name }) => name.endsWith('(Act 1)'))
+      && preparedParticipants.some(({ name }) => name.endsWith('(Act 2)')),
+    'Ferocity action names were not generated.',
+  );
+
+  const removableMonster = preparedParticipants.find(({ type }) => type === 'monster');
+  const removedParticipant = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/participants/${removableMonster.actorId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'if-match': `"${addedParticipants.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-remove-participant-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Verify planned participants can be removed.' }),
+    },
+  );
+  assert(removedParticipant.response.status === 200, `Removing participant failed: ${JSON.stringify(removedParticipant.payload)}`);
+  assert(
+    removedParticipant.payload.data.state_excerpt.combat.participants.length === 2,
+    'Removed participant remained in the planned encounter.',
+  );
+
   const playerToken = `smoke-player-${randomUUID()}`;
   const playerIdentity = randomUUID();
   await withTransaction(async (client) => {
@@ -237,6 +543,23 @@ try {
   assert(playerState.response.status === 200, 'Authenticated player could not read campaign state.');
   assert(!Object.hasOwn(playerState.payload.data, 'gmContext'), 'Player received GM-only context.');
   assert(playerState.payload.data.openThreads.length === 0, 'Player received GM-only open threads.');
+  const forbiddenCombatWrite = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${combatId}/end`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${playerState.payload.data.campaign.revision}"`,
+        'idempotency-key': `smoke-player-combat-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        outcome: 'other',
+        summary: 'A player must not be able to end combat.',
+        reason: 'Authorization negative test.',
+      }),
+    },
+    playerToken,
+  );
+  assert(forbiddenCombatWrite.response.status === 403, 'A player was allowed to perform a GM combat operation.');
 
   const openapi = await fetch(`${apiBaseUrl}/openapi.json`);
   assert(openapi.ok, 'OpenAPI document is unavailable.');
@@ -248,12 +571,112 @@ try {
     });
     await mcpClient.connect(transport);
     const tools = await mcpClient.listTools();
-    assert(tools.tools.some(({ name }) => name === 'apply_actor_changes'), 'MCP modifying tool is missing.');
+    for (const name of [
+      'apply_actor_changes',
+      'get_encounter_setup_options',
+      'create_encounter',
+      'add_encounter_participants',
+      'remove_encounter_participant',
+      'get_session_history',
+      'start_session',
+      'complete_session',
+      'start_combat',
+      'resolve_game_action',
+      'advance_combat_turn',
+      'end_combat',
+    ]) {
+      assert(tools.tools.some((tool) => tool.name === name), `MCP tool is missing: ${name}`);
+    }
     const mcpState = await mcpClient.callTool({
       name: 'get_campaign_state',
       arguments: { campaign_id: campaignId },
     });
     assert(mcpState.structuredContent?.success === true, 'MCP campaign state call was not structured.');
+    const mcpOptions = await mcpClient.callTool({
+      name: 'get_encounter_setup_options',
+      arguments: { campaign_id: campaignId, monster_search: 'Smoke Hydra', monster_limit: 10 },
+    });
+    assert(
+      mcpOptions.structuredContent?.data?.monsters?.some(({ id }) => id === monsterId),
+      'MCP encounter options did not return the smoke monster.',
+    );
+    const mcpSessionStarted = await mcpClient.callTool({
+      name: 'start_session',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: mcpState.structuredContent.data.campaign.revision,
+        idempotency_key: `smoke-mcp-session-start-${randomUUID()}`,
+        title: 'MCP smoke game session',
+        opening_scene: { location: 'MCP smoke bridge' },
+        reason: 'Verify session start through the MCP transport.',
+      },
+    });
+    assert(mcpSessionStarted.structuredContent?.success === true, 'MCP session start failed.');
+    const mcpCreated = await mcpClient.callTool({
+      name: 'create_encounter',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: mcpSessionStarted.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-create-${randomUUID()}`,
+        name: 'MCP prepared smoke combat',
+        reason: 'Verify encounter creation through the MCP transport.',
+      },
+    });
+    assert(mcpCreated.structuredContent?.success === true, 'MCP encounter creation failed.');
+    const mcpPreparedCombatId = mcpCreated.structuredContent.state_excerpt.combat.id;
+    const mcpAdded = await mcpClient.callTool({
+      name: 'add_encounter_participants',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: mcpPreparedCombatId,
+        expected_revision: mcpCreated.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-add-${randomUUID()}`,
+        character_ids: [actorId],
+        monsters: [{ monster_id: monsterId, count: 1, use_ferocity: false }],
+        reason: 'Verify participant preparation through the MCP transport.',
+      },
+    });
+    assert(mcpAdded.structuredContent?.success === true, 'MCP participant addition failed.');
+    const mcpMonsterActorId = mcpAdded.structuredContent.state_excerpt.combat.participants
+      .find(({ type }) => type === 'monster')?.actorId;
+    assert(mcpMonsterActorId, 'MCP participant addition did not return a monster actor ID.');
+    const mcpRemoved = await mcpClient.callTool({
+      name: 'remove_encounter_participant',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: mcpPreparedCombatId,
+        actor_id: mcpMonsterActorId,
+        expected_revision: mcpAdded.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-remove-${randomUUID()}`,
+        reason: 'Verify participant removal through the MCP transport.',
+      },
+    });
+    assert(mcpRemoved.structuredContent?.success === true, 'MCP participant removal failed.');
+    const mcpSessionCompleted = await mcpClient.callTool({
+      name: 'complete_session',
+      arguments: {
+        campaign_id: campaignId,
+        session_id: mcpSessionStarted.structuredContent.state_excerpt.session.id,
+        expected_revision: mcpRemoved.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-session-complete-${randomUUID()}`,
+        summary: 'The MCP transport completed its disposable session workflow.',
+        unresolved_threads: [],
+        ending_scene: { location: 'MCP smoke bridge', situation: 'Verification complete' },
+        reason: 'Verify session completion through the MCP transport.',
+      },
+    });
+    assert(mcpSessionCompleted.structuredContent?.success === true, 'MCP session completion failed.');
+    const mcpHistory = await mcpClient.callTool({
+      name: 'get_session_history',
+      arguments: { campaign_id: campaignId, limit: 5 },
+    });
+    assert(
+      mcpHistory.structuredContent?.data?.sessions?.some(
+        ({ id, status }) => id === mcpSessionStarted.structuredContent.state_excerpt.session.id
+          && status === 'completed',
+      ),
+      'MCP session history did not return the completed session.',
+    );
   }
 
   console.log(JSON.stringify({
@@ -267,14 +690,26 @@ try {
       'revision conflict',
       'atomic rollback',
       'append-only event sequence',
+      'combat start and idempotent replay',
+      'active-turn enforcement',
+      'atomic combat action effects',
+      'combat turn and round advancement',
+      'combat completion',
+      'session start, event binding, completion, and history',
+      'encounter setup discovery',
+      'encounter creation',
+      'bulk participant and ferocity expansion',
+      'planned participant removal',
+      'GM-only combat authorization',
       'GM context isolation',
       'OpenAPI document',
-      ...(mcpUrl ? ['MCP discovery and state call'] : []),
+      ...(mcpUrl ? ['MCP discovery, encounter preparation, and session lifecycle'] : []),
     ],
   }));
 } finally {
   if (mcpClient) await mcpClient.close().catch(() => {});
   if (campaignId) await pool.query('DELETE FROM parties WHERE id = $1', [campaignId]).catch(() => {});
+  if (monsterId) await pool.query('DELETE FROM monsters WHERE id = $1', [monsterId]).catch(() => {});
   if (playerUserId) await pool.query('DELETE FROM users WHERE id = $1', [playerUserId]).catch(() => {});
   await pool.end();
 }

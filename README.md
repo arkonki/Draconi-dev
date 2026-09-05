@@ -66,10 +66,20 @@ The Helper integration uses the existing data model instead of duplicating it:
 - MCP calls the `/api/v1` REST contract and never accesses PostgreSQL directly.
 
 The current MVP provides the read-only MCP tools `list_campaigns`,
-`get_campaign_state`, `get_actor`, `get_combat_state`, and
-`get_recent_events`. It also provides the modifying tools
-`apply_actor_changes` and `append_campaign_event`. Actor changes support HP,
-WP, conditions, and quantity changes for existing character inventory items.
+`get_campaign_state`, `get_actor`, `get_combat_state`,
+`get_encounter_setup_options`, `get_session_history`, and `get_recent_events`.
+It also provides the
+modifying tools `apply_actor_changes`, `append_campaign_event`,
+`create_encounter`, `add_encounter_participants`,
+`remove_encounter_participant`, `start_combat`, `resolve_game_action`,
+`advance_combat_turn`, `end_combat`, `start_session`, and `complete_session`.
+Actor changes support HP, WP,
+conditions, and quantity changes for existing character inventory items.
+Encounter preparation is GM-only, uses party characters and the local monster
+catalog, and expands monster ferocity into separate initiative actions. Combat
+actions apply effects to multiple participants in one transaction and enforce
+the active turn. Session lifecycle tools bind subsequent events to an active
+game session and persist its ending summary, scene, and unresolved threads.
 
 Every modifying call:
 
@@ -155,9 +165,11 @@ header as `Bearer <DEVELOPMENT_TOKEN>`:
 npx @modelcontextprotocol/inspector@latest
 ```
 
-The disposable integration rehearsal creates a temporary campaign and actor,
-tests damage, idempotent replay, revision conflict, event ordering, OpenAPI, and
-MCP discovery, then removes its test data:
+The disposable integration rehearsal creates a temporary campaign, actors, and
+encounter. It tests encounter discovery and preparation, damage, idempotent
+replay, revision conflict, event ordering, the complete combat lifecycle,
+GM-only combat authorization, OpenAPI, and MCP discovery, then removes its test
+data:
 
 ```bash
 docker compose exec -T \
@@ -169,19 +181,33 @@ It is intended for a local stack. `npm run test:helper-api` runs the same script
 from the host when `DATABASE_URL`, `DEVELOPMENT_TOKEN`, and
 `DEVELOPMENT_USER_EMAIL` are exported.
 
-### Development-mode security limitations
+### Production MCP and OAuth
 
 `development_token` mode uses one long-lived secret with all permissions of the
 mapped local user. Keep it out of source control, logs, screenshots, browser
 code, and public endpoints. Use it only on localhost or a private development
 network. Rotate it by changing `.env` and restarting the API.
 
-Do not expose this MVP as a public ChatGPT plugin yet. A production ChatGPT
-connection requires a public HTTPS `/mcp` endpoint and OAuth 2.1 authorization
-with PKCE, protected-resource discovery, campaign scopes, and per-user consent.
-That is the next authentication phase; no OpenAI API key is needed or used by
-the Helper itself. Production should also reverse-proxy `/mcp` to the MCP
-service, retain request logs without tokens, and keep rate limiting enabled.
+Production exposes Streamable HTTP at `https://draconi.ee/mcp` from the same
+Node process as the API. It uses OAuth 2.1 Authorization Code + S256 PKCE,
+dynamic client registration, rotating refresh tokens, protected-resource and
+authorization-server discovery, explicit read/write scopes, and Draconi's own
+login screen. OAuth tokens are stored only as SHA-256 hashes. Campaign access
+is still resolved from the authenticated Draconi user on every Helper API call.
+No OpenAI API key is needed or used by the public Helper endpoint.
+
+The production environment should set:
+
+```dotenv
+AUTH_MODE=oauth
+PUBLIC_BASE_URL=https://draconi.ee
+OAUTH_ACCESS_TOKEN_MINUTES=60
+OAUTH_REFRESH_TOKEN_DAYS=30
+```
+
+The deployment script defaults to these production-safe values, refuses
+`development_token` mode, creates a PostgreSQL safety dump before migrations,
+and verifies OAuth discovery plus the unauthenticated `/mcp` challenge.
 
 See [docs/HELPER_MCP.md](docs/HELPER_MCP.md) for the architecture, data-model
 mapping, consistency rules, deliberate MVP limits, and the next implementation
@@ -191,7 +217,8 @@ For the production domain `https://draconi.ee`, build the frontend with
 `VITE_BASE_PATH=/` and `VITE_API_BASE_URL=/api`. The deployment script reads
 these values from the production environment and defaults to the same paths.
 It also renders the Apache proxy configuration, including the WebSocket
-upgrade route, from `hosting/apache.htaccess.template`. On Veebimajutus,
+upgrade route, `/mcp`, and OAuth endpoints, from
+`hosting/apache.htaccess.template`. On Veebimajutus,
 `ELKDATA_APP_IP` is used automatically when the hosting panel supplies it;
 otherwise Node binds to all interfaces and Apache reaches it on localhost.
 

@@ -11,7 +11,7 @@ ChatGPT / MCP client
         |
         | Streamable HTTP + bearer/OAuth token
         v
-Dragonbane MCP server (:3100/mcp)
+Dragonbane MCP transport (/mcp; integrated with production API)
         |
         | versioned JSON REST calls
         v
@@ -22,9 +22,10 @@ Dragonbane Node API (:3000/api/v1)
 PostgreSQL
 ```
 
-The MCP server intentionally has no database connection. Validation,
-authorization, revision checks, idempotency, rules, and events live in the API
-and domain layer.
+The MCP transport calls the Helper REST contract instead of accessing campaign
+tables. Validation, campaign authorization, revision checks, idempotency,
+rules, and events live in the API and domain layer. The standalone port 3100
+transport remains available for local tunnel testing.
 
 ## Existing-model mapping
 
@@ -65,7 +66,12 @@ so existing application lifecycle behavior is not broken.
 ## Authorization
 
 Development mode maps the secret `DEVELOPMENT_TOKEN` to the existing user named
-by `DEVELOPMENT_USER_EMAIL`. Identity never comes from MCP arguments.
+by `DEVELOPMENT_USER_EMAIL`. Production uses OAuth 2.1 Authorization Code with
+S256 PKCE. It publishes protected-resource and authorization-server metadata,
+supports dynamic client registration, issues hashed short-lived access tokens
+and rotating refresh tokens, and asks the user to sign in and consent on
+Draconi. OAuth grants use `draconi:read` and `draconi:write`. Identity never
+comes from MCP arguments.
 
 Campaign access is checked on every endpoint:
 
@@ -77,7 +83,8 @@ Campaign access is checked on every endpoint:
 - players may modify only their own player character;
 - appending narrative events requires GM access.
 
-The production OAuth scopes and observer role are not part of this MVP.
+OAuth scopes are enforced at the Helper REST boundary. The current campaign
+role mapping remains owner/GM/player; an explicit observer role is deferred.
 
 ## MVP tools
 
@@ -87,41 +94,84 @@ Read-only:
 - `get_campaign_state`
 - `get_actor`
 - `get_combat_state`
+- `get_encounter_setup_options`
+- `get_session_history`
 - `get_recent_events`
 
 Modifying:
 
 - `apply_actor_changes`
 - `append_campaign_event`
+- `create_encounter`
+- `add_encounter_participants`
+- `remove_encounter_participant`
+- `start_combat`
+- `resolve_game_action`
+- `advance_combat_turn`
+- `end_combat`
+- `start_session`
+- `complete_session`
 
 The modifying tools have `readOnlyHint: false`, `idempotentHint: true`, and
 `openWorldHint: false`. Read-only tools advertise `readOnlyHint: true`.
 
+## Combat workflow
+
+Combat preparation and runtime tools are GM-only:
+
+1. Call `get_encounter_setup_options` to discover valid party characters,
+   searchable local monsters, resolved monster ferocity, and existing planned
+   encounters.
+2. Read the latest campaign revision, call `create_encounter`, and then call
+   `add_encounter_participants`. Monster `count` and ferocity expand into the
+   same separate action entries used by the web UI. Participants can be removed
+   while the encounter is still planning.
+3. Call `start_combat` with initiative assignments using the actor IDs returned
+   by the prepared combat state and cards 1–10.
+4. Read the active combat state, obtain the active actor's roll/outcome from the
+   user or application, and call `resolve_game_action`. Its effects are applied
+   atomically across all target actors.
+5. After a turn-consuming action, call `advance_combat_turn`. It selects the
+   next living participant and starts a new round after everyone has acted.
+6. Call `end_combat` with the outcome and a durable summary.
+
+Starting combat synchronizes player-character HP/WP from the character table.
+Actor effects continue to synchronize character and active-combatant vitals.
+Combat transitions also update the existing encounter log so the web combat UI
+and MCP clients see the same progression.
+
+## Game session workflow
+
+Game session tools are GM-only except for session-history reads. A session is a
+durable container for the campaign events produced during one period of play:
+
+1. Read the campaign state and call `start_session` with a title, optional
+   opening scene, and optional private GM notes.
+2. Run narrative and combat play normally. New campaign events automatically
+   receive the active session ID.
+3. Read the latest revision and call `complete_session` with a durable summary,
+   explicit unresolved threads (an empty array when there are none), and an
+   optional ending scene.
+4. Use `get_session_history` when resuming later to retrieve prior summaries.
+
+Only one session may be active for a campaign. Completing it clears the active
+session pointer while keeping its immutable event history.
+
 ## Deliberate MVP limits
 
-- OAuth 2.1/PKCE and protected-resource discovery are not implemented.
-- Sessions can be read when present in the database, but MCP session
-  start/complete tools are not yet exposed.
-- Combat can be read, but start/advance/resolve/end tools remain in the combat
-  phase.
+- Initiative is preserved at round rollover. Re-drawing or swapping initiative
+  remains a web application operation.
 - Actor changes adjust only existing inventory quantities; adding a new item is
   deferred until item-definition and freeform-item validation is finalized.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
 - Roll modes and cryptographically recorded server rolls are not implemented.
-- Production scope grants, observer membership, and player-specific combat
-  actions require the OAuth/roles phase.
+- Observer membership and more granular per-campaign OAuth grants are not yet
+  implemented.
 
 ## Next phases
 
-1. Add `start_session` and `complete_session`, including summaries, unresolved
-   threads, ending location, and revisioned events.
-2. Add combat domain services and `start_combat`, `resolve_game_action`,
-   `advance_combat_turn`, and `end_combat`, with atomic action effects.
-3. Add OAuth 2.1 Authorization Code + PKCE, protected-resource and authorization
-   server metadata, scopes, consent, and an explicit campaign membership table
-   for owner/GM/player/observer.
-4. Add player/server/mixed roll modes and immutable roll events.
-5. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
+1. Add an explicit campaign membership table for owner/GM/player/observer.
+2. Add player/server/mixed roll modes and immutable roll events.
+3. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
    evaluations before enabling the public connector.
-

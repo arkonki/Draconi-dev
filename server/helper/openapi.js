@@ -1,7 +1,16 @@
 import { z } from 'zod';
 import {
+  addEncounterParticipantsBodySchema,
+  advanceCombatTurnBodySchema,
   appendCampaignEventBodySchema,
   applyActorChangesBodySchema,
+  completeSessionBodySchema,
+  createEncounterBodySchema,
+  endCombatBodySchema,
+  resolveGameActionBodySchema,
+  removeEncounterParticipantBodySchema,
+  startSessionBodySchema,
+  startCombatBodySchema,
 } from './schemas.js';
 
 const errorResponse = {
@@ -67,6 +76,13 @@ const campaignParameter = {
   schema: { type: 'string', format: 'uuid' },
 };
 
+const combatParameter = {
+  name: 'combatId',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', format: 'uuid' },
+};
+
 const revisionHeader = {
   name: 'If-Match',
   in: 'header',
@@ -93,6 +109,7 @@ export const openApiDocument = {
     'INACTIVE_CAMPAIGN',
     'INACTIVE_SESSION',
     'INACTIVE_COMBAT',
+    'NOT_ACTORS_TURN',
     'ACTOR_DEFEATED',
     'INSUFFICIENT_HP',
     'INSUFFICIENT_WP',
@@ -105,7 +122,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.0.0-mvp',
+    version: '1.3.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -173,6 +190,93 @@ export const openApiDocument = {
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/sessions': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'List recent game sessions',
+        description: 'Returns durable session summaries. Private GM notes are included only for GM access.',
+        parameters: [
+          campaignParameter,
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+        ],
+        responses: {
+          200: { description: 'Game session history', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/sessions/start': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Start a game session',
+        description: 'GM-only. Starts the campaign session and binds subsequent campaign events to it.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(startSessionBodySchema),
+              example: {
+                title: 'Night of the Manticore',
+                gm_notes: 'The beast was sent by the masked rider.',
+                opening_scene: { location: 'Old bridge', situation: 'A roar in the fog' },
+                reason: 'The GM begins play.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Session started or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/sessions/{sessionId}/complete': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Complete the active game session',
+        description: 'GM-only. Saves a durable summary, ending scene, and unresolved threads, then clears the active session.',
+        parameters: [
+          campaignParameter,
+          { name: 'sessionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(completeSessionBodySchema),
+              example: {
+                summary: 'The heroes drove the manticore from the old bridge.',
+                unresolved_threads: ['Who sent the beast?'],
+                ending_scene: { location: 'Old bridge', situation: 'The fog clears' },
+                reason: 'The GM ends play.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Session completed or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
         },
       },
     },
@@ -253,6 +357,251 @@ export const openApiDocument = {
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/encounter-options': {
+      get: {
+        tags: ['Combat'],
+        summary: 'List encounter setup options',
+        description: 'GM-only. Returns party characters, searchable local monsters with resolved ferocity, and planned encounters.',
+        parameters: [
+          campaignParameter,
+          { name: 'monsterSearch', in: 'query', schema: { type: 'string', maxLength: 100 } },
+          { name: 'monsterLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+        ],
+        responses: {
+          200: { description: 'Encounter setup options', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/encounters': {
+      post: {
+        tags: ['Combat'],
+        summary: 'Create a planned encounter',
+        description: 'GM-only. Creates an empty planned encounter that can be populated before combat starts.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(createEncounterBodySchema),
+              example: {
+                name: 'Roadside ambush',
+                description: 'Two goblins block the old bridge.',
+                reason: 'The GM requested a new encounter.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Encounter created or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/participants': {
+      post: {
+        tags: ['Combat'],
+        summary: 'Add participants to a planned encounter',
+        description: 'GM-only. Adds party characters and catalog monsters. Monster count and ferocity expand into initiative actions.',
+        parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(addEncounterParticipantsBodySchema),
+              example: {
+                character_ids: ['9e031ae2-f333-4546-8475-530962888e5f'],
+                monsters: [{
+                  monster_id: '2c85d47c-f6ce-4c3a-af53-43a0c81b77e0',
+                  count: 2,
+                  use_ferocity: true,
+                }],
+                reason: 'The heroes are confronted at the bridge.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Participants added or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/participants/{actorId}': {
+      delete: {
+        tags: ['Combat'],
+        summary: 'Remove a participant from a planned encounter',
+        description: 'GM-only. Removes the participant identified by its actor ID.',
+        parameters: [
+          campaignParameter,
+          combatParameter,
+          { name: 'actorId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(removeEncounterParticipantBodySchema),
+              example: { reason: 'The GM changed the planned opposition.' },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Participant removed or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/start': {
+      post: {
+        tags: ['Combat'],
+        summary: 'Start an existing planned combat encounter',
+        description: 'GM-only. Synchronizes player-character vitals, applies optional initiative assignments, resets acted flags, and selects the first living actor.',
+        parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(startCombatBodySchema),
+              example: {
+                initiatives: [
+                  { actor_id: '9e031ae2-f333-4546-8475-530962888e5f', initiative: 3 },
+                ],
+                reason: 'The ambushers spring from the ruined watchtower.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Combat started or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/actions': {
+      post: {
+        tags: ['Combat'],
+        summary: 'Resolve the active actor action atomically',
+        description: 'GM-only. Records the declared outcome, applies all validated effects in one transaction, and optionally consumes the active actor turn. Dice are not rolled by this endpoint.',
+        parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(resolveGameActionBodySchema),
+              example: {
+                actor_id: '9e031ae2-f333-4546-8475-530962888e5f',
+                action: 'Longsword attack',
+                outcome: 'success',
+                effects: [{
+                  actor_id: '2c85d47c-f6ce-4c3a-af53-43a0c81b77e0',
+                  changes: [{ type: 'damage', amount: 6, damage_type: 'slashing' }],
+                }],
+                consume_turn: true,
+                reason: 'The player reported a successful attack and 6 damage after armor.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Action resolved or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/turns/advance': {
+      post: {
+        tags: ['Combat'],
+        summary: 'Advance to the next living combatant',
+        description: 'GM-only. Requires the current living actor turn to be consumed. Starts the next round automatically after all living participants have acted, preserving initiative order.',
+        parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(advanceCombatTurnBodySchema),
+              example: { reason: 'The active actor completed their action.' },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Turn advanced or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/combat/{combatId}/end': {
+      post: {
+        tags: ['Combat'],
+        summary: 'End an active combat encounter',
+        description: 'GM-only. Marks the encounter completed, clears the active turn, and records its outcome and summary.',
+        parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(endCombatBodySchema),
+              example: {
+                outcome: 'victory',
+                summary: 'The heroes drove the goblins from the watchtower.',
+                reason: 'No hostile combatants remain.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Combat ended or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
         },
       },
     },

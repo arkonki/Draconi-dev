@@ -106,7 +106,7 @@ export async function verifyUserPassword(userId, password) {
   return Boolean(rows[0] && verifyPassword(String(password || ''), rows[0].password_hash));
 }
 
-export async function signIn({ email, password }) {
+export async function authenticateCredentials(email, password) {
   const { rows } = await pool.query(
     `SELECT u.*, c.password_hash FROM users u
      JOIN app_credentials c ON c.user_id = u.id
@@ -114,10 +114,9 @@ export async function signIn({ email, password }) {
     [normalizeEmail(email)],
   );
   const user = rows[0];
-  if (!user || !verifyPassword(String(password || ''), user.password_hash)) {
-    throw new HttpError(400, 'Invalid login credentials', 'INVALID_CREDENTIALS');
-  }
-  const session = await withTransaction(async (client) => {
+  if (!user || !verifyPassword(String(password || ''), user.password_hash)) return null;
+
+  await withTransaction(async (client) => {
     if (!String(user.password_hash).startsWith('scrypt$')) {
       await client.query(
         'UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2',
@@ -125,8 +124,16 @@ export async function signIn({ email, password }) {
       );
     }
     await client.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
-    return createSession(client, user);
   });
+  return user;
+}
+
+export async function signIn({ email, password }) {
+  const user = await authenticateCredentials(email, password);
+  if (!user) {
+    throw new HttpError(400, 'Invalid login credentials', 'INVALID_CREDENTIALS');
+  }
+  const session = await withTransaction((client) => createSession(client, user));
   return { user: publicUser(user), session };
 }
 

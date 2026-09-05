@@ -103,13 +103,76 @@ async function performCleanup(reason, failIfLocked) {
       WHERE events.id = candidates.id
     `, config.changeEventRetentionDays);
 
+    const oauthAuthorizationRequests = await deleteInBatches(client, `
+      WITH candidates AS (
+        SELECT id
+        FROM oauth_authorization_requests
+        WHERE expires_at < now() - ($1::integer * interval '1 hour')
+        ORDER BY expires_at
+        LIMIT $2
+      )
+      DELETE FROM oauth_authorization_requests AS requests
+      USING candidates
+      WHERE requests.id = candidates.id
+    `, config.expiredSessionRetentionHours);
+
+    const oauthAuthorizationCodes = await deleteInBatches(client, `
+      WITH candidates AS (
+        SELECT code_hash
+        FROM oauth_authorization_codes
+        WHERE expires_at < now() - ($1::integer * interval '1 hour')
+           OR used_at < now() - ($1::integer * interval '1 hour')
+        ORDER BY expires_at
+        LIMIT $2
+      )
+      DELETE FROM oauth_authorization_codes AS codes
+      USING candidates
+      WHERE codes.code_hash = candidates.code_hash
+    `, config.expiredSessionRetentionHours);
+
+    const oauthAccessTokens = await deleteInBatches(client, `
+      WITH candidates AS (
+        SELECT token_hash
+        FROM oauth_access_tokens
+        WHERE expires_at < now() - ($1::integer * interval '1 hour')
+        ORDER BY expires_at
+        LIMIT $2
+      )
+      DELETE FROM oauth_access_tokens AS tokens
+      USING candidates
+      WHERE tokens.token_hash = candidates.token_hash
+    `, config.expiredSessionRetentionHours);
+
+    const oauthRefreshTokens = await deleteInBatches(client, `
+      WITH candidates AS (
+        SELECT token_hash
+        FROM oauth_refresh_tokens
+        WHERE expires_at < now() - ($1::integer * interval '1 hour')
+           OR revoked_at < now() - ($1::integer * interval '1 hour')
+        ORDER BY expires_at
+        LIMIT $2
+      )
+      DELETE FROM oauth_refresh_tokens AS tokens
+      USING candidates
+      WHERE tokens.token_hash = candidates.token_hash
+    `, config.expiredSessionRetentionHours);
+
     return {
       reason,
       deletedSessions: sessions.deleted,
       deletedChangeEvents: changeEvents.deleted,
+      deletedOAuthAuthorizationRequests: oauthAuthorizationRequests.deleted,
+      deletedOAuthAuthorizationCodes: oauthAuthorizationCodes.deleted,
+      deletedOAuthAccessTokens: oauthAccessTokens.deleted,
+      deletedOAuthRefreshTokens: oauthRefreshTokens.deleted,
       sessionBatches: sessions.batches,
       changeEventBatches: changeEvents.batches,
-      backlogRemaining: sessions.reachedLimit || changeEvents.reachedLimit,
+      backlogRemaining: sessions.reachedLimit
+        || changeEvents.reachedLimit
+        || oauthAuthorizationRequests.reachedLimit
+        || oauthAuthorizationCodes.reachedLimit
+        || oauthAccessTokens.reachedLimit
+        || oauthRefreshTokens.reachedLimit,
     };
   } finally {
     if (locked) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [HOUSEKEEPING_LOCK]);
@@ -152,11 +215,25 @@ async function pendingCounts() {
       (SELECT COUNT(*) FROM app_sessions
        WHERE expires_at < now() - ($1::integer * interval '1 hour')) AS expired_sessions,
       (SELECT COUNT(*) FROM app_change_events
-       WHERE created_at < now() - ($2::integer * interval '1 day')) AS change_events
+       WHERE created_at < now() - ($2::integer * interval '1 day')) AS change_events,
+      (SELECT COUNT(*) FROM oauth_authorization_requests
+       WHERE expires_at < now() - ($1::integer * interval '1 hour')) AS oauth_authorization_requests,
+      (SELECT COUNT(*) FROM oauth_authorization_codes
+       WHERE expires_at < now() - ($1::integer * interval '1 hour')
+          OR used_at < now() - ($1::integer * interval '1 hour')) AS oauth_authorization_codes,
+      (SELECT COUNT(*) FROM oauth_access_tokens
+       WHERE expires_at < now() - ($1::integer * interval '1 hour')) AS oauth_access_tokens,
+      (SELECT COUNT(*) FROM oauth_refresh_tokens
+       WHERE expires_at < now() - ($1::integer * interval '1 hour')
+          OR revoked_at < now() - ($1::integer * interval '1 hour')) AS oauth_refresh_tokens
   `, [config.expiredSessionRetentionHours, config.changeEventRetentionDays]);
   return {
     expiredSessions: Number(rows[0].expired_sessions),
     changeEvents: Number(rows[0].change_events),
+    oauthAuthorizationRequests: Number(rows[0].oauth_authorization_requests),
+    oauthAuthorizationCodes: Number(rows[0].oauth_authorization_codes),
+    oauthAccessTokens: Number(rows[0].oauth_access_tokens),
+    oauthRefreshTokens: Number(rows[0].oauth_refresh_tokens),
   };
 }
 

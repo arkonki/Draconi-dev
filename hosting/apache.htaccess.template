@@ -15,6 +15,13 @@ DirectoryIndex index.html
   # Keep API traffic same-origin while the Node process listens privately.
   RewriteRule ^api(?:/(.*))?$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/api/$1 [P,QSA,L,NE]
 
+  # Public Helper MCP transport and its OAuth 2.1 authorization/discovery routes.
+  RewriteRule ^mcp$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/mcp [P,QSA,L,NE]
+  RewriteRule ^oauth(?:/(.*))?$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/oauth/$1 [P,QSA,L,NE]
+  RewriteRule ^\.well-known/oauth-protected-resource$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/.well-known/oauth-protected-resource [P,QSA,L,NE]
+  RewriteRule ^\.well-known/oauth-protected-resource/mcp$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/.well-known/oauth-protected-resource/mcp [P,QSA,L,NE]
+  RewriteRule ^\.well-known/oauth-authorization-server$ http://__DRACONI_API_HOST__:__DRACONI_API_PORT__/.well-known/oauth-authorization-server [P,QSA,L,NE]
+
   # Stop inherited parent rewrites for known build files and directories.
   RewriteRule ^index\.html$ - [END]
   RewriteRule ^(?:assets|icons|sounds)/ - [END]

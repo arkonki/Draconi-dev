@@ -57,6 +57,43 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/state?${query}`);
   }
 
+  getSessionHistory({ campaign_id, limit }) {
+    const query = new URLSearchParams();
+    if (limit) query.set('limit', String(limit));
+    return this.request(`/api/v1/campaigns/${campaign_id}/sessions?${query}`);
+  }
+
+  startSession(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/sessions/start`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  completeSession(input) {
+    const {
+      campaign_id,
+      session_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/sessions/${session_id}/complete`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   getActor({ campaign_id, actor_id }) {
     return this.request(`/api/v1/campaigns/${campaign_id}/actors/${actor_id}`);
   }
@@ -65,6 +102,128 @@ export class HelperApiClient {
     const query = new URLSearchParams();
     if (combat_id) query.set('combatId', combat_id);
     return this.request(`/api/v1/campaigns/${campaign_id}/combat?${query}`);
+  }
+
+  getEncounterSetupOptions({ campaign_id, monster_search, monster_limit }) {
+    const query = new URLSearchParams();
+    if (monster_search) query.set('monsterSearch', monster_search);
+    if (monster_limit) query.set('monsterLimit', String(monster_limit));
+    return this.request(`/api/v1/campaigns/${campaign_id}/encounter-options?${query}`);
+  }
+
+  createEncounter(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/encounters`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  addEncounterParticipants(input) {
+    const {
+      campaign_id,
+      combat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/combat/${combat_id}/participants`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  removeEncounterParticipant(input) {
+    const {
+      campaign_id,
+      combat_id,
+      actor_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(
+      `/api/v1/campaigns/${campaign_id}/combat/${combat_id}/participants/${actor_id}`,
+      {
+        method: 'DELETE',
+        body,
+        expectedRevision: expected_revision,
+        idempotencyKey: idempotency_key,
+      },
+    );
+  }
+
+  startCombat(input) {
+    const {
+      campaign_id,
+      combat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/combat/${combat_id}/start`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveGameAction(input) {
+    const {
+      campaign_id,
+      combat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/combat/${combat_id}/actions`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  advanceCombatTurn(input) {
+    const {
+      campaign_id,
+      combat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/combat/${combat_id}/turns/advance`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  endCombat(input) {
+    const {
+      campaign_id,
+      combat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/combat/${combat_id}/end`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
   }
 
   getRecentEvents(input) {
@@ -109,4 +268,3 @@ export class HelperApiClient {
     });
   }
 }
-

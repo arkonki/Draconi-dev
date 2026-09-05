@@ -27,6 +27,9 @@ dist-ssr
 .env
 .env*.local
 
+# Local Secure MCP Tunnel runtime state
+.tunnel-client/
+
 # Optional npm cache directory
 .npm
 

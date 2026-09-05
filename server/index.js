@@ -29,9 +29,16 @@ import {
 } from './recovery.js';
 import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
+import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
+import { createMcpHttpHandler } from './mcp/http.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.ELKDATA_APP_IP || process.env.DRACONI_HOST || '0.0.0.0';
+const MCP_INTERNAL_API_BASE_URL = process.env.MCP_INTERNAL_API_BASE_URL || `http://${HOST}:${PORT}`;
+const handleMcpHttpRequest = createMcpHttpHandler({
+  apiBaseUrl: MCP_INTERNAL_API_BASE_URL,
+  verifyAccessToken: (token) => authenticateOAuthAccessToken(token, true),
+});
 
 function matchPath(pathname, expression) {
   const match = pathname.match(expression);
@@ -73,10 +80,19 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
         'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'authorization, content-type, x-upsert, if-match, idempotency-key, x-request-id, x-helper-client',
+        'access-control-allow-headers': 'authorization, content-type, x-upsert, if-match, idempotency-key, x-request-id, x-helper-client, mcp-protocol-version, mcp-session-id, last-event-id',
         'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'access-control-expose-headers': 'mcp-session-id, www-authenticate',
       });
       response.end();
+      return;
+    }
+
+    if (await handleOAuthRequest(request, response)) {
+      return;
+    }
+
+    if (await handleMcpHttpRequest(request, response)) {
       return;
     }
 

@@ -7,6 +7,10 @@ import { createDragonbaneMcpServer } from './server.js';
 
 const campaignId = 'b2f6308c-20c1-4701-bf9d-cb0949730d9c';
 const actorId = '03d353da-eb85-407c-a405-3210430b21fc';
+const combatId = '82783674-9f79-4539-bd97-d88b3c772cc0';
+const monsterId = 'a245161e-d43c-4f17-a702-e1cbf7ca22d7';
+const monsterActorId = 'f4974280-bb74-4560-a8c1-11117b6668af';
+const sessionId = '9e748766-03c7-48ca-a59b-d17d66173c3f';
 
 let client;
 let server;
@@ -22,6 +26,30 @@ beforeEach(async () => {
       data: { campaign: { id: campaignId, revision: 42 }, actors: [] },
       meta: { requestId: 'request-2', campaignRevision: 42 },
     })),
+    getSessionHistory: vi.fn(async () => ({
+      data: { campaignRevision: 42, sessions: [] },
+      meta: { requestId: 'request-session-history', campaignRevision: 42 },
+    })),
+    startSession: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 43,
+        event_ids: ['aeb5ecae-c39a-4dda-8b81-dde229489504'],
+        summary: 'Night of the Manticore started.',
+        state_excerpt: { session: { id: sessionId, status: 'active' } },
+      },
+      meta: { requestId: 'request-session-start', campaignRevision: 43 },
+    })),
+    completeSession: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 44,
+        event_ids: ['907f3c7a-4685-43ff-a882-d7dbb249f54c'],
+        summary: 'Night of the Manticore completed and its campaign summary was saved.',
+        state_excerpt: { session: { id: sessionId, status: 'completed' } },
+      },
+      meta: { requestId: 'request-session-complete', campaignRevision: 44 },
+    })),
     getActor: vi.fn(async () => ({
       data: { id: actorId, name: 'Alaric', hp: { current: 14, max: 14 }, revision: 42 },
       meta: { requestId: 'request-3', campaignRevision: 42 },
@@ -29,6 +57,88 @@ beforeEach(async () => {
     getCombatState: vi.fn(async () => ({
       data: null,
       meta: { requestId: 'request-4', campaignRevision: 42 },
+    })),
+    getEncounterSetupOptions: vi.fn(async () => ({
+      data: {
+        campaignRevision: 42,
+        characters: [{ id: actorId, name: 'Alaric' }],
+        monsters: [{ id: monsterId, name: 'Goblin', resolvedFerocity: 1 }],
+        plannedEncounters: [],
+      },
+      meta: { requestId: 'request-options', campaignRevision: 42 },
+    })),
+    createEncounter: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 43,
+        event_ids: ['87f11f3a-32e1-4bf2-94ef-197e9564d549'],
+        summary: 'Roadside ambush was created as a planned encounter.',
+        state_excerpt: { combat: { id: combatId, status: 'planning', participants: [] } },
+      },
+      meta: { requestId: 'request-create', campaignRevision: 43 },
+    })),
+    addEncounterParticipants: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 44,
+        event_ids: ['e327d643-9dcc-4575-b77d-f781f2e18ab9'],
+        summary: 'Added 2 participants to Roadside ambush.',
+        state_excerpt: {
+          added_actor_ids: [actorId, monsterActorId],
+          combat: { id: combatId, status: 'planning' },
+        },
+      },
+      meta: { requestId: 'request-add-participants', campaignRevision: 44 },
+    })),
+    removeEncounterParticipant: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 45,
+        event_ids: ['61983333-d90d-4f52-af1b-66afad9c634f'],
+        summary: 'Goblin was removed from Roadside ambush.',
+        state_excerpt: { combat: { id: combatId, status: 'planning' } },
+      },
+      meta: { requestId: 'request-remove-participant', campaignRevision: 45 },
+    })),
+    startCombat: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 43,
+        event_ids: ['7495399a-29d0-4af2-a8d5-8992462f582f'],
+        summary: 'Combat started.',
+        state_excerpt: { combat: { id: combatId, status: 'active', round: 1 } },
+      },
+      meta: { requestId: 'request-combat-start', campaignRevision: 43 },
+    })),
+    resolveGameAction: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 44,
+        event_ids: ['9e4e035b-543f-416e-97e9-7fef9e3c770b'],
+        summary: 'Action resolved.',
+        state_excerpt: { combat: { id: combatId, status: 'active', round: 1 } },
+      },
+      meta: { requestId: 'request-action', campaignRevision: 44 },
+    })),
+    advanceCombatTurn: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 45,
+        event_ids: ['a99c9b66-c2ec-466a-af11-d49ecb9d27de'],
+        summary: 'Turn advanced.',
+        state_excerpt: { combat: { id: combatId, status: 'active', round: 1 } },
+      },
+      meta: { requestId: 'request-turn', campaignRevision: 45 },
+    })),
+    endCombat: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 46,
+        event_ids: ['cd5d41d5-e836-4a53-a779-273d2d48de48'],
+        summary: 'Combat ended.',
+        state_excerpt: { combat: { id: combatId, status: 'completed', round: 1 } },
+      },
+      meta: { requestId: 'request-combat-end', campaignRevision: 46 },
     })),
     getRecentEvents: vi.fn(async () => ({
       data: [],
@@ -152,5 +262,218 @@ describe('Dragonbane MCP server', () => {
       campaign_revision: 43,
       event_ids: ['4f5ccf68-7f6f-44ae-8aae-b59757fdf934'],
     });
+  });
+
+  it('exposes the complete revision-safe combat workflow', async () => {
+    const start = await client.callTool({
+      name: 'start_combat',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        expected_revision: 42,
+        idempotency_key: 'combat-start-1',
+        initiatives: [{ actor_id: actorId, initiative: 4 }],
+        reason: 'The ambush begins.',
+      },
+    });
+    expect(start.structuredContent).toMatchObject({ success: true, campaign_revision: 43 });
+
+    const action = await client.callTool({
+      name: 'resolve_game_action',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        actor_id: actorId,
+        expected_revision: 43,
+        idempotency_key: 'combat-action-1',
+        action: 'Defend',
+        outcome: 'automatic',
+        effects: [],
+        consume_turn: true,
+        reason: 'The actor takes a defensive action.',
+      },
+    });
+    expect(action.structuredContent).toMatchObject({ success: true, campaign_revision: 44 });
+
+    const advance = await client.callTool({
+      name: 'advance_combat_turn',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        expected_revision: 44,
+        idempotency_key: 'combat-advance-1',
+        reason: 'The action is complete.',
+      },
+    });
+    expect(advance.structuredContent).toMatchObject({ success: true, campaign_revision: 45 });
+
+    const end = await client.callTool({
+      name: 'end_combat',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        expected_revision: 45,
+        idempotency_key: 'combat-end-1',
+        outcome: 'victory',
+        summary: 'The enemies surrendered.',
+        reason: 'No enemies remain willing to fight.',
+      },
+    });
+    expect(end.structuredContent).toMatchObject({ success: true, campaign_revision: 46 });
+
+    const listed = await client.listTools();
+    for (const name of ['start_combat', 'resolve_game_action', 'advance_combat_turn', 'end_combat']) {
+      expect(listed.tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
+        readOnlyHint: false,
+        idempotentHint: true,
+      });
+    }
+    expect(api.startCombat).toHaveBeenCalledTimes(1);
+    expect(api.resolveGameAction).toHaveBeenCalledTimes(1);
+    expect(api.advanceCombatTurn).toHaveBeenCalledTimes(1);
+    expect(api.endCombat).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes encounter discovery and preparation before combat starts', async () => {
+    const options = await client.callTool({
+      name: 'get_encounter_setup_options',
+      arguments: { campaign_id: campaignId, monster_search: 'goblin' },
+    });
+    expect(options.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 42,
+      data: { monsters: [{ id: monsterId, name: 'Goblin' }] },
+    });
+
+    const created = await client.callTool({
+      name: 'create_encounter',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 42,
+        idempotency_key: 'encounter-create-1',
+        name: 'Roadside ambush',
+        reason: 'The GM requested a new combat.',
+      },
+    });
+    expect(created.structuredContent).toMatchObject({ success: true, campaign_revision: 43 });
+
+    const added = await client.callTool({
+      name: 'add_encounter_participants',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        expected_revision: 43,
+        idempotency_key: 'encounter-add-1',
+        character_ids: [actorId],
+        monsters: [{ monster_id: monsterId, count: 1, use_ferocity: true }],
+        reason: 'Alaric encounters a goblin.',
+      },
+    });
+    expect(added.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 44,
+      state_excerpt: { added_actor_ids: [actorId, monsterActorId] },
+    });
+
+    const removed = await client.callTool({
+      name: 'remove_encounter_participant',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        actor_id: monsterActorId,
+        expected_revision: 44,
+        idempotency_key: 'encounter-remove-1',
+        reason: 'The GM changed the planned opposition.',
+      },
+    });
+    expect(removed.structuredContent).toMatchObject({ success: true, campaign_revision: 45 });
+
+    const listed = await client.listTools();
+    for (const name of [
+      'get_encounter_setup_options',
+      'create_encounter',
+      'add_encounter_participants',
+      'remove_encounter_participant',
+    ]) {
+      expect(listed.tools.some((tool) => tool.name === name)).toBe(true);
+    }
+    expect(api.getEncounterSetupOptions).toHaveBeenCalledTimes(1);
+    expect(api.createEncounter).toHaveBeenCalledTimes(1);
+    expect(api.addEncounterParticipants).toHaveBeenCalledTimes(1);
+    expect(api.removeEncounterParticipant).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes revision-safe game session lifecycle tools', async () => {
+    const history = await client.callTool({
+      name: 'get_session_history',
+      arguments: { campaign_id: campaignId },
+    });
+    expect(history.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 42,
+      data: { sessions: [] },
+    });
+
+    const started = await client.callTool({
+      name: 'start_session',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 42,
+        idempotency_key: 'session-start-1',
+        title: 'Night of the Manticore',
+        opening_scene: { location: 'Old bridge', situation: 'A roar in the fog' },
+        reason: 'The GM begins play.',
+      },
+    });
+    expect(started.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 43,
+      state_excerpt: { session: { id: sessionId, status: 'active' } },
+    });
+
+    const completed = await client.callTool({
+      name: 'complete_session',
+      arguments: {
+        campaign_id: campaignId,
+        session_id: sessionId,
+        expected_revision: 43,
+        idempotency_key: 'session-complete-1',
+        summary: 'The heroes drove off the manticore.',
+        unresolved_threads: ['Who sent the beast?'],
+        ending_scene: { location: 'Old bridge', situation: 'The fog clears' },
+        reason: 'The GM ends play.',
+      },
+    });
+    expect(completed.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 44,
+      state_excerpt: { session: { id: sessionId, status: 'completed' } },
+    });
+    expect(api.getSessionHistory).toHaveBeenCalledTimes(1);
+    expect(api.startSession).toHaveBeenCalledTimes(1);
+    expect(api.completeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects duplicate combat effect targets before calling the API', async () => {
+    const result = await client.callTool({
+      name: 'resolve_game_action',
+      arguments: {
+        campaign_id: campaignId,
+        combat_id: combatId,
+        actor_id: actorId,
+        expected_revision: 43,
+        idempotency_key: 'combat-action-duplicate',
+        action: 'Strike',
+        outcome: 'success',
+        effects: [
+          { actor_id: actorId, changes: [{ type: 'damage', amount: 1 }] },
+          { actor_id: actorId, changes: [{ type: 'damage', amount: 1 }] },
+        ],
+        reason: 'Invalid duplicate target test.',
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/combine changes/i);
+    expect(api.resolveGameAction).not.toHaveBeenCalled();
   });
 });

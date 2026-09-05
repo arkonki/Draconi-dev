@@ -98,6 +98,7 @@ fi
 if [[ "${NO_RESTART}" == false ]]; then
   command -v pm2 >/dev/null 2>&1 || fail "PM2 is required to run the API"
   command -v psql >/dev/null 2>&1 || fail "psql is required to verify PostgreSQL access"
+  command -v pg_dump >/dev/null 2>&1 || fail "pg_dump is required for the pre-deployment database backup"
 
   if [[ ! -f "${ENV_FILE}" ]]; then
     cat >&2 <<EOF
@@ -127,15 +128,32 @@ EOF
   export STORAGE_ROOT="${STORAGE_ROOT:-${DATA_DIR}/storage}"
   export BACKUP_ROOT="${BACKUP_ROOT:-${DATA_DIR}/backups}"
   readonly API_PROXY_HOST="${ELKDATA_APP_IP:-127.0.0.1}"
+  export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://draconi.ee}"
+  export AUTH_MODE="${AUTH_MODE:-oauth}"
+  export MCP_INTERNAL_API_BASE_URL="${MCP_INTERNAL_API_BASE_URL:-http://${API_PROXY_HOST}:${PORT}}"
 
   [[ "${STORAGE_ROOT}" != "${BACKUP_ROOT}" ]] || fail "STORAGE_ROOT and BACKUP_ROOT must be different"
   [[ "${PORT}" =~ ^[0-9]+$ ]] || fail "PORT must be numeric"
   [[ "${API_PROXY_HOST}" =~ ^[A-Za-z0-9.-]+$ ]] || fail "ELKDATA_APP_IP must be an IPv4 address or hostname"
+  [[ "${PUBLIC_BASE_URL}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] \
+    || fail "PUBLIC_BASE_URL must be an HTTPS origin without a trailing slash or path"
+  [[ "${AUTH_MODE}" != "development_token" ]] \
+    || fail "Refusing to expose the production MCP endpoint with development-token authentication"
   mkdir -p "${STORAGE_ROOT}" "${BACKUP_ROOT}"
   chmod 700 "${STORAGE_ROOT}" "${BACKUP_ROOT}"
 
   psql "${DATABASE_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --tuples-only --command 'SELECT 1' >/dev/null \
     || fail "Unable to connect to PostgreSQL using DATABASE_URL"
+
+  predeploy_backup_dir="${BACKUP_ROOT}/predeploy"
+  mkdir -p "${predeploy_backup_dir}"
+  chmod 700 "${predeploy_backup_dir}"
+  predeploy_backup="${predeploy_backup_dir}/database-$(date -u '+%Y%m%dT%H%M%SZ')-${commit_ref}.dump"
+  printf 'Creating pre-deployment PostgreSQL backup...\n'
+  pg_dump "${DATABASE_URL}" --format=custom --no-owner --no-acl --file="${predeploy_backup}" \
+    || fail "Unable to create pre-deployment PostgreSQL backup"
+  chmod 600 "${predeploy_backup}"
+  printf 'Database backup stored at %s.\n' "${predeploy_backup}"
 fi
 
 # Build for the public URL. Production uses draconi.ee at the domain root;
@@ -193,6 +211,12 @@ for _attempt in {1..20}; do
 done
 
 [[ "${healthy}" == true ]] || fail "API health check failed: ${health_url}"
+
+oauth_metadata_url="http://${API_PROXY_HOST}:${PORT}/.well-known/oauth-authorization-server"
+curl --fail --silent --show-error "${oauth_metadata_url}" >/dev/null \
+  || fail "OAuth discovery check failed: ${oauth_metadata_url}"
+mcp_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://${API_PROXY_HOST}:${PORT}/mcp")"
+[[ "${mcp_status}" == "401" ]] || fail "MCP unauthenticated check returned HTTP ${mcp_status}, expected 401"
 
 apache_template="${APP_DIR}/hosting/apache.htaccess.template"
 [[ -f "${apache_template}" ]] || fail "Apache proxy template is missing: ${apache_template}"
