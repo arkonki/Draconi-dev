@@ -8,7 +8,7 @@ import { useNotifications } from '../../contexts/useNotifications';
 import { 
   Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
   ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle,
-  AlertTriangle, CheckCircle2, CircleHelp, RotateCcw
+  AlertTriangle, CheckCircle2, CircleHelp, RotateCcw, Keyboard
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
@@ -18,6 +18,7 @@ import {
   PUSH_ROLL_CONDITIONS,
   type PushRollConditionKey,
 } from './pushRoll';
+import { resolveDiceRoll } from './resolveDiceRoll';
 
 const DiceIcon = ({ type }: { type: DiceType }) => (
   <span className="font-semibold text-xs uppercase">{type}</span>
@@ -76,6 +77,10 @@ export function DiceRollerModal() {
   const [selectedPushCondition, setSelectedPushCondition] = useState<PushRollConditionKey | null>(null);
   const [pushRollError, setPushRollError] = useState<string | null>(null);
   const [hasPushedCurrentTest, setHasPushedCurrentTest] = useState(false);
+  const [isManualEntry, setIsManualEntry] = useState(false);
+  const [manualValues, setManualValues] = useState<string[]>([]);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [isManualPushRoll, setIsManualPushRoll] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCompletionRef = useRef<(() => void) | null>(null);
@@ -130,16 +135,8 @@ export function DiceRollerModal() {
     else { setBane(true); setModifierCount(1); }
   };
 
-  const handleRoll = useCallback((isPushedRoll = false) => {
-    if (dicePool.length === 0) return;
-
-    if (!isPushedRoll) {
-      flushPendingCompletion();
-    }
-
-    // 3. TRIGGER SOUND IMMEDIATELY
-    playSound('dice');
-
+  const prepareForRoll = useCallback((isPushedRoll: boolean) => {
+    if (!isPushedRoll) flushPendingCompletion();
     setHasPushedCurrentTest(isPushedRoll);
     setPushRollStage('idle');
     setSelectedPushCondition(null);
@@ -152,53 +149,129 @@ export function DiceRollerModal() {
     setIsSuccess(undefined);
     setLastRolledEntry(null);
     setPendingPostRollAction(null);
+  }, [flushPendingCompletion]);
 
-    const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
-    const currentBoonResults: DiceRollResult[] = [];
-    let finalValue: number | string = currentResults.reduce((sum, r) => sum + r.value, 0);
-    let numericFinalValue: number = Number(finalValue); 
-    let crit = false;
-    let success: boolean | undefined = undefined;
+  const finalizeRoll = useCallback((
+    currentResults: DiceRollResult[],
+    currentModifierResults: DiceRollResult[],
+    isPushedRoll: boolean,
+    isManualRoll: boolean,
+  ) => {
+    const resolved = resolveDiceRoll({
+      dicePool,
+      results: currentResults,
+      modifierResults: currentModifierResults,
+      isBoonActive,
+      isBaneActive,
+      rollMode,
+      targetValue: currentConfig?.targetValue,
+    });
+    const { finalOutcome: resolvedOutcome, selectedValue, isCritical: crit, isSuccess: success } = resolved;
     const skillName = currentConfig?.skillName;
 
-    // Logic
-    if (dicePool.length === 1 && dicePool[0] === 'd20') {
-      if (isBoonActive || isBaneActive) {
-        for (let i = 0; i < modifierCount; i++) currentBoonResults.push({ type: 'd20', value: rollDie('d20') });
-        const allRolls = [currentResults[0].value, ...currentBoonResults.map(r => r.value)];
-        numericFinalValue = isBoonActive ? Math.min(...allRolls) : Math.max(...allRolls);
-        finalValue = numericFinalValue;
-      } else {
-        numericFinalValue = currentResults[0].value;
-        finalValue = numericFinalValue;
-      }
-      
-      const val = numericFinalValue;
+    setIsRolling(false);
+    setResults(currentResults);
+    setBoonResults(currentModifierResults);
+    setFinalOutcome(resolvedOutcome);
+    setDisplayedOutcome(resolvedOutcome);
+    setIsCritical(crit);
+    setIsSuccess(success);
 
-      if (isAdvancementRoll) {
-        if (currentConfig?.targetValue !== undefined) {
-             success = val > currentConfig.targetValue;
-        }
-        finalValue = val; 
-      } else {
-        if (val === 1) { 
-            crit = true; 
-            finalValue = "Dragon!"; 
-            success = true; 
-        } else if (val === 20) { 
-            crit = true; 
-            finalValue = "Demon!"; 
-            success = false; 
-        } else if (currentConfig?.targetValue !== undefined) {
-            if (isSkillCheck || isRallyRoll || isDeathRoll) {
-                success = val <= currentConfig.targetValue;
-            }
-        }
+    const configuredPostRollAction = currentConfig?.postRollAction;
+    if (configuredPostRollAction) {
+      const actionWhen = configuredPostRollAction.when ?? 'always';
+      const shouldShowAction =
+        actionWhen === 'always'
+        || (actionWhen === 'success' && success === true)
+        || (actionWhen === 'failure' && success === false);
+      setPendingPostRollAction(shouldShowAction ? configuredPostRollAction : null);
+    } else {
+      setPendingPostRollAction(null);
+    }
+
+    if (isSkillCheck && skillName && (selectedValue === 1 || selectedValue === 20)) {
+      markSkillThisSession(skillName);
+    }
+    if (isInitiative && currentConfig?.combatantId) {
+      setInitiativeForCombatant(currentConfig.combatantId, selectedValue);
+    }
+    if (isRest && currentConfig?.restType) {
+      if (currentConfig.restType === 'round') {
+        performRest('round', 0, selectedValue);
+      } else if (currentConfig.restType === 'stretch') {
+        performRest('stretch', selectedValue, 0);
       }
-    } 
-    else if ((isRecoveryRoll || isRest) && dicePool.every(d => d === 'd6')) {
-        numericFinalValue = currentResults.reduce((acc, curr) => acc + curr.value, 0);
-        finalValue = numericFinalValue;
+    }
+
+    const baseDescription = currentConfig?.description || `${dicePool.join(', ')} Roll`;
+    const historyEntryData: Omit<RollHistoryEntry, 'id' | 'timestamp'> = {
+      description: isPushedRoll ? `Pushed: ${baseDescription}` : baseDescription,
+      dicePool: [...dicePool],
+      results: currentResults,
+      boonResults: currentModifierResults.length > 0 ? currentModifierResults : undefined,
+      finalOutcome: resolvedOutcome,
+      isBoon: isBoonActive,
+      isBane: isBaneActive,
+      targetValue: currentConfig?.targetValue,
+      isSuccess: success,
+      isCritical: crit,
+      skillName,
+      selectedValue,
+      isManual: isManualRoll,
+    };
+
+    addRollToHistory(historyEntryData);
+    setLastRolledEntry({
+      ...historyEntryData,
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+    });
+
+    const runCompletionCallbacks = () => {
+      if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
+      if (currentConfig?.onRoll) currentConfig.onRoll({ total: selectedValue });
+    };
+
+    const pushAvailability = getPushRollAvailability({
+      isSkillCheck,
+      isPlayer: isPlayer(),
+      isFailure: success === false,
+      isDemon: crit && success === false,
+      hasCharacter: Boolean(currentCharacter),
+      hasAlreadyPushed: isPushedRoll,
+      conditions: currentCharacter?.conditions,
+    });
+
+    if (isSkillCheck && (currentConfig?.onRollComplete || currentConfig?.onRoll)) {
+      pendingCompletionRef.current = runCompletionCallbacks;
+      if (!pushAvailability.canPush) {
+        if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+        completionTimeoutRef.current = setTimeout(() => {
+          flushPendingCompletion();
+        }, SKILL_CHECK_RESULT_DISPLAY_MS);
+      }
+    } else {
+      runCompletionCallbacks();
+    }
+  }, [addRollToHistory, currentCharacter, currentConfig, dicePool, flushPendingCompletion, isBaneActive, isBoonActive, isInitiative, isPlayer, isRest, isSkillCheck, markSkillThisSession, performRest, rollMode, setInitiativeForCombatant]);
+
+  const handleRoll = useCallback((isPushedRoll = false) => {
+    if (dicePool.length === 0) return;
+
+    prepareForRoll(isPushedRoll);
+
+    // Trigger sound only when the app is actually rolling the dice.
+    playSound('dice');
+    setIsManualEntry(false);
+    setManualError(null);
+    setIsRolling(true);
+
+    const currentResults: DiceRollResult[] = dicePool.map(type => ({ type, value: rollDie(type) }));
+    const currentModifierResults: DiceRollResult[] = [];
+    if (dicePool.length === 1 && dicePool[0] === 'd20' && (isBoonActive || isBaneActive)) {
+      for (let i = 0; i < modifierCount; i++) {
+        currentModifierResults.push({ type: 'd20', value: rollDie('d20') });
+      }
     }
 
     let shuffleCount = 0;
@@ -210,93 +283,66 @@ export function DiceRollerModal() {
       
       if (shuffleCount > 8) {
         if (intervalRef.current) clearInterval(intervalRef.current);
-        
-        setIsRolling(false);
-        setResults(currentResults);
-        setBoonResults(currentBoonResults);
-        setFinalOutcome(finalValue);
-        setDisplayedOutcome(finalValue);
-        setIsCritical(crit);
-        setIsSuccess(success);
-
-        const configuredPostRollAction = currentConfig?.postRollAction;
-        if (configuredPostRollAction) {
-          const actionWhen = configuredPostRollAction.when ?? 'always';
-          const shouldShowAction =
-            actionWhen === 'always'
-            || (actionWhen === 'success' && success === true)
-            || (actionWhen === 'failure' && success === false);
-          setPendingPostRollAction(shouldShowAction ? configuredPostRollAction : null);
-        } else {
-          setPendingPostRollAction(null);
-        }
-
-        if (isSkillCheck && skillName && (numericFinalValue === 1 || numericFinalValue === 20)) {
-            markSkillThisSession(skillName);
-        }
-        if (isInitiative && currentConfig?.combatantId) {
-            setInitiativeForCombatant(currentConfig.combatantId, numericFinalValue);
-        }
-        if (isRest && currentConfig?.restType) {
-            if (currentConfig.restType === 'round') {
-                performRest('round', 0, numericFinalValue); 
-            } else if (currentConfig.restType === 'stretch') {
-                performRest('stretch', numericFinalValue, 0); 
-            }
-        }
-
-        const baseDescription = currentConfig?.description || `${dicePool.join(', ')} Roll`;
-        const historyEntryData: Omit<RollHistoryEntry, 'id' | 'timestamp'> = {
-          description: isPushedRoll ? `Pushed: ${baseDescription}` : baseDescription,
-          dicePool: [...dicePool],
-          results: currentResults,
-          boonResults: currentBoonResults.length > 0 ? currentBoonResults : undefined,
-          finalOutcome: finalValue,
-          isBoon: isBoonActive,
-          isBane: isBaneActive,
-          targetValue: currentConfig?.targetValue,
-          isSuccess: success,
-          isCritical: crit,
-          skillName: skillName,
-        };
-        
-        addRollToHistory(historyEntryData);
-        setLastRolledEntry({
-          ...historyEntryData,
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-        });
-
-        const runCompletionCallbacks = () => {
-          if (currentConfig?.onRollComplete) currentConfig.onRollComplete(historyEntryData);
-          if (currentConfig?.onRoll) currentConfig.onRoll({ total: numericFinalValue });
-        };
-
-        const pushAvailability = getPushRollAvailability({
-          isSkillCheck,
-          isPlayer: isPlayer(),
-          isFailure: success === false,
-          isDemon: crit && success === false,
-          hasCharacter: Boolean(currentCharacter),
-          hasAlreadyPushed: isPushedRoll,
-          conditions: currentCharacter?.conditions,
-        });
-
-        if (isSkillCheck && (currentConfig?.onRollComplete || currentConfig?.onRoll)) {
-          pendingCompletionRef.current = runCompletionCallbacks;
-          if (!pushAvailability.canPush) {
-            if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
-            completionTimeoutRef.current = setTimeout(() => {
-              flushPendingCompletion();
-            }, SKILL_CHECK_RESULT_DISPLAY_MS);
-          }
-        } else {
-          runCompletionCallbacks();
-        }
+        finalizeRoll(currentResults, currentModifierResults, isPushedRoll, false);
       }
     }, 60);
 
-  }, [dicePool, isBoonActive, isBaneActive, modifierCount, currentConfig, addRollToHistory, markSkillThisSession, performRest, setInitiativeForCombatant, isSkillCheck, isAdvancementRoll, isInitiative, isRest, isRallyRoll, isDeathRoll, isRecoveryRoll, playSound, flushPendingCompletion, isPlayer, currentCharacter]);
+  }, [dicePool, finalizeRoll, isBaneActive, isBoonActive, modifierCount, playSound, prepareForRoll]);
+
+  const manualDiceTypes: DiceType[] = [
+    ...dicePool,
+    ...(dicePool.length === 1 && dicePool[0] === 'd20' && (isBoonActive || isBaneActive)
+      ? Array.from({ length: modifierCount }, () => 'd20' as DiceType)
+      : []),
+  ];
+
+  const beginManualRoll = (isPushedRoll: boolean) => {
+    if (dicePool.length === 0 || isRolling) return;
+    setIsManualPushRoll(isPushedRoll);
+    setManualValues(manualDiceTypes.map(() => ''));
+    setManualError(null);
+    setIsManualEntry(true);
+    setShowHistory(false);
+  };
+
+  const cancelManualRoll = () => {
+    setIsManualEntry(false);
+    setManualValues([]);
+    setManualError(null);
+    setIsManualPushRoll(false);
+  };
+
+  const handleManualRoll = () => {
+    if (manualDiceTypes.length === 0) return;
+
+    const parsedValues = manualValues.map((value) => Number(value));
+    const invalidIndex = parsedValues.findIndex((value, index) => (
+      !Number.isInteger(value)
+      || value < 1
+      || value > DICE_VALUES[manualDiceTypes[index]]
+    ));
+
+    if (invalidIndex >= 0) {
+      setManualError(`Enter a whole number from 1 to ${DICE_VALUES[manualDiceTypes[invalidIndex]]} for every die.`);
+      return;
+    }
+
+    const enteredResults = dicePool.map((type, index) => ({
+      type,
+      value: parsedValues[index],
+    }));
+    const enteredModifierResults = manualDiceTypes.slice(dicePool.length).map((type, index) => ({
+      type,
+      value: parsedValues[dicePool.length + index],
+    }));
+
+    prepareForRoll(isManualPushRoll);
+    setIsManualEntry(false);
+    setManualValues([]);
+    setManualError(null);
+    finalizeRoll(enteredResults, enteredModifierResults, isManualPushRoll, true);
+    setIsManualPushRoll(false);
+  };
 
   useEffect(() => {
     if (!showDiceRoller) {
@@ -308,16 +354,20 @@ export function DiceRollerModal() {
       setSelectedPushCondition(null);
       setPushRollError(null);
       setHasPushedCurrentTest(false);
+      setIsManualEntry(false);
+      setManualValues([]);
+      setManualError(null);
+      setIsManualPushRoll(false);
       if (intervalRef.current) clearInterval(intervalRef.current);
       flushPendingCompletion();
     }
   }, [showDiceRoller, flushPendingCompletion]);
 
   const handleClose = useCallback(() => {
-    if (pushRollStage === 'ready') return;
+    if (pushRollStage === 'ready' || (isManualEntry && isManualPushRoll)) return;
     closeDiceRoller();
     flushPendingCompletion();
-  }, [closeDiceRoller, flushPendingCompletion, pushRollStage]);
+  }, [closeDiceRoller, flushPendingCompletion, isManualEntry, isManualPushRoll, pushRollStage]);
 
   const handleTakePushCondition = async (condition: PushRollConditionKey) => {
     if (!currentCharacter || currentCharacter.conditions?.[condition]) return;
@@ -408,8 +458,8 @@ export function DiceRollerModal() {
           </div>
           <button
             onClick={handleClose}
-            disabled={pushRollStage === 'ready'}
-            title={pushRollStage === 'ready' ? 'Complete the pushed roll before closing.' : 'Close dice roller'}
+            disabled={pushRollStage === 'ready' || (isManualEntry && isManualPushRoll)}
+            title={pushRollStage === 'ready' || (isManualEntry && isManualPushRoll) ? 'Complete the pushed roll before closing.' : 'Close dice roller'}
             className="dice-modal-close text-gray-400 hover:text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-30"
           >
             <X className="w-6 h-6" />
@@ -433,7 +483,7 @@ export function DiceRollerModal() {
                          <span className={entry.isSuccess ? "text-green-600" : entry.isSuccess === false ? "text-red-600" : ""}>{String(entry.finalOutcome)}</span>
                       </div>
                       <div className="text-xs text-gray-500 flex justify-between items-center">
-                         <span>{entry.dicePool.join('+')} {entry.isBoon && '(Boon)'}{entry.isBane && '(Bane)'}</span>
+                         <span>{entry.dicePool.join('+')} {entry.isBoon && '(Boon)'}{entry.isBane && '(Bane)'}{entry.isManual && ' · Manual'}</span>
                          {entry.isCritical && <span className="text-purple-600 font-bold">CRITICAL</span>}
                       </div>
 
@@ -450,6 +500,64 @@ export function DiceRollerModal() {
                     </li>
                   ))}
               </ul>
+            </div>
+          ) : isManualEntry ? (
+            <div className="dice-modal-manual flex h-full flex-col animate-in slide-in-from-right-4 duration-200">
+              <div className="text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+                  <Keyboard className="h-6 w-6" />
+                </div>
+                <h3 className="mt-3 text-lg font-bold text-stone-900">Enter your physical roll</h3>
+                <p className="mt-1 text-sm leading-relaxed text-stone-600">
+                  Roll the dice at the table and enter each result. The app will resolve the test
+                  and continue the linked action, including spell WP management.
+                </p>
+                {currentConfig?.targetValue !== undefined && (
+                  <div className="mt-3 inline-flex rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-700">
+                    {isAdvancementRoll ? `Need above ${currentConfig.targetValue}` : `Target ${currentConfig.targetValue} or lower`}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {manualDiceTypes.map((die, index) => {
+                  const isModifier = index >= dicePool.length;
+                  const modifierLabel = isBoonActive ? 'Boon' : 'Bane';
+                  return (
+                    <label key={`${die}-${index}`} className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-left">
+                      <span className="block text-xs font-bold uppercase tracking-wide text-stone-600">
+                        {isModifier ? `${modifierLabel} die ${index - dicePool.length + 1}` : `${die} result`}
+                      </span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={DICE_VALUES[die]}
+                        step={1}
+                        value={manualValues[index] ?? ''}
+                        onChange={(event) => {
+                          const nextValues = [...manualValues];
+                          nextValues[index] = event.target.value;
+                          setManualValues(nextValues);
+                          setManualError(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') handleManualRoll();
+                        }}
+                        aria-label={isModifier ? `${modifierLabel} ${die} result ${index - dicePool.length + 1}` : `${die} result ${index + 1}`}
+                        className="mt-2 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-center text-xl font-bold text-stone-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                        placeholder={`1–${DICE_VALUES[die]}`}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+
+              {manualError && (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {manualError}
+                </div>
+              )}
             </div>
           ) : pushRollStage !== 'idle' ? (
             <div className="dice-modal-push-condition flex flex-col h-full animate-in slide-in-from-right-4 duration-200">
@@ -676,7 +784,16 @@ export function DiceRollerModal() {
         {/* Footer */}
         <div className="dice-modal-footer p-4 border-t flex justify-between items-center bg-gray-50">
           <div className="dice-modal-footer-actions">
-            {pushRollStage === 'choose-condition' ? (
+            {isManualEntry ? (
+              <Button
+                onClick={cancelManualRoll}
+                variant="ghost"
+                size="sm"
+                className="text-gray-500 hover:text-gray-800"
+              >
+                Back
+              </Button>
+            ) : pushRollStage === 'choose-condition' ? (
               <Button
                 onClick={() => {
                   setPushRollError(null);
@@ -700,22 +817,50 @@ export function DiceRollerModal() {
               </span>
             )}
           </div>
-          {!showHistory && pushRollStage === 'ready' ? (
-            <Button
-              onClick={handlePushReroll}
-              disabled={isSavingCharacter}
-              size="lg"
-              className="dice-modal-roll-button w-36 bg-emerald-600 text-white shadow-lg hover:bg-emerald-700 hover:scale-105"
-            >
-              <RotateCcw className="mr-2 h-5 w-5" />
-              Roll Again
+          {!showHistory && isManualEntry ? (
+            <Button onClick={handleManualRoll} size="lg" className="dice-modal-roll-button bg-indigo-600 text-white shadow-lg hover:bg-indigo-700">
+              Use Results
             </Button>
+          ) : !showHistory && pushRollStage === 'ready' ? (
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => beginManualRoll(true)}
+                disabled={isSavingCharacter}
+                variant="outline"
+                size="lg"
+                className="dice-modal-manual-button"
+              >
+                <Keyboard className="mr-1.5 h-4 w-4" />
+                Roll manually
+              </Button>
+              <Button
+                onClick={handlePushReroll}
+                disabled={isSavingCharacter}
+                size="lg"
+                className="dice-modal-roll-button bg-emerald-600 text-white shadow-lg hover:bg-emerald-700 hover:scale-105"
+              >
+                <RotateCcw className="mr-2 h-5 w-5" />
+                Roll Again
+              </Button>
+            </div>
           ) : !showHistory && pushRollStage === 'idle' && isSkillCheck && finalOutcome !== null && !isRolling ? (
             <Button onClick={handleClose} size="lg" className="dice-modal-roll-button w-32 bg-stone-700 text-white shadow-lg hover:bg-stone-800">
               Done
             </Button>
           ) : !showHistory && pushRollStage === 'idle' ? (
-            <Button onClick={() => handleRoll(false)} disabled={dicePool.length === 0 || isRolling} size="lg" className={`dice-modal-roll-button w-32 shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => beginManualRoll(false)}
+                disabled={dicePool.length === 0 || isRolling}
+                variant="outline"
+                size="lg"
+                className="dice-modal-manual-button"
+              >
+                <Keyboard className="mr-1.5 h-4 w-4" />
+                Roll manually
+              </Button>
+              <Button onClick={() => handleRoll(false)} disabled={dicePool.length === 0 || isRolling} size="lg" className={`dice-modal-roll-button shadow-lg transition-all ${isRolling ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-105'}`}>{isRolling ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : <><Dices className="w-5 h-5 mr-2" /> Roll</>}</Button>
+            </div>
           ) : null}
         </div>
       </div>

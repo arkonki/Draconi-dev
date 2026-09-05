@@ -170,6 +170,7 @@ export function DiceProvider({ children }: { children: React.ReactNode }) {
     if (entry.isSuccess !== undefined) {
       message += entry.isSuccess ? " ✅ Success" : " ❌ Failure";
     }
+    if (entry.isManual) message += " 🎲 Manual roll";
 
     await sendMessage(partyId, userId, message);
   }, []);

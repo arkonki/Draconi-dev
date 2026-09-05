@@ -388,7 +388,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
           }
         : undefined,
       onRollComplete: (resultEntry: RollCompletionData) => {
-        const rollValue = resultEntry.results?.[0]?.value;
+        const rollValue = resultEntry.selectedValue ?? resultEntry.results?.[0]?.value;
         const wasSuccessful = resultEntry.isSuccess === true;
         void logCombatEvent(`⚔️ **Attack ${weaponName}** (${skillName} ${skillValue}${rangeDisplay ? `, range ${rangeDisplay}` : ''}) rolled ${rollValue ?? '?'}: ${wasSuccessful ? 'success' : 'failure'}.${wasSuccessful && damageDiceString ? ' Damage roll is ready.' : ''}`);
       }

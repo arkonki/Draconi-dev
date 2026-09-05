@@ -52,7 +52,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
 
   const handleDeathRollComplete = (resultEntry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
     setIsRolling(false);
-    const roll = resultEntry.results[0].value;
+    const roll = resultEntry.selectedValue ?? resultEntry.results[0].value;
     const isCritSuccess = resultEntry.isCritical && resultEntry.isSuccess; // 1
     const isCritFailure = resultEntry.isCritical && !resultEntry.isSuccess; // 20
     const isSuccess = resultEntry.isSuccess;
@@ -86,7 +86,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
 
   const handleRallyRollComplete = (resultEntry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
     setIsRolling(false);
-    const roll = resultEntry.results[0].value;
+    const roll = resultEntry.selectedValue ?? resultEntry.results[0].value;
     const isSuccess = resultEntry.isSuccess;
 
     if (isSuccess) {
@@ -101,7 +101,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
 
   const handleRecoveryRollComplete = (resultEntry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
     setIsRolling(false);
-    const hpRecovered = resultEntry.results[0].value;
+    const hpRecovered = resultEntry.selectedValue ?? resultEntry.results[0].value;
     setLastRollResult({ msg: `Recovered ${hpRecovered} HP! Roll on SEVERE INJURIES table.`, type: 'success' });
     adjustStat('current_hp', hpRecovered); 
     toggleDiceRoller();

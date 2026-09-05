@@ -390,7 +390,9 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
           if (usesDragonBane) {
             setNextCastHasBane(false);
           }
-          const rollValue = resultEntry.results?.[0]?.value;
+          // selectedValue is the resolved d20 after boon/bane; older entries fall back
+          // to the first die for compatibility.
+          const rollValue = resultEntry.selectedValue ?? resultEntry.results?.[0]?.value;
           if (!resultEntry.isSuccess) {
             await spendWillpower(actualWpCost);
             const isDemon = resultEntry.isCritical === true;

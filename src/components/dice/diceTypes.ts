@@ -19,6 +19,8 @@ export interface RollHistoryEntry {
   isSuccess?: boolean;
   isCritical?: boolean;
   skillName?: string;
+  selectedValue?: number;
+  isManual?: boolean;
 }
 
 export interface PostRollAction {
