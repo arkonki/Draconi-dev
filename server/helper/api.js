@@ -22,6 +22,8 @@ import {
   completeSoloMissionInputSchema,
   completeSessionBodySchema,
   completeSessionInputSchema,
+  createRollRequestBodySchema,
+  createRollRequestInputSchema,
   createEncounterBodySchema,
   createEncounterInputSchema,
   drawInspirationBodySchema,
@@ -40,6 +42,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getRollRequestInputSchema,
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
   getSoloStateInputSchema,
@@ -47,6 +50,8 @@ import {
   listCampaignsInputSchema,
   resolveGameActionBodySchema,
   resolveGameActionInputSchema,
+  resolveRollRequestServerBodySchema,
+  resolveRollRequestServerInputSchema,
   resolveSoloDyingActionBodySchema,
   resolveSoloDyingActionInputSchema,
   resolveSoloCheckBodySchema,
@@ -77,6 +82,8 @@ import {
   startSoloMissionInputSchema,
   startSessionBodySchema,
   startSessionInputSchema,
+  submitManualRollResultBodySchema,
+  submitManualRollResultInputSchema,
   takeSoloRestBodySchema,
   takeSoloRestInputSchema,
 } from './schemas.js';
@@ -89,6 +96,7 @@ import {
   askFortune,
   completeSoloMission,
   completeSession,
+  createRollRequest,
   createEncounter,
   drawInspiration,
   disableSoloMode,
@@ -101,12 +109,14 @@ import {
   getCombatState,
   getEncounterSetupOptions,
   getRecentEvents,
+  getRollRequest,
   getSessionHistory,
   getSoloOptions,
   getSoloState,
   listActors,
   listCampaigns,
   resolveGameAction,
+  resolveRollRequestServer,
   resolveCharacterInjuryAction,
   resolveSoloDyingAction,
   resolveSoloCheck,
@@ -122,6 +132,7 @@ import {
   startCombat,
   startSession,
   startSoloMission,
+  submitManualRollResult,
   takeSoloRest,
 } from './service.js';
 
@@ -277,6 +288,79 @@ export async function handleHelperApiRequest(request, response) {
         recentEventLimit: input.recent_event_limit,
       });
       resultingRevision = data.campaign.revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const rollRequestsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests$/);
+    if (rollRequestsMatch && request.method === 'POST') {
+      operation = 'request_roll';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(createRollRequestBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(createRollRequestInputSchema, {
+        campaign_id: rollRequestsMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await createRollRequest(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const rollRequestMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests\/([^/]+)$/);
+    if (rollRequestMatch && request.method === 'GET') {
+      operation = 'get_roll_request';
+      const input = parseSchema(getRollRequestInputSchema, {
+        campaign_id: rollRequestMatch[0],
+        request_id: rollRequestMatch[1],
+      });
+      campaignId = input.campaign_id;
+      const data = await getRollRequest(user, input.campaign_id, input.request_id);
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const serverRollMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests\/([^/]+)\/server-roll$/);
+    if (serverRollMatch && request.method === 'POST') {
+      operation = 'resolve_roll_server';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveRollRequestServerBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveRollRequestServerInputSchema, {
+        campaign_id: serverRollMatch[0],
+        request_id: serverRollMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveRollRequestServer(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const manualRollMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests\/([^/]+)\/manual-result$/);
+    if (manualRollMatch && request.method === 'POST') {
+      operation = 'submit_manual_roll_result';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(submitManualRollResultBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(submitManualRollResultInputSchema, {
+        campaign_id: manualRollMatch[0],
+        request_id: manualRollMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await submitManualRollResult(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }

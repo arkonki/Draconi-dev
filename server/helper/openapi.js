@@ -10,12 +10,14 @@ import {
   completeSoloMissionBodySchema,
   completeSessionBodySchema,
   createEncounterBodySchema,
+  createRollRequestBodySchema,
   drawInspirationBodySchema,
   disableSoloModeBodySchema,
   enableSoloModeBodySchema,
   selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
   resolveGameActionBodySchema,
+  resolveRollRequestServerBodySchema,
   resolveSoloCheckBodySchema,
   resolveSoloCheckConsequenceBodySchema,
   resolveSoloDyingActionBodySchema,
@@ -29,6 +31,7 @@ import {
   startSessionBodySchema,
   startCombatBodySchema,
   startSoloMissionBodySchema,
+  submitManualRollResultBodySchema,
   takeSoloRestBodySchema,
 } from './schemas.js';
 
@@ -155,7 +158,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.14.0',
+    version: '1.15.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -224,6 +227,94 @@ export const openApiDocument = {
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/roll-requests': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Create an immutable trusted roll request',
+        description: 'GM-only. Request a player, server, or mixed-mode roll linked to the current campaign session and optionally an encounter, actor, and assigned user.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(createRollRequestBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Roll requested and realtime event appended', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/roll-requests/{requestId}': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'Read a trusted roll request and its immutable result',
+        parameters: [
+          campaignParameter,
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: { description: 'Roll request state', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/server-roll': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Resolve a request with authoritative server dice',
+        description: 'Uses cryptographically secure server randomness. Player-only requests cannot be resolved by this operation.',
+        parameters: [
+          campaignParameter,
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveRollRequestServerBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Server roll recorded and linked', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/manual-result': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Submit the assigned player’s physical dice',
+        description: 'Only the assigned campaign user may submit exact die faces. Server-only requests reject manual results. This operation is intentionally not exposed as an MCP tool.',
+        parameters: [
+          campaignParameter,
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(submitManualRollResultBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Manual roll validated, recorded, and linked', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
         },
       },
     },

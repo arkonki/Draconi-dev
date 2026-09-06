@@ -9,6 +9,7 @@ import {
   completeSoloMissionInputSchema,
   completeSessionInputSchema,
   createEncounterInputSchema,
+  createRollRequestInputSchema,
   drawInspirationInputSchema,
   disableSoloModeInputSchema,
   enableSoloModeInputSchema,
@@ -19,6 +20,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getRollRequestInputSchema,
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
   getSoloStateInputSchema,
@@ -26,6 +28,7 @@ import {
   mcpReadResultSchema,
   mcpWriteResultSchema,
   resolveGameActionInputSchema,
+  resolveRollRequestServerInputSchema,
   resolveSoloCheckInputSchema,
   resolveSoloCheckConsequenceInputSchema,
   resolveSoloDyingActionInputSchema,
@@ -131,7 +134,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.13.0' },
+    { name: 'dragonbane-helper', version: '1.14.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -140,6 +143,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
+        'For a trusted general roll, use request_roll first. Use resolve_roll_server only when the request mode permits server dice, then read the immutable result with get_roll_request. Never supply physical dice through MCP or replace a returned result.',
         'For solo play, call get_solo_state before narrating. Fortune, Inspiration, and skill-check results are authoritative only when returned by their tools.',
         'Use resolve_solo_check for skill or attribute tests outside combat. The server reads the hero target, resolves normal/boon/bane dice, marks a skill on Dragon or Demon, and returns a generic critical prompt.',
         'When a Solo check returns requiresFailForward, use resolve_solo_check_consequence exactly once for that roll. Ask the user to accept one explicit consequence or offer two contextual consequences for the server to choose with 1D6. Never claim a mechanical consequence before the tool applies it.',
@@ -169,6 +173,30 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
   }, safe(async (input) => readResult(await apiClient.getCampaignState(input))));
+
+  server.registerTool('request_roll', {
+    title: 'Request a trusted campaign roll',
+    description: 'GM-only. Create an immutable player, server, or mixed-mode roll request linked to the current session and optional encounter, actor, and assigned user. Use a bounded NdS expression and never invent a player result.',
+    inputSchema: createRollRequestInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.createRollRequest(input))));
+
+  server.registerTool('get_roll_request', {
+    title: 'Read a trusted roll request',
+    description: 'Read a visible roll request, its pending/resolved/expired status, and its immutable result when resolved.',
+    inputSchema: getRollRequestInputSchema,
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getRollRequest(input))));
+
+  server.registerTool('resolve_roll_server', {
+    title: 'Resolve a request with server dice',
+    description: 'Resolve a pending server or mixed-mode request using cryptographically secure server dice. This tool accepts no die values and rejects player-only requests.',
+    inputSchema: resolveRollRequestServerInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveRollRequestServer(input))));
 
   server.registerTool('get_solo_options', {
     title: 'Get solo-mode setup options',
@@ -504,6 +532,11 @@ export function createDragonbaneMcpServer(apiClient) {
         'start_session',
         'complete_session',
       ],
+      supportedRollOperations: [
+        'request_roll',
+        'get_roll_request',
+        'resolve_roll_server',
+      ],
       supportedSoloOperations: [
         'get_solo_options',
         'get_solo_state',
@@ -555,6 +588,9 @@ export function createDragonbaneMcpServer(apiClient) {
 export const mcpToolAnnotations = {
   list_campaigns: READ_ONLY,
   get_campaign_state: READ_ONLY,
+  request_roll: MODIFYING,
+  get_roll_request: READ_ONLY,
+  resolve_roll_server: MODIFYING,
   get_solo_options: READ_ONLY,
   get_solo_state: READ_ONLY,
   enable_solo_mode: MODIFYING,

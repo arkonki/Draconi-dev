@@ -57,6 +57,30 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/state?${query}`);
   }
 
+  createRollRequest(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  getRollRequest({ campaign_id, request_id }) {
+    return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests/${request_id}`);
+  }
+
+  resolveRollRequestServer(input) {
+    const { campaign_id, request_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests/${request_id}/server-roll`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   getSoloOptions({ campaign_id }) {
     return this.request(`/api/v1/campaigns/${campaign_id}/solo/options`);
   }

@@ -19,6 +19,70 @@ export const getCampaignStateInputSchema = z.object({
   recent_event_limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();
 
+const trustedRollKindSchema = z.enum(['generic', 'check', 'damage', 'recovery', 'advancement']);
+const trustedRollModeSchema = z.enum(['player', 'server', 'mixed']);
+const trustedRollModifierSchema = z.enum(['normal', 'boon', 'bane']);
+
+const createRollRequestFields = {
+  actor_id: uuidSchema.optional(),
+  encounter_id: uuidSchema.optional(),
+  assigned_user_id: uuidSchema.optional(),
+  purpose: z.string().trim().min(1).max(200),
+  expression: z.string().trim().min(3).max(100),
+  roll_kind: trustedRollKindSchema.default('generic'),
+  target_value: z.number().int().min(1).max(20).optional(),
+  modifier: trustedRollModifierSchema.default('normal'),
+  mode: trustedRollModeSchema,
+  visibility: z.enum(['gm', 'players', 'assigned']).default('assigned'),
+  context: z.string().trim().max(5_000).optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  expires_at: z.string().datetime({ offset: true }).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const createRollRequestInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...createRollRequestFields,
+}).strict();
+
+export const createRollRequestBodySchema = z.object(createRollRequestFields).strict();
+
+export const getRollRequestInputSchema = z.object({
+  campaign_id: uuidSchema,
+  request_id: uuidSchema,
+}).strict();
+
+const resolveRollRequestFields = {
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const resolveRollRequestServerInputSchema = z.object({
+  campaign_id: uuidSchema,
+  request_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...resolveRollRequestFields,
+}).strict();
+
+export const resolveRollRequestServerBodySchema = z.object(resolveRollRequestFields).strict();
+
+const submitManualRollFields = {
+  dice: z.array(z.number().int()).min(1).max(20),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const submitManualRollResultInputSchema = z.object({
+  campaign_id: uuidSchema,
+  request_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...submitManualRollFields,
+}).strict();
+
+export const submitManualRollResultBodySchema = z.object(submitManualRollFields).strict();
+
 export const getSoloOptionsInputSchema = z.object({
   campaign_id: uuidSchema,
 }).strict();

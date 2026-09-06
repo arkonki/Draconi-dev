@@ -11,6 +11,11 @@ import { HelperError } from './errors.js';
 import { conditionId } from './identifiers.js';
 import { applyActorChangeSet, validateActorCanAct } from './rules.js';
 import {
+  parseTrustedDiceExpression,
+  resolveTrustedManualRoll,
+  resolveTrustedServerRoll,
+} from './trustedRolls.js';
+import {
   advanceSoloInjuryRecovery,
   advanceThreatState,
   resolveExplorationFind,
@@ -177,7 +182,7 @@ async function insertEvent(client, {
   return rows[0].id;
 }
 
-async function eventRows(client, access, campaignId, filters) {
+async function eventRows(client, access, campaignId, filters, userId) {
   const values = [campaignId];
   const clauses = ['campaign_id = $1'];
   const add = (sql, value) => {
@@ -192,7 +197,13 @@ async function eventRows(client, access, campaignId, filters) {
     clauses.push(`(actor_id = $${values.length} OR target_id = $${values.length})`);
   }
   if (filters.sessionId) add('session_id = ?', filters.sessionId);
-  if (!access.isGm) clauses.push(`visibility IN ('public', 'players')`);
+  if (!access.isGm) {
+    values.push(userId);
+    clauses.push(`(
+      visibility IN ('public', 'players')
+      OR (visibility = 'assigned' AND payload->>'assignedUserId' = $${values.length})
+    )`);
+  }
   values.push(filters.limit);
   const { rows } = await client.query(
     `SELECT id, campaign_id, session_id, sequence, type, actor_id, target_id,
@@ -366,6 +377,71 @@ function recordedRollForOutput(row) {
   return output;
 }
 
+function rollRequestForOutput(row) {
+  const expired = Boolean(row.expires_at && new Date(row.expires_at).getTime() <= Date.now());
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    sessionId: row.session_id,
+    encounterId: row.encounter_id,
+    actorId: row.actor_id,
+    requestedBy: row.requested_by,
+    assignedUserId: row.assigned_user_id,
+    purpose: row.purpose,
+    expression: row.expression,
+    rollKind: row.roll_kind,
+    targetValue: row.target_value === null ? null : Number(row.target_value),
+    modifier: row.modifier,
+    mode: row.mode,
+    visibility: row.visibility,
+    context: row.context,
+    metadata: row.metadata || {},
+    campaignRevision: Number(row.campaign_revision),
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    status: row.resolved_roll ? 'resolved' : expired ? 'expired' : 'pending',
+    result: row.resolved_roll ? {
+      source: row.resolution_source,
+      submittedBy: row.result_submitted_by,
+      createdAt: row.result_created_at,
+      roll: recordedRollForOutput(row.resolved_roll),
+    } : null,
+  };
+}
+
+async function loadRollRequest(client, campaignId, requestId, { forUpdate = false } = {}) {
+  const { rows } = await client.query(
+    `SELECT request.*, result.resolution_source,
+       result.submitted_by AS result_submitted_by,
+       result.created_at AS result_created_at,
+       CASE WHEN roll.id IS NULL THEN NULL ELSE to_jsonb(roll) END AS resolved_roll
+     FROM roll_requests request
+     LEFT JOIN roll_request_results result ON result.request_id = request.id
+     LEFT JOIN recorded_rolls roll ON roll.id = result.roll_id
+     WHERE request.id = $1 AND request.campaign_id = $2
+     ${forUpdate ? 'FOR UPDATE OF request' : ''}`,
+    [requestId, campaignId],
+  );
+  return rows[0] || null;
+}
+
+function assertRollRequestVisible(user, access, request) {
+  if (access.isGm || request.visibility === 'players') return;
+  if (request.visibility === 'assigned' && request.assigned_user_id === user.id) return;
+  throw new HelperError(403, 'PERMISSION_DENIED', 'This roll request is not visible to this campaign member.');
+}
+
+function assertPendingRollRequest(user, access, request) {
+  assertRollRequestVisible(user, access, request);
+  if (request.resolved_roll) throw new HelperError(409, 'INVALID_STATE', 'This roll request is already resolved.');
+  if (request.expires_at && new Date(request.expires_at).getTime() <= Date.now()) {
+    throw new HelperError(409, 'INVALID_STATE', 'This roll request has expired.');
+  }
+  if (!access.isGm && request.assigned_user_id !== user.id) {
+    throw new HelperError(403, 'PERMISSION_DENIED', 'Only the assigned player or a campaign GM can resolve this roll request.');
+  }
+}
+
 function soloRestStateForOutput(row) {
   const roundRestTaken = Boolean(row?.round_rest_taken);
   const stretchRestTaken = Boolean(row?.stretch_rest_taken);
@@ -518,6 +594,7 @@ async function loadSoloRuleTable(client, tableKey, version) {
 async function insertRecordedRoll(client, {
   campaignId,
   sessionId,
+  encounterId = null,
   actorId,
   userId,
   purpose,
@@ -529,21 +606,24 @@ async function insertRecordedRoll(client, {
   tableVersion,
   result,
   previousRollId = null,
+  source = 'server',
   campaignRevision,
 }) {
   const { rows } = await client.query(
     `INSERT INTO recorded_rolls (
-       campaign_id, session_id, actor_id, source_user_id, purpose, source,
+       campaign_id, session_id, encounter_id, actor_id, source_user_id, purpose, source,
        expression, dice, kept_indices, kept_values, table_key, table_version,
        result, previous_roll_id, campaign_revision
-     ) VALUES ($1, $2, $3, $4, $5, 'server', $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16)
      RETURNING *`,
     [
       campaignId,
       sessionId,
+      encounterId,
       actorId,
       userId,
       purpose,
+      source,
       expression,
       dice,
       keptIndices,
@@ -697,7 +777,7 @@ export async function getRecentEvents(user, campaignId, filters = {}) {
   return eventRows(pool, access, campaignId, {
     ...filters,
     limit: filters.limit || 20,
-  });
+  }, user.id);
 }
 
 export async function getSessionHistory(user, campaignId, { limit = 20 } = {}) {
@@ -713,6 +793,310 @@ export async function getSessionHistory(user, campaignId, { limit = 20 } = {}) {
     campaignRevision: Number(access.campaign.helper_revision || 0),
     sessions: rows.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
   };
+}
+
+export async function createRollRequest(user, input, { sourceClient } = {}) {
+  const operation = 'request_roll';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+
+    let parsed;
+    try {
+      parsed = parseTrustedDiceExpression(input.expression);
+    } catch (error) {
+      throw new HelperError(400, 'VALIDATION_ERROR', error.message);
+    }
+    const usesKeep = input.modifier === 'boon' || input.modifier === 'bane';
+    if (usesKeep && (parsed.count !== 1 || parsed.sides !== 20 || parsed.flatModifier !== 0)) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Boon and bane require an unmodified 1d20 request.');
+    }
+    if (input.target_value !== undefined
+      && (parsed.count !== 1 || parsed.sides !== 20 || parsed.flatModifier !== 0)) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'A target value requires an unmodified 1d20 request.');
+    }
+    if (input.target_value !== undefined && !['check', 'advancement'].includes(input.roll_kind)) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Target values are supported only for check and advancement rolls.');
+    }
+    if (['check', 'advancement'].includes(input.roll_kind) && input.target_value === undefined) {
+      throw new HelperError(400, 'VALIDATION_ERROR', `${input.roll_kind} rolls require a target value.`);
+    }
+    if (input.expires_at && new Date(input.expires_at).getTime() <= Date.now()) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Roll request expiry must be in the future.');
+    }
+
+    let assignedUserId = input.assigned_user_id || null;
+    if (input.actor_id) {
+      const loaded = await loadActor(client, input.campaign_id, input.actor_id, {
+        combatId: input.encounter_id || null,
+      });
+      if (!assignedUserId && loaded.storage.type === 'character') {
+        assignedUserId = loaded.storage.row.user_id;
+      }
+      if (input.encounter_id) {
+        const { rows: combatants } = await client.query(
+          `SELECT 1 FROM encounter_combatants
+           WHERE encounter_id = $1 AND (id = $2 OR character_id = $2)
+           LIMIT 1`,
+          [input.encounter_id, input.actor_id],
+        );
+        if (!combatants[0]) {
+          throw new HelperError(400, 'VALIDATION_ERROR', 'The requested actor is not a participant in this encounter.');
+        }
+      }
+    }
+    if (input.encounter_id) {
+      const { rows: encounters } = await client.query(
+        `SELECT id FROM encounters WHERE id = $1 AND party_id = $2`,
+        [input.encounter_id, input.campaign_id],
+      );
+      if (!encounters[0]) throw new HelperError(400, 'VALIDATION_ERROR', 'The encounter is not part of this campaign.');
+    }
+    if (assignedUserId) {
+      const { rows: members } = await client.query(
+        `SELECT role FROM campaign_memberships
+         WHERE party_id = $1 AND user_id = $2 AND role IN ('owner', 'gm', 'player')`,
+        [input.campaign_id, assignedUserId],
+      );
+      if (!members[0] && access.campaign.created_by !== assignedUserId) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'The assigned user is not a writable member of this campaign.');
+      }
+    }
+    if ((input.mode === 'player' || input.visibility === 'assigned') && !assignedUserId) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'This roll request requires an assigned campaign user.');
+    }
+
+    const resultingRevision = previousRevision + 1;
+    const { rows } = await client.query(
+      `INSERT INTO roll_requests (
+         campaign_id, session_id, encounter_id, actor_id, requested_by,
+         assigned_user_id, purpose, expression, roll_kind, target_value,
+         modifier, mode, visibility, context, metadata, campaign_revision, expires_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+         $11, $12, $13, $14, $15::jsonb, $16, $17
+       ) RETURNING *`,
+      [
+        input.campaign_id,
+        access.campaign.active_session_id,
+        input.encounter_id || null,
+        input.actor_id || null,
+        user.id,
+        assignedUserId,
+        input.purpose,
+        parsed.expression,
+        input.roll_kind,
+        input.target_value ?? null,
+        input.modifier,
+        input.mode,
+        input.visibility,
+        input.context || null,
+        JSON.stringify(input.metadata || {}),
+        resultingRevision,
+        input.expires_at || null,
+      ],
+    );
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'roll.requested',
+      actorId: input.actor_id || null,
+      payload: {
+        requestId: rows[0].id,
+        assignedUserId,
+        purpose: input.purpose,
+        expression: parsed.expression,
+        rollKind: input.roll_kind,
+        targetValue: input.target_value ?? null,
+        modifier: input.modifier,
+        mode: input.mode,
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: input.visibility,
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Roll requested: ${input.purpose} (${parsed.expression}, ${input.mode} mode).`,
+      state_excerpt: { request: rollRequestForOutput(rows[0]) },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function getRollRequest(user, campaignId, requestId) {
+  const access = await requireCampaignAccess(pool, user, campaignId);
+  const request = await loadRollRequest(pool, campaignId, requestId);
+  if (!request) throw new HelperError(404, 'NOT_FOUND', 'Roll request not found.');
+  assertRollRequestVisible(user, access, request);
+  return {
+    campaignRevision: Number(access.campaign.helper_revision || 0),
+    request: rollRequestForOutput(request),
+  };
+}
+
+async function resolveRollRequest(user, input, { sourceClient, resolutionSource }) {
+  const operation = resolutionSource === 'server' ? 'resolve_roll_server' : 'submit_manual_roll_result';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { write: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const request = await loadRollRequest(client, input.campaign_id, input.request_id, { forUpdate: true });
+    if (!request) throw new HelperError(404, 'NOT_FOUND', 'Roll request not found.');
+    assertPendingRollRequest(user, access, request);
+    if (resolutionSource === 'server' && request.mode === 'player') {
+      throw new HelperError(409, 'INVALID_STATE', 'This request requires a player-supplied physical roll.');
+    }
+    if (resolutionSource === 'manual') {
+      if (request.mode === 'server') {
+        throw new HelperError(409, 'INVALID_STATE', 'This request requires an authoritative server roll.');
+      }
+      if (!request.assigned_user_id || request.assigned_user_id !== user.id) {
+        throw new HelperError(403, 'PERMISSION_DENIED', 'Only the assigned user can submit a physical roll result.');
+      }
+    }
+
+    let resolution;
+    try {
+      const shared = {
+        expression: request.expression,
+        modifier: request.modifier,
+        rollKind: request.roll_kind,
+        targetValue: request.target_value === null ? null : Number(request.target_value),
+      };
+      resolution = resolutionSource === 'server'
+        ? resolveTrustedServerRoll(shared)
+        : resolveTrustedManualRoll({ ...shared, dice: input.dice });
+    } catch (error) {
+      throw new HelperError(400, 'VALIDATION_ERROR', error.message);
+    }
+
+    const resultingRevision = previousRevision + 1;
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: request.session_id,
+      encounterId: request.encounter_id,
+      actorId: request.actor_id,
+      userId: user.id,
+      purpose: request.purpose,
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: null,
+      tableVersion: access.campaign.rules_version,
+      result: {
+        action: 'trusted_roll',
+        requestId: request.id,
+        ...resolution,
+        context: request.context,
+        metadata: request.metadata,
+      },
+      source: resolutionSource,
+      campaignRevision: resultingRevision,
+    });
+    await client.query(
+      `INSERT INTO roll_request_results (request_id, roll_id, submitted_by, resolution_source)
+       VALUES ($1, $2, $3, $4)`,
+      [request.id, rollRow.id, user.id, resolutionSource],
+    );
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'roll.resolved',
+      actorId: request.actor_id,
+      payload: {
+        requestId: request.id,
+        rollId: rollRow.id,
+        assignedUserId: request.assigned_user_id,
+        resolutionSource,
+        purpose: request.purpose,
+        expression: resolution.expression,
+        dice: resolution.dice,
+        keptIndices: resolution.keptIndices,
+        keptValues: resolution.keptValues,
+        total: resolution.total,
+        targetValue: resolution.targetValue,
+        modifier: resolution.modifier,
+        outcome: resolution.outcome,
+        reason: input.reason,
+      },
+      visibility: request.visibility,
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const resolvedRequest = await loadRollRequest(client, input.campaign_id, request.id);
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${request.purpose}: ${resolution.total}${resolution.outcome ? ` (${resolution.outcome})` : ''}.`,
+      state_excerpt: {
+        request: rollRequestForOutput(resolvedRequest),
+        roll: recordedRollForOutput(rollRow),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function resolveRollRequestServer(user, input, { sourceClient } = {}) {
+  return resolveRollRequest(user, input, { sourceClient, resolutionSource: 'server' });
+}
+
+export async function submitManualRollResult(user, input, { sourceClient } = {}) {
+  return resolveRollRequest(user, input, { sourceClient, resolutionSource: 'manual' });
 }
 
 export async function getSoloOptions(user, campaignId) {
@@ -4756,7 +5140,7 @@ export async function getCampaignState(user, campaignId, { recentEventLimit = 20
   const [characters, combat, recentEvents] = await Promise.all([
     listActors(user, campaignId),
     getCombatState(user, campaignId),
-    eventRows(pool, access, campaignId, { limit: recentEventLimit }),
+    eventRows(pool, access, campaignId, { limit: recentEventLimit }, user.id),
   ]);
   const result = {
     campaign,

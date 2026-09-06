@@ -148,7 +148,11 @@ function canRead(table, row, ctx) {
   if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return true;
   if (table === 'campaign_events') {
     return partyAccess(ctx, row.campaign_id)
-      && (partyGmAccess(ctx, row.campaign_id) || ['public', 'players'].includes(row.visibility));
+      && (
+        partyGmAccess(ctx, row.campaign_id)
+        || ['public', 'players'].includes(row.visibility)
+        || (row.visibility === 'assigned' && row.payload?.assignedUserId === ctx.user.id)
+      );
   }
   if (table === 'characters') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
   if (table === 'parties') return partyAccess(ctx, row.id);
