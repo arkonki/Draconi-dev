@@ -141,6 +141,32 @@ export const advanceThreatInputSchema = z.object({
 export const advanceThreatBodySchema = advanceThreatInputSchema
   .omit({ campaign_id: true, threat_id: true, expected_revision: true, idempotency_key: true });
 
+export const searchWaypointInputSchema = z.object({
+  campaign_id: uuidSchema,
+  waypoint_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  known_location: z.boolean().default(false),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const searchWaypointBodySchema = searchWaypointInputSchema
+  .omit({ campaign_id: true, waypoint_id: true, expected_revision: true, idempotency_key: true });
+
+export const scavengeWaypointInputSchema = z.object({
+  campaign_id: uuidSchema,
+  waypoint_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  spend_stretch: z.boolean().default(false),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const scavengeWaypointBodySchema = scavengeWaypointInputSchema
+  .omit({ campaign_id: true, waypoint_id: true, expected_revision: true, idempotency_key: true });
+
 export const revealWaypointInputSchema = z.object({
   campaign_id: uuidSchema,
   waypoint_id: uuidSchema,

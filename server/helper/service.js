@@ -10,7 +10,13 @@ import { requireCampaignAccess } from './auth.js';
 import { HelperError } from './errors.js';
 import { conditionId } from './identifiers.js';
 import { applyActorChangeSet, validateActorCanAct } from './rules.js';
-import { advanceThreatState, resolveFortune, resolveInspiration } from './soloRules.js';
+import {
+  advanceThreatState,
+  resolveExplorationFind,
+  resolveFortune,
+  resolveInspiration,
+  resolveSoloSkillCheck,
+} from './soloRules.js';
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -277,6 +283,11 @@ function soloWaypointForOutput(row) {
     npcIds: row.npc_ids || [],
     encounterId: row.encounter_id,
     notes: row.notes || [],
+    exploration: {
+      searchCount: Number(row.search_count || 0),
+      scavengeCount: Number(row.scavenge_count || 0),
+      stretchesSpent: Number(row.stretches_spent || 0),
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -615,7 +626,14 @@ export async function getSoloState(user, campaignId) {
     activeMission = missions[0] || null;
     if (activeMission) {
       const { rows } = await pool.query(
-        `SELECT * FROM solo_waypoints WHERE mission_id = $1 ORDER BY position`,
+        `SELECT waypoint.*,
+           COALESCE(exploration.search_count, 0) AS search_count,
+           COALESCE(exploration.scavenge_count, 0) AS scavenge_count,
+           COALESCE(exploration.stretches_spent, 0) AS stretches_spent
+         FROM solo_waypoints waypoint
+         LEFT JOIN solo_waypoint_exploration exploration ON exploration.waypoint_id = waypoint.id
+         WHERE waypoint.mission_id = $1
+         ORDER BY waypoint.position`,
         [activeMission.id],
       );
       waypoints = rows;
@@ -660,6 +678,9 @@ export async function getSoloState(user, campaignId) {
       allowedNextActions.push('complete_solo_mission');
     }
     if (activeThreat?.status === 'active') allowedNextActions.push('advance_threat');
+    if (currentWaypoint?.status === 'active' && activeThreat?.status === 'active') {
+      allowedNextActions.push('search_waypoint', 'scavenge_waypoint');
+    }
   }
   return {
     campaignRevision: Number(access.campaign.helper_revision || 0),
@@ -1606,6 +1627,391 @@ export async function advanceThreat(user, input, { sourceClient } = {}) {
       state_excerpt: {
         threat: soloThreatForOutput(updatedThreat, { revealTriggerEffect: resolution.triggered }),
         transition: resolution,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+function normalizedSkillName(value) {
+  return String(value || '').trim().toLocaleLowerCase().replaceAll('_', ' ').replaceAll('-', ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function actorSkillTarget(actor, skillName) {
+  const targetName = normalizedSkillName(skillName);
+  const match = Object.entries(actor.skills || {}).find(([name]) => normalizedSkillName(name) === targetName);
+  const target = Number(match?.[1]);
+  return Number.isInteger(target) && target >= 1 && target <= 20 ? target : null;
+}
+
+async function loadExplorationContext(client, campaignId, waypointId, state) {
+  if (!state.current_mission_id) {
+    throw new HelperError(409, 'INVALID_STATE', 'There is no current solo mission.');
+  }
+  const { rows: missions } = await client.query(
+    `SELECT * FROM solo_missions
+     WHERE id = $1 AND campaign_id = $2 AND status IN ('active', 'returning')
+     FOR UPDATE`,
+    [state.current_mission_id, campaignId],
+  );
+  const mission = missions[0];
+  if (!mission) throw new HelperError(409, 'INVALID_STATE', 'The current solo mission cannot be explored.');
+
+  const { rows: waypoints } = await client.query(
+    `SELECT * FROM solo_waypoints
+     WHERE id = $1 AND mission_id = $2
+     FOR UPDATE`,
+    [waypointId, mission.id],
+  );
+  const waypoint = waypoints[0];
+  if (
+    !waypoint
+    || waypoint.status !== 'active'
+    || Number(waypoint.position) !== Number(mission.current_waypoint_index)
+  ) {
+    throw new HelperError(400, 'VALIDATION_ERROR', 'Only the current active waypoint may be explored.');
+  }
+
+  const { rows: threats } = await client.query(
+    `SELECT * FROM solo_threats
+     WHERE id = $1 AND mission_id = $2 AND status = 'active'
+     FOR UPDATE`,
+    [mission.active_threat_id, mission.id],
+  );
+  const threat = threats[0];
+  if (!threat) {
+    throw new HelperError(409, 'INVALID_STATE', 'Exploration requires an active mission threat.');
+  }
+
+  await client.query(
+    `INSERT INTO solo_waypoint_exploration (waypoint_id)
+     VALUES ($1)
+     ON CONFLICT (waypoint_id) DO NOTHING`,
+    [waypoint.id],
+  );
+  const { rows: explorationRows } = await client.query(
+    `SELECT * FROM solo_waypoint_exploration WHERE waypoint_id = $1 FOR UPDATE`,
+    [waypoint.id],
+  );
+  return { mission, waypoint, threat, exploration: explorationRows[0] };
+}
+
+async function updateExplorationThreat(client, threat, amount) {
+  const transition = advanceThreatState({
+    counter: Number(threat.counter),
+    recurring: threat.recurring,
+    status: threat.status,
+  }, amount);
+  const { rows } = await client.query(
+    `UPDATE solo_threats SET counter = $1, status = $2 WHERE id = $3 RETURNING *`,
+    [transition.counter, transition.status, threat.id],
+  );
+  return { transition, threat: rows[0] };
+}
+
+function explorationFindingSummary(groups) {
+  const labels = groups.flatMap((group) => group.results.map((result) => result.label));
+  return labels.length > 0 ? labels.join(' + ') : 'Nothing useful';
+}
+
+export async function searchWaypoint(user, input, { sourceClient } = {}) {
+  const operation = 'search_waypoint';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const context = await loadExplorationContext(client, input.campaign_id, input.waypoint_id, state);
+    const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+    const table = await loadSoloRuleTable(client, 'exploration_find', 'draconi-generic-v1');
+
+    let check = null;
+    let findingGroups = [];
+    if (input.known_location) {
+      findingGroups = [resolveExplorationFind(table.entries)];
+    } else {
+      const target = actorSkillTarget(loadedActor.actor, 'Spot Hidden');
+      if (target === null) {
+        throw new HelperError(
+          409,
+          'INVALID_STATE',
+          'The solo character has no usable Spot Hidden skill value.',
+        );
+      }
+      check = resolveSoloSkillCheck({ target });
+      if (check.outcome === 'dragon') {
+        findingGroups = [resolveExplorationFind(table.entries), resolveExplorationFind(table.entries)];
+      } else if (check.outcome === 'success') {
+        findingGroups = [resolveExplorationFind(table.entries)];
+      } else if (check.outcome === 'demon') {
+        findingGroups = [{
+          expression: null,
+          dice: [],
+          keptIndices: [],
+          keptValues: [],
+          rerollLimitReached: false,
+          results: [{
+            roll: null,
+            key: 'new_danger',
+            label: 'A new danger appears',
+            kind: 'danger',
+            reroll: false,
+          }],
+        }];
+      }
+    }
+
+    const threatResult = await updateExplorationThreat(client, context.threat, 1);
+    const { rows: explorationRows } = await client.query(
+      `UPDATE solo_waypoint_exploration
+       SET search_count = search_count + 1,
+         stretches_spent = stretches_spent + 1
+       WHERE waypoint_id = $1
+       RETURNING *`,
+      [context.waypoint.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+
+    const tableDice = findingGroups.flatMap((group) => group.dice);
+    const dice = [...(check?.dice || []), ...tableDice];
+    const expressionParts = [check?.expression, tableDice.length > 0 ? `${tableDice.length}d10` : null].filter(Boolean);
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `Search: ${context.waypoint.title || `waypoint ${context.waypoint.position + 1}`}`,
+      expression: expressionParts.join(' + ') || '1d20',
+      dice,
+      keptIndices: dice.map((_, index) => index),
+      keptValues: [...dice],
+      tableKey: table.tableKey,
+      tableVersion: table.version,
+      result: {
+        action: 'search',
+        knownLocation: input.known_location,
+        skill: input.known_location ? null : 'Spot Hidden',
+        check,
+        findingChoices: findingGroups.map((group) => group.results),
+        requiresChoice: check?.outcome === 'dragon',
+        context: input.context || null,
+        sourceKind: table.sourceKind,
+      },
+      campaignRevision: resultingRevision,
+    });
+
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const searchEventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.waypoint_searched',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: context.mission.id,
+        waypointId: context.waypoint.id,
+        rollId: rollRow.id,
+        knownLocation: input.known_location,
+        check,
+        findingChoices: findingGroups.map((group) => group.results),
+        requiresChoice: check?.outcome === 'dragon',
+        searchCount: Number(explorationRows[0].search_count),
+        stretchesSpent: Number(explorationRows[0].stretches_spent),
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const threatEventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence: sequence + 1,
+      type: threatResult.transition.triggered ? 'solo.threat_triggered' : 'solo.threat_advanced',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: context.mission.id,
+        waypointId: context.waypoint.id,
+        threatId: context.threat.id,
+        previousCounter: threatResult.transition.previousCounter,
+        resultingCounter: threatResult.transition.counter,
+        triggered: threatResult.transition.triggered,
+        ...(threatResult.transition.triggered ? { triggerEffect: context.threat.trigger_effect || {} } : {}),
+        reason: 'A thorough waypoint search consumes one stretch.',
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+
+    const outcome = input.known_location ? 'known location' : check.outcome;
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [searchEventId, threatEventId],
+      summary: `Search (${outcome}): ${explorationFindingSummary(findingGroups)}. Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.`,
+      state_excerpt: {
+        roll: recordedRollForOutput(rollRow),
+        waypoint: soloWaypointForOutput({ ...context.waypoint, ...explorationRows[0] }),
+        threat: soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered }),
+        notice: 'Findings use the generic Draconi exploration table, not an official adventure table.',
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
+  const operation = 'scavenge_waypoint';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const context = await loadExplorationContext(client, input.campaign_id, input.waypoint_id, state);
+    const table = await loadSoloRuleTable(client, 'exploration_find', 'draconi-generic-v1');
+    const finding = resolveExplorationFind(table.entries);
+    const spendsStretch = input.spend_stretch || Number(context.exploration.scavenge_count) >= 1;
+    const threatResult = spendsStretch
+      ? await updateExplorationThreat(client, context.threat, 1)
+      : null;
+    const { rows: explorationRows } = await client.query(
+      `UPDATE solo_waypoint_exploration
+       SET scavenge_count = scavenge_count + 1,
+         stretches_spent = stretches_spent + $2
+       WHERE waypoint_id = $1
+       RETURNING *`,
+      [context.waypoint.id, spendsStretch ? 1 : 0],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `Scavenge: ${context.waypoint.title || `waypoint ${context.waypoint.position + 1}`}`,
+      expression: finding.expression,
+      dice: finding.dice,
+      keptIndices: finding.keptIndices,
+      keptValues: finding.keptValues,
+      tableKey: table.tableKey,
+      tableVersion: table.version,
+      result: {
+        action: 'scavenge',
+        findings: finding.results,
+        rerollLimitReached: finding.rerollLimitReached,
+        spentStretch: spendsStretch,
+        context: input.context || null,
+        sourceKind: table.sourceKind,
+      },
+      campaignRevision: resultingRevision,
+    });
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventIds = [await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.waypoint_scavenged',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: context.mission.id,
+        waypointId: context.waypoint.id,
+        rollId: rollRow.id,
+        findings: finding.results,
+        spentStretch: spendsStretch,
+        scavengeCount: Number(explorationRows[0].scavenge_count),
+        stretchesSpent: Number(explorationRows[0].stretches_spent),
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    })];
+    if (threatResult) {
+      eventIds.push(await insertEvent(client, {
+        campaign: access.campaign,
+        user,
+        sequence: sequence + 1,
+        type: threatResult.transition.triggered ? 'solo.threat_triggered' : 'solo.threat_advanced',
+        actorId: state.player_character_id,
+        payload: {
+          missionId: context.mission.id,
+          waypointId: context.waypoint.id,
+          threatId: context.threat.id,
+          previousCounter: threatResult.transition.previousCounter,
+          resultingCounter: threatResult.transition.counter,
+          triggered: threatResult.transition.triggered,
+          ...(threatResult.transition.triggered ? { triggerEffect: context.threat.trigger_effect || {} } : {}),
+          reason: input.spend_stretch
+            ? 'The scavenge took a stretch.'
+            : 'Repeated scavenging at the same waypoint took a stretch.',
+        },
+        visibility: 'players',
+        sourceClient,
+        idempotencyKey: input.idempotency_key,
+        previousRevision,
+        resultingRevision,
+      }));
+    }
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: eventIds,
+      summary: `Scavenge: ${explorationFindingSummary([finding])}.${spendsStretch ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ' Quick first pass; no threat advance.'}`,
+      state_excerpt: {
+        roll: recordedRollForOutput(rollRow),
+        waypoint: soloWaypointForOutput({ ...context.waypoint, ...explorationRows[0] }),
+        threat: threatResult
+          ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
+          : soloThreatForOutput(context.threat),
+        notice: 'Findings use the generic Draconi exploration table, not an official adventure table.',
       },
     };
     await storeIdempotentResult(client, {

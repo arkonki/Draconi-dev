@@ -171,6 +171,38 @@ export class HelperApiClient {
     });
   }
 
+  searchWaypoint(input) {
+    const {
+      campaign_id,
+      waypoint_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/waypoints/${waypoint_id}/search`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  scavengeWaypoint(input) {
+    const {
+      campaign_id,
+      waypoint_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/waypoints/${waypoint_id}/scavenge`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   completeSoloMission(input) {
     const {
       campaign_id,

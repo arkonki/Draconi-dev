@@ -62,6 +62,9 @@ Solo foundation already delivered toward this phase:
 - [x] Add a responsive Solo Dashboard with hero vitals, mission/waypoint state,
   threat clock, authoritative roll history, realtime refresh, and controls for
   all currently implemented Solo operations.
+- [x] Add rules-aware Search and Scavenge actions with stored Spot Hidden checks,
+  immutable server dice, per-waypoint usage, and automatic stretch/threat
+  consequences through REST, MCP, and the Solo Dashboard.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

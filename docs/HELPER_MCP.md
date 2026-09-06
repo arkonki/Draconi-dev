@@ -127,6 +127,8 @@ Modifying:
 - `draw_inspiration`
 - `start_solo_mission`
 - `reveal_waypoint`
+- `search_waypoint`
+- `scavenge_waypoint`
 - `advance_threat`
 - `complete_solo_mission`
 
@@ -189,6 +191,17 @@ in sequence. Threats begin at 1, advance by 1 or 2 with an audited reason, and
 trigger at 6; recurring threats reset to 1. A successful mission can only be
 completed from its final objective waypoint.
 
+The active waypoint also tracks Search and Scavenge usage. A thorough
+`search_waypoint` resolves the solo hero's stored Spot Hidden value (unless the
+hero already knows the exact hiding place), records the skill die and any find
+dice, consumes one stretch, and advances the threat by 1. A Dragon offers two
+find groups to choose between; failure finds nothing; a Demon reveals a new
+danger. The first quick `scavenge_waypoint` attempt at a location does not
+consume a stretch, while repeat attempts and explicitly prolonged scavenging
+consume one stretch and advance the threat by 1. Both tools use the clearly
+labelled `draconi-generic-v1` exploration table. Their abstract findings are
+prompts and never silently add an item to character inventory.
+
 ## Combat workflow
 
 Combat preparation and runtime tools are GM-only:
@@ -241,9 +254,9 @@ session pointer while keeping its immutable event history.
   deferred until item-definition and freeform-item validation is finalized.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
-- General player/manual/mixed roll modes are not implemented. The Solo Fortune
-  and Inspiration operations do have immutable cryptographically generated
-  server rolls.
+- General player/manual/mixed roll modes are not implemented. Solo Fortune,
+  Inspiration, Search, and Scavenge do have immutable cryptographically
+  generated server rolls.
 - Inviting a GM or observer without first joining as a player is not yet
   implemented; owners can promote an existing campaign member in Campaign
   Roles.

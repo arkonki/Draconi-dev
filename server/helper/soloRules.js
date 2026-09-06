@@ -87,6 +87,50 @@ export function resolveInspiration({ columns, tables }, rollDie = secureRollDie)
   };
 }
 
+export function resolveSoloSkillCheck({ target }, rollDie = secureRollDie) {
+  if (!Number.isInteger(target) || target < 1 || target > 20) {
+    throw new Error('Skill target must be an integer between 1 and 20.');
+  }
+  const roll = rollDie(20);
+  const outcome = roll === 1
+    ? 'dragon'
+    : roll === 20
+      ? 'demon'
+      : roll <= target ? 'success' : 'failure';
+  return { expression: '1d20', dice: [roll], roll, target, outcome };
+}
+
+export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5) {
+  if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
+  const dice = [];
+  const results = [];
+  let reroll = true;
+  while (reroll && dice.length < maxRolls) {
+    const roll = rollDie(10);
+    const entry = findTableEntry(entries, roll);
+    if (!entry || typeof entry !== 'object' || typeof entry.key !== 'string') {
+      throw new Error(`Exploration table has an invalid result for ${roll}.`);
+    }
+    dice.push(roll);
+    results.push({
+      roll,
+      key: entry.key,
+      label: entry.label || entry.key,
+      kind: entry.kind || null,
+      reroll: Boolean(entry.reroll),
+    });
+    reroll = Boolean(entry.reroll);
+  }
+  return {
+    expression: `${dice.length}d10`,
+    dice,
+    keptIndices: dice.map((_, index) => index),
+    keptValues: [...dice],
+    results,
+    rerollLimitReached: reroll,
+  };
+}
+
 export function advanceThreatState({ counter, recurring, status }, amount) {
   if (status !== 'active') throw new Error(`Cannot advance a threat with status ${status}.`);
   if (!Number.isInteger(counter) || counter < 1 || counter > 6) throw new Error('Threat counter must be between 1 and 6.');

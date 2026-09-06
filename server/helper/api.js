@@ -50,6 +50,10 @@ import {
   removeEncounterParticipantInputSchema,
   revealWaypointBodySchema,
   revealWaypointInputSchema,
+  scavengeWaypointBodySchema,
+  scavengeWaypointInputSchema,
+  searchWaypointBodySchema,
+  searchWaypointInputSchema,
   revisionSchema,
   startCombatBodySchema,
   startCombatInputSchema,
@@ -86,6 +90,8 @@ import {
   resolveGameAction,
   removeEncounterParticipant,
   revealWaypoint,
+  scavengeWaypoint,
+  searchWaypoint,
   startCombat,
   startSession,
   startSoloMission,
@@ -397,6 +403,52 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await revealWaypoint(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const waypointSearchMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/waypoints\/([^/]+)\/search$/,
+    );
+    if (waypointSearchMatch && request.method === 'POST') {
+      operation = 'search_waypoint';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(searchWaypointBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(searchWaypointInputSchema, {
+        campaign_id: waypointSearchMatch[0],
+        waypoint_id: waypointSearchMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await searchWaypoint(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const waypointScavengeMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/waypoints\/([^/]+)\/scavenge$/,
+    );
+    if (waypointScavengeMatch && request.method === 'POST') {
+      operation = 'scavenge_waypoint';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(scavengeWaypointBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(scavengeWaypointInputSchema, {
+        campaign_id: waypointScavengeMatch[0],
+        waypoint_id: waypointScavengeMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await scavengeWaypoint(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

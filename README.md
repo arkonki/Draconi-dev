@@ -67,12 +67,17 @@ The Helper integration uses the existing data model instead of duplicating it:
 
 The current MVP provides the read-only MCP tools `list_campaigns`,
 `get_campaign_state`, `get_actor`, `get_combat_state`,
-`get_encounter_setup_options`, `get_session_history`, and `get_recent_events`.
+`get_encounter_setup_options`, `get_session_history`, `get_recent_events`,
+`get_solo_options`, and `get_solo_state`.
 It also provides the
 modifying tools `apply_actor_changes`, `append_campaign_event`,
 `create_encounter`, `add_encounter_participants`,
 `remove_encounter_participant`, `start_combat`, `resolve_game_action`,
-`advance_combat_turn`, `end_combat`, `start_session`, and `complete_session`.
+`advance_combat_turn`, `end_combat`, `start_session`, `complete_session`,
+`enable_solo_mode`, `disable_solo_mode`, `select_solo_heroic_ability`,
+`ask_fortune`, `draw_inspiration`, `start_solo_mission`, `reveal_waypoint`,
+`search_waypoint`, `scavenge_waypoint`, `advance_threat`, and
+`complete_solo_mission`.
 Actor changes support HP, WP,
 conditions, and quantity changes for existing character inventory items.
 Encounter preparation is GM-only, uses party characters and the local monster

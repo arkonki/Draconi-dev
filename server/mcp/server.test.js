@@ -60,12 +60,12 @@ beforeEach(async () => {
     disableSoloMode: vi.fn(async () => ({
       data: {
         success: true,
-        campaign_revision: 51,
+        campaign_revision: 53,
         event_ids: ['6acbf745-8217-45dc-90c2-1ce65f29e19d'],
         summary: 'Solo mode disabled for this campaign.',
         state_excerpt: { solo: { enabled: false } },
       },
-      meta: { requestId: 'request-solo-disable', campaignRevision: 51 },
+      meta: { requestId: 'request-solo-disable', campaignRevision: 53 },
     })),
     selectSoloHeroicAbility: vi.fn(async () => ({
       data: {
@@ -133,15 +133,43 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-waypoint-reveal', campaignRevision: 49 },
     })),
-    completeSoloMission: vi.fn(async () => ({
+    searchWaypoint: vi.fn(async () => ({
       data: {
         success: true,
         campaign_revision: 50,
+        event_ids: ['51ef1632-6649-4473-a157-8101f8fd1164', '9041421d-f2e4-498c-bb80-6f523020c97e'],
+        summary: 'Search (success): Useful supplies. Threat 2 → 3.',
+        state_excerpt: {
+          roll: { expression: '1d20 + 1d10', dice: [7, 5] },
+          waypoint: { id: waypointId, exploration: { searchCount: 1, scavengeCount: 0, stretchesSpent: 1 } },
+          threat: { id: threatId, counter: 3 },
+        },
+      },
+      meta: { requestId: 'request-waypoint-search', campaignRevision: 50 },
+    })),
+    scavengeWaypoint: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 51,
+        event_ids: ['0548bb23-a291-4327-a0e3-77e24eeb1643'],
+        summary: 'Scavenge: Something useful. Quick first pass; no threat advance.',
+        state_excerpt: {
+          roll: { expression: '1d10', dice: [8] },
+          waypoint: { id: waypointId, exploration: { searchCount: 1, scavengeCount: 1, stretchesSpent: 1 } },
+          threat: { id: threatId, counter: 3 },
+        },
+      },
+      meta: { requestId: 'request-waypoint-scavenge', campaignRevision: 51 },
+    })),
+    completeSoloMission: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 52,
         event_ids: ['0dc71ac5-20e2-419e-a738-8342c7ee933a'],
         summary: 'Solo mission “The Sunken Bell” ended with abandoned.',
         state_excerpt: { mission: { id: missionId, status: 'abandoned' }, currentMissionId: null },
       },
-      meta: { requestId: 'request-mission-complete', campaignRevision: 50 },
+      meta: { requestId: 'request-mission-complete', campaignRevision: 52 },
     })),
     getSessionHistory: vi.fn(async () => ({
       data: { campaignRevision: 42, sessions: [] },
@@ -703,12 +731,48 @@ describe('Dragonbane MCP server', () => {
       state_excerpt: { currentWaypoint: { id: waypointId, status: 'active' } },
     });
 
+    const searched = await client.callTool({
+      name: 'search_waypoint',
+      arguments: {
+        campaign_id: campaignId,
+        waypoint_id: waypointId,
+        expected_revision: 49,
+        idempotency_key: 'solo-search-1',
+        known_location: false,
+        context: 'The alcoves behind the cracked mosaic.',
+        reason: 'The hero performs a thorough search.',
+      },
+    });
+    expect(searched.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 50,
+      state_excerpt: { waypoint: { exploration: { searchCount: 1 } }, threat: { counter: 3 } },
+    });
+
+    const scavenged = await client.callTool({
+      name: 'scavenge_waypoint',
+      arguments: {
+        campaign_id: campaignId,
+        waypoint_id: waypointId,
+        expected_revision: 50,
+        idempotency_key: 'solo-scavenge-1',
+        spend_stretch: false,
+        context: 'The abandoned packs near the wall.',
+        reason: 'The hero makes a quick scavenge.',
+      },
+    });
+    expect(scavenged.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 51,
+      state_excerpt: { waypoint: { exploration: { scavengeCount: 1 } }, threat: { counter: 3 } },
+    });
+
     const completed = await client.callTool({
       name: 'complete_solo_mission',
       arguments: {
         campaign_id: campaignId,
         mission_id: missionId,
-        expected_revision: 49,
+        expected_revision: 51,
         idempotency_key: 'solo-complete-1',
         outcome: 'abandoned',
         summary: 'The rising water forces the hero to turn back.',
@@ -717,21 +781,21 @@ describe('Dragonbane MCP server', () => {
     });
     expect(completed.structuredContent).toMatchObject({
       success: true,
-      campaign_revision: 50,
+      campaign_revision: 52,
       state_excerpt: { currentMissionId: null },
     });
     const disabled = await client.callTool({
       name: 'disable_solo_mode',
       arguments: {
         campaign_id: campaignId,
-        expected_revision: 50,
+        expected_revision: 52,
         idempotency_key: 'solo-disable-1',
         reason: 'The user confirmed that solo mode should be disabled.',
       },
     });
     expect(disabled.structuredContent).toMatchObject({
       success: true,
-      campaign_revision: 51,
+      campaign_revision: 53,
       state_excerpt: { solo: { enabled: false } },
     });
     expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
@@ -743,6 +807,8 @@ describe('Dragonbane MCP server', () => {
     expect(api.startSoloMission).toHaveBeenCalledTimes(1);
     expect(api.advanceThreat).toHaveBeenCalledTimes(1);
     expect(api.revealWaypoint).toHaveBeenCalledTimes(1);
+    expect(api.searchWaypoint).toHaveBeenCalledTimes(1);
+    expect(api.scavengeWaypoint).toHaveBeenCalledTimes(1);
     expect(api.completeSoloMission).toHaveBeenCalledTimes(1);
   });
 

@@ -63,6 +63,11 @@ export interface SoloWaypoint {
   npcIds: string[];
   encounterId?: string | null;
   notes: string[];
+  exploration: {
+    searchCount: number;
+    scavengeCount: number;
+    stretchesSpent: number;
+  };
 }
 
 export interface SoloThreat {
@@ -354,6 +359,52 @@ export async function revealSoloWaypoint(
     },
   );
   return parseResponse<SoloWriteResult>(response, 'Could not reveal the next waypoint.');
+}
+
+export async function searchSoloWaypoint(
+  partyId: string,
+  waypointId: string,
+  revision: number,
+  input: { knownLocation: boolean; context?: string },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(
+    `/v1/campaigns/${partyId}/solo/waypoints/${waypointId}/search`,
+    {
+      method: 'POST',
+      headers: writeHeaders(revision),
+      body: JSON.stringify({
+        known_location: input.knownLocation,
+        context: input.context || undefined,
+        reason: input.knownLocation
+          ? 'The solo hero searched a specific known hiding place.'
+          : 'The solo hero thoroughly searched the current waypoint.',
+      }),
+    },
+  );
+  return parseResponse<SoloWriteResult>(response, 'Could not search the current waypoint.');
+}
+
+export async function scavengeSoloWaypoint(
+  partyId: string,
+  waypointId: string,
+  revision: number,
+  input: { spendStretch: boolean; context?: string },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(
+    `/v1/campaigns/${partyId}/solo/waypoints/${waypointId}/scavenge`,
+    {
+      method: 'POST',
+      headers: writeHeaders(revision),
+      body: JSON.stringify({
+        spend_stretch: input.spendStretch,
+        context: input.context || undefined,
+        reason: input.spendStretch
+          ? 'The solo hero spent a stretch scavenging the current waypoint.'
+          : 'The solo hero made a quick scavenge of the current waypoint.',
+      }),
+    },
+  );
+  return parseResponse<SoloWriteResult>(response, 'Could not scavenge the current waypoint.');
 }
 
 export async function advanceSoloThreat(

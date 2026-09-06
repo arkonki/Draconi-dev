@@ -12,8 +12,10 @@ import {
   Heart,
   LockKeyhole,
   MapPin,
+  PackageSearch,
   RefreshCw,
   Route,
+  Search,
   Settings2,
   Shield,
   Sparkles,
@@ -31,6 +33,8 @@ import {
   FortuneTilt,
   InspirationColumn,
   revealSoloWaypoint,
+  scavengeSoloWaypoint,
+  searchSoloWaypoint,
   SoloApiError,
   SoloRecordedRoll,
   SoloWaypoint,
@@ -47,7 +51,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'advance-threat' | 'complete-mission';
 
 const fortuneCategories: Array<{ value: FortuneCategory; label: string }> = [
   { value: 'yes_no', label: 'Yes / No' },
@@ -78,6 +82,21 @@ function rollResultLabel(roll: SoloRecordedRoll) {
     return String(roll.result.value);
   }
   if (typeof roll.result.phrase === 'string') return roll.result.phrase;
+  const labelsFor = (value: unknown): string[] => Array.isArray(value)
+    ? value.flatMap((entry) => {
+      if (Array.isArray(entry)) return labelsFor(entry);
+      if (entry && typeof entry === 'object' && 'label' in entry && typeof entry.label === 'string') {
+        return [entry.label];
+      }
+      return [];
+    })
+    : [];
+  const findings = labelsFor(roll.result.findings ?? roll.result.findingChoices);
+  const check = roll.result.check;
+  const outcome = check && typeof check === 'object' && 'outcome' in check && typeof check.outcome === 'string'
+    ? titleCase(check.outcome)
+    : null;
+  if (outcome || findings.length > 0) return [outcome, findings.join(' + ')].filter(Boolean).join(' · ');
   return null;
 }
 
@@ -104,6 +123,8 @@ function ActionModal({
     inspiration: 'Draw Inspiration',
     'start-mission': 'Start a custom mission',
     'reveal-waypoint': 'Reveal the next waypoint',
+    search: 'Search the current waypoint',
+    scavenge: 'Scavenge the current waypoint',
     'advance-threat': 'Advance the threat',
     'complete-mission': 'Conclude the mission',
   };
@@ -159,6 +180,10 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
 
   const [revealTitle, setRevealTitle] = useState('');
   const [revealDescription, setRevealDescription] = useState('');
+  const [searchContext, setSearchContext] = useState('');
+  const [knownSearchLocation, setKnownSearchLocation] = useState(false);
+  const [scavengeContext, setScavengeContext] = useState('');
+  const [scavengeStretch, setScavengeStretch] = useState(false);
   const [threatAmount, setThreatAmount] = useState<1 | 2>(1);
   const [threatReason, setThreatReason] = useState('');
   const [missionOutcome, setMissionOutcome] = useState<'success' | 'failure' | 'abandoned'>('success');
@@ -242,6 +267,18 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
             title: nextWaypoint.kind === 'unknown' ? revealTitle.trim() : undefined,
             description: nextWaypoint.kind === 'unknown' ? revealDescription.trim() : undefined,
           });
+        case 'search':
+          if (!state.currentWaypoint) throw new Error('There is no active waypoint to search.');
+          return searchSoloWaypoint(partyId, state.currentWaypoint.id, revision, {
+            knownLocation: knownSearchLocation,
+            context: searchContext.trim(),
+          });
+        case 'scavenge':
+          if (!state.currentWaypoint) throw new Error('There is no active waypoint to scavenge.');
+          return scavengeSoloWaypoint(partyId, state.currentWaypoint.id, revision, {
+            spendStretch: scavengeStretch,
+            context: scavengeContext.trim(),
+          });
         case 'advance-threat':
           if (!state.activeThreat) throw new Error('There is no active threat.');
           return advanceSoloThreat(partyId, state.activeThreat.id, revision, {
@@ -282,6 +319,14 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     if (action === 'reveal-waypoint') {
       setRevealTitle('');
       setRevealDescription('');
+    }
+    if (action === 'search') {
+      setSearchContext('');
+      setKnownSearchLocation(false);
+    }
+    if (action === 'scavenge') {
+      setScavengeContext('');
+      setScavengeStretch(false);
     }
     if (action === 'advance-threat') {
       setThreatReason('');
@@ -399,6 +444,13 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-violet-600"><MapPin className="h-4 w-4" /> Current waypoint</div>
                     <h4 className="mt-2 font-bold text-violet-950">{state.currentWaypoint?.title || 'Uncharted location'}</h4>
                     {state.currentWaypoint?.description && <p className="mt-1 text-sm leading-relaxed text-violet-900">{state.currentWaypoint.description}</p>}
+                    {state.currentWaypoint && (
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-violet-700">
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">Searches {state.currentWaypoint.exploration.searchCount}</span>
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">Scavenges {state.currentWaypoint.exploration.scavengeCount}</span>
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">Stretches {state.currentWaypoint.exploration.stretchesSpent}</span>
+                      </div>
+                    )}
                   </div>
 
                   <ol className="space-y-2">
@@ -424,6 +476,12 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
 
                   {canManage && (
                     <div className="flex flex-wrap gap-2 border-t border-stone-100 pt-4">
+                      {state.currentWaypoint && state.activeThreat?.status === 'active' && (
+                        <>
+                          <Button icon={Search} onClick={() => openAction('search')}>Search</Button>
+                          <Button variant="outline" icon={PackageSearch} onClick={() => openAction('scavenge')}>Scavenge</Button>
+                        </>
+                      )}
                       {nextWaypoint && (
                         <Button icon={ChevronRight} onClick={() => openAction('reveal-waypoint')}>Reveal next waypoint</Button>
                       )}
@@ -667,6 +725,47 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   <div className="rounded-lg bg-violet-50 p-4 text-violet-900"><div className="font-bold">{nextWaypoint.title}</div><p className="mt-1 text-sm">{nextWaypoint.description}</p></div>
                 )}
                 <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={nextWaypoint.kind === 'unknown' && (!revealTitle.trim() || !revealDescription.trim())} icon={ChevronRight}>Resolve and Continue</Button>
+              </>
+            )}
+
+            {activeAction === 'search' && state.currentWaypoint && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  A thorough Search always consumes one stretch and advances <strong>{state.activeThreat?.description || 'the active threat'}</strong> by 1.
+                </div>
+                <p className="text-sm text-stone-600">The server rolls Spot Hidden and records every die. A Dragon produces two possible finds; choose the one that best fits the fiction.</p>
+                <label htmlFor="solo-known-search-location" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                  <input id="solo-known-search-location" type="checkbox" checked={knownSearchLocation} onChange={(event) => setKnownSearchLocation(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                  <span className="font-bold">Specific known hiding place<span className="mt-0.5 block text-xs font-normal text-stone-500">Skip Spot Hidden because the hero already knows exactly where to look.</span></span>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">What is being searched? <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={searchContext} onChange={(event) => setSearchContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The carved desk and the loose stones behind it" />
+                </label>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">Find categories come from the clearly labelled generic Draconi exploration table, not an official adventure table. Interpret the abstract result in the current scene.</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Search}>Search · spend 1 stretch</Button>
+              </>
+            )}
+
+            {activeAction === 'scavenge' && state.currentWaypoint && (
+              <>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
+                  {state.currentWaypoint.exploration.scavengeCount === 0
+                    ? 'This is the first quick pass at this waypoint. It takes only a few minutes and does not advance the threat unless you choose a full stretch.'
+                    : `This waypoint has already been scavenged ${state.currentWaypoint.exploration.scavengeCount} time(s). Another attempt automatically consumes one stretch and advances the threat by 1.`}
+                </div>
+                <label className="block text-sm font-bold text-stone-700">What is being scavenged? <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={scavengeContext} onChange={(event) => setScavengeContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Search the abandoned camp for anything useful" />
+                </label>
+                {state.currentWaypoint.exploration.scavengeCount === 0 && (
+                  <label htmlFor="solo-scavenge-stretch" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                    <input id="solo-scavenge-stretch" type="checkbox" checked={scavengeStretch} onChange={(event) => setScavengeStretch(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                    <span className="font-bold">Take a full stretch<span className="mt-0.5 block text-xs font-normal text-stone-500">Advances the active threat by 1. Choose this when the fiction makes the scavenging prolonged.</span></span>
+                  </label>
+                )}
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server records a d10 result from the generic Draconi exploration table. Findings are abstract prompts; no item is silently added to inventory.</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={PackageSearch}>
+                  Scavenge{state.currentWaypoint.exploration.scavengeCount > 0 || scavengeStretch ? ' · spend 1 stretch' : ' · quick pass'}
+                </Button>
               </>
             )}
 

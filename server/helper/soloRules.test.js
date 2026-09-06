@@ -4,7 +4,9 @@ import {
   advanceThreatState,
   findTableEntry,
   resolveFortune,
+  resolveExplorationFind,
   resolveInspiration,
+  resolveSoloSkillCheck,
 } from './soloRules.js';
 
 const fortuneEntries = [
@@ -55,6 +57,38 @@ describe('Solo rule resolution', () => {
         { column: 'action', roll: 1, keyword: 'seek', tableKey: 'inspiration_action', tableVersion: 'generic-v1', sourceKind: 'generic' },
         { column: 'thing', roll: 1, keyword: 'secret', tableKey: 'inspiration_thing', tableVersion: 'generic-v1', sourceKind: 'generic' },
       ],
+    });
+  });
+
+  it('resolves Dragonbane skill outcomes including dragon and demon', () => {
+    expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(1))).toMatchObject({ roll: 1, outcome: 'dragon' });
+    expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(12))).toMatchObject({ roll: 12, outcome: 'success' });
+    expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(13))).toMatchObject({ roll: 13, outcome: 'failure' });
+    expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(20))).toMatchObject({ roll: 20, outcome: 'demon' });
+  });
+
+  it('keeps a treasure result and performs its bonus reroll', () => {
+    const entries = [
+      { min: 1, max: 9, key: 'supplies', label: 'Useful supplies', kind: 'supplies' },
+      { min: 10, max: 10, key: 'treasure', label: 'Treasure', kind: 'treasure', reroll: true },
+    ];
+    expect(resolveExplorationFind(entries, fixedRolls(10, 4))).toMatchObject({
+      expression: '2d10',
+      dice: [10, 4],
+      keptValues: [10, 4],
+      rerollLimitReached: false,
+      results: [
+        { roll: 10, key: 'treasure', reroll: true },
+        { roll: 4, key: 'supplies', reroll: false },
+      ],
+    });
+  });
+
+  it('caps recursive exploration rerolls', () => {
+    const entries = [{ min: 1, max: 10, key: 'again', label: 'Again', reroll: true }];
+    expect(resolveExplorationFind(entries, fixedRolls(10, 10, 10), 3)).toMatchObject({
+      dice: [10, 10, 10],
+      rerollLimitReached: true,
     });
   });
 

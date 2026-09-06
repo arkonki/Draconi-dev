@@ -57,11 +57,12 @@ try {
     const actor = await client.query(
       `INSERT INTO characters (
          user_id, party_id, name, max_hp, current_hp, max_wp, current_wp,
-         conditions, equipment
+         conditions, equipment, skill_levels
        ) VALUES (
          $1, $2, 'Smoke Hero', 14, 14, 8, 8,
          '{"exhausted":false,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false}'::jsonb,
-         '{"inventory":[],"equipped":{"weapons":[]},"money":{}}'::jsonb
+         '{"inventory":[],"equipped":{"weapons":[]},"money":{}}'::jsonb,
+         '{"Spot Hidden":12}'::jsonb
        ) RETURNING id`,
       [users[0].id, campaignId],
     );
@@ -832,8 +833,89 @@ try {
   const missionId = missionState.mission.id;
   const threatId = missionState.threat.id;
 
+  const explorationReady = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(
+    explorationReady.payload.data.allowedNextActions.includes('search_waypoint')
+      && explorationReady.payload.data.allowedNextActions.includes('scavenge_waypoint'),
+    'Solo state did not advertise Search and Scavenge at the active waypoint.',
+  );
+
   let threatRevision = missionStarted.payload.data.campaign_revision;
-  for (const [index, amount] of [2, 2, 1].entries()) {
+  const openingWaypoint = missionState.currentWaypoint;
+  const quickScavengeKey = `smoke-scavenge-${randomUUID()}`;
+  const quickScavengeBody = JSON.stringify({
+    spend_stretch: false,
+    context: 'The abandoned packs on the flooded stair.',
+    reason: 'Verify the first quick scavenge does not consume a stretch.',
+  });
+  const quickScavengeHeaders = {
+    'if-match': `"${threatRevision}"`,
+    'idempotency-key': quickScavengeKey,
+  };
+  const quickScavenge = await api(
+    `/api/v1/campaigns/${campaignId}/solo/waypoints/${openingWaypoint.id}/scavenge`,
+    { method: 'POST', headers: quickScavengeHeaders, body: quickScavengeBody },
+  );
+  assert(quickScavenge.response.status === 200, `Quick scavenge failed: ${JSON.stringify(quickScavenge.payload)}`);
+  assert(quickScavenge.payload.data.state_excerpt.waypoint.exploration.scavengeCount === 1, 'Quick scavenge count was not persisted.');
+  assert(quickScavenge.payload.data.state_excerpt.waypoint.exploration.stretchesSpent === 0, 'First quick scavenge consumed a stretch.');
+  assert(quickScavenge.payload.data.state_excerpt.threat.counter === 1, 'First quick scavenge advanced the threat.');
+
+  const quickScavengeReplay = await api(
+    `/api/v1/campaigns/${campaignId}/solo/waypoints/${openingWaypoint.id}/scavenge`,
+    { method: 'POST', headers: quickScavengeHeaders, body: quickScavengeBody },
+  );
+  assert(quickScavengeReplay.response.status === 200, 'Quick scavenge idempotent replay failed.');
+  assert(
+    quickScavengeReplay.payload.data.event_ids[0] === quickScavenge.payload.data.event_ids[0],
+    'Quick scavenge replay returned a different event.',
+  );
+  threatRevision = quickScavenge.payload.data.campaign_revision;
+
+  const repeatScavenge = await api(
+    `/api/v1/campaigns/${campaignId}/solo/waypoints/${openingWaypoint.id}/scavenge`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-repeat-scavenge-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        spend_stretch: false,
+        reason: 'Verify repeat scavenging automatically consumes a stretch.',
+      }),
+    },
+  );
+  assert(repeatScavenge.response.status === 200, `Repeat scavenge failed: ${JSON.stringify(repeatScavenge.payload)}`);
+  assert(repeatScavenge.payload.data.state_excerpt.waypoint.exploration.scavengeCount === 2, 'Repeat scavenge count was not persisted.');
+  assert(repeatScavenge.payload.data.state_excerpt.waypoint.exploration.stretchesSpent === 1, 'Repeat scavenge did not consume a stretch.');
+  assert(repeatScavenge.payload.data.state_excerpt.threat.counter === 2, 'Repeat scavenge did not advance the threat.');
+  threatRevision = repeatScavenge.payload.data.campaign_revision;
+
+  const searched = await api(
+    `/api/v1/campaigns/${campaignId}/solo/waypoints/${openingWaypoint.id}/search`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-search-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        known_location: false,
+        context: 'The cracked mosaics and flooded alcoves.',
+        reason: 'Verify a recorded Spot Hidden Search and its time consequence.',
+      }),
+    },
+  );
+  assert(searched.response.status === 200, `Waypoint search failed: ${JSON.stringify(searched.payload)}`);
+  assert(searched.payload.data.state_excerpt.waypoint.exploration.searchCount === 1, 'Search count was not persisted.');
+  assert(searched.payload.data.state_excerpt.waypoint.exploration.stretchesSpent === 2, 'Search did not consume a stretch.');
+  assert(searched.payload.data.state_excerpt.threat.counter === 3, 'Search did not advance the threat.');
+  assert(searched.payload.data.state_excerpt.roll.dice.length >= 1, 'Search did not preserve its dice.');
+  assert(searched.payload.data.state_excerpt.roll.result.check.target === 12, 'Search did not use the authoritative Spot Hidden value.');
+  threatRevision = searched.payload.data.campaign_revision;
+
+  for (const [index, amount] of [2, 1].entries()) {
     const advanced = await api(
       `/api/v1/campaigns/${campaignId}/solo/threats/${threatId}/advance`,
       {
@@ -850,7 +932,7 @@ try {
     );
     assert(advanced.response.status === 200, `Threat advance failed: ${JSON.stringify(advanced.payload)}`);
     threatRevision = advanced.payload.data.campaign_revision;
-    if (index < 2) {
+    if (index < 1) {
       assert(
         !Object.hasOwn(advanced.payload.data.state_excerpt.threat, 'triggerEffect'),
         'Threat effect leaked before counter 6.',
@@ -992,6 +1074,12 @@ try {
 
   const openapi = await fetch(`${apiBaseUrl}/openapi.json`);
   assert(openapi.ok, 'OpenAPI document is unavailable.');
+  const openapiDocument = await openapi.json();
+  assert(
+    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge'],
+    'OpenAPI document is missing Solo exploration operations.',
+  );
 
   if (mcpUrl) {
     mcpClient = new Client({ name: 'dragonbane-helper-smoke', version: '1.0.0' });
@@ -1018,6 +1106,8 @@ try {
       'draw_inspiration',
       'start_solo_mission',
       'reveal_waypoint',
+      'search_waypoint',
+      'scavenge_waypoint',
       'advance_threat',
       'complete_solo_mission',
       'start_combat',
@@ -1178,6 +1268,7 @@ try {
       'Sole Survivor exact WP cost, condition isolation, and atomic insufficient-WP rejection',
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
+      'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
       'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',
       'GM context isolation',
@@ -1187,6 +1278,7 @@ try {
   }));
 } finally {
   if (mcpClient) await mcpClient.close().catch(() => {});
+  if (actorId) await pool.query('DELETE FROM characters WHERE id = $1', [actorId]).catch(() => {});
   if (campaignId) await pool.query('DELETE FROM parties WHERE id = $1', [campaignId]).catch(() => {});
   if (monsterId) await pool.query('DELETE FROM monsters WHERE id = $1', [monsterId]).catch(() => {});
   if (playerUserId) await pool.query('DELETE FROM users WHERE id = $1', [playerUserId]).catch(() => {});

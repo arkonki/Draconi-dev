@@ -28,6 +28,8 @@ import {
   resolveGameActionInputSchema,
   removeEncounterParticipantInputSchema,
   revealWaypointInputSchema,
+  scavengeWaypointInputSchema,
+  searchWaypointInputSchema,
   startCombatInputSchema,
   startSessionInputSchema,
   startSoloMissionInputSchema,
@@ -123,7 +125,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.7.0' },
+    { name: 'dragonbane-helper', version: '1.8.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -133,6 +135,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
         'For solo play, call get_solo_state before narrating. Fortune and Inspiration results are authoritative only when returned by their tools.',
+        'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
         'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
@@ -226,6 +229,22 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.revealWaypoint(input))));
+
+  server.registerTool('search_waypoint', {
+    title: 'Search the current solo waypoint',
+    description: 'GM-only. Perform a thorough Search at the active waypoint. The server resolves Spot Hidden unless a specific known hiding place is supplied, records every die, consumes one stretch, advances the active threat by 1, and returns abstract Draconi-generic findings.',
+    inputSchema: searchWaypointInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.searchWaypoint(input))));
+
+  server.registerTool('scavenge_waypoint', {
+    title: 'Scavenge the current solo waypoint',
+    description: 'GM-only. Make a quick Draconi-generic d10 exploration find at the active waypoint. The first quick pass takes no stretch; repeat attempts or an explicitly thorough pass consume one stretch and advance the active threat by 1. All dice are recorded.',
+    inputSchema: scavengeWaypointInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.scavengeWaypoint(input))));
 
   server.registerTool('advance_threat', {
     title: 'Advance the active solo threat',
@@ -435,6 +454,8 @@ export function createDragonbaneMcpServer(apiClient) {
         'draw_inspiration',
         'start_solo_mission',
         'reveal_waypoint',
+        'search_waypoint',
+        'scavenge_waypoint',
         'advance_threat',
         'complete_solo_mission',
       ],
@@ -477,6 +498,8 @@ export const mcpToolAnnotations = {
   draw_inspiration: MODIFYING,
   start_solo_mission: MODIFYING,
   reveal_waypoint: MODIFYING,
+  search_waypoint: MODIFYING,
+  scavenge_waypoint: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
   get_actor: READ_ONLY,

@@ -17,6 +17,8 @@ import {
   resolveGameActionBodySchema,
   removeEncounterParticipantBodySchema,
   revealWaypointBodySchema,
+  scavengeWaypointBodySchema,
+  searchWaypointBodySchema,
   startSessionBodySchema,
   startCombatBodySchema,
   startSoloMissionBodySchema,
@@ -131,7 +133,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.7.0',
+    version: '1.8.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -367,6 +369,56 @@ export const openApiDocument = {
         },
         responses: {
           200: { description: 'Waypoint revealed', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Search the active waypoint with a recorded Spot Hidden check',
+        description: 'A thorough Search consumes one stretch and advances the active threat by 1. Findings use the explicitly non-official Draconi generic exploration table.',
+        parameters: [
+          campaignParameter,
+          { name: 'waypointId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(searchWaypointBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Search resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Scavenge the active waypoint with a recorded exploration roll',
+        description: 'The first quick pass is free. Repeat attempts, or an explicitly thorough pass, consume one stretch and advance the active threat by 1. Findings use the explicitly non-official Draconi generic exploration table.',
+        parameters: [
+          campaignParameter,
+          { name: 'waypointId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(scavengeWaypointBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Scavenge resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,
