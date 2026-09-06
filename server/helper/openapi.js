@@ -22,6 +22,7 @@ import {
   startSessionBodySchema,
   startCombatBodySchema,
   startSoloMissionBodySchema,
+  takeSoloRestBodySchema,
 } from './schemas.js';
 
 const errorResponse = {
@@ -133,7 +134,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.8.0',
+    version: '1.9.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -345,6 +346,26 @@ export const openApiDocument = {
         },
         responses: {
           200: { description: 'Solo mission started', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/rest': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve rest and recovery for the solo hero',
+        description: 'Round and stretch rests are limited to once per shift. Stretch rests can clear one explicitly chosen standard condition, shift rests require a confirmed safe location, and stretch-or-longer rests advance an active mission threat. Poison, fear, and custom effects are preserved.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(takeSoloRestBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Solo rest resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,

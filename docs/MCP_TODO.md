@@ -65,6 +65,9 @@ Solo foundation already delivered toward this phase:
 - [x] Add rules-aware Search and Scavenge actions with stored Spot Hidden checks,
   immutable server dice, per-waypoint usage, and automatic stretch/threat
   consequences through REST, MCP, and the Solo Dashboard.
+- [x] Add rules-aware round, stretch, and shift rests with authoritative
+  recovery rolls, explicit condition and safety choices, per-shift limits,
+  game-time advancement, and active-mission threat consequences.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

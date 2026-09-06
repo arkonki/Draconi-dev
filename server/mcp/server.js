@@ -33,6 +33,7 @@ import {
   startCombatInputSchema,
   startSessionInputSchema,
   startSoloMissionInputSchema,
+  takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
 
@@ -125,7 +126,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.8.0' },
+    { name: 'dragonbane-helper', version: '1.9.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -136,6 +137,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
         'For solo play, call get_solo_state before narrating. Fortune and Inspiration results are authoritative only when returned by their tools.',
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
+        'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
         'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
@@ -245,6 +247,14 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.scavengeWaypoint(input))));
+
+  server.registerTool('take_solo_rest', {
+    title: 'Take a solo rest',
+    description: 'GM-only. Resolve a round, stretch, or shift rest for the solo hero. The server enforces once-per-shift limits, rolls recovery, requires an explicit condition choice and safe-location confirmation where applicable, advances game time, and advances an active mission threat for stretch or shift rests.',
+    inputSchema: takeSoloRestInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.takeSoloRest(input))));
 
   server.registerTool('advance_threat', {
     title: 'Advance the active solo threat',
@@ -456,6 +466,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'reveal_waypoint',
         'search_waypoint',
         'scavenge_waypoint',
+        'take_solo_rest',
         'advance_threat',
         'complete_solo_mission',
       ],
@@ -500,6 +511,7 @@ export const mcpToolAnnotations = {
   reveal_waypoint: MODIFYING,
   search_waypoint: MODIFYING,
   scavenge_waypoint: MODIFYING,
+  take_solo_rest: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
   get_actor: READ_ONLY,

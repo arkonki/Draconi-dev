@@ -61,6 +61,8 @@ import {
   startSoloMissionInputSchema,
   startSessionBodySchema,
   startSessionInputSchema,
+  takeSoloRestBodySchema,
+  takeSoloRestInputSchema,
 } from './schemas.js';
 import {
   addEncounterParticipants,
@@ -95,6 +97,7 @@ import {
   startCombat,
   startSession,
   startSoloMission,
+  takeSoloRest,
 } from './service.js';
 
 function matchPath(pathname, expression) {
@@ -389,6 +392,26 @@ export async function handleHelperApiRequest(request, response) {
       pathname,
       /^\/api\/v1\/campaigns\/([^/]+)\/solo\/waypoints\/([^/]+)\/reveal$/,
     );
+
+    const soloRestMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/rest$/);
+    if (soloRestMatch && request.method === 'POST') {
+      operation = 'take_solo_rest';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(takeSoloRestBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(takeSoloRestInputSchema, {
+        campaign_id: soloRestMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await takeSoloRest(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     if (waypointRevealMatch && request.method === 'POST') {
       operation = 'reveal_waypoint';
       previousRevision = parseRevision(request);

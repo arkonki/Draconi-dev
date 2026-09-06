@@ -6,6 +6,7 @@ import {
   resolveFortune,
   resolveExplorationFind,
   resolveInspiration,
+  resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
 
@@ -65,6 +66,54 @@ describe('Solo rule resolution', () => {
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(12))).toMatchObject({ roll: 12, outcome: 'success' });
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(13))).toMatchObject({ roll: 13, outcome: 'failure' });
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(20))).toMatchObject({ roll: 20, outcome: 'demon' });
+  });
+
+  it('resolves round and ordinary stretch rest recovery', () => {
+    expect(resolveSoloRest({ restType: 'round' }, fixedRolls(4))).toMatchObject({
+      expression: '1d6', dice: [4], hpRecovery: 0, wpRecovery: 4, fullRecovery: false,
+    });
+    expect(resolveSoloRest({ restType: 'stretch' }, fixedRolls(3, 5))).toMatchObject({
+      expression: '2d6', dice: [3, 5], hpRecovery: 3, wpRecovery: 5,
+    });
+  });
+
+  it('uses a successful Healing test to restore 2d6 HP during a stretch rest', () => {
+    expect(resolveSoloRest(
+      { restType: 'stretch', useHealing: true, healingTarget: 12 },
+      fixedRolls(8, 4, 6, 2),
+    )).toMatchObject({
+      expression: '1d20 + 3d6',
+      dice: [8, 4, 6, 2],
+      healingCheck: { roll: 8, target: 12, outcome: 'success' },
+      hpRecovery: 10,
+      wpRecovery: 2,
+    });
+  });
+
+  it('keeps the normal 1d6 HP recovery when a solo Healing test fails', () => {
+    expect(resolveSoloRest(
+      { restType: 'stretch', useHealing: true, healingTarget: 12 },
+      fixedRolls(17, 4, 2),
+    )).toMatchObject({
+      expression: '1d20 + 2d6',
+      dice: [17, 4, 2],
+      healingCheck: { outcome: 'failure' },
+      hpRecovery: 4,
+      wpRecovery: 2,
+    });
+  });
+
+  it('resolves a shift rest as full recovery without inventing a dice roll', () => {
+    expect(resolveSoloRest({ restType: 'shift' })).toEqual({
+      expression: null,
+      dice: [],
+      keptIndices: [],
+      keptValues: [],
+      healingCheck: null,
+      hpRecovery: null,
+      wpRecovery: null,
+      fullRecovery: true,
+    });
   });
 
   it('keeps a treasure result and performs its bonus reroll', () => {

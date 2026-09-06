@@ -15,8 +15,19 @@ import {
   resolveExplorationFind,
   resolveFortune,
   resolveInspiration,
+  resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
+
+const STANDARD_CONDITION_KEYS = new Set([
+  'exhausted',
+  'sickly',
+  'dazed',
+  'angry',
+  'scared',
+  'disheartened',
+]);
+const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -330,6 +341,31 @@ function recordedRollForOutput(row) {
     campaignRevision: Number(row.campaign_revision),
     createdAt: row.created_at,
   };
+}
+
+function soloRestStateForOutput(row) {
+  const roundRestTaken = Boolean(row?.round_rest_taken);
+  const stretchRestTaken = Boolean(row?.stretch_rest_taken);
+  return {
+    roundRestTaken,
+    stretchRestTaken,
+    shiftCount: Number(row?.shift_count || 0),
+    lastRestType: row?.last_rest_type || null,
+    lastRestAt: row?.last_rest_at || null,
+    available: {
+      round: !roundRestTaken,
+      stretch: !stretchRestTaken,
+      shift: true,
+    },
+  };
+}
+
+async function loadSoloRestState(client, campaignId, { forUpdate = false } = {}) {
+  const { rows } = await client.query(
+    `SELECT * FROM solo_rest_states WHERE campaign_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [campaignId],
+  );
+  return rows[0] || null;
 }
 
 async function loadSoloState(client, campaignId, { forUpdate = false } = {}) {
@@ -656,6 +692,7 @@ export async function getSoloState(user, campaignId) {
      LIMIT 10`,
     [campaignId],
   );
+  const restState = await loadSoloRestState(pool, campaignId);
   const { rows: activeCombats } = await pool.query(
     `SELECT id, name FROM encounters
      WHERE party_id = $1 AND status = 'active'
@@ -681,6 +718,9 @@ export async function getSoloState(user, campaignId) {
     if (currentWaypoint?.status === 'active' && activeThreat?.status === 'active') {
       allowedNextActions.push('search_waypoint', 'scavenge_waypoint');
     }
+    if (!activeCombats[0] && playerCharacter?.hp?.current > 0) {
+      allowedNextActions.push('take_solo_rest');
+    }
   }
   return {
     campaignRevision: Number(access.campaign.helper_revision || 0),
@@ -696,6 +736,8 @@ export async function getSoloState(user, campaignId) {
     activeCombat: activeCombats[0]
       ? { id: activeCombats[0].id, name: activeCombats[0].name }
       : null,
+    gameTime: access.campaign.game_time || {},
+    restState: soloRestStateForOutput(restState),
     latestRolls: latestRolls.map(recordedRollForOutput),
     allowedNextActions,
   };
@@ -2012,6 +2054,289 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
           ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
           : soloThreatForOutput(context.threat),
         notice: 'Findings use the generic Draconi exploration table, not an official adventure table.',
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function takeSoloRest(user, input, { sourceClient } = {}) {
+  const operation = 'take_solo_rest';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+
+    const { rows: activeCombats } = await client.query(
+      `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (activeCombats[0]) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero cannot rest during an active combat encounter.');
+    }
+    if (input.rest_type === 'shift' && !input.safe_location) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'A shift rest requires an explicitly confirmed safe location.');
+    }
+
+    await client.query(
+      `INSERT INTO solo_rest_states (campaign_id) VALUES ($1) ON CONFLICT (campaign_id) DO NOTHING`,
+      [input.campaign_id],
+    );
+    const restState = await loadSoloRestState(client, input.campaign_id, { forUpdate: true });
+    if (input.rest_type === 'round' && restState.round_rest_taken) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero has already taken a round rest during this shift.');
+    }
+    if (input.rest_type === 'stretch' && restState.stretch_rest_taken) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero has already taken a stretch rest during this shift.');
+    }
+
+    const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+    const actor = loadedActor.actor;
+    if (actor.currentHp <= 0) {
+      throw new HelperError(
+        409,
+        'INVALID_STATE',
+        'The solo hero is at 0 HP. Resolve rallying or a life-saving Healing attempt before taking a normal rest.',
+      );
+    }
+    const activeStandardConditions = actor.conditions.filter((condition) => STANDARD_CONDITION_KEYS.has(condition.key));
+    if (input.rest_type === 'stretch' && activeStandardConditions.length > 0 && !input.condition_to_clear) {
+      throw new HelperError(
+        400,
+        'VALIDATION_ERROR',
+        'Choose which active standard condition the stretch rest clears.',
+        { activeConditions: activeStandardConditions.map((condition) => condition.key) },
+      );
+    }
+    if (input.condition_to_clear
+      && !activeStandardConditions.some((condition) => condition.key === input.condition_to_clear)) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'The chosen condition is not active on the solo hero.');
+    }
+
+    const healingTarget = input.use_healing ? actorSkillTarget(actor, 'Healing') : null;
+    if (input.use_healing && healingTarget === null) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero has no usable Healing skill value.');
+    }
+    const resolution = resolveSoloRest({
+      restType: input.rest_type,
+      useHealing: input.use_healing,
+      healingTarget,
+    });
+    const before = {
+      hp: { current: actor.currentHp, max: actor.maxHp },
+      wp: { current: actor.currentWp, max: actor.maxWp },
+      conditions: actor.conditions.map((condition) => condition.key),
+    };
+    const nextHp = resolution.fullRecovery
+      ? actor.maxHp
+      : Math.min(actor.maxHp, actor.currentHp + resolution.hpRecovery);
+    const nextWp = resolution.fullRecovery
+      ? actor.maxWp
+      : Math.min(actor.maxWp, actor.currentWp + resolution.wpRecovery);
+    const nextConditions = input.rest_type === 'shift'
+      ? actor.conditions.filter((condition) => !STANDARD_CONDITION_KEYS.has(condition.key))
+      : input.condition_to_clear
+        ? actor.conditions.filter((condition) => condition.key !== input.condition_to_clear)
+        : actor.conditions;
+    const resultingActor = {
+      ...actor,
+      currentHp: nextHp,
+      currentWp: nextWp,
+      hp: { current: nextHp, max: actor.maxHp },
+      wp: { current: nextWp, max: actor.maxWp },
+      conditions: nextConditions,
+      isAlive: nextHp > 0,
+    };
+    await persistActor(client, resultingActor, loadedActor.storage);
+
+    const durationSeconds = SOLO_REST_SECONDS[input.rest_type];
+    const previousGameTime = access.campaign.game_time && typeof access.campaign.game_time === 'object'
+      ? access.campaign.game_time
+      : {};
+    const oldElapsed = Number(previousGameTime.elapsedSeconds);
+    const gameTime = {
+      ...previousGameTime,
+      elapsedSeconds: (Number.isFinite(oldElapsed) ? oldElapsed : 0) + durationSeconds,
+      lastAdvance: {
+        kind: 'solo_rest',
+        restType: input.rest_type,
+        seconds: durationSeconds,
+        at: new Date().toISOString(),
+      },
+    };
+
+    const { rows: restRows } = await client.query(
+      `UPDATE solo_rest_states SET
+         round_rest_taken = CASE
+           WHEN $2 = 'shift' THEN false
+           WHEN $2 = 'round' THEN true
+           ELSE round_rest_taken
+         END,
+         stretch_rest_taken = CASE
+           WHEN $2 = 'shift' THEN false
+           WHEN $2 = 'stretch' THEN true
+           ELSE stretch_rest_taken
+         END,
+         shift_count = shift_count + CASE WHEN $2 = 'shift' THEN 1 ELSE 0 END,
+         last_rest_type = $2,
+         last_rest_at = now()
+       WHERE campaign_id = $1
+       RETURNING *`,
+      [input.campaign_id, input.rest_type],
+    );
+
+    let mission = null;
+    let threatResult = null;
+    if (input.rest_type !== 'round' && state.current_mission_id) {
+      const { rows: threats } = await client.query(
+        `SELECT threat.*, mission.id AS active_mission_id
+         FROM solo_missions mission
+         JOIN solo_threats threat ON threat.id = mission.active_threat_id
+         WHERE mission.id = $1 AND mission.campaign_id = $2
+           AND mission.status IN ('active', 'returning') AND threat.status = 'active'
+         FOR UPDATE OF threat, mission`,
+        [state.current_mission_id, input.campaign_id],
+      );
+      if (threats[0]) {
+        mission = { id: threats[0].active_mission_id };
+        threatResult = await updateExplorationThreat(client, threats[0], 1);
+      }
+    }
+
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
+      [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
+    );
+    const hpApplied = nextHp - actor.currentHp;
+    const wpApplied = nextWp - actor.currentWp;
+    const clearedConditions = before.conditions.filter(
+      (condition) => !nextConditions.some((remaining) => remaining.key === condition),
+    );
+    const preservedEffects = nextConditions
+      .filter((condition) => !STANDARD_CONDITION_KEYS.has(condition.key))
+      .map((condition) => condition.key);
+
+    const rollRow = resolution.expression ? await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `${input.rest_type === 'round' ? 'Round' : 'Stretch'} rest recovery`,
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: null,
+      tableVersion: state.ruleset_version,
+      result: {
+        action: 'solo_rest',
+        restType: input.rest_type,
+        healingCheck: resolution.healingCheck,
+        hpRecoveryRolled: resolution.hpRecovery,
+        hpRecoveryApplied: hpApplied,
+        wpRecoveryRolled: resolution.wpRecovery,
+        wpRecoveryApplied: wpApplied,
+        conditionCleared: input.condition_to_clear || null,
+        durationSeconds,
+        context: input.context || null,
+      },
+      campaignRevision: resultingRevision,
+    }) : null;
+
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventIds = [await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.rest_taken',
+      actorId: state.player_character_id,
+      payload: {
+        restType: input.rest_type,
+        durationSeconds,
+        rollId: rollRow?.id || null,
+        healingCheck: resolution.healingCheck,
+        before,
+        after: {
+          hp: { current: nextHp, max: actor.maxHp },
+          wp: { current: nextWp, max: actor.maxWp },
+          conditions: nextConditions.map((condition) => condition.key),
+        },
+        hpRecoveryRolled: resolution.hpRecovery,
+        hpRecoveryApplied: hpApplied,
+        wpRecoveryRolled: resolution.wpRecovery,
+        wpRecoveryApplied: wpApplied,
+        clearedConditions,
+        preservedEffects,
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    })];
+    if (threatResult) {
+      eventIds.push(await insertEvent(client, {
+        campaign: access.campaign,
+        user,
+        sequence: sequence + 1,
+        type: threatResult.transition.triggered ? 'solo.threat_triggered' : 'solo.threat_advanced',
+        actorId: state.player_character_id,
+        payload: {
+          missionId: mission.id,
+          threatId: threatResult.threat.id,
+          previousCounter: threatResult.transition.previousCounter,
+          resultingCounter: threatResult.transition.counter,
+          triggered: threatResult.transition.triggered,
+          ...(threatResult.transition.triggered ? { triggerEffect: threatResult.threat.trigger_effect || {} } : {}),
+          reason: `A ${input.rest_type} rest during an active solo mission advances the threat.`,
+        },
+        visibility: 'players',
+        sourceClient,
+        idempotencyKey: input.idempotency_key,
+        previousRevision,
+        resultingRevision,
+      }));
+    }
+
+    const recoverySummary = input.rest_type === 'shift'
+      ? 'HP and WP fully restored'
+      : `${hpApplied} HP and ${wpApplied} WP restored`;
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: eventIds,
+      summary: `${input.rest_type[0].toUpperCase()}${input.rest_type.slice(1)} rest: ${recoverySummary}${clearedConditions.length ? `; cleared ${clearedConditions.join(', ')}` : ''}.${threatResult ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ''}`,
+      state_excerpt: {
+        actor: actorForOutput(resultingActor),
+        restState: soloRestStateForOutput(restRows[0]),
+        gameTime,
+        roll: rollRow ? recordedRollForOutput(rollRow) : null,
+        threat: threatResult
+          ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
+          : null,
+        preservedEffects,
       },
     };
     await storeIdempotentResult(client, {

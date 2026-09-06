@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Brain,
+  Bed,
   CheckCircle2,
   ChevronRight,
   CircleDot,
@@ -39,6 +40,7 @@ import {
   SoloRecordedRoll,
   SoloWaypoint,
   startSoloMission,
+  takeSoloRest,
 } from '../../lib/api/solo';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { Button } from '../shared/Button';
@@ -51,7 +53,9 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'advance-threat' | 'complete-mission';
+
+const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
 
 const fortuneCategories: Array<{ value: FortuneCategory; label: string }> = [
   { value: 'yes_no', label: 'Yes / No' },
@@ -125,6 +129,7 @@ function ActionModal({
     'reveal-waypoint': 'Reveal the next waypoint',
     search: 'Search the current waypoint',
     scavenge: 'Scavenge the current waypoint',
+    rest: 'Rest and recover',
     'advance-threat': 'Advance the threat',
     'complete-mission': 'Conclude the mission',
   };
@@ -184,6 +189,11 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const [knownSearchLocation, setKnownSearchLocation] = useState(false);
   const [scavengeContext, setScavengeContext] = useState('');
   const [scavengeStretch, setScavengeStretch] = useState(false);
+  const [restType, setRestType] = useState<'round' | 'stretch' | 'shift'>('round');
+  const [restUseHealing, setRestUseHealing] = useState(false);
+  const [restCondition, setRestCondition] = useState('');
+  const [restSafeLocation, setRestSafeLocation] = useState(false);
+  const [restContext, setRestContext] = useState('');
   const [threatAmount, setThreatAmount] = useState<1 | 2>(1);
   const [threatReason, setThreatReason] = useState('');
   const [missionOutcome, setMissionOutcome] = useState<'success' | 'failure' | 'abandoned'>('success');
@@ -279,6 +289,14 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
             spendStretch: scavengeStretch,
             context: scavengeContext.trim(),
           });
+        case 'rest':
+          return takeSoloRest(partyId, revision, {
+            restType,
+            useHealing: restType === 'stretch' && restUseHealing,
+            conditionToClear: restType === 'stretch' ? restCondition || undefined : undefined,
+            safeLocation: restType === 'shift' && restSafeLocation,
+            context: restContext.trim(),
+          });
         case 'advance-threat':
           if (!state.activeThreat) throw new Error('There is no active threat.');
           return advanceSoloThreat(partyId, state.activeThreat.id, revision, {
@@ -327,6 +345,13 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     if (action === 'scavenge') {
       setScavengeContext('');
       setScavengeStretch(false);
+    }
+    if (action === 'rest') {
+      setRestType(state?.restState.available.round ? 'round' : state?.restState.available.stretch ? 'stretch' : 'shift');
+      setRestUseHealing(false);
+      setRestCondition('');
+      setRestSafeLocation(false);
+      setRestContext('');
     }
     if (action === 'advance-threat') {
       setThreatReason('');
@@ -379,6 +404,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   }
 
   const hero = state.playerCharacter;
+  const standardConditions = hero?.conditions.filter((condition) => standardConditionKeys.has(condition.key)) || [];
   const equippedItems = hero?.inventory.filter((item) => item.equipped) || [];
   const threatCounter = state.activeThreat?.counter || 0;
 
@@ -502,6 +528,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   <div className="flex flex-wrap gap-2">
                     <Button icon={Gauge} onClick={() => openAction('fortune')}>Ask Fortune</Button>
                     <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>Inspire</Button>
+                    <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>Rest</Button>
                   </div>
                 )}
               </div>
@@ -571,6 +598,14 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   {hero?.conditions.length ? hero.conditions.map((condition) => (
                     <span key={condition.id} className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{titleCase(condition.name)}</span>
                   )) : <span className="text-sm text-stone-400">None</span>}
+                </div>
+              </div>
+
+              <div className="mt-4 border-t border-stone-100 pt-4">
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Bed className="h-3.5 w-3.5" /> Rest this shift</div>
+                <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
+                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.round ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Round {state.restState.available.round ? 'available' : 'used'}</span>
+                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.stretch ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Stretch {state.restState.available.stretch ? 'available' : 'used'}</span>
                 </div>
               </div>
 
@@ -765,6 +800,72 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server records a d10 result from the generic Draconi exploration table. Findings are abstract prompts; no item is silently added to inventory.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={PackageSearch}>
                   Scavenge{state.currentWaypoint.exploration.scavengeCount > 0 || scavengeStretch ? ' · spend 1 stretch' : ' · quick pass'}
+                </Button>
+              </>
+            )}
+
+            {activeAction === 'rest' && hero && (
+              <>
+                <fieldset>
+                  <legend className="text-sm font-bold text-stone-700">Rest type</legend>
+                  <div className="mt-2 grid gap-2">
+                    {([
+                      { type: 'round' as const, title: 'Round rest · 10 seconds', detail: 'Recover D6 WP. Once per shift.', available: state.restState.available.round },
+                      { type: 'stretch' as const, title: 'Stretch rest · 15 minutes', detail: 'Recover D6 HP and D6 WP, and clear one chosen standard condition. Once per shift.', available: state.restState.available.stretch },
+                      { type: 'shift' as const, title: 'Shift rest · 6 hours', detail: 'Requires safety. Fully restore HP/WP and clear all standard conditions.', available: true },
+                    ]).map((option) => (
+                      <label key={option.type} htmlFor={`solo-rest-${option.type}`} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${restType === option.type ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'} ${option.available ? '' : 'cursor-not-allowed opacity-50'}`}>
+                        <input id={`solo-rest-${option.type}`} type="radio" name="solo-rest-type" value={option.type} checked={restType === option.type} disabled={!option.available} onChange={() => { setRestType(option.type); setRestUseHealing(false); setRestCondition(''); setRestSafeLocation(false); }} className="mt-1 h-4 w-4 border-stone-300 text-indigo-600" />
+                        <span className="sr-only">Rest type option</span>
+                        <span className="text-sm"><strong className="block text-stone-800">{option.title}</strong><span className="text-stone-500">{option.detail}{option.available ? '' : ' Already used this shift.'}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {restType === 'stretch' && (
+                  <>
+                    <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                      <input type="checkbox" checked={restUseHealing} onChange={(event) => setRestUseHealing(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                      <span className="font-bold">Make a solo Healing test<span className="mt-0.5 block text-xs font-normal text-stone-500">On success, recover 2D6 HP instead of D6. A failed test keeps the normal D6 recovery.</span></span>
+                    </label>
+                    {standardConditions.length > 0 && (
+                      <label className="block text-sm font-bold text-stone-700">Condition to clear
+                        <select value={restCondition} onChange={(event) => setRestCondition(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                          <option value="">Choose an active condition…</option>
+                          {standardConditions.map((condition) => <option key={condition.key} value={condition.key}>{titleCase(condition.name)}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </>
+                )}
+
+                {restType === 'shift' && (
+                  <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                    <input type="checkbox" checked={restSafeLocation} onChange={(event) => setRestSafeLocation(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-indigo-600" />
+                    <span className="font-bold">I confirm this is a safe location<span className="mt-0.5 block text-xs font-normal">The app will not infer safety from the scene.</span></span>
+                  </label>
+                )}
+
+                {restType !== 'round' && state.activeMission && state.activeThreat?.status === 'active' && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                    This rest advances <strong>{state.activeThreat.description}</strong> from {state.activeThreat.counter}/6 by 1.
+                  </div>
+                )}
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">Only standard conditions are cleared. Poison, fear effects, and custom statuses remain active and must be resolved separately.</div>
+                <label className="block text-sm font-bold text-stone-700">Narrative context <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={restContext} onChange={(event) => setRestContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Where and how does the hero rest?" />
+                </label>
+                <Button
+                  type="submit"
+                  fullWidth
+                  loading={actionMutation.isPending}
+                  disabled={(restType === 'round' && !state.restState.available.round)
+                    || (restType === 'stretch' && (!state.restState.available.stretch || (standardConditions.length > 0 && !restCondition)))
+                    || (restType === 'shift' && !restSafeLocation)}
+                  icon={Bed}
+                >
+                  Take {titleCase(restType)} Rest
                 </Button>
               </>
             )}

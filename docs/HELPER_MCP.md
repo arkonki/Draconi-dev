@@ -129,6 +129,7 @@ Modifying:
 - `reveal_waypoint`
 - `search_waypoint`
 - `scavenge_waypoint`
+- `take_solo_rest`
 - `advance_threat`
 - `complete_solo_mission`
 
@@ -201,6 +202,18 @@ consume a stretch, while repeat attempts and explicitly prolonged scavenging
 consume one stretch and advance the threat by 1. Both tools use the clearly
 labelled `draconi-generic-v1` exploration table. Their abstract findings are
 prompts and never silently add an item to character inventory.
+
+`take_solo_rest` resolves recovery as an authoritative Solo action. A round
+rest takes 10 seconds, restores D6 WP, and is available once per shift. A
+stretch rest takes 15 minutes, restores D6 HP and D6 WP, clears one standard
+condition explicitly chosen by the player, and is available once per shift.
+The optional stored Healing test raises HP recovery to 2D6 on success; a failed
+test retains the ordinary D6 recovery. A shift rest takes six hours, requires
+the user to confirm a safe location, fully restores HP and WP, and clears the
+six standard conditions. It begins a new shift and resets the round/stretch
+limits. Stretch and shift rests advance an active mission threat by 1. Poison,
+fear effects, and custom statuses are deliberately preserved. Every recovery
+roll, state change, game-time advance, and threat consequence is recorded.
 
 ## Combat workflow
 

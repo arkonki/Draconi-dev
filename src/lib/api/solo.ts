@@ -140,6 +140,15 @@ export interface SoloState {
   currentWaypoint?: SoloWaypoint | null;
   activeThreat?: SoloThreat | null;
   activeCombat?: { id: string; name: string } | null;
+  gameTime: Record<string, unknown>;
+  restState: {
+    roundRestTaken: boolean;
+    stretchRestTaken: boolean;
+    shiftCount: number;
+    lastRestType?: 'round' | 'stretch' | 'shift' | null;
+    lastRestAt?: string | null;
+    available: { round: boolean; stretch: boolean; shift: boolean };
+  };
   latestRolls: SoloRecordedRoll[];
   allowedNextActions: string[];
 }
@@ -405,6 +414,32 @@ export async function scavengeSoloWaypoint(
     },
   );
   return parseResponse<SoloWriteResult>(response, 'Could not scavenge the current waypoint.');
+}
+
+export async function takeSoloRest(
+  partyId: string,
+  revision: number,
+  input: {
+    restType: 'round' | 'stretch' | 'shift';
+    useHealing: boolean;
+    conditionToClear?: string;
+    safeLocation: boolean;
+    context?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/rest`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      rest_type: input.restType,
+      use_healing: input.useHealing,
+      condition_to_clear: input.conditionToClear || undefined,
+      safe_location: input.safeLocation,
+      context: input.context || undefined,
+      reason: `The solo player chose a ${input.restType} rest.`,
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the solo rest.');
 }
 
 export async function advanceSoloThreat(

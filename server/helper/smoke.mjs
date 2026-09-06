@@ -60,9 +60,9 @@ try {
          conditions, equipment, skill_levels
        ) VALUES (
          $1, $2, 'Smoke Hero', 14, 14, 8, 8,
-         '{"exhausted":false,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false}'::jsonb,
+         '{"exhausted":true,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false,"poisoned":true}'::jsonb,
          '{"inventory":[],"equipped":{"weapons":[]},"money":{}}'::jsonb,
-         '{"Spot Hidden":12}'::jsonb
+         '{"Spot Hidden":12,"Healing":12}'::jsonb
        ) RETURNING id`,
       [users[0].id, campaignId],
     );
@@ -915,7 +915,113 @@ try {
   assert(searched.payload.data.state_excerpt.roll.result.check.target === 12, 'Search did not use the authoritative Spot Hidden value.');
   threatRevision = searched.payload.data.campaign_revision;
 
-  for (const [index, amount] of [2, 1].entries()) {
+  const roundRestKey = `smoke-round-rest-${randomUUID()}`;
+  const roundRestBody = JSON.stringify({
+    rest_type: 'round',
+    use_healing: false,
+    safe_location: false,
+    reason: 'Verify once-per-shift round rest recovery.',
+  });
+  const roundRest = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': roundRestKey,
+      },
+      body: roundRestBody,
+    },
+  );
+  assert(roundRest.response.status === 200, `Round rest failed: ${JSON.stringify(roundRest.payload)}`);
+  assert(roundRest.payload.data.state_excerpt.roll.expression === '1d6', 'Round rest did not record its D6 roll.');
+  assert(roundRest.payload.data.state_excerpt.threat === null, 'Round rest advanced the mission threat.');
+  assert(roundRest.payload.data.state_excerpt.restState.roundRestTaken, 'Round rest limit was not persisted.');
+  threatRevision = roundRest.payload.data.campaign_revision;
+
+  const repeatedRoundRest = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-round-rest-repeat-${randomUUID()}`,
+      },
+      body: roundRestBody,
+    },
+  );
+  assert(repeatedRoundRest.response.status === 409, 'A second round rest was allowed in the same shift.');
+
+  const stretchRest = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-stretch-rest-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        rest_type: 'stretch',
+        use_healing: true,
+        condition_to_clear: 'exhausted',
+        safe_location: false,
+        context: 'A dry ledge above the flooded stair.',
+        reason: 'Verify Healing recovery, condition choice, and threat advancement.',
+      }),
+    },
+  );
+  assert(stretchRest.response.status === 200, `Stretch rest failed: ${JSON.stringify(stretchRest.payload)}`);
+  assert(stretchRest.payload.data.state_excerpt.roll.result.healingCheck.target === 12, 'Stretch rest did not use the stored Healing value.');
+  assert(stretchRest.payload.data.state_excerpt.threat.counter === 4, 'Stretch rest did not advance the threat.');
+  assert(!stretchRest.payload.data.state_excerpt.actor.conditions.some(({ key }) => key === 'exhausted'), 'Stretch rest did not clear the chosen condition.');
+  assert(stretchRest.payload.data.state_excerpt.actor.conditions.some(({ key }) => key === 'poisoned'), 'Stretch rest incorrectly cleared poison.');
+  threatRevision = stretchRest.payload.data.campaign_revision;
+
+  const shiftWithoutSafety = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-unsafe-shift-rest-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        rest_type: 'shift',
+        use_healing: false,
+        safe_location: false,
+        reason: 'Verify that shift-rest safety cannot be inferred.',
+      }),
+    },
+  );
+  assert(shiftWithoutSafety.response.status === 400, 'A shift rest was allowed without explicit safety confirmation.');
+
+  const shiftRest = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-shift-rest-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        rest_type: 'shift',
+        use_healing: false,
+        safe_location: true,
+        reason: 'Verify full recovery, preserved poison, and a new shift.',
+      }),
+    },
+  );
+  assert(shiftRest.response.status === 200, `Shift rest failed: ${JSON.stringify(shiftRest.payload)}`);
+  assert(shiftRest.payload.data.state_excerpt.actor.hp.current === 14, 'Shift rest did not fully restore HP.');
+  assert(shiftRest.payload.data.state_excerpt.actor.wp.current === 8, 'Shift rest did not fully restore WP.');
+  assert(shiftRest.payload.data.state_excerpt.actor.conditions.some(({ key }) => key === 'poisoned'), 'Shift rest incorrectly cleared poison.');
+  assert(shiftRest.payload.data.state_excerpt.restState.available.round, 'Shift rest did not reset the round-rest limit.');
+  assert(shiftRest.payload.data.state_excerpt.restState.available.stretch, 'Shift rest did not reset the stretch-rest limit.');
+  assert(shiftRest.payload.data.state_excerpt.threat.counter === 5, 'Shift rest did not advance the threat.');
+  assert(shiftRest.payload.data.state_excerpt.gameTime.elapsedSeconds >= 22510, 'Rest durations were not added to game time.');
+  threatRevision = shiftRest.payload.data.campaign_revision;
+
+  for (const [index, amount] of [1].entries()) {
     const advanced = await api(
       `/api/v1/campaigns/${campaignId}/solo/threats/${threatId}/advance`,
       {
@@ -932,18 +1038,11 @@ try {
     );
     assert(advanced.response.status === 200, `Threat advance failed: ${JSON.stringify(advanced.payload)}`);
     threatRevision = advanced.payload.data.campaign_revision;
-    if (index < 1) {
-      assert(
-        !Object.hasOwn(advanced.payload.data.state_excerpt.threat, 'triggerEffect'),
-        'Threat effect leaked before counter 6.',
-      );
-    } else {
-      assert(advanced.payload.data.state_excerpt.transition.triggered, 'Threat did not trigger at counter 6.');
-      assert(
-        advanced.payload.data.state_excerpt.threat.triggerEffect.type === 'route_closed',
-        'Triggered threat did not reveal its structured effect.',
-      );
-    }
+    assert(advanced.payload.data.state_excerpt.transition.triggered, 'Threat did not trigger at counter 6.');
+    assert(
+      advanced.payload.data.state_excerpt.threat.triggerEffect.type === 'route_closed',
+      'Triggered threat did not reveal its structured effect.',
+    );
   }
 
   const continuedSoloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
@@ -1076,7 +1175,8 @@ try {
   assert(openapi.ok, 'OpenAPI document is unavailable.');
   const openapiDocument = await openapi.json();
   assert(
-    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
+    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge'],
     'OpenAPI document is missing Solo exploration operations.',
   );
@@ -1108,6 +1208,7 @@ try {
       'reveal_waypoint',
       'search_waypoint',
       'scavenge_waypoint',
+      'take_solo_rest',
       'advance_threat',
       'complete_solo_mission',
       'start_combat',
@@ -1269,6 +1370,7 @@ try {
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
+      'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
       'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',
       'GM context isolation',

@@ -60,12 +60,12 @@ beforeEach(async () => {
     disableSoloMode: vi.fn(async () => ({
       data: {
         success: true,
-        campaign_revision: 53,
+        campaign_revision: 54,
         event_ids: ['6acbf745-8217-45dc-90c2-1ce65f29e19d'],
         summary: 'Solo mode disabled for this campaign.',
         state_excerpt: { solo: { enabled: false } },
       },
-      meta: { requestId: 'request-solo-disable', campaignRevision: 53 },
+      meta: { requestId: 'request-solo-disable', campaignRevision: 54 },
     })),
     selectSoloHeroicAbility: vi.fn(async () => ({
       data: {
@@ -161,15 +161,29 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-waypoint-scavenge', campaignRevision: 51 },
     })),
-    completeSoloMission: vi.fn(async () => ({
+    takeSoloRest: vi.fn(async () => ({
       data: {
         success: true,
         campaign_revision: 52,
+        event_ids: ['a9c518e0-c7a6-4a2e-bab4-d2316c071c9b', 'f74a3c1e-4378-4d95-b33c-17fcc0aeecc2'],
+        summary: 'Stretch rest: 6 HP and 3 WP restored; cleared exhausted. Threat 3 → 4.',
+        state_excerpt: {
+          restState: { roundRestTaken: false, stretchRestTaken: true },
+          roll: { expression: '1d20 + 3d6', dice: [7, 2, 4, 3] },
+          threat: { id: threatId, counter: 4 },
+        },
+      },
+      meta: { requestId: 'request-solo-rest', campaignRevision: 52 },
+    })),
+    completeSoloMission: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 53,
         event_ids: ['0dc71ac5-20e2-419e-a738-8342c7ee933a'],
         summary: 'Solo mission “The Sunken Bell” ended with abandoned.',
         state_excerpt: { mission: { id: missionId, status: 'abandoned' }, currentMissionId: null },
       },
-      meta: { requestId: 'request-mission-complete', campaignRevision: 52 },
+      meta: { requestId: 'request-mission-complete', campaignRevision: 53 },
     })),
     getSessionHistory: vi.fn(async () => ({
       data: { campaignRevision: 42, sessions: [] },
@@ -767,12 +781,32 @@ describe('Dragonbane MCP server', () => {
       state_excerpt: { waypoint: { exploration: { scavengeCount: 1 } }, threat: { counter: 3 } },
     });
 
+    const rested = await client.callTool({
+      name: 'take_solo_rest',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 51,
+        idempotency_key: 'solo-rest-stretch-1',
+        rest_type: 'stretch',
+        use_healing: true,
+        condition_to_clear: 'exhausted',
+        safe_location: false,
+        context: 'A sheltered alcove beside the gallery.',
+        reason: 'The player explicitly chose a stretch rest.',
+      },
+    });
+    expect(rested.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 52,
+      state_excerpt: { restState: { stretchRestTaken: true }, threat: { counter: 4 } },
+    });
+
     const completed = await client.callTool({
       name: 'complete_solo_mission',
       arguments: {
         campaign_id: campaignId,
         mission_id: missionId,
-        expected_revision: 51,
+        expected_revision: 52,
         idempotency_key: 'solo-complete-1',
         outcome: 'abandoned',
         summary: 'The rising water forces the hero to turn back.',
@@ -781,21 +815,21 @@ describe('Dragonbane MCP server', () => {
     });
     expect(completed.structuredContent).toMatchObject({
       success: true,
-      campaign_revision: 52,
+      campaign_revision: 53,
       state_excerpt: { currentMissionId: null },
     });
     const disabled = await client.callTool({
       name: 'disable_solo_mode',
       arguments: {
         campaign_id: campaignId,
-        expected_revision: 52,
+        expected_revision: 53,
         idempotency_key: 'solo-disable-1',
         reason: 'The user confirmed that solo mode should be disabled.',
       },
     });
     expect(disabled.structuredContent).toMatchObject({
       success: true,
-      campaign_revision: 53,
+      campaign_revision: 54,
       state_excerpt: { solo: { enabled: false } },
     });
     expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
@@ -809,6 +843,7 @@ describe('Dragonbane MCP server', () => {
     expect(api.revealWaypoint).toHaveBeenCalledTimes(1);
     expect(api.searchWaypoint).toHaveBeenCalledTimes(1);
     expect(api.scavengeWaypoint).toHaveBeenCalledTimes(1);
+    expect(api.takeSoloRest).toHaveBeenCalledTimes(1);
     expect(api.completeSoloMission).toHaveBeenCalledTimes(1);
   });
 

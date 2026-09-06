@@ -167,6 +167,41 @@ export const scavengeWaypointInputSchema = z.object({
 export const scavengeWaypointBodySchema = scavengeWaypointInputSchema
   .omit({ campaign_id: true, waypoint_id: true, expected_revision: true, idempotency_key: true });
 
+const soloRestTypeSchema = z.enum(['round', 'stretch', 'shift']);
+const standardConditionSchema = z.enum([
+  'exhausted',
+  'sickly',
+  'dazed',
+  'angry',
+  'scared',
+  'disheartened',
+]);
+const soloRestFields = {
+  rest_type: soloRestTypeSchema,
+  use_healing: z.boolean().default(false),
+  condition_to_clear: standardConditionSchema.optional(),
+  safe_location: z.boolean().default(false),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+function validateSoloRest(value, context) {
+  if (value.rest_type !== 'stretch' && value.use_healing) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['use_healing'], message: 'Healing may only be used during a stretch rest.' });
+  }
+  if (value.rest_type !== 'stretch' && value.condition_to_clear) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['condition_to_clear'], message: 'A condition may only be cleared during a stretch rest.' });
+  }
+}
+
+export const takeSoloRestInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloRestFields,
+}).strict().superRefine(validateSoloRest);
+
+export const takeSoloRestBodySchema = z.object(soloRestFields).strict().superRefine(validateSoloRest);
+
 export const revealWaypointInputSchema = z.object({
   campaign_id: uuidSchema,
   waypoint_id: uuidSchema,

@@ -100,6 +100,56 @@ export function resolveSoloSkillCheck({ target }, rollDie = secureRollDie) {
   return { expression: '1d20', dice: [roll], roll, target, outcome };
 }
 
+export function resolveSoloRest({ restType, useHealing = false, healingTarget = null }, rollDie = secureRollDie) {
+  if (!['round', 'stretch', 'shift'].includes(restType)) {
+    throw new Error(`Unsupported solo rest type: ${restType}`);
+  }
+  if (restType !== 'stretch' && useHealing) {
+    throw new Error('Healing may only be used during a stretch rest.');
+  }
+  if (restType === 'shift') {
+    return {
+      expression: null,
+      dice: [],
+      keptIndices: [],
+      keptValues: [],
+      healingCheck: null,
+      hpRecovery: null,
+      wpRecovery: null,
+      fullRecovery: true,
+    };
+  }
+  if (restType === 'round') {
+    const wpRecovery = rollDie(6);
+    return {
+      expression: '1d6',
+      dice: [wpRecovery],
+      keptIndices: [0],
+      keptValues: [wpRecovery],
+      healingCheck: null,
+      hpRecovery: 0,
+      wpRecovery,
+      fullRecovery: false,
+    };
+  }
+
+  const healingCheck = useHealing ? resolveSoloSkillCheck({ target: healingTarget }, rollDie) : null;
+  const healingSucceeded = ['dragon', 'success'].includes(healingCheck?.outcome);
+  const hpDice = healingSucceeded ? [rollDie(6), rollDie(6)] : [rollDie(6)];
+  const wpRecovery = rollDie(6);
+  const dice = [...(healingCheck?.dice || []), ...hpDice, wpRecovery];
+  return {
+    expression: `${healingCheck ? '1d20 + ' : ''}${hpDice.length + 1}d6`,
+    dice,
+    keptIndices: dice.map((_, index) => index),
+    keptValues: [...dice],
+    healingCheck,
+    hpRecovery: hpDice.reduce((sum, value) => sum + value, 0),
+    wpRecovery,
+    fullRecovery: false,
+  };
+}
+
 export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5) {
   if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
   const dice = [];
