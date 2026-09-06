@@ -44,9 +44,15 @@ import {
   SoloWaypoint,
   startSoloMission,
   resolveSoloDyingAction,
+  resolveSoloCheck,
+  resolveSoloCheckConsequence,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
   takeSoloRest,
+  SoloCheckModifier,
+  SoloCheckType,
+  SoloConsequenceEffect,
+  SoloConsequenceOption,
 } from '../../lib/api/solo';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { Button } from '../shared/Button';
@@ -59,7 +65,8 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'check' | 'consequence' | 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'complete-mission';
+type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
 
@@ -85,6 +92,10 @@ function percentage(current: number, maximum: number) {
 
 function titleCase(value: string) {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function updatePair<T>(pair: [T, T], index: number, value: T): [T, T] {
+  return index === 0 ? [value, pair[1]] : [pair[0], value];
 }
 
 function injuryRecoveryLabel(shifts?: number | null) {
@@ -117,7 +128,11 @@ function rollResultLabel(roll: SoloRecordedRoll) {
   const outcome = check && typeof check === 'object' && 'outcome' in check && typeof check.outcome === 'string'
     ? titleCase(check.outcome)
     : null;
-  if (outcome || findings.length > 0) return [outcome, findings.join(' + ')].filter(Boolean).join(' · ');
+  const criticalEffect = roll.result.criticalEffect;
+  const criticalLabel = criticalEffect && typeof criticalEffect === 'object' && 'label' in criticalEffect && typeof criticalEffect.label === 'string'
+    ? criticalEffect.label
+    : null;
+  if (outcome || criticalLabel || findings.length > 0) return [outcome, criticalLabel, findings.join(' + ')].filter(Boolean).join(' · ');
   return null;
 }
 
@@ -140,6 +155,8 @@ function ActionModal({
   children: React.ReactNode;
 }) {
   const titles: Record<SoloAction, string> = {
+    check: 'Resolve a Solo check',
+    consequence: 'Resolve the complication',
     fortune: 'Ask Fortune',
     inspiration: 'Draw Inspiration',
     'start-mission': 'Start a custom mission',
@@ -185,6 +202,19 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const queryClient = useQueryClient();
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const [checkType, setCheckType] = useState<SoloCheckType>('skill');
+  const [checkName, setCheckName] = useState('');
+  const [checkModifier, setCheckModifier] = useState<SoloCheckModifier>('normal');
+  const [checkContext, setCheckContext] = useState('');
+  const [consequenceRollId, setConsequenceRollId] = useState<string | null>(null);
+  const [consequenceMode, setConsequenceMode] = useState<'manual' | 'roll_choice'>('manual');
+  const [consequenceDescriptions, setConsequenceDescriptions] = useState<[string, string]>(['', '']);
+  const [consequenceEffectTypes, setConsequenceEffectTypes] = useState<[SoloConsequenceEffectType, SoloConsequenceEffectType]>(['story_event', 'story_event']);
+  const [consequenceAmounts, setConsequenceAmounts] = useState<[number, number]>([1, 1]);
+  const [consequenceDetails, setConsequenceDetails] = useState<[string, string]>(['', '']);
+  const [consequenceWaypointDescriptions, setConsequenceWaypointDescriptions] = useState<[string, string]>(['', '']);
+  const [consequenceItemIds, setConsequenceItemIds] = useState<[string, string]>(['', '']);
 
   const [fortuneQuestion, setFortuneQuestion] = useState('');
   const [fortuneCategory, setFortuneCategory] = useState<FortuneCategory>('yes_no');
@@ -271,11 +301,63 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     state?.activeMission && state.activeMission.currentWaypointIndex === finalWaypointPosition,
   );
 
+  const consequenceOption = (index: 0 | 1): SoloConsequenceOption => {
+    const type = consequenceEffectTypes[index];
+    let effect: SoloConsequenceEffect;
+    if (type === 'advance_threat') {
+      effect = { type, amount: consequenceAmounts[index] >= 2 ? 2 : 1 };
+    } else if (type === 'damage') {
+      effect = {
+        type,
+        amount: Math.max(1, Math.round(consequenceAmounts[index])),
+        damage_type: consequenceDetails[index].trim() || undefined,
+      };
+    } else if (type === 'add_condition') {
+      effect = { type, key: consequenceDetails[index].trim() };
+    } else if (type === 'lose_item') {
+      effect = {
+        type,
+        item_id: consequenceItemIds[index],
+        quantity: Math.max(1, Math.round(consequenceAmounts[index])),
+      };
+    } else if (type === 'new_danger') {
+      effect = { type, description: consequenceDetails[index].trim() };
+    } else if (type === 'add_diversion_waypoint') {
+      effect = {
+        type,
+        title: consequenceDetails[index].trim(),
+        description: consequenceWaypointDescriptions[index].trim(),
+      };
+    } else {
+      effect = { type: 'story_event' };
+    }
+    return { description: consequenceDescriptions[index].trim(), effect };
+  };
+
   const actionMutation = useMutation({
     mutationFn: async () => {
       if (!state || !activeAction) throw new Error('Solo state is not ready.');
       const revision = state.campaignRevision;
       switch (activeAction) {
+        case 'check':
+          return resolveSoloCheck(partyId, revision, {
+            checkType,
+            checkName,
+            modifier: checkModifier,
+            context: checkContext.trim(),
+          });
+        case 'consequence': {
+          if (!consequenceRollId) throw new Error('Choose the failed Solo check to resolve.');
+          const first = consequenceOption(0);
+          return resolveSoloCheckConsequence(
+            partyId,
+            consequenceRollId,
+            revision,
+            consequenceMode === 'manual'
+              ? { mode: 'manual', consequence: first }
+              : { mode: 'roll_choice', consequences: [first, consequenceOption(1)] },
+          );
+        }
         case 'fortune':
           return askSoloFortune(partyId, revision, {
             question: fortuneQuestion.trim(),
@@ -378,6 +460,22 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     if (action === 'fortune') {
       setFortuneTilt('even');
     }
+    if (action === 'check') {
+      const firstSkill = Object.keys(state?.playerCharacter?.skills || {}).sort()[0];
+      setCheckType(firstSkill ? 'skill' : 'attribute');
+      setCheckName(firstSkill || 'STR');
+      setCheckModifier('normal');
+      setCheckContext('');
+    }
+    if (action === 'consequence') {
+      setConsequenceMode('manual');
+      setConsequenceDescriptions(['', '']);
+      setConsequenceEffectTypes(['story_event', 'story_event']);
+      setConsequenceAmounts([1, 1]);
+      setConsequenceDetails(['', '']);
+      setConsequenceWaypointDescriptions(['', '']);
+      setConsequenceItemIds(['', '']);
+    }
     if (action === 'reveal-waypoint') {
       setRevealTitle('');
       setRevealDescription('');
@@ -420,6 +518,11 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     setSelectedInjuryId(injuryId);
     setInjuryAction(action);
     openAction('injury');
+  };
+
+  const openConsequenceAction = (rollId: string) => {
+    setConsequenceRollId(rollId);
+    openAction('consequence');
   };
 
   const submitAction = (event: FormEvent) => {
@@ -465,6 +568,9 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const hero = state.playerCharacter;
   const standardConditions = hero?.conditions.filter((condition) => standardConditionKeys.has(condition.key)) || [];
   const equippedItems = hero?.inventory.filter((item) => item.equipped) || [];
+  const skillOptions = Object.entries(hero?.skills || {}).sort(([left], [right]) => left.localeCompare(right));
+  const attributeOptions = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA']
+    .flatMap((name) => Number.isInteger(hero?.attributes?.[name]) ? [[name, hero!.attributes![name]] as const] : []);
   const threatCounter = state.activeThreat?.counter || 0;
 
   return (
@@ -536,6 +642,14 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                         <span className="rounded-full bg-white/70 px-2.5 py-1">Stretches {state.currentWaypoint.exploration.stretchesSpent}</span>
                       </div>
                     )}
+                    {state.activeDangers.filter((danger) => danger.waypointId === state.currentWaypoint?.id).length > 0 && (
+                      <div className="mt-3 space-y-1.5 border-t border-violet-200 pt-3">
+                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Active dangers</div>
+                        {state.activeDangers
+                          .filter((danger) => danger.waypointId === state.currentWaypoint?.id)
+                          .map((danger) => <div key={danger.id} className="text-sm font-semibold text-red-900">{danger.description}</div>)}
+                      </div>
+                    )}
                   </div>
 
                   <ol className="space-y-2">
@@ -585,6 +699,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 </div>
                 {canManage && (
                   <div className="flex flex-wrap gap-2">
+                    <Button icon={Dices} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('check')}>Act</Button>
                     <Button icon={Gauge} onClick={() => openAction('fortune')}>Ask Fortune</Button>
                     <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>Inspire</Button>
                     <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>Rest</Button>
@@ -609,6 +724,9 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 <div className="divide-y divide-stone-100">
                   {state.latestRolls.map((roll) => {
                     const result = rollResultLabel(roll);
+                    const needsConsequence = roll.result.action === 'solo_check'
+                      && roll.result.requiresFailForward === true
+                      && !roll.consequence;
                     return (
                       <div key={roll.id} className="p-4 sm:px-5">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -624,6 +742,18 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                           {roll.keptValues.length > 0 && <span className="text-indigo-700">Kept: {roll.keptValues.join(', ')}</span>}
                           {roll.tableVersion && <span className="text-stone-400">{roll.tableVersion}</span>}
                         </div>
+                        {roll.consequence && (
+                          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                            <div className="font-bold">Complication resolved</div>
+                            <div className="mt-0.5">{roll.consequence.selectedDescription}</div>
+                            <div className="mt-1 text-xs text-emerald-700">{roll.consequence.appliedSummary}</div>
+                          </div>
+                        )}
+                        {canManage && needsConsequence && !state.activeCombat && (
+                          <Button className="mt-3" size="sm" icon={AlertTriangle} onClick={() => openConsequenceAction(roll.id)}>
+                            Resolve complication
+                          </Button>
+                        )}
                       </div>
                     );
                   })}
@@ -777,6 +907,174 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
       {activeAction && (
         <ActionModal action={activeAction} busy={actionMutation.isPending} error={actionMutation.error} onClose={() => setActiveAction(null)}>
           <form onSubmit={submitAction} className="space-y-4">
+            {activeAction === 'check' && hero && (
+              <>
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
+                  The server uses {hero.name}&apos;s stored target and records every die. This action is for checks outside combat.
+                </div>
+                <fieldset>
+                  <legend className="text-sm font-bold text-stone-700">Check type</legend>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {(['skill', 'attribute'] as const).map((type) => (
+                      <label key={type} className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm font-bold ${checkType === type ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-stone-200 text-stone-700'}`}>
+                        <input
+                          type="radio"
+                          name="solo-check-type"
+                          checked={checkType === type}
+                          onChange={() => {
+                            setCheckType(type);
+                            setCheckName(type === 'skill' ? skillOptions[0]?.[0] || '' : attributeOptions[0]?.[0] || 'STR');
+                          }}
+                          className="h-4 w-4 border-stone-300 text-indigo-600"
+                        />
+                        {titleCase(type)}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="block text-sm font-bold text-stone-700">
+                  {checkType === 'skill' ? 'Skill' : 'Attribute'}
+                  <select value={checkName} onChange={(event) => setCheckName(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                    <option value="">Choose a {checkType}…</option>
+                    {(checkType === 'skill' ? skillOptions : attributeOptions).map(([name, target]) => (
+                      <option key={name} value={name}>{titleCase(name)} · {target}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">Roll modifier
+                  <select value={checkModifier} onChange={(event) => setCheckModifier(event.target.value as SoloCheckModifier)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                    <option value="normal">Normal · 1D20</option>
+                    <option value="boon">Boon · 2D20, keep lower</option>
+                    <option value="bane">Bane · 2D20, keep higher</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">What is the hero trying to do?
+                  <textarea value={checkContext} onChange={(event) => setCheckContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Climb the crumbling wall before the patrol returns…" />
+                </label>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
+                  A Dragon or Demon marks the selected skill once and rolls a generic critical-effect prompt. A failure requires a complication that moves the story forward; it does not silently alter HP, inventory, or threat.
+                </div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!checkName} icon={Dices}>Roll {titleCase(checkName || 'Check')}</Button>
+              </>
+            )}
+
+            {activeAction === 'consequence' && hero && consequenceRollId && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  A failed check must move the story forward. Record one accepted consequence, or provide two reasonable alternatives and let the server choose: 1-3 selects A, 4-6 selects B.
+                </div>
+                <fieldset>
+                  <legend className="text-sm font-bold text-stone-700">Resolution</legend>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {([
+                      ['manual', 'Accept one consequence'],
+                      ['roll_choice', 'Roll between two'],
+                    ] as const).map(([mode, label]) => (
+                      <label key={mode} className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm font-bold ${consequenceMode === mode ? 'border-amber-400 bg-amber-50 text-amber-950' : 'border-stone-200 text-stone-700'}`}>
+                        <input type="radio" name="consequence-mode" checked={consequenceMode === mode} onChange={() => setConsequenceMode(mode)} className="h-4 w-4 border-stone-300 text-amber-600" />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                {(consequenceMode === 'manual' ? [0] : [0, 1]).map((rawIndex) => {
+                  const index = rawIndex as 0 | 1;
+                  const effectType = consequenceEffectTypes[index];
+                  return (
+                    <fieldset key={index} className="space-y-3 rounded-xl border border-stone-200 p-4">
+                      <legend className="px-1 text-sm font-bold text-stone-800">
+                        {consequenceMode === 'manual' ? 'Consequence' : `Option ${index === 0 ? 'A · 1-3' : 'B · 4-6'}`}
+                      </legend>
+                      <label className="block text-sm font-bold text-stone-700">What happens?
+                        <textarea
+                          value={consequenceDescriptions[index]}
+                          onChange={(event) => setConsequenceDescriptions((current) => updatePair(current, index, event.target.value))}
+                          required
+                          maxLength={2000}
+                          rows={2}
+                          className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal"
+                          placeholder="The hero succeeds, but the noise alerts something below…"
+                        />
+                      </label>
+                      <label className="block text-sm font-bold text-stone-700">Mechanical effect
+                        <select
+                          value={effectType}
+                          onChange={(event) => setConsequenceEffectTypes((current) => updatePair(current, index, event.target.value as SoloConsequenceEffectType))}
+                          className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"
+                        >
+                          <option value="story_event">Story event only</option>
+                          <option value="advance_threat">Advance threat</option>
+                          <option value="damage">Damage hero</option>
+                          <option value="add_condition">Add condition</option>
+                          <option value="lose_item">Lose or expend item</option>
+                          <option value="new_danger">Add danger here</option>
+                          <option value="add_diversion_waypoint">Insert diversion waypoint</option>
+                        </select>
+                      </label>
+                      {effectType === 'advance_threat' && (
+                        <label className="block text-sm font-bold text-stone-700">Threat increase
+                          <select value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                            <option value={1}>+1 · normal delay or opening</option>
+                            <option value={2}>+2 · dire or time-sensitive setback</option>
+                          </select>
+                        </label>
+                      )}
+                      {effectType === 'damage' && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block text-sm font-bold text-stone-700">Damage
+                            <input type="number" min={1} max={100} value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} required className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                          </label>
+                          <label className="block text-sm font-bold text-stone-700">Damage type <span className="font-normal text-stone-400">optional</span>
+                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} maxLength={80} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="falling" />
+                          </label>
+                        </div>
+                      )}
+                      {effectType === 'add_condition' && (
+                        <label className="block text-sm font-bold text-stone-700">Condition
+                          <select value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                            <option value="">Choose a condition…</option>
+                            {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{titleCase(key)}</option>)}
+                          </select>
+                        </label>
+                      )}
+                      {effectType === 'lose_item' && (
+                        <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
+                          <label className="block text-sm font-bold text-stone-700">Item
+                            <select value={consequenceItemIds[index]} onChange={(event) => setConsequenceItemIds((current) => updatePair(current, index, event.target.value))} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                              <option value="">Choose an item…</option>
+                              {hero.inventory.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.quantity}</option>)}
+                            </select>
+                          </label>
+                          <label className="block text-sm font-bold text-stone-700">Quantity
+                            <input type="number" min={1} max={999} value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} required className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                          </label>
+                        </div>
+                      )}
+                      {effectType === 'new_danger' && (
+                        <label className="block text-sm font-bold text-stone-700">Danger
+                          <textarea value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="A patrol enters the chamber from the east." />
+                        </label>
+                      )}
+                      {effectType === 'add_diversion_waypoint' && (
+                        <div className="space-y-3">
+                          <label className="block text-sm font-bold text-stone-700">Diversion title
+                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The Collapsed Passage" />
+                          </label>
+                          <label className="block text-sm font-bold text-stone-700">Hidden waypoint description
+                            <textarea value={consequenceWaypointDescriptions[index]} onChange={(event) => setConsequenceWaypointDescriptions((current) => updatePair(current, index, event.target.value))} required maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                          </label>
+                        </div>
+                      )}
+                    </fieldset>
+                  );
+                })}
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
+                  The selected consequence is permanent in the audit trail. Only its declared mechanical effect is applied; Draconi will not infer extra damage, threat, inventory, or condition changes.
+                </div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={AlertTriangle}>Resolve and continue</Button>
+              </>
+            )}
+
             {activeAction === 'fortune' && (
               <>
                 <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Ask only when the answer is genuinely uncertain. A certain or more interesting answer may be decided without rolling.</p>

@@ -16,6 +16,8 @@ import {
   selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
   resolveGameActionBodySchema,
+  resolveSoloCheckBodySchema,
+  resolveSoloCheckConsequenceBodySchema,
   resolveSoloDyingActionBodySchema,
   resolveSoloInjuryActionBodySchema,
   resolveSoloNarrativeDamageBodySchema,
@@ -153,7 +155,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.12.0',
+    version: '1.14.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -349,6 +351,52 @@ export const openApiDocument = {
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/checks': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve a recorded Solo skill or attribute check',
+        description: 'Outside combat, resolve the solo hero stored target with a normal, boon, or bane D20 roll. Dragon and Demon skill results add an advancement mark once and receive a versioned generic critical-effect prompt.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloCheckBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Recorded Solo check result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/consequence': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve a failed Solo check consequence',
+        description: 'Resolve fail-forward after a failed or Demon Solo check. Record one manual consequence or roll 1D6 to select between two supplied consequences, then atomically apply the selected guarded effect.',
+        parameters: [
+          campaignParameter,
+          { name: 'rollId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloCheckConsequenceBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Consequence selected, recorded, and applied', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
           409: errorResponse,
           428: errorResponse,
         },

@@ -140,6 +140,37 @@ export class HelperApiClient {
     });
   }
 
+  resolveSoloCheck(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/checks`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveSoloCheckConsequence(input) {
+    const {
+      campaign_id,
+      source_roll_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/checks/${source_roll_id}/consequence`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   startSoloMission(input) {
     const {
       campaign_id,

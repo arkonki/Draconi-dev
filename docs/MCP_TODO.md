@@ -77,6 +77,14 @@ Solo foundation already delivered toward this phase:
 - [x] Generalize severe-injury persistence to every campaign character sheet,
   including authoritative injury rolls, owner/GM authorization, resolved
   history, medical care, and ordinary shift-rest recovery.
+- [x] Add authoritative general Solo skill and attribute checks outside combat,
+  including stored targets, normal/boon/bane dice, Dragon/Demon advancement
+  marks, versioned generic critical prompts, fail-forward signalling, REST,
+  MCP, dashboard controls, events, and immutable roll history.
+- [x] Resolve failed and Demon Solo checks through a one-time fail-forward flow,
+  including manual acceptance, authoritative D6 choice between two consequences,
+  immutable source-roll linkage, guarded mechanical effects, realtime events,
+  dashboard controls, REST, and MCP.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

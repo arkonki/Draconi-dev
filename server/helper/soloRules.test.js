@@ -9,6 +9,7 @@ import {
   resolveInspiration,
   resolveNarrativeDamage,
   resolveSevereInjury,
+  resolveSoloCriticalEffect,
   resolveSoloDyingAction,
   resolveSoloInjuryTreatment,
   resolveSoloRest,
@@ -82,6 +83,37 @@ describe('Solo rule resolution', () => {
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(12))).toMatchObject({ roll: 12, outcome: 'success' });
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(13))).toMatchObject({ roll: 13, outcome: 'failure' });
     expect(resolveSoloSkillCheck({ target: 12 }, fixedRolls(20))).toMatchObject({ roll: 20, outcome: 'demon' });
+  });
+
+  it('keeps the lower d20 for a boon and the higher d20 for a bane', () => {
+    expect(resolveSoloSkillCheck({ target: 12, modifier: 'boon' }, fixedRolls(17, 6))).toEqual({
+      expression: '2d20',
+      dice: [17, 6],
+      keptIndices: [1],
+      keptValues: [6],
+      roll: 6,
+      target: 12,
+      modifier: 'boon',
+      outcome: 'success',
+    });
+    expect(resolveSoloSkillCheck({ target: 12, modifier: 'bane' }, fixedRolls(4, 20))).toMatchObject({
+      dice: [4, 20], keptIndices: [1], keptValues: [20], roll: 20, outcome: 'demon',
+    });
+  });
+
+  it('returns a transparent d6 prompt for a Solo Dragon or Demon', () => {
+    expect(resolveSoloCriticalEffect([
+      { min: 1, max: 3, key: 'opening', label: 'A useful opening' },
+      { min: 4, max: 6, key: 'greater_result', label: 'A greater result' },
+    ], fixedRolls(5))).toEqual({
+      expression: '1d6',
+      dice: [5],
+      keptIndices: [0],
+      keptValues: [5],
+      roll: 5,
+      key: 'greater_result',
+      label: 'A greater result',
+    });
   });
 
   it('resolves round and ordinary stretch rest recovery', () => {

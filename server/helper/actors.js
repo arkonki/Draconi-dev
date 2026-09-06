@@ -107,6 +107,7 @@ function characterActor(row, combatant) {
         : currentHp <= 0 ? 'dying' : 'active',
       attributes: row.attributes || {},
       skills: row.skill_levels || {},
+      markedSkills: Array.isArray(row.marked_skills) ? row.marked_skills : [],
       movement: null,
       armor: null,
       inventory: equipment.inventory,

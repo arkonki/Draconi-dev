@@ -103,6 +103,88 @@ export const drawInspirationBodySchema = drawInspirationSchema
     }
   });
 
+const soloCheckFields = {
+  check_type: z.enum(['skill', 'attribute']),
+  check_name: z.string().trim().min(1).max(100),
+  modifier: z.enum(['normal', 'boon', 'bane']).default('normal'),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const resolveSoloCheckInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloCheckFields,
+}).strict();
+
+export const resolveSoloCheckBodySchema = z.object(soloCheckFields).strict();
+
+const soloConsequenceEffectSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('story_event') }).strict(),
+  z.object({
+    type: z.literal('advance_threat'),
+    amount: z.number().int().min(1).max(2).default(1),
+  }).strict(),
+  z.object({
+    type: z.literal('damage'),
+    amount: z.number().int().min(1).max(100),
+    damage_type: z.string().trim().min(1).max(80).optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('add_condition'),
+    key: z.string().trim().min(1).max(64).regex(/^[a-z][a-z0-9_-]*$/),
+  }).strict(),
+  z.object({
+    type: z.literal('lose_item'),
+    item_id: uuidSchema,
+    quantity: z.number().int().min(1).max(999).default(1),
+  }).strict(),
+  z.object({
+    type: z.literal('new_danger'),
+    description: z.string().trim().min(1).max(2_000),
+  }).strict(),
+  z.object({
+    type: z.literal('add_diversion_waypoint'),
+    title: z.string().trim().min(1).max(200),
+    description: z.string().trim().min(1).max(2_000),
+  }).strict(),
+]);
+
+const soloConsequenceOptionSchema = z.object({
+  description: z.string().trim().min(1).max(2_000),
+  effect: soloConsequenceEffectSchema,
+}).strict();
+
+const soloConsequenceResolutionSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('manual'),
+    consequence: soloConsequenceOptionSchema,
+  }).strict(),
+  z.object({
+    mode: z.literal('roll_choice'),
+    consequences: z.tuple([soloConsequenceOptionSchema, soloConsequenceOptionSchema]),
+  }).strict(),
+]);
+
+const soloCheckConsequenceFields = {
+  source_roll_id: uuidSchema,
+  resolution: soloConsequenceResolutionSchema,
+  confirmed_by_user: z.literal(true),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const resolveSoloCheckConsequenceInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloCheckConsequenceFields,
+}).strict();
+
+export const resolveSoloCheckConsequenceBodySchema = z.object(soloCheckConsequenceFields)
+  .omit({ source_roll_id: true })
+  .strict();
+
 const openingWaypointSchema = z.object({
   title: z.string().trim().min(1).max(200).default('Departure'),
   description: z.string().trim().min(1).max(2_000),

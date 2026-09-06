@@ -26,6 +26,8 @@ import {
   mcpReadResultSchema,
   mcpWriteResultSchema,
   resolveGameActionInputSchema,
+  resolveSoloCheckInputSchema,
+  resolveSoloCheckConsequenceInputSchema,
   resolveSoloDyingActionInputSchema,
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageInputSchema,
@@ -129,7 +131,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.11.0' },
+    { name: 'dragonbane-helper', version: '1.13.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -138,7 +140,9 @@ export function createDragonbaneMcpServer(apiClient) {
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
-        'For solo play, call get_solo_state before narrating. Fortune and Inspiration results are authoritative only when returned by their tools.',
+        'For solo play, call get_solo_state before narrating. Fortune, Inspiration, and skill-check results are authoritative only when returned by their tools.',
+        'Use resolve_solo_check for skill or attribute tests outside combat. The server reads the hero target, resolves normal/boon/bane dice, marks a skill on Dragon or Demon, and returns a generic critical prompt.',
+        'When a Solo check returns requiresFailForward, use resolve_solo_check_consequence exactly once for that roll. Ask the user to accept one explicit consequence or offer two contextual consequences for the server to choose with 1D6. Never claim a mechanical consequence before the tool applies it.',
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
         'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
         'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
@@ -221,6 +225,22 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.drawInspiration(input))));
+
+  server.registerTool('resolve_solo_check', {
+    title: 'Resolve a solo skill or attribute check',
+    description: 'GM-only. Resolve an authoritative Dragonbane D20 check outside combat using the solo hero stored skill or attribute target. Supports normal, boon, and bane rolls; records every die; marks a skill for advancement on Dragon or Demon; and returns a generic critical prompt or fail-forward requirement.',
+    inputSchema: resolveSoloCheckInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloCheck(input))));
+
+  server.registerTool('resolve_solo_check_consequence', {
+    title: 'Resolve a failed Solo check consequence',
+    description: 'GM-only. After explicit user confirmation, resolve fail-forward exactly once for a failed or Demon Solo check. Record one accepted consequence or provide two contextual alternatives for an authoritative 1D6 selection, then atomically apply the selected guarded effect.',
+    inputSchema: resolveSoloCheckConsequenceInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloCheckConsequence(input))));
 
   server.registerTool('start_solo_mission', {
     title: 'Start a custom solo mission',
@@ -492,6 +512,8 @@ export function createDragonbaneMcpServer(apiClient) {
         'select_solo_heroic_ability',
         'ask_fortune',
         'draw_inspiration',
+        'resolve_solo_check',
+        'resolve_solo_check_consequence',
         'start_solo_mission',
         'reveal_waypoint',
         'search_waypoint',
@@ -540,6 +562,8 @@ export const mcpToolAnnotations = {
   select_solo_heroic_ability: MODIFYING,
   ask_fortune: MODIFYING,
   draw_inspiration: MODIFYING,
+  resolve_solo_check: MODIFYING,
+  resolve_solo_check_consequence: MODIFYING,
   start_solo_mission: MODIFYING,
   reveal_waypoint: MODIFYING,
   search_waypoint: MODIFYING,

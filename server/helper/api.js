@@ -49,6 +49,10 @@ import {
   resolveGameActionInputSchema,
   resolveSoloDyingActionBodySchema,
   resolveSoloDyingActionInputSchema,
+  resolveSoloCheckBodySchema,
+  resolveSoloCheckInputSchema,
+  resolveSoloCheckConsequenceBodySchema,
+  resolveSoloCheckConsequenceInputSchema,
   resolveSoloInjuryActionBodySchema,
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageBodySchema,
@@ -105,6 +109,8 @@ import {
   resolveGameAction,
   resolveCharacterInjuryAction,
   resolveSoloDyingAction,
+  resolveSoloCheck,
+  resolveSoloCheckConsequence,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
   rollCharacterSevereInjury,
@@ -383,6 +389,48 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await drawInspiration(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloCheckMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/checks$/);
+    if (soloCheckMatch && request.method === 'POST') {
+      operation = 'resolve_solo_check';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloCheckBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveSoloCheckInputSchema, {
+        campaign_id: soloCheckMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloCheck(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloCheckConsequenceMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/checks\/([^/]+)\/consequence$/,
+    );
+    if (soloCheckConsequenceMatch && request.method === 'POST') {
+      operation = 'resolve_solo_check_consequence';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloCheckConsequenceBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(resolveSoloCheckConsequenceInputSchema, {
+        campaign_id: soloCheckConsequenceMatch[0],
+        source_roll_id: soloCheckConsequenceMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloCheckConsequence(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

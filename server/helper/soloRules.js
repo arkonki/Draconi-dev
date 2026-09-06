@@ -87,17 +87,48 @@ export function resolveInspiration({ columns, tables }, rollDie = secureRollDie)
   };
 }
 
-export function resolveSoloSkillCheck({ target }, rollDie = secureRollDie) {
+export function resolveSoloSkillCheck({ target, modifier = 'normal' }, rollDie = secureRollDie) {
   if (!Number.isInteger(target) || target < 1 || target > 20) {
     throw new Error('Skill target must be an integer between 1 and 20.');
   }
-  const roll = rollDie(20);
+  if (!['normal', 'boon', 'bane'].includes(modifier)) {
+    throw new Error(`Unsupported skill-check modifier: ${modifier}`);
+  }
+  const dice = modifier === 'normal' ? [rollDie(20)] : [rollDie(20), rollDie(20)];
+  const roll = modifier === 'boon' ? Math.min(...dice) : modifier === 'bane' ? Math.max(...dice) : dice[0];
+  const keptIndex = dice.indexOf(roll);
   const outcome = roll === 1
     ? 'dragon'
     : roll === 20
       ? 'demon'
       : roll <= target ? 'success' : 'failure';
-  return { expression: '1d20', dice: [roll], roll, target, outcome };
+  return {
+    expression: `${dice.length}d20`,
+    dice,
+    keptIndices: [keptIndex],
+    keptValues: [roll],
+    roll,
+    target,
+    modifier,
+    outcome,
+  };
+}
+
+export function resolveSoloCriticalEffect(entries, rollDie = secureRollDie) {
+  const roll = rollDie(6);
+  const entry = findTableEntry(entries, roll);
+  if (!entry || typeof entry !== 'object' || !entry.key || !entry.label) {
+    throw new Error(`Solo critical-effect table has an invalid result for ${roll}.`);
+  }
+  return {
+    expression: '1d6',
+    dice: [roll],
+    keptIndices: [0],
+    keptValues: [roll],
+    roll,
+    key: entry.key,
+    label: entry.label,
+  };
 }
 
 export function resolveSoloRest({ restType, useHealing = false, healingTarget = null }, rollDie = secureRollDie) {

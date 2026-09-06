@@ -125,6 +125,8 @@ Modifying:
 - `select_solo_heroic_ability`
 - `ask_fortune`
 - `draw_inspiration`
+- `resolve_solo_check`
+- `resolve_solo_check_consequence`
 - `start_solo_mission`
 - `reveal_waypoint`
 - `search_waypoint`
@@ -164,9 +166,32 @@ The campaign's Solo Adventure tab provides the playable web dashboard. It shows
 the bound hero's HP, WP, conditions, equipped items and Solo ability alongside
 the mission route, current waypoint, threat counter, active combat, and recent
 authoritative rolls. Campaign owners and GMs can use the same guarded operations
-as MCP to ask Fortune, draw Inspiration, create a custom mission, reveal the next
+as MCP to resolve stored skill/attribute checks, ask Fortune, draw Inspiration, create a custom mission, reveal the next
 waypoint, advance its threat, and conclude it. Campaign events refresh this view
 over the existing WebSocket channel, with periodic refetch as a fallback.
+
+`resolve_solo_check` handles general actions outside combat. The caller chooses
+a skill or attribute and whether the fiction supplies a normal roll, boon, or
+bane; the server reads the actual target from the configured hero and rolls the
+D20s. Boons retain the lower result and banes retain the higher. Dragon and Demon
+results on skills add that skill to the character's existing advancement marks
+only once. They also roll a versioned `draconi-generic-v1` critical-effect prompt,
+which is advisory until the player or AI interprets it in the current fiction.
+Failures and Demons explicitly require fail-forward narration but do not silently
+change threat, HP, conditions, or inventory. Any such mechanical consequence must
+be applied through its guarded state operation. General Solo checks are rejected
+during active combat, where the encounter rules remain authoritative.
+
+When a check returns `requiresFailForward`, resolve it exactly once with
+`resolve_solo_check_consequence`. A manual resolution records one consequence
+accepted by the player. A rolled resolution accepts two contextual alternatives,
+rolls an authoritative D6, and selects the first on 1-3 or the second on 4-6.
+Both modes require explicit user confirmation before the command is submitted.
+The resolution is linked to its immutable source roll. Its explicit effect can
+record a story event, advance the current threat, damage the hero, add a
+condition, expend an existing item, add a structured danger to the current
+waypoint, or insert a hidden diversion waypoint next in the route. The server
+never infers additional mechanical effects from the narrative description.
 
 `Sole Survivor` is integrated into the failed-test push flow. A lone configured
 solo character may spend exactly 3 WP to reroll without taking a condition;

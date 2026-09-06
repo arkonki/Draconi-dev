@@ -36,6 +36,7 @@ export interface SoloActor {
   conditions: SoloActorCondition[];
   attributes?: Record<string, number>;
   skills?: Record<string, number>;
+  markedSkills?: string[];
   isRallied: boolean;
   deathRolls: { passed: number; failed: number };
   lifeStatus: 'active' | 'dying' | 'dead';
@@ -117,8 +118,30 @@ export interface SoloRecordedRoll {
   tableKey?: string | null;
   tableVersion?: string | null;
   result: Record<string, unknown>;
+  consequence?: {
+    id: string;
+    resolutionMode: 'manual' | 'roll_choice';
+    options: SoloConsequenceOption[];
+    selectedIndex: number | null;
+    selectedDescription: string;
+    selectedEffect: SoloConsequenceEffect;
+    choiceRollId?: string | null;
+    appliedSummary: string;
+    createdAt: string;
+  };
   campaignRevision: number;
   createdAt: string;
+}
+
+export interface SoloDanger {
+  id: string;
+  missionId: string;
+  waypointId: string;
+  description: string;
+  status: 'active' | 'resolved' | 'avoided';
+  sourceRollId?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SoloCharacterOption {
@@ -165,6 +188,7 @@ export interface SoloState {
   waypoints: SoloWaypoint[];
   currentWaypoint?: SoloWaypoint | null;
   activeThreat?: SoloThreat | null;
+  activeDangers: SoloDanger[];
   activeCombat?: { id: string; name: string } | null;
   gameTime: Record<string, unknown>;
   restState: {
@@ -297,6 +321,21 @@ export async function disableSoloMode(partyId: string, revision: number): Promis
 export type FortuneCategory = 'yes_no' | 'number' | 'scale' | 'power' | 'quality' | 'reaction';
 export type FortuneTilt = 'unlikely' | 'even' | 'likely';
 export type InspirationColumn = 'action' | 'attribute' | 'thing';
+export type SoloCheckType = 'skill' | 'attribute';
+export type SoloCheckModifier = 'normal' | 'boon' | 'bane';
+export type SoloConsequenceEffect =
+  | { type: 'story_event' }
+  | { type: 'advance_threat'; amount: 1 | 2 }
+  | { type: 'damage'; amount: number; damage_type?: string }
+  | { type: 'add_condition'; key: string }
+  | { type: 'lose_item'; item_id: string; quantity: number }
+  | { type: 'new_danger'; description: string }
+  | { type: 'add_diversion_waypoint'; title: string; description: string };
+
+export interface SoloConsequenceOption {
+  description: string;
+  effect: SoloConsequenceEffect;
+}
 
 export async function askSoloFortune(
   partyId: string,
@@ -335,6 +374,53 @@ export async function drawSoloInspiration(
     }),
   });
   return parseResponse<SoloWriteResult>(response, 'Could not draw inspiration.');
+}
+
+export async function resolveSoloCheck(
+  partyId: string,
+  revision: number,
+  input: {
+    checkType: SoloCheckType;
+    checkName: string;
+    modifier: SoloCheckModifier;
+    context?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/checks`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      check_type: input.checkType,
+      check_name: input.checkName,
+      modifier: input.modifier,
+      context: input.context || undefined,
+      reason: `The solo player chose to test ${input.checkName} with ${input.modifier === 'normal' ? 'a normal roll' : `a ${input.modifier}`}.`,
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the Solo check.');
+}
+
+export async function resolveSoloCheckConsequence(
+  partyId: string,
+  rollId: string,
+  revision: number,
+  resolution:
+    | { mode: 'manual'; consequence: SoloConsequenceOption }
+    | { mode: 'roll_choice'; consequences: [SoloConsequenceOption, SoloConsequenceOption] },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(
+    `/v1/campaigns/${partyId}/solo/checks/${rollId}/consequence`,
+    {
+      method: 'POST',
+      headers: writeHeaders(revision),
+      body: JSON.stringify({
+        resolution,
+        confirmed_by_user: true,
+        reason: 'The solo player resolved the failed check with an explicit fail-forward consequence.',
+      }),
+    },
+  );
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the Solo check consequence.');
 }
 
 export async function startSoloMission(

@@ -101,6 +101,37 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-inspiration', campaignRevision: 46 },
     })),
+    resolveSoloCheck: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 47,
+        event_ids: ['357790b2-cf61-4f37-b3d2-e31ba919d5b5'],
+        summary: 'Spot Hidden dragon: rolled 1, kept 1 vs 12. Reveal an opportunity, clue, or useful opening. Spot Hidden was marked for advancement.',
+        state_excerpt: {
+          check: { expression: '1d20', dice: [1], roll: 1, target: 12, outcome: 'dragon' },
+          criticalEffect: { expression: '1d6', dice: [4], key: 'opportunity_or_clue' },
+          advancementMark: { skill: 'Spot Hidden', added: true },
+        },
+      },
+      meta: { requestId: 'request-solo-check', campaignRevision: 47 },
+    })),
+    resolveSoloCheckConsequence: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 48,
+        event_ids: ['9f78d063-ac91-4c50-b006-d91c4a9d2d23'],
+        summary: 'The attempt succeeds slowly, and the patrol draws closer.',
+        state_excerpt: {
+          sourceRollId: '357790b2-cf61-4f37-b3d2-e31ba919d5b5',
+          consequence: {
+            resolutionMode: 'manual',
+            selectedDescription: 'The attempt succeeds slowly, and the patrol draws closer.',
+            selectedEffect: { type: 'story_event' },
+          },
+        },
+      },
+      meta: { requestId: 'request-solo-consequence', campaignRevision: 48 },
+    })),
     startSoloMission: vi.fn(async () => ({
       data: {
         success: true,
@@ -723,6 +754,49 @@ describe('Dragonbane MCP server', () => {
     });
     expect(inspiration.structuredContent).toMatchObject({ success: true, campaign_revision: 46 });
 
+    const check = await client.callTool({
+      name: 'resolve_solo_check',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 46,
+        idempotency_key: 'solo-check-1',
+        check_type: 'skill',
+        check_name: 'Spot Hidden',
+        modifier: 'boon',
+        context: 'Search the cracked mural for a hidden catch.',
+        reason: 'The solo player attempts an uncertain action outside combat.',
+      },
+    });
+    expect(check.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 47,
+      state_excerpt: { advancementMark: { skill: 'Spot Hidden', added: true } },
+    });
+
+    const consequence = await client.callTool({
+      name: 'resolve_solo_check_consequence',
+      arguments: {
+        campaign_id: campaignId,
+        source_roll_id: '357790b2-cf61-4f37-b3d2-e31ba919d5b5',
+        expected_revision: 47,
+        idempotency_key: 'solo-consequence-1',
+        resolution: {
+          mode: 'manual',
+          consequence: {
+            description: 'The attempt succeeds slowly, and the patrol draws closer.',
+            effect: { type: 'story_event' },
+          },
+        },
+        confirmed_by_user: true,
+        reason: 'The player accepts the fail-forward consequence.',
+      },
+    });
+    expect(consequence.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 48,
+      state_excerpt: { consequence: { resolutionMode: 'manual' } },
+    });
+
     const mission = await client.callTool({
       name: 'start_solo_mission',
       arguments: {
@@ -924,6 +998,8 @@ describe('Dragonbane MCP server', () => {
     expect(api.selectSoloHeroicAbility).toHaveBeenCalledTimes(1);
     expect(api.askFortune).toHaveBeenCalledTimes(1);
     expect(api.drawInspiration).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloCheck).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloCheckConsequence).toHaveBeenCalledTimes(1);
     expect(api.startSoloMission).toHaveBeenCalledTimes(1);
     expect(api.advanceThreat).toHaveBeenCalledTimes(1);
     expect(api.revealWaypoint).toHaveBeenCalledTimes(1);

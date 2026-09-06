@@ -782,10 +782,89 @@ try {
     'Generic Inspiration was incorrectly presented as an official table.',
   );
 
+  const soloCheck = await api(
+    `/api/v1/campaigns/${campaignId}/solo/checks`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${inspiration.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-check-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        check_type: 'skill',
+        check_name: 'Spot Hidden',
+        modifier: 'boon',
+        context: 'Inspect the gate mechanism without entering combat.',
+        reason: 'Verify an authoritative Solo skill check with a boon.',
+      }),
+    },
+  );
+  assert(soloCheck.response.status === 200, `Solo check failed: ${JSON.stringify(soloCheck.payload)}`);
+  const soloCheckResult = soloCheck.payload.data.state_excerpt.check;
+  assert(soloCheckResult.dice.length === 2, 'Solo boon did not retain both d20 results.');
+  assert(soloCheckResult.roll === Math.min(...soloCheckResult.dice), 'Solo boon did not keep the lower d20.');
+  assert(soloCheckResult.target === 12, 'Solo check did not use the stored skill target.');
+
+  const { rows: pendingFailureRows } = await pool.query(
+    `INSERT INTO recorded_rolls (
+       campaign_id, actor_id, source_user_id, purpose, source, expression,
+       dice, kept_indices, kept_values, result, campaign_revision
+     ) VALUES (
+       $1, $2, $3, 'Synthetic failed Solo check', 'server', '1d20',
+       ARRAY[17], ARRAY[0], ARRAY[17],
+       '{"action":"solo_check","outcome":"failure","requiresFailForward":true}'::jsonb,
+       $4
+     ) RETURNING id`,
+    [campaignId, actorId, users[0].id, soloCheck.payload.data.campaign_revision],
+  );
+  const pendingFailureId = pendingFailureRows[0].id;
+  const consequenceKey = `smoke-solo-consequence-${randomUUID()}`;
+  const consequenceBody = {
+    resolution: {
+      mode: 'roll_choice',
+      consequences: [
+        { description: 'The patrol arrives before the lock opens.', effect: { type: 'story_event' } },
+        { description: 'The lock opens, but the tools are left behind.', effect: { type: 'story_event' } },
+      ],
+    },
+    confirmed_by_user: true,
+    reason: 'Verify authoritative fail-forward consequence selection.',
+  };
+  const consequence = await api(
+    `/api/v1/campaigns/${campaignId}/solo/checks/${pendingFailureId}/consequence`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${soloCheck.payload.data.campaign_revision}"`,
+        'idempotency-key': consequenceKey,
+      },
+      body: JSON.stringify(consequenceBody),
+    },
+  );
+  assert(consequence.response.status === 200, `Solo consequence failed: ${JSON.stringify(consequence.payload)}`);
+  const consequenceState = consequence.payload.data.state_excerpt.consequence;
+  assert(consequenceState.choiceRoll.expression === '1d6', 'Consequence choice was not recorded as 1d6.');
+  assert(consequenceState.choiceRoll.previousRollId === pendingFailureId, 'Consequence choice was not linked to its failed roll.');
+  assert([0, 1].includes(consequenceState.selectedIndex), 'Consequence choice returned an invalid option index.');
+  const duplicateConsequence = await api(
+    `/api/v1/campaigns/${campaignId}/solo/checks/${pendingFailureId}/consequence`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${consequence.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-consequence-duplicate-${randomUUID()}`,
+      },
+      body: JSON.stringify(consequenceBody),
+    },
+  );
+  assert(duplicateConsequence.response.status === 409, 'A failed Solo check accepted a second consequence.');
+
   const soloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
   assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
   assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
-  assert(soloState.payload.data.latestRolls.length === 2, 'Solo state did not return both recorded rolls.');
+  assert(soloState.payload.data.latestRolls.length === 5, 'Solo state did not return all recorded rolls.');
+  const resolvedFailure = soloState.payload.data.latestRolls.find((roll) => roll.id === pendingFailureId);
+  assert(resolvedFailure?.consequence?.resolutionMode === 'roll_choice', 'Solo state did not expose the resolved consequence.');
   assert(
     soloState.payload.data.allowedNextActions.includes('start_solo_mission'),
     'Solo state did not advertise mission start while idle.',
@@ -794,14 +873,14 @@ try {
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
   );
-  assert(storedRolls.rows[0].count === 2, 'Solo rolls were not persisted exactly once.');
+  assert(storedRolls.rows[0].count === 5, 'Solo rolls were not persisted exactly once.');
 
   const missionStarted = await api(
     `/api/v1/campaigns/${campaignId}/solo/missions`,
     {
       method: 'POST',
       headers: {
-        'if-match': `"${inspiration.payload.data.campaign_revision}"`,
+        'if-match': `"${consequence.payload.data.campaign_revision}"`,
         'idempotency-key': `smoke-solo-mission-${randomUUID()}`,
       },
       body: JSON.stringify({
@@ -1495,6 +1574,8 @@ try {
   const openapiDocument = await openapi.json();
   assert(
     openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/consequence']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/dying/actions']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/damage']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/injuries/{injuryId}/actions']
@@ -1530,6 +1611,8 @@ try {
       'select_solo_heroic_ability',
       'ask_fortune',
       'draw_inspiration',
+      'resolve_solo_check',
+      'resolve_solo_check_consequence',
       'start_solo_mission',
       'reveal_waypoint',
       'search_waypoint',
@@ -1699,6 +1782,7 @@ try {
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
+      'one-time fail-forward consequence selection, source-roll linkage, and persisted resolution',
       'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
       'narrative damage, CON death rolls, unbaned Solo self-rally, D6 recovery, and persisted severe injuries',
       'medical care, per-shift retry limits, automatic injury recovery, confirmation, and audited healing overrides',
