@@ -77,4 +77,19 @@ describe('pushed test rolls', () => {
       reason: 'All six conditions are already active.',
     });
   });
+
+  it('allows a contextual ability to replace the condition cost', () => {
+    expect(getPushRollAvailability({
+      ...eligibleRoll,
+      conditions: {
+        exhausted: true,
+        sickly: true,
+        dazed: true,
+        angry: true,
+        scared: true,
+        disheartened: true,
+      },
+      canPushWithoutCondition: true,
+    })).toEqual({ canPush: true });
+  });
 });

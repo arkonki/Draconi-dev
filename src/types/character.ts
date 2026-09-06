@@ -133,6 +133,9 @@ export interface Ability {
   willpower_cost?: number | null;
   requirement?: string | unknown; // Can be JSON logic or string text
   kin?: string; // If specific to a kin
+  profession?: string;
+  rule_key?: string | null;
+  activation_type?: 'manual' | 'passive' | 'contextual' | null;
 }
 
 export interface Teacher {

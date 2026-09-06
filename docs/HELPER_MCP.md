@@ -54,6 +54,10 @@ campaign row, compare the supplied revision, suppress automatic revision
 triggers for their internal row updates, and increment the campaign exactly
 once. Writes made by the existing web application touch the revision through
 database triggers, so an MCP client detects changes made outside `/api/v1`.
+Those non-Helper writes also append a GM-visible
+`app.<table>.<operation>` fallback event with the affected record and changed
+field names. Helper commands suppress that fallback because they already append
+richer domain events explicitly.
 
 All Helper writes require an idempotency key. The database stores the canonical
 request hash and original structured response. Replaying the same request
@@ -100,6 +104,8 @@ Read-only:
 - `get_encounter_setup_options`
 - `get_session_history`
 - `get_recent_events`
+- `get_solo_options`
+- `get_solo_state`
 
 Modifying:
 
@@ -114,9 +120,59 @@ Modifying:
 - `end_combat`
 - `start_session`
 - `complete_session`
+- `enable_solo_mode`
+- `select_solo_heroic_ability`
+- `ask_fortune`
+- `draw_inspiration`
+- `start_solo_mission`
+- `reveal_waypoint`
+- `advance_threat`
+- `complete_solo_mission`
 
 The modifying tools have `readOnlyHint: false`, `idempotentHint: true`, and
 `openWorldHint: false`. Read-only tools advertise `readOnlyHint: true`.
+
+## Solo foundation
+
+Custom solo campaigns can bind one existing campaign character to the
+`db-solo-v1.2` rules model. Enabling solo mode never silently grants or replaces
+a heroic ability; the response asks the user to review that character choice.
+Existing campaigns remain non-solo until an owner or campaign GM explicitly
+enables the mode.
+
+After the user confirms the choice, `select_solo_heroic_ability` assigns one
+additional heroic ability to the configured solo character. The two solo
+abilities are stored as normal compendium abilities with stable rule keys:
+`solo.army_of_one` and `solo.sole_survivor`. Replacing a previous solo choice
+removes it only when Draconi originally granted it, so pre-existing character
+abilities are preserved.
+
+`Sole Survivor` is integrated into the failed-test push flow. A lone configured
+solo character may spend exactly 3 WP to reroll without taking a condition;
+the normal condition-based push remains available. `Army of One` is represented
+as one combatant with two distinct initiative slots and two turns per round.
+Monster ferocity actions remain separate participants and are interleaved with
+both hero slots in global initiative order.
+
+`ask_fortune` and `draw_inspiration` use cryptographically secure server rolls.
+Every result stores the expression, every die, kept indices and values, table
+version, result payload, user, active session, selected solo actor, and campaign
+revision in the immutable `recorded_rolls` table. The same transaction advances
+the campaign revision and appends a campaign event. Idempotent replay returns the
+original roll instead of rolling again.
+
+The Fortune table implements the Solo v1.2 category and tilt mechanics. Until an
+authorized official data pack is installed, Inspiration uses the separately
+versioned `draconi-generic-v1` table and is explicitly identified as non-official
+in API responses. Deepfall Breach remains unavailable rather than exposing or
+inventing protected module content.
+
+Custom missions persist an objective, ordered waypoints, and one active threat.
+Unknown waypoint payloads are stored separately from public waypoint rows and
+are not returned by `get_solo_state` before revelation. Waypoints advance only
+in sequence. Threats begin at 1, advance by 1 or 2 with an audited reason, and
+trigger at 6; recurring threats reset to 1. A successful mission can only be
+completed from its final objective waypoint.
 
 ## Combat workflow
 
@@ -130,7 +186,9 @@ Combat preparation and runtime tools are GM-only:
    same separate action entries used by the web UI. Participants can be removed
    while the encounter is still planning.
 3. Call `start_combat` with initiative assignments using the actor IDs returned
-   by the prepared combat state and cards 1–10.
+   by the prepared combat state and cards 1–10. A lone solo character with
+   `Army of One` must receive two distinct `initiative_slots`; all other actors
+   receive one slot.
 4. Read the active combat state, obtain the active actor's roll/outcome from the
    user or application, and call `resolve_game_action`. Its effects are applied
    atomically across all target actors.
@@ -168,7 +226,9 @@ session pointer while keeping its immutable event history.
   deferred until item-definition and freeform-item validation is finalized.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
-- Roll modes and cryptographically recorded server rolls are not implemented.
+- General player/manual/mixed roll modes are not implemented. The Solo Fortune
+  and Inspiration operations do have immutable cryptographically generated
+  server rolls.
 - Inviting a GM or observer without first joining as a player is not yet
   implemented; owners can promote an existing campaign member in Campaign
   Roles.

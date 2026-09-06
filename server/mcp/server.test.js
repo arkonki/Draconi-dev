@@ -11,6 +11,10 @@ const combatId = '82783674-9f79-4539-bd97-d88b3c772cc0';
 const monsterId = 'a245161e-d43c-4f17-a702-e1cbf7ca22d7';
 const monsterActorId = 'f4974280-bb74-4560-a8c1-11117b6668af';
 const sessionId = '9e748766-03c7-48ca-a59b-d17d66173c3f';
+const missionId = 'f35f9f4e-65c8-4a7f-a63a-3aa66ac84f48';
+const threatId = '4a7fd3d4-384d-42bc-9362-2c6379d70291';
+const waypointId = 'b93bd6e4-7b86-4ccd-8639-cb5f5fd5dd56';
+const soloAbilityId = '30000000-0000-4000-8000-000000000101';
 
 let client;
 let server;
@@ -25,6 +29,109 @@ beforeEach(async () => {
     getCampaignState: vi.fn(async () => ({
       data: { campaign: { id: campaignId, revision: 42 }, actors: [] },
       meta: { requestId: 'request-2', campaignRevision: 42 },
+    })),
+    getSoloOptions: vi.fn(async () => ({
+      data: {
+        campaignRevision: 42,
+        solo: { enabled: false },
+        characters: [{ id: actorId, name: 'Alaric' }],
+        modes: [{ key: 'custom', available: true }],
+      },
+      meta: { requestId: 'request-solo-options', campaignRevision: 42 },
+    })),
+    getSoloState: vi.fn(async () => ({
+      data: {
+        campaignRevision: 43,
+        solo: { enabled: true, mode: 'custom', playerCharacterId: actorId },
+        allowedNextActions: ['ask_fortune', 'draw_inspiration'],
+      },
+      meta: { requestId: 'request-solo-state', campaignRevision: 43 },
+    })),
+    enableSoloMode: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 43,
+        event_ids: ['0d6f6202-9be2-41d4-b8d0-1a0655243eb7'],
+        summary: 'Solo mode enabled for Alaric.',
+        state_excerpt: { solo: { enabled: true, mode: 'custom' } },
+      },
+      meta: { requestId: 'request-solo-enable', campaignRevision: 43 },
+    })),
+    selectSoloHeroicAbility: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 44,
+        event_ids: ['3ad553e5-32f9-42fa-a46f-a8e68afe88d4'],
+        summary: 'Army of One selected for Alaric.',
+        state_excerpt: {
+          solo: { enabled: true, soloHeroicAbilityId: soloAbilityId },
+          playerCharacter: { id: actorId, heroicAbilities: ['Army of One'] },
+        },
+      },
+      meta: { requestId: 'request-solo-ability', campaignRevision: 44 },
+    })),
+    askFortune: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 45,
+        event_ids: ['dbdcce2c-7c12-4160-8081-950e65050424'],
+        summary: 'Fortune answered “yes” (1d6: 4; kept 4).',
+        state_excerpt: { roll: { expression: '1d6', dice: [4], keptValues: [4] } },
+      },
+      meta: { requestId: 'request-fortune', campaignRevision: 45 },
+    })),
+    drawInspiration: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 46,
+        event_ids: ['f530f6b7-605b-452c-a184-d3441a26c79b'],
+        summary: 'Inspiration: reveal secret (4, 8).',
+        state_excerpt: { roll: { expression: '2d20', dice: [4, 8] } },
+      },
+      meta: { requestId: 'request-inspiration', campaignRevision: 46 },
+    })),
+    startSoloMission: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 47,
+        event_ids: ['ca287c76-d4c4-4ae7-a1ae-fc49becb8c81'],
+        summary: 'Solo mission “The Sunken Bell” started. Threat begins at 1.',
+        state_excerpt: {
+          mission: { id: missionId, status: 'active' },
+          threat: { id: threatId, counter: 1, status: 'active' },
+        },
+      },
+      meta: { requestId: 'request-mission-start', campaignRevision: 47 },
+    })),
+    advanceThreat: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 48,
+        event_ids: ['598f67de-e6c3-4ae1-b28c-e234df897f56'],
+        summary: 'Threat advanced from 1 to 2.',
+        state_excerpt: { threat: { id: threatId, counter: 2, status: 'active' } },
+      },
+      meta: { requestId: 'request-threat-advance', campaignRevision: 48 },
+    })),
+    revealWaypoint: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 49,
+        event_ids: ['4592aeed-80fa-453c-be28-c39da8cdaef5'],
+        summary: 'Waypoint revealed: Echoing gallery.',
+        state_excerpt: { currentWaypoint: { id: waypointId, status: 'active' } },
+      },
+      meta: { requestId: 'request-waypoint-reveal', campaignRevision: 49 },
+    })),
+    completeSoloMission: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 50,
+        event_ids: ['0dc71ac5-20e2-419e-a738-8342c7ee933a'],
+        summary: 'Solo mission “The Sunken Bell” ended with abandoned.',
+        state_excerpt: { mission: { id: missionId, status: 'abandoned' }, currentMissionId: null },
+      },
+      meta: { requestId: 'request-mission-complete', campaignRevision: 50 },
     })),
     getSessionHistory: vi.fn(async () => ({
       data: { campaignRevision: 42, sessions: [] },
@@ -452,6 +559,166 @@ describe('Dragonbane MCP server', () => {
     expect(api.getSessionHistory).toHaveBeenCalledTimes(1);
     expect(api.startSession).toHaveBeenCalledTimes(1);
     expect(api.completeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes a revision-safe solo setup and oracle workflow', async () => {
+    const options = await client.callTool({
+      name: 'get_solo_options',
+      arguments: { campaign_id: campaignId },
+    });
+    expect(options.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 42,
+      data: { solo: { enabled: false }, characters: [{ id: actorId }] },
+    });
+
+    const enabled = await client.callTool({
+      name: 'enable_solo_mode',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 42,
+        idempotency_key: 'solo-enable-1',
+        player_character_id: actorId,
+        mode: 'custom',
+        reason: 'The user starts a custom solo campaign.',
+      },
+    });
+    expect(enabled.structuredContent).toMatchObject({ success: true, campaign_revision: 43 });
+
+    const ability = await client.callTool({
+      name: 'select_solo_heroic_ability',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 43,
+        idempotency_key: 'solo-ability-1',
+        ability_id: soloAbilityId,
+        reason: 'The user confirmed Army of One as the additional solo ability.',
+      },
+    });
+    expect(ability.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 44,
+      state_excerpt: { playerCharacter: { heroicAbilities: ['Army of One'] } },
+    });
+
+    const fortune = await client.callTool({
+      name: 'ask_fortune',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 44,
+        idempotency_key: 'solo-fortune-1',
+        question: 'Is the old gate guarded?',
+        category: 'yes_no',
+        tilt: 'even',
+        reason: 'The answer is genuinely uncertain.',
+      },
+    });
+    expect(fortune.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 45,
+      state_excerpt: { roll: { expression: '1d6', dice: [4] } },
+    });
+
+    const inspiration = await client.callTool({
+      name: 'draw_inspiration',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 45,
+        idempotency_key: 'solo-inspire-1',
+        columns: ['action', 'thing'],
+        reason: 'The user asks what changes in the scene.',
+      },
+    });
+    expect(inspiration.structuredContent).toMatchObject({ success: true, campaign_revision: 46 });
+
+    const mission = await client.callTool({
+      name: 'start_solo_mission',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 46,
+        idempotency_key: 'solo-mission-1',
+        title: 'The Sunken Bell',
+        objective: 'Recover the bell before the tunnels flood.',
+        waypoint_count: 3,
+        opening_waypoint: {
+          title: 'Flooded stair',
+          description: 'Cold water flows down into the dark.',
+        },
+        threat: {
+          description: 'The lower tunnels are filling with water.',
+          recurring: false,
+          trigger_effect: { type: 'flood', consequence: 'The return route closes.' },
+        },
+        reason: 'The player accepts the custom mission.',
+      },
+    });
+    expect(mission.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 47,
+      state_excerpt: { mission: { id: missionId }, threat: { id: threatId, counter: 1 } },
+    });
+
+    const threat = await client.callTool({
+      name: 'advance_threat',
+      arguments: {
+        campaign_id: campaignId,
+        threat_id: threatId,
+        expected_revision: 47,
+        idempotency_key: 'solo-threat-1',
+        amount: 1,
+        reason: 'The hero spends a stretch searching the entrance.',
+      },
+    });
+    expect(threat.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 48,
+      state_excerpt: { threat: { counter: 2 } },
+    });
+
+    const waypoint = await client.callTool({
+      name: 'reveal_waypoint',
+      arguments: {
+        campaign_id: campaignId,
+        waypoint_id: waypointId,
+        expected_revision: 48,
+        idempotency_key: 'solo-waypoint-1',
+        title: 'Echoing gallery',
+        description: 'Every footstep returns from a different tunnel.',
+        reason: 'The hero leaves the entrance and enters the next area.',
+      },
+    });
+    expect(waypoint.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 49,
+      state_excerpt: { currentWaypoint: { id: waypointId, status: 'active' } },
+    });
+
+    const completed = await client.callTool({
+      name: 'complete_solo_mission',
+      arguments: {
+        campaign_id: campaignId,
+        mission_id: missionId,
+        expected_revision: 49,
+        idempotency_key: 'solo-complete-1',
+        outcome: 'abandoned',
+        summary: 'The rising water forces the hero to turn back.',
+        reason: 'The player abandons the mission.',
+      },
+    });
+    expect(completed.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 50,
+      state_excerpt: { currentMissionId: null },
+    });
+    expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
+    expect(api.enableSoloMode).toHaveBeenCalledTimes(1);
+    expect(api.selectSoloHeroicAbility).toHaveBeenCalledTimes(1);
+    expect(api.askFortune).toHaveBeenCalledTimes(1);
+    expect(api.drawInspiration).toHaveBeenCalledTimes(1);
+    expect(api.startSoloMission).toHaveBeenCalledTimes(1);
+    expect(api.advanceThreat).toHaveBeenCalledTimes(1);
+    expect(api.revealWaypoint).toHaveBeenCalledTimes(1);
+    expect(api.completeSoloMission).toHaveBeenCalledTimes(1);
   });
 
   it('rejects duplicate combat effect targets before calling the API', async () => {

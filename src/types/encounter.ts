@@ -17,6 +17,8 @@ export interface EncounterCombatant {
   max_wp: number | null;
   status_effects: EncounterStatusEffect[];
   initiative_roll: number | null;
+  initiative_slots?: number[];
+  completed_initiative_slots?: number[];
   is_active_turn: boolean;
   has_acted: boolean;
   created_at: string;
@@ -26,6 +28,7 @@ export interface EncounterCombatant {
     max_hp: number;
     current_wp: number;
     max_wp: number;
+    heroic_ability?: string[];
   };
 }
 
@@ -37,6 +40,7 @@ export interface Encounter {
   status: 'planning' | 'active' | 'completed';
   current_round: number;
   active_combatant_id: string | null;
+  active_initiative_slot?: number | null;
   log?: unknown[]; // Array of combat events
   created_at: string;
   updated_at: string;

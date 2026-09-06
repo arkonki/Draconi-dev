@@ -12,6 +12,8 @@ Draconi Helper MCP endpoint.
 - [x] Revision checks, idempotency, campaign authorization, and event history.
 - [x] Production deployment, database safety backup, smoke tests, and server
   dependency audit.
+- [x] Ensure non-Helper campaign writes append a fallback audit event whenever
+  they advance the campaign revision.
 
 ## Phase 1 — Campaign-specific roles
 
@@ -32,6 +34,29 @@ Draconi Helper MCP endpoint.
 - [ ] Add administrator-visible OAuth connection and token revocation controls.
 
 ## Phase 2 — Trusted dice rolls
+
+Solo foundation already delivered toward this phase:
+
+- [x] Add immutable server roll records for Solo Fortune and Inspiration.
+- [x] Generate Solo server rolls with a cryptographically secure random source.
+- [x] Expose `get_solo_options`, `enable_solo_mode`, `get_solo_state`,
+  `ask_fortune`, and `draw_inspiration` through REST and MCP.
+- [x] Preserve raw dice, kept values, table versions, revision, idempotency, and
+  campaign events for those Solo operations.
+- [x] Persist custom Solo missions, public/secret waypoint separation, and one
+  active threat beginning at 1.
+- [x] Expose sequential waypoint reveal, +1/+2 threat advancement and trigger,
+  and mission completion through REST and MCP.
+- [x] Test that later unknown waypoint content and an untriggered threat effect
+  are absent from API responses.
+- [x] Seed Army of One and Sole Survivor with stable rule keys and explicit
+  passive/contextual activation metadata.
+- [x] Add confirmed solo heroic-ability selection without overwriting a
+  pre-existing character ability.
+- [x] Apply Sole Survivor in the failed-roll push flow for exactly 3 WP and no
+  condition.
+- [x] Model Army of One as one actor with two distinct initiative slots and two
+  ordered turns per round in both the web encounter and Helper combat flows.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

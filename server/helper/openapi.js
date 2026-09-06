@@ -2,15 +2,23 @@ import { z } from 'zod';
 import {
   addEncounterParticipantsBodySchema,
   advanceCombatTurnBodySchema,
+  advanceThreatBodySchema,
+  askFortuneBodySchema,
   appendCampaignEventBodySchema,
   applyActorChangesBodySchema,
+  completeSoloMissionBodySchema,
   completeSessionBodySchema,
   createEncounterBodySchema,
+  drawInspirationBodySchema,
+  enableSoloModeBodySchema,
+  selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
   resolveGameActionBodySchema,
   removeEncounterParticipantBodySchema,
+  revealWaypointBodySchema,
   startSessionBodySchema,
   startCombatBodySchema,
+  startSoloMissionBodySchema,
 } from './schemas.js';
 
 const errorResponse = {
@@ -122,7 +130,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.3.0',
+    version: '1.6.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -135,6 +143,7 @@ export const openApiDocument = {
   tags: [
     { name: 'Health' },
     { name: 'Campaigns' },
+    { name: 'Solo' },
     { name: 'Actors' },
     { name: 'Combat' },
     { name: 'Events' },
@@ -190,6 +199,208 @@ export const openApiDocument = {
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/options': {
+      get: {
+        tags: ['Solo'],
+        summary: 'Get solo-mode setup options and prerequisites',
+        parameters: [campaignParameter],
+        responses: {
+          200: { description: 'Solo setup options', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo': {
+      get: {
+        tags: ['Solo'],
+        summary: 'Get authoritative solo continuation state',
+        parameters: [campaignParameter],
+        responses: {
+          200: { description: 'Solo state', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+      post: {
+        tags: ['Solo'],
+        summary: 'Enable custom solo mode for one campaign character',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(enableSoloModeBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Solo mode enabled', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/heroic-ability': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Select the solo character additional heroic ability',
+        description: 'GM-only. Applies a user-confirmed heroic ability choice to the configured solo character and records the change as a campaign event.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(selectSoloHeroicAbilityBodySchema),
+              example: {
+                ability_id: '30000000-0000-4000-8000-000000000102',
+                reason: 'The user selected Sole Survivor for the solo hero.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Ability selected or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/fortune': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Ask the Fortune oracle with a recorded server roll',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(askFortuneBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Recorded Fortune result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/inspiration': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Draw one or more recorded Inspiration columns',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(drawInspirationBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Recorded Inspiration result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/missions': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Start a persisted custom solo mission',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(startSoloMissionBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Solo mission started', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/reveal': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Reveal and activate the next sequential waypoint',
+        parameters: [
+          campaignParameter,
+          { name: 'waypointId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(revealWaypointBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Waypoint revealed', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/missions/{missionId}/complete': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Complete the current solo mission',
+        parameters: [
+          campaignParameter,
+          { name: 'missionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(completeSoloMissionBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Mission completed', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/threats/{threatId}/advance': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Advance and possibly trigger the active solo threat',
+        parameters: [
+          campaignParameter,
+          { name: 'threatId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(advanceThreatBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Threat transition recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
         },
       },
     },
@@ -482,7 +693,7 @@ export const openApiDocument = {
       post: {
         tags: ['Combat'],
         summary: 'Start an existing planned combat encounter',
-        description: 'GM-only. Synchronizes player-character vitals, applies optional initiative assignments, resets acted flags, and selects the first living actor.',
+        description: 'GM-only. Synchronizes player-character vitals, applies optional initiative assignments, resets acted flags, and selects the first living actor. A lone Army of One hero must receive two distinct initiative_slots.',
         parameters: [campaignParameter, combatParameter, revisionHeader, idempotencyHeader],
         requestBody: {
           required: true,
@@ -491,7 +702,7 @@ export const openApiDocument = {
               schema: z.toJSONSchema(startCombatBodySchema),
               example: {
                 initiatives: [
-                  { actor_id: '9e031ae2-f333-4546-8475-530962888e5f', initiative: 3 },
+                  { actor_id: '9e031ae2-f333-4546-8475-530962888e5f', initiative_slots: [3, 8] },
                 ],
                 reason: 'The ambushers spring from the ruined watchtower.',
               },

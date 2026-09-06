@@ -64,7 +64,7 @@ export function CompendiumAdmin({ onEntryAdded }: CompendiumAdminProps) {
           break;
         case 'abilities':
           query = supabase
-            .from('game_heroic_abilities')
+            .from('heroic_abilities')
             .select('*')
             .order('name');
           break;
@@ -96,7 +96,7 @@ export function CompendiumAdmin({ onEntryAdded }: CompendiumAdminProps) {
           table = 'game_items';
           break;
         case 'abilities':
-          table = 'game_heroic_abilities';
+          table = 'heroic_abilities';
           break;
       }
 
@@ -129,7 +129,7 @@ export function CompendiumAdmin({ onEntryAdded }: CompendiumAdminProps) {
       const { error } = await supabase
         .from(activeCategory === 'spells' ? 'game_spells' : 
               activeCategory === 'items' ? 'game_items' : 
-              'game_heroic_abilities')
+              'heroic_abilities')
         .delete()
         .eq('id', id);
 

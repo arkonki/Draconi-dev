@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   fetchCharacterById: vi.fn(),
   fetchItems: vi.fn(),
   heroicAbilitiesOrder: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock('../lib/api/characters', () => ({
@@ -23,6 +24,7 @@ vi.mock('../lib/api/encounters', () => ({
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
+    rpc: mocks.rpc,
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         order: mocks.heroicAbilitiesOrder,
@@ -38,6 +40,7 @@ describe('characterSheetStore', () => {
     mocks.fetchCharacterById.mockReset();
     mocks.fetchItems.mockReset();
     mocks.heroicAbilitiesOrder.mockReset();
+    mocks.rpc.mockReset();
 
     useCharacterSheetStore.setState({
       character: null,
@@ -82,5 +85,28 @@ describe('characterSheetStore', () => {
     );
 
     consoleError.mockRestore();
+  });
+
+  it('spends Sole Survivor WP atomically and updates local character state', async () => {
+    const character = {
+      id: 'character-1',
+      user_id: 'user-1',
+      name: 'Anemone',
+      party_id: 'party-1',
+      current_wp: 7,
+    } as unknown as Character;
+    mocks.rpc.mockResolvedValue({ data: { current_wp: 4, spent_wp: 3 }, error: null });
+    useCharacterSheetStore.setState({ character });
+
+    await useCharacterSheetStore.getState().spendSoleSurvivorWillpower();
+
+    expect(mocks.rpc).toHaveBeenCalledWith('spend_solo_survivor_wp', {
+      p_character_id: character.id,
+    });
+    expect(useCharacterSheetStore.getState()).toMatchObject({
+      character: { id: character.id, current_wp: 4 },
+      isSaving: false,
+      saveError: null,
+    });
   });
 });

@@ -2,10 +2,16 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import {
   addEncounterParticipantsInputSchema,
   advanceCombatTurnInputSchema,
+  advanceThreatInputSchema,
+  askFortuneInputSchema,
   appendCampaignEventInputSchema,
   applyActorChangesInputSchema,
+  completeSoloMissionInputSchema,
   completeSessionInputSchema,
   createEncounterInputSchema,
+  drawInspirationInputSchema,
+  enableSoloModeInputSchema,
+  selectSoloHeroicAbilityInputSchema,
   endCombatInputSchema,
   getActorInputSchema,
   getCampaignStateInputSchema,
@@ -13,13 +19,17 @@ import {
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
   getSessionHistoryInputSchema,
+  getSoloOptionsInputSchema,
+  getSoloStateInputSchema,
   listCampaignsInputSchema,
   mcpReadResultSchema,
   mcpWriteResultSchema,
   resolveGameActionInputSchema,
   removeEncounterParticipantInputSchema,
+  revealWaypointInputSchema,
   startCombatInputSchema,
   startSessionInputSchema,
+  startSoloMissionInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
 
@@ -112,15 +122,17 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.3.0' },
+    { name: 'dragonbane-helper', version: '1.6.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
         'Before every write use the latest campaign revision and a unique idempotency key.',
         'On REVISION_CONFLICT, read state again and reassess; never repeat stale arguments.',
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
-        'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin.',
+        'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
+        'For solo play, call get_solo_state before narrating. Fortune and Inspiration results are authoritative only when returned by their tools.',
+        'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
     },
@@ -141,6 +153,86 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
   }, safe(async (input) => readResult(await apiClient.getCampaignState(input))));
+
+  server.registerTool('get_solo_options', {
+    title: 'Get solo-mode setup options',
+    description: 'List eligible campaign characters, supported solo rulesets and modes, current solo configuration, and missing prerequisites. Use before enabling solo mode.',
+    inputSchema: getSoloOptionsInputSchema,
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getSoloOptions(input))));
+
+  server.registerTool('get_solo_state', {
+    title: 'Get authoritative solo state',
+    description: 'Use before narrating or continuing solo play. Returns the solo hero, public scene, recent trusted rolls, and currently allowed solo actions.',
+    inputSchema: getSoloStateInputSchema,
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getSoloState(input))));
+
+  server.registerTool('enable_solo_mode', {
+    title: 'Enable solo mode for a campaign',
+    description: 'GM-only. Bind one existing campaign player character to the supported solo ruleset. This never changes heroic abilities automatically and currently supports custom solo adventures only.',
+    inputSchema: enableSoloModeInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.enableSoloMode(input))));
+
+  server.registerTool('select_solo_heroic_ability', {
+    title: 'Select the solo hero additional ability',
+    description: 'GM-only. After explicit user confirmation, assign or replace the configured solo character additional heroic ability. Use get_solo_options first and pass an ability ID returned there.',
+    inputSchema: selectSoloHeroicAbilityInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.selectSoloHeroicAbility(input))));
+
+  server.registerTool('ask_fortune', {
+    title: 'Ask the solo Fortune oracle',
+    description: 'GM-only. Resolve a genuinely uncertain solo question with an authoritative server roll, retaining every die, the kept result, table version, and campaign event.',
+    inputSchema: askFortuneInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.askFortune(input))));
+
+  server.registerTool('draw_inspiration', {
+    title: 'Draw solo inspiration',
+    description: 'GM-only. Roll any selected subset of action, attribute, and thing columns. Results are prompts, not established campaign facts until applied through a later event.',
+    inputSchema: drawInspirationInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.drawInspiration(input))));
+
+  server.registerTool('start_solo_mission', {
+    title: 'Start a custom solo mission',
+    description: 'GM-only. Start one persisted custom mission with an active opening waypoint, hidden unknown waypoint placeholders, a revealed objective waypoint, and one threat counter beginning at 1.',
+    inputSchema: startSoloMissionInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.startSoloMission(input))));
+
+  server.registerTool('reveal_waypoint', {
+    title: 'Reveal the next solo waypoint',
+    description: 'GM-only. Resolve the current waypoint and activate only the next sequential waypoint. Unknown waypoint content is supplied at reveal time and later hidden waypoints remain absent from responses.',
+    inputSchema: revealWaypointInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.revealWaypoint(input))));
+
+  server.registerTool('advance_threat', {
+    title: 'Advance the active solo threat',
+    description: 'GM-only. Advance the current mission threat by 1 or 2 for the supplied reason. At 6, reveal and record its trigger effect; recurring threats reset to 1.',
+    inputSchema: advanceThreatInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.advanceThreat(input))));
+
+  server.registerTool('complete_solo_mission', {
+    title: 'Complete the current solo mission',
+    description: 'GM-only. End the current solo mission as success, failure, or abandoned and record its durable summary and rewards. Success is allowed only at the final objective waypoint.',
+    inputSchema: completeSoloMissionInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.completeSoloMission(input))));
 
   server.registerTool('get_session_history', {
     title: 'Get game session history',
@@ -216,7 +308,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('start_combat', {
     title: 'Start a combat encounter',
-    description: 'GM-only. Start an existing planned encounter, optionally assign initiative cards 1–10, synchronize player-character vitals, and select the first active actor. Read campaign state immediately before calling.',
+    description: 'GM-only. Start an existing planned encounter, optionally assign initiative cards 1–10, synchronize player-character vitals, and select the first active actor. For a lone solo hero with Army of One, pass two distinct initiative_slots on that actor assignment. Read campaign state immediately before calling.',
     inputSchema: startCombatInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
@@ -232,7 +324,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('advance_combat_turn', {
     title: 'Advance the combat turn',
-    description: 'GM-only. Advance from an actor whose turn was resolved to the next living participant. When everyone has acted, start the next round while preserving the current initiative order.',
+    description: 'GM-only. Advance from a resolved initiative slot to the next living participant slot. Army of One can therefore activate the same actor twice in one round. When all slots are resolved, start the next round while preserving the current initiative cards.',
     inputSchema: advanceCombatTurnInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
@@ -324,11 +416,24 @@ export function createDragonbaneMcpServer(apiClient) {
         'start_session',
         'complete_session',
       ],
+      supportedSoloOperations: [
+        'get_solo_options',
+        'get_solo_state',
+        'enable_solo_mode',
+        'select_solo_heroic_ability',
+        'ask_fortune',
+        'draw_inspiration',
+        'start_solo_mission',
+        'reveal_waypoint',
+        'advance_threat',
+        'complete_solo_mission',
+      ],
       combatLimits: [
         'only party characters and monsters from the local catalog can be added',
         'monster ferocity may expand one creature into multiple initiative actions',
         'dice outcomes must come from the user or application',
         'initiative order is preserved when a new round starts',
+        'Army of One uses two distinct initiative slots on one actor; the actor is never duplicated',
       ],
       standardConditions: [
         'exhausted',
@@ -353,6 +458,16 @@ export function createDragonbaneMcpServer(apiClient) {
 export const mcpToolAnnotations = {
   list_campaigns: READ_ONLY,
   get_campaign_state: READ_ONLY,
+  get_solo_options: READ_ONLY,
+  get_solo_state: READ_ONLY,
+  enable_solo_mode: MODIFYING,
+  select_solo_heroic_ability: MODIFYING,
+  ask_fortune: MODIFYING,
+  draw_inspiration: MODIFYING,
+  start_solo_mission: MODIFYING,
+  reveal_waypoint: MODIFYING,
+  advance_threat: MODIFYING,
+  complete_solo_mission: MODIFYING,
   get_actor: READ_ONLY,
   get_combat_state: READ_ONLY,
   start_combat: MODIFYING,

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { pool, withTransaction } from '../db.js';
+import { executeRpc } from '../rpc.js';
 
 const apiBaseUrl = process.env.HELPER_SMOKE_API_URL || `http://127.0.0.1:${process.env.PORT || 3000}`;
 const mcpUrl = process.env.MCP_SMOKE_URL;
@@ -40,7 +41,7 @@ let mcpClient;
 
 try {
   const { rows: users } = await pool.query(
-    'SELECT id FROM users WHERE lower(email) = $1 AND is_active = true',
+    'SELECT id, email, role FROM users WHERE lower(email) = $1 AND is_active = true',
     [email],
   );
   assert(users[0], 'Development user does not exist.');
@@ -220,7 +221,14 @@ try {
   assert(appended.response.status === 200, `Event append failed: ${JSON.stringify(appended.payload)}`);
 
   const events = await api(`/api/v1/campaigns/${campaignId}/events?limit=10`);
-  assert(events.payload.data.length === 2, 'Expected exactly one damage event and one narrative event.');
+  assert(
+    events.payload.data.some(({ type }) => type === 'campaign.smoke_test'),
+    'Narrative event was not returned.',
+  );
+  assert(
+    events.payload.data.some(({ type }) => type === 'app.characters.update'),
+    'Direct application-style character update did not produce an audit event.',
+  );
   assert(events.payload.data[0].sequence > events.payload.data[1].sequence, 'Events are not ordered newest first.');
 
   const sessionStarted = await api(
@@ -514,6 +522,411 @@ try {
     'Removed participant remained in the planned encounter.',
   );
 
+  const soloOptions = await api(`/api/v1/campaigns/${campaignId}/solo/options`);
+  assert(soloOptions.response.status === 200, `Solo options failed: ${JSON.stringify(soloOptions.payload)}`);
+  assert(
+    soloOptions.payload.data.characters.some(({ id }) => id === actorId),
+    'Solo options omitted the campaign character.',
+  );
+  const soloEnableKey = `smoke-solo-enable-${randomUUID()}`;
+  const soloEnableBody = {
+    player_character_id: actorId,
+    mode: 'custom',
+    ruleset_version: 'db-solo-v1.2',
+    oracle_default_tilt: 'ask',
+    reason: 'Enable the disposable custom solo campaign.',
+  };
+  const soloEnabled = await api(
+    `/api/v1/campaigns/${campaignId}/solo`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${soloOptions.payload.data.campaignRevision}"`,
+        'idempotency-key': soloEnableKey,
+      },
+      body: JSON.stringify(soloEnableBody),
+    },
+  );
+  assert(soloEnabled.response.status === 200, `Solo enable failed: ${JSON.stringify(soloEnabled.payload)}`);
+  assert(soloEnabled.payload.data.state_excerpt.solo.enabled, 'Solo mode was not enabled.');
+
+  const soloEnabledReplay = await api(
+    `/api/v1/campaigns/${campaignId}/solo`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${soloOptions.payload.data.campaignRevision}"`,
+        'idempotency-key': soloEnableKey,
+      },
+      body: JSON.stringify(soloEnableBody),
+    },
+  );
+  assert(soloEnabledReplay.response.status === 200, 'Solo enable idempotent replay failed.');
+  assert(
+    soloEnabledReplay.payload.data.event_ids[0] === soloEnabled.payload.data.event_ids[0],
+    'Solo enable replay returned a different event.',
+  );
+
+  const armyOfOne = soloOptions.payload.data.heroicAbilities.find(
+    ({ ruleKey }) => ruleKey === 'solo.army_of_one',
+  );
+  assert(armyOfOne, 'Solo options omitted Army of One.');
+  const soleSurvivor = soloOptions.payload.data.heroicAbilities.find(
+    ({ ruleKey }) => ruleKey === 'solo.sole_survivor',
+  );
+  assert(soleSurvivor, 'Solo options omitted Sole Survivor.');
+  const selectedSoloAbility = await api(
+    `/api/v1/campaigns/${campaignId}/solo/heroic-ability`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${soloEnabled.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-ability-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        ability_id: armyOfOne.id,
+        reason: 'Confirm Army of One as the disposable solo character additional ability.',
+      }),
+    },
+  );
+  assert(selectedSoloAbility.response.status === 200, `Solo ability selection failed: ${JSON.stringify(selectedSoloAbility.payload)}`);
+  assert(
+    selectedSoloAbility.payload.data.state_excerpt.playerCharacter.heroicAbilities.includes('Army of One'),
+    'Army of One was not added to the solo character.',
+  );
+
+  const preparedForArmy = removedParticipant.payload.data.state_excerpt.combat.participants;
+  const armyEnemy = preparedForArmy.find(({ type }) => type === 'monster');
+  assert(armyEnemy, 'The prepared Army of One combat has no enemy.');
+  const armyCombatStarted = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/start`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${selectedSoloAbility.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-army-start-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        initiatives: [
+          { actor_id: actorId, initiative_slots: [2, 8] },
+          { actor_id: armyEnemy.actorId, initiative: 5 },
+        ],
+        reason: 'Verify Army of One multi-initiative combat.',
+      }),
+    },
+  );
+  assert(armyCombatStarted.response.status === 200, `Army of One combat failed to start: ${JSON.stringify(armyCombatStarted.payload)}`);
+  let armyRevision = armyCombatStarted.payload.data.campaign_revision;
+  let armyCombat = armyCombatStarted.payload.data.state_excerpt.combat;
+  assert(armyCombat.activeActorId === actorId && armyCombat.activeInitiativeSlot === 2, 'Army of One first slot was not active.');
+  assert(
+    armyCombat.participants.find(({ actorId: id }) => id === actorId)?.initiativeSlots?.join(',') === '2,8',
+    'Army of One did not persist both initiative slots.',
+  );
+
+  const resolveArmyTurn = async (actorIdToResolve, label) => {
+    const resolved = await api(
+      `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/actions`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${armyRevision}"`,
+          'idempotency-key': `smoke-army-action-${label}-${randomUUID()}`,
+        },
+        body: JSON.stringify({
+          actor_id: actorIdToResolve,
+          action: `${label} test action`,
+          outcome: 'automatic',
+          effects: [],
+          consume_turn: true,
+          reason: `Resolve ${label} in the Army of One test.`,
+        }),
+      },
+    );
+    assert(resolved.response.status === 200, `Army action failed: ${JSON.stringify(resolved.payload)}`);
+    armyRevision = resolved.payload.data.campaign_revision;
+    const advanced = await api(
+      `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/turns/advance`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${armyRevision}"`,
+          'idempotency-key': `smoke-army-advance-${label}-${randomUUID()}`,
+        },
+        body: JSON.stringify({ reason: `Advance after ${label}.` }),
+      },
+    );
+    assert(advanced.response.status === 200, `Army turn advance failed: ${JSON.stringify(advanced.payload)}`);
+    armyRevision = advanced.payload.data.campaign_revision;
+    armyCombat = advanced.payload.data.state_excerpt.combat;
+  };
+
+  await resolveArmyTurn(actorId, 'first hero slot');
+  assert(armyCombat.activeActorId === armyEnemy.actorId && armyCombat.activeInitiativeSlot === 5, 'Enemy did not act between Army of One slots.');
+  await resolveArmyTurn(armyEnemy.actorId, 'enemy slot');
+  assert(armyCombat.activeActorId === actorId && armyCombat.activeInitiativeSlot === 8, 'Army of One second slot was not reached.');
+  await resolveArmyTurn(actorId, 'second hero slot');
+  assert(armyCombat.round === 2 && armyCombat.activeActorId === actorId, 'Army of One round did not reset after both hero slots.');
+
+  const armyCombatEnded = await api(
+    `/api/v1/campaigns/${campaignId}/combat/${preparedCombatId}/end`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${armyRevision}"`,
+        'idempotency-key': `smoke-army-end-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        outcome: 'other',
+        summary: 'Army of One multi-slot verification complete.',
+        reason: 'End the disposable Army of One combat.',
+      }),
+    },
+  );
+  assert(armyCombatEnded.response.status === 200, `Army combat end failed: ${JSON.stringify(armyCombatEnded.payload)}`);
+
+  const selectedSoleSurvivor = await api(
+    `/api/v1/campaigns/${campaignId}/solo/heroic-ability`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${armyCombatEnded.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-survivor-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        ability_id: soleSurvivor.id,
+        reason: 'Confirm Sole Survivor and verify its atomic WP cost.',
+      }),
+    },
+  );
+  assert(selectedSoleSurvivor.response.status === 200, `Sole Survivor selection failed: ${JSON.stringify(selectedSoleSurvivor.payload)}`);
+  const wpBeforeSoleSurvivor = await pool.query(
+    'SELECT current_wp, conditions FROM characters WHERE id = $1',
+    [actorId],
+  );
+  const soleSurvivorSpent = await executeRpc(
+    users[0],
+    'spend_solo_survivor_wp',
+    { p_character_id: actorId },
+  );
+  assert(
+    soleSurvivorSpent.current_wp === Number(wpBeforeSoleSurvivor.rows[0].current_wp) - 3,
+    'Sole Survivor did not spend exactly 3 WP.',
+  );
+  const afterSoleSurvivor = await pool.query(
+    'SELECT current_wp, conditions FROM characters WHERE id = $1',
+    [actorId],
+  );
+  assert(
+    JSON.stringify(afterSoleSurvivor.rows[0].conditions) === JSON.stringify(wpBeforeSoleSurvivor.rows[0].conditions),
+    'Sole Survivor changed a condition.',
+  );
+  await pool.query('UPDATE characters SET current_wp = 2 WHERE id = $1', [actorId]);
+  let insufficientSoleSurvivorError;
+  try {
+    await executeRpc(users[0], 'spend_solo_survivor_wp', { p_character_id: actorId });
+  } catch (error) {
+    insufficientSoleSurvivorError = error;
+  }
+  assert(insufficientSoleSurvivorError?.status === 409, 'Sole Survivor allowed a character with fewer than 3 WP to spend.');
+  const wpAfterRejectedSpend = await pool.query('SELECT current_wp FROM characters WHERE id = $1', [actorId]);
+  assert(Number(wpAfterRejectedSpend.rows[0].current_wp) === 2, 'Rejected Sole Survivor spend changed WP.');
+
+  const stateAfterSoloAbilityChecks = await api(`/api/v1/campaigns/${campaignId}/state`);
+  assert(stateAfterSoloAbilityChecks.response.status === 200, 'Could not refresh campaign state after solo ability checks.');
+
+  const fortune = await api(
+    `/api/v1/campaigns/${campaignId}/solo/fortune`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${stateAfterSoloAbilityChecks.payload.data.campaign.revision}"`,
+        'idempotency-key': `smoke-fortune-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        question: 'Is the smoke gate guarded?',
+        category: 'yes_no',
+        tilt: 'unlikely',
+        reason: 'Verify an authoritative recorded Fortune roll.',
+      }),
+    },
+  );
+  assert(fortune.response.status === 200, `Fortune roll failed: ${JSON.stringify(fortune.payload)}`);
+  const fortuneRoll = fortune.payload.data.state_excerpt.roll;
+  assert(fortuneRoll.dice.length === 2, 'Unlikely Fortune did not retain two dice.');
+  assert(
+    fortuneRoll.keptValues[0] === Math.min(...fortuneRoll.dice),
+    'Unlikely Fortune did not retain the lower die.',
+  );
+
+  const inspiration = await api(
+    `/api/v1/campaigns/${campaignId}/solo/inspiration`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${fortune.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-inspiration-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        columns: ['action', 'thing'],
+        reason: 'Verify a recorded generic Inspiration draw.',
+      }),
+    },
+  );
+  assert(inspiration.response.status === 200, `Inspiration draw failed: ${JSON.stringify(inspiration.payload)}`);
+  assert(
+    inspiration.payload.data.state_excerpt.roll.result.officialTable === false,
+    'Generic Inspiration was incorrectly presented as an official table.',
+  );
+
+  const soloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
+  assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
+  assert(soloState.payload.data.latestRolls.length === 2, 'Solo state did not return both recorded rolls.');
+  const storedRolls = await pool.query(
+    'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
+    [campaignId],
+  );
+  assert(storedRolls.rows[0].count === 2, 'Solo rolls were not persisted exactly once.');
+
+  const missionStarted = await api(
+    `/api/v1/campaigns/${campaignId}/solo/missions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${inspiration.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-mission-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        title: 'The Sunken Bell',
+        objective: 'Recover the bell before the tunnels flood.',
+        waypoint_count: 4,
+        opening_waypoint: {
+          title: 'Flooded stair',
+          description: 'Cold water flows down into the dark.',
+        },
+        threat: {
+          description: 'The lower tunnels are filling with water.',
+          recurring: false,
+          trigger_effect: { type: 'route_closed', detail: 'The direct return route floods.' },
+        },
+        reason: 'Start a disposable custom Solo mission.',
+      }),
+    },
+  );
+  assert(missionStarted.response.status === 200, `Solo mission start failed: ${JSON.stringify(missionStarted.payload)}`);
+  const missionState = missionStarted.payload.data.state_excerpt;
+  assert(missionState.mission.status === 'active', 'Solo mission did not become active.');
+  assert(missionState.threat.counter === 1, 'Solo mission threat did not start at 1.');
+  assert(!Object.hasOwn(missionState.threat, 'triggerEffect'), 'Untriggered threat effect leaked from mission start.');
+  const unknownWaypoints = missionState.waypoints.filter(({ kind }) => kind === 'unknown');
+  assert(unknownWaypoints.length === 2, 'Custom mission did not create the requested unknown waypoint placeholders.');
+  assert(
+    unknownWaypoints.every(({ title, description, status }) => title === null && description === null && status === 'hidden'),
+    'An unknown waypoint exposed content before reveal.',
+  );
+  const missionId = missionState.mission.id;
+  const threatId = missionState.threat.id;
+
+  let threatRevision = missionStarted.payload.data.campaign_revision;
+  for (const [index, amount] of [2, 2, 1].entries()) {
+    const advanced = await api(
+      `/api/v1/campaigns/${campaignId}/solo/threats/${threatId}/advance`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${threatRevision}"`,
+          'idempotency-key': `smoke-threat-${index}-${randomUUID()}`,
+        },
+        body: JSON.stringify({
+          amount,
+          reason: `Disposable threat advance ${index + 1}.`,
+        }),
+      },
+    );
+    assert(advanced.response.status === 200, `Threat advance failed: ${JSON.stringify(advanced.payload)}`);
+    threatRevision = advanced.payload.data.campaign_revision;
+    if (index < 2) {
+      assert(
+        !Object.hasOwn(advanced.payload.data.state_excerpt.threat, 'triggerEffect'),
+        'Threat effect leaked before counter 6.',
+      );
+    } else {
+      assert(advanced.payload.data.state_excerpt.transition.triggered, 'Threat did not trigger at counter 6.');
+      assert(
+        advanced.payload.data.state_excerpt.threat.triggerEffect.type === 'route_closed',
+        'Triggered threat did not reveal its structured effect.',
+      );
+    }
+  }
+
+  const continuedSoloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(continuedSoloState.response.status === 200, 'Solo mission continuation state failed.');
+  assert(continuedSoloState.payload.data.activeMission.id === missionId, 'Solo state lost the active mission.');
+  assert(continuedSoloState.payload.data.currentWaypoint.status === 'active', 'Solo state lost the active waypoint.');
+  assert(
+    continuedSoloState.payload.data.waypoints.filter(({ kind }) => kind === 'unknown')
+      .every(({ title, description }) => title === null && description === null),
+    'Solo continuation state leaked unknown waypoint content.',
+  );
+
+  let waypointRevision = continuedSoloState.payload.data.campaignRevision;
+  const remainingWaypoints = continuedSoloState.payload.data.waypoints
+    .filter(({ position }) => position > 0)
+    .sort((left, right) => left.position - right.position);
+  for (const waypoint of remainingWaypoints) {
+    const isUnknown = waypoint.kind === 'unknown';
+    const revealed = await api(
+      `/api/v1/campaigns/${campaignId}/solo/waypoints/${waypoint.id}/reveal`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${waypointRevision}"`,
+          'idempotency-key': `smoke-waypoint-${waypoint.position}-${randomUUID()}`,
+        },
+        body: JSON.stringify({
+          ...(isUnknown ? {
+            title: `Unknown chamber ${waypoint.position}`,
+            description: `The chamber at position ${waypoint.position} is revealed only on arrival.`,
+            generated_from_roll_ids: waypoint.position === 1 ? [fortuneRoll.id] : [],
+          } : {}),
+          reason: `Advance to waypoint ${waypoint.position}.`,
+        }),
+      },
+    );
+    assert(revealed.response.status === 200, `Waypoint reveal failed: ${JSON.stringify(revealed.payload)}`);
+    assert(revealed.payload.data.state_excerpt.currentWaypoint.id === waypoint.id, 'Wrong waypoint became active.');
+    const futureUnknowns = revealed.payload.data.state_excerpt.waypoints
+      .filter((entry) => entry.position > waypoint.position && entry.kind === 'unknown');
+    assert(
+      futureUnknowns.every(({ title, description }) => title === null && description === null),
+      'Revealing one waypoint leaked a later unknown waypoint.',
+    );
+    waypointRevision = revealed.payload.data.campaign_revision;
+  }
+
+  const missionCompleted = await api(
+    `/api/v1/campaigns/${campaignId}/solo/missions/${missionId}/complete`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${waypointRevision}"`,
+        'idempotency-key': `smoke-mission-complete-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        outcome: 'success',
+        summary: 'The disposable bell was recovered.',
+        rewards: { testReward: true },
+        reason: 'Verify successful completion at the objective waypoint.',
+      }),
+    },
+  );
+  assert(missionCompleted.response.status === 200, `Mission completion failed: ${JSON.stringify(missionCompleted.payload)}`);
+  assert(missionCompleted.payload.data.state_excerpt.mission.status === 'success', 'Mission did not complete successfully.');
+  const postMissionState = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(postMissionState.payload.data.activeMission === null, 'Completed mission remained active in Solo state.');
+  assert(postMissionState.payload.data.solo.currentMissionId === null, 'Solo campaign retained a completed current mission ID.');
+
   const playerToken = `smoke-player-${randomUUID()}`;
   const playerIdentity = randomUUID();
   await withTransaction(async (client) => {
@@ -580,6 +993,16 @@ try {
       'get_session_history',
       'start_session',
       'complete_session',
+      'get_solo_options',
+      'get_solo_state',
+      'enable_solo_mode',
+      'select_solo_heroic_ability',
+      'ask_fortune',
+      'draw_inspiration',
+      'start_solo_mission',
+      'reveal_waypoint',
+      'advance_threat',
+      'complete_solo_mission',
       'start_combat',
       'resolve_game_action',
       'advance_combat_turn',
@@ -592,6 +1015,14 @@ try {
       arguments: { campaign_id: campaignId },
     });
     assert(mcpState.structuredContent?.success === true, 'MCP campaign state call was not structured.');
+    const mcpSoloState = await mcpClient.callTool({
+      name: 'get_solo_state',
+      arguments: { campaign_id: campaignId },
+    });
+    assert(
+      mcpSoloState.structuredContent?.data?.solo?.playerCharacterId === actorId,
+      'MCP solo state did not return the selected solo character.',
+    );
     const mcpOptions = await mcpClient.callTool({
       name: 'get_encounter_setup_options',
       arguments: { campaign_id: campaignId, monster_search: 'Smoke Hydra', monster_limit: 10 },
@@ -690,6 +1121,7 @@ try {
       'revision conflict',
       'atomic rollback',
       'append-only event sequence',
+      'automatic audit event for non-Helper campaign writes',
       'combat start and idempotent replay',
       'active-turn enforcement',
       'atomic combat action effects',
@@ -700,10 +1132,15 @@ try {
       'encounter creation',
       'bulk participant and ferocity expansion',
       'planned participant removal',
+      'solo setup, idempotency, confirmed heroic ability selection, Fortune, Inspiration, and persisted state',
+      'Army of One two-slot combat sequencing',
+      'Sole Survivor exact WP cost, condition isolation, and atomic insufficient-WP rejection',
+      'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
+      'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',
       'GM context isolation',
       'OpenAPI document',
-      ...(mcpUrl ? ['MCP discovery, encounter preparation, and session lifecycle'] : []),
+      ...(mcpUrl ? ['MCP discovery, solo abilities, solo state, encounter preparation, and session lifecycle'] : []),
     ],
   }));
 } finally {

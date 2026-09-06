@@ -12,6 +12,8 @@ export async function fetchHeroicAbilities(): Promise<Ability[]> {
       description,
       willpower_cost,
       requirement,
+      rule_key,
+      activation_type,
       kin,        
       profession  
     `); // Select all relevant columns - CORRECTED: Removed invalid comments
@@ -30,6 +32,8 @@ export async function fetchHeroicAbilities(): Promise<Ability[]> {
     requirement: ab.requirement,
     kin: ab.kin,
     profession: ab.profession,
+    rule_key: ab.rule_key,
+    activation_type: ab.activation_type,
   }));
 
   return abilities;

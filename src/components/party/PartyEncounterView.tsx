@@ -43,6 +43,13 @@ import {
 } from '../../lib/encounterStatusEffects';
 import { type MonsterAttackTableDie, rollMonsterAttackTable } from '../../lib/monsterAttackTable';
 import { resolveMonsterFerocity } from '../../lib/monsterFerocity';
+import {
+  completeCurrentInitiativeSlot,
+  initiativeSlotsFor,
+  nextInitiativeActions,
+  pendingInitiativeSlotsFor,
+  usesArmyOfOne,
+} from '../../lib/initiativeSlots';
 
 // --- TYPES ---
 export interface MonsterStats {
@@ -122,7 +129,7 @@ interface CombatLogEntry {
   damage?: number;
   message?: string;
 }
-interface InitiativeUpdate { id: string; initiative_roll: number; }
+interface InitiativeUpdate { id: string; initiative_roll: number; initiative_slots: number[]; }
 interface PersistedEncounterViewState {
   selectedEncounterId: string | null;
   viewMode: 'details' | 'create';
@@ -1261,35 +1268,36 @@ interface InitiativeDrawModalProps {
 }
 
 function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: InitiativeDrawModalProps) {
-  const [manualValues, setManualValues] = useState<Record<string, string>>({});
+  const [manualValues, setManualValues] = useState<Record<string, string[]>>({});
   useEffect(() => {
     if (isOpen) {
-      const init: Record<string, string> = {};
+      const init: Record<string, string[]> = {};
       combatants.forEach((c) => {
-        if (c.initiative_roll) init[c.id] = String(c.initiative_roll);
+        init[c.id] = initiativeSlotsFor(c).filter((value): value is number => value !== null).map(String);
       });
       setManualValues(init);
     }
   }, [isOpen, combatants]);
   const handleDraw = () => {
     const updates: InitiativeUpdate[] = [];
-    const taken: number[] = [];
+    const actionCount = combatants.reduce((total, combatant) => total + (usesArmyOfOne(combatant, combatants) ? 2 : 1), 0);
+    const taken = Object.values(manualValues).flat().map(Number).filter((value) => Number.isInteger(value) && value >= 1 && value <= 10);
+    const deck = generateDeck(actionCount, taken);
     combatants.forEach((c) => {
-      const val = parseInt(manualValues[c.id]);
-      if (!isNaN(val)) {
-        taken.push(val);
-        updates.push({ id: c.id, initiative_roll: val });
+      const slotCount = usesArmyOfOne(c, combatants) ? 2 : 1;
+      const slots = (manualValues[c.id] || [])
+        .map(Number)
+        .filter((value, index, values) => Number.isInteger(value) && value >= 1 && value <= 10 && values.indexOf(value) === index)
+        .slice(0, slotCount);
+      while (slots.length < slotCount) {
+        const index = deck.findIndex((card) => !slots.includes(card));
+        const card = index >= 0 ? deck.splice(index, 1)[0] : undefined;
+        if (card === undefined) break;
+        slots.push(card);
       }
+      slots.sort((left, right) => left - right);
+      if (slots[0] !== undefined) updates.push({ id: c.id, initiative_roll: slots[0], initiative_slots: slots });
     });
-    if (combatants.length - updates.length > 0) {
-      const deck = generateDeck(combatants.length, taken);
-      combatants.forEach((c) => {
-        if (!updates.find((u) => u.id === c.id)) {
-          const card = deck.pop();
-          if (card) updates.push({ id: c.id, initiative_roll: card });
-        }
-      });
-    }
     onApply(updates);
   };
   if (!isOpen) return null;
@@ -1298,7 +1306,29 @@ function InitiativeDrawModal({ isOpen, onClose, combatants, onApply }: Initiativ
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg h-[80vh] flex flex-col overflow-hidden border border-stone-200">
         <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Dices className="w-5 h-5" /> Draw Initiative</h3><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24} /></button></div>
         <div className="p-3 bg-blue-50 text-blue-900 text-sm border-b border-blue-100">Enter manual values for characters keeping their card (e.g. <strong>Veteran</strong> talent). Leave blank to draw from deck.</div>
-        <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-2">{combatants.map((c) => (<div key={c.id} className="flex items-center justify-between bg-white p-3 rounded border shadow-sm"><span className="font-bold text-stone-800">{c.display_name}</span><input type="number" min="1" max="10" placeholder="Auto" className={`w-20 px-2 py-1 text-center border rounded font-mono font-bold ${manualValues[c.id] ? 'bg-yellow-50 border-yellow-400 text-yellow-900' : 'bg-white'}`} value={manualValues[c.id] || ''} onChange={(e) => setManualValues(prev => ({ ...prev, [c.id]: e.target.value }))} /></div>))}</div>
+        <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-2">{combatants.map((c) => {
+          const slotCount = usesArmyOfOne(c, combatants) ? 2 : 1;
+          return <div key={c.id} className="flex items-center justify-between gap-3 bg-white p-3 rounded border shadow-sm">
+            <span className="font-bold text-stone-800">{c.display_name}{slotCount === 2 && <span className="ml-2 text-xs font-semibold text-indigo-600">Army of One</span>}</span>
+            <div className="flex gap-2">{Array.from({ length: slotCount }, (_, index) => (
+              <input
+                key={index}
+                type="number"
+                min="1"
+                max="10"
+                aria-label={`${c.display_name} initiative card ${index + 1}`}
+                placeholder="Auto"
+                className={`w-16 px-2 py-1 text-center border rounded font-mono font-bold ${manualValues[c.id]?.[index] ? 'bg-yellow-50 border-yellow-400 text-yellow-900' : 'bg-white'}`}
+                value={manualValues[c.id]?.[index] || ''}
+                onChange={(event) => setManualValues((previous) => {
+                  const values = [...(previous[c.id] || [])];
+                  values[index] = event.target.value;
+                  return { ...previous, [c.id]: values };
+                })}
+              />
+            ))}</div>
+          </div>;
+        })}</div>
         <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={Dices} onClick={handleDraw}>Draw & Apply</Button></div>
       </div>
     </div>
@@ -1568,8 +1598,9 @@ function RollTablesModal({ isOpen, onClose, partyId }: RollTablesModalProps) {
   );
 }
 
-function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onUseHeroicAbility, onWait, onOpenCharacterSheet, isDM }: {
+function ActiveCombatantSpotlight({ combatant, initiativeSlot, monsterData, currentAttack, onRollAttack, onEndTurn, onOpenAttackModal, onUseHeroicAbility, onWait, onOpenCharacterSheet, isDM }: {
   combatant: EncounterCombatant,
+  initiativeSlot?: number | null,
   monsterData?: MonsterData,
   currentAttack?: MonsterAttack | null,
   onRollAttack: () => void,
@@ -1603,7 +1634,7 @@ function ActiveCombatantSpotlight({ combatant, monsterData, currentAttack, onRol
   return (
     <div className="bg-white rounded-xl shadow-lg border-2 border-blue-500 overflow-hidden mb-6 relative animate-in fade-in slide-in-from-top-2">
       <div className="bg-blue-600 text-white px-4 py-2 flex justify-between items-center">
-        <div className="flex items-center gap-2"><div className="bg-white text-blue-800 font-bold font-serif w-8 h-8 flex items-center justify-center rounded shadow">{combatant.initiative_roll ?? '-'}</div><div><h3 className="font-bold text-lg leading-none">{combatant.display_name}</h3><span className="text-xs text-blue-100 uppercase tracking-wider font-semibold">Current Turn</span></div></div>
+        <div className="flex items-center gap-2"><div className="bg-white text-blue-800 font-bold font-serif w-8 h-8 flex items-center justify-center rounded shadow">{initiativeSlot ?? combatant.initiative_roll ?? '-'}</div><div><h3 className="font-bold text-lg leading-none">{combatant.display_name}</h3><span className="text-xs text-blue-100 uppercase tracking-wider font-semibold">Current Turn</span></div></div>
         <div className="flex gap-2">
           {canControl && (
             <>
@@ -1740,7 +1771,7 @@ interface DragonbaneCombatantCardProps {
 function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onToggleFear, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
-  const initValue = combatant.initiative_roll ?? '-';
+  const initValue = initiativeSlotsFor(combatant).filter((value) => value !== null).join(' / ') || '-';
   const isDefeated = isMonster && combatant.current_hp === 0;
   const isDying = !isMonster && combatant.current_hp === 0;
   const hpVal = statsState.current_hp ?? '';
@@ -1778,9 +1809,9 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
         type="button"
         onClick={handleInitClick}
         title={canEdit ? "Click to set Initiative" : "Initiative"}
-        className={`relative z-10 flex-shrink-0 w-10 h-14 rounded flex items-center justify-center shadow-sm border transition-colors ${isDefeated ? 'bg-red-100 border-red-300 text-red-800' : hasActed ? 'bg-stone-200 border-stone-300 text-stone-400' : 'bg-white border-stone-800 text-stone-900'} ${canEdit ? 'hover:bg-blue-50 cursor-pointer' : ''}`}
+        className={`relative z-10 flex-shrink-0 min-w-10 px-1 h-14 rounded flex items-center justify-center shadow-sm border transition-colors ${isDefeated ? 'bg-red-100 border-red-300 text-red-800' : hasActed ? 'bg-stone-200 border-stone-300 text-stone-400' : 'bg-white border-stone-800 text-stone-900'} ${canEdit ? 'hover:bg-blue-50 cursor-pointer' : ''}`}
       >
-        <span className="font-serif font-bold text-xl">{initValue}</span>
+        <span className="font-serif font-bold text-sm">{initValue}</span>
       </button>
 
       <div className="relative z-10 flex-grow min-w-0">
@@ -1984,6 +2015,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   }, [allMonsters]);
   const combatants = useMemo(() => (combatantsData?.slice().sort((a, b) => { const ia = a.initiative_roll ?? 1000; const ib = b.initiative_roll ?? 1000; if (ia !== ib) return ia - ib; return (a.display_name ?? '').localeCompare(b.display_name ?? ''); }) || []), [combatantsData]);
   const activeCombatant = useMemo(() => combatants.find(c => c.id === selectedActorId), [combatants, selectedActorId]);
+  const activeInitiativeSlot = useMemo(() => activeCombatant ? pendingInitiativeSlotsFor(activeCombatant)[0] : null, [activeCombatant]);
   const activeCombatantMonsterData = useMemo(() => activeCombatant?.monster_id ? monstersById.get(activeCombatant.monster_id) : null, [activeCombatant, monstersById]);
   const availableParty = useMemo(() => partyMembers.filter(m => !combatants.some(c => c.character_id === m.id)), [partyMembers, combatants]);
   const requestedSheetCharacterId = sheetCombatant?.character_id || null;
@@ -2138,22 +2170,11 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     if (encounterDetails?.status !== 'active') return;
 
     // 1. Find the correct "Next Up" actor (Lowest init, not acted, alive)
-    const nextUp = combatants.find(c => !c.has_acted && !(c.monster_id && c.current_hp === 0));
+    const nextUp = nextInitiativeActions(combatants)[0]?.combatant;
 
     if (nextUp) {
       // 2. Determine current selection state
-      const current = combatants.find(c => c.id === selectedActorId);
-
-      // 3. Logic to switch
-      const shouldSwitch =
-        !selectedActorId ||
-        !current ||
-        current.has_acted || // Current just finished turn
-        (current.monster_id && current.current_hp === 0) || // Current died
-        // CRITICAL: If current selection is valid but has HIGHER init than nextUp (e.g. after swap), switch to nextUp
-        (current.initiative_roll ?? 99) > (nextUp.initiative_roll ?? 99);
-
-      if (shouldSwitch) {
+      if (selectedActorId !== nextUp.id) {
         setSelectedActorId(nextUp.id);
       }
     } else {
@@ -2189,7 +2210,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const appendLogMu = useMutation({ mutationFn: (entry: CombatLogEntry) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
   const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
-  const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
+  const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false, completed_initiative_slots: [] }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
 
   const handleAddMonster = (id: string, count: number, customName: string) => {
     const m = id ? monstersById.get(id) : null;
@@ -2414,10 +2435,17 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   };
 
-  const handleInitApply = async (updates: { id: string, initiative_roll: number }[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { ...u, has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
+  const handleInitApply = async (updates: InitiativeUpdate[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { initiative_roll: u.initiative_roll, initiative_slots: u.initiative_slots, completed_initiative_slots: [], has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
 
   const handleFlip = (id: string, current: boolean) => {
-    updateCombatantMu.mutate({ id, updates: { has_acted: !current } });
+    const combatant = combatants.find((entry) => entry.id === id);
+    if (!combatant) return;
+    updateCombatantMu.mutate({
+      id,
+      updates: current
+        ? { has_acted: false, completed_initiative_slots: [] }
+        : completeCurrentInitiativeSlot(combatant),
+    });
   };
 
   const handleAttackConfirm = (targetIds: string[], dmg: number) => {
@@ -2520,6 +2548,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             {encounterDetails.status === 'active' && activeCombatant && (
               <ActiveCombatantSpotlight
                 combatant={activeCombatant}
+                initiativeSlot={activeInitiativeSlot}
                 monsterData={activeCombatantMonsterData || undefined}
                 currentAttack={currentMonsterAttacks[activeCombatant.id]}
                 onRollAttack={() => activeCombatantMonsterData && handleRollMonsterAttack(activeCombatant.id, activeCombatantMonsterData as MonsterData)}

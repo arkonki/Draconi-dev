@@ -329,7 +329,7 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
     return rows.map((row) => ({ ...row, magic_schools: map.get(row.school_id) || null }));
   }
   if (table === 'encounter_combatants') {
-    const { rows: characters } = await client.query('SELECT id, current_hp, max_hp, current_wp, max_wp FROM characters');
+    const { rows: characters } = await client.query('SELECT id, current_hp, max_hp, current_wp, max_wp, heroic_ability FROM characters');
     const map = new Map(characters.map((row) => [row.id, row]));
     return rows.map((row) => ({ ...row, character: map.get(row.character_id) || null }));
   }
@@ -429,6 +429,11 @@ export async function executeDataQuery(user, request) {
   }
 
   return withTransaction(async (client) => {
+    await client.query(
+      `SELECT set_config('draconi.source_user_id', $1, true),
+         set_config('draconi.source_client', 'dragonbane-web', true)`,
+      [user.id],
+    );
     const transactionCtx = await accessContext(user, client);
     if (action === 'insert' || action === 'upsert') {
       const values = Array.isArray(payload) ? payload : [payload];

@@ -9,15 +9,27 @@ import {
   addEncounterParticipantsInputSchema,
   advanceCombatTurnBodySchema,
   advanceCombatTurnInputSchema,
+  advanceThreatBodySchema,
+  advanceThreatInputSchema,
+  askFortuneBodySchema,
+  askFortuneInputSchema,
   appendCampaignEventBodySchema,
   appendCampaignEventInputSchema,
   applyActorChangesBodySchema,
   applyActorChangesInputSchema,
   campaignIdInputSchema,
+  completeSoloMissionBodySchema,
+  completeSoloMissionInputSchema,
   completeSessionBodySchema,
   completeSessionInputSchema,
   createEncounterBodySchema,
   createEncounterInputSchema,
+  drawInspirationBodySchema,
+  drawInspirationInputSchema,
+  enableSoloModeBodySchema,
+  enableSoloModeInputSchema,
+  selectSoloHeroicAbilityBodySchema,
+  selectSoloHeroicAbilityInputSchema,
   endCombatBodySchema,
   endCombatInputSchema,
   getActorInputSchema,
@@ -26,25 +38,37 @@ import {
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
   getSessionHistoryInputSchema,
+  getSoloOptionsInputSchema,
+  getSoloStateInputSchema,
   idempotencyKeySchema,
   listCampaignsInputSchema,
   resolveGameActionBodySchema,
   resolveGameActionInputSchema,
   removeEncounterParticipantBodySchema,
   removeEncounterParticipantInputSchema,
+  revealWaypointBodySchema,
+  revealWaypointInputSchema,
   revisionSchema,
   startCombatBodySchema,
   startCombatInputSchema,
+  startSoloMissionBodySchema,
+  startSoloMissionInputSchema,
   startSessionBodySchema,
   startSessionInputSchema,
 } from './schemas.js';
 import {
   addEncounterParticipants,
   advanceCombatTurn,
+  advanceThreat,
   appendCampaignEvent,
   applyActorChanges,
+  askFortune,
+  completeSoloMission,
   completeSession,
   createEncounter,
+  drawInspiration,
+  enableSoloMode,
+  selectSoloHeroicAbility,
   endCombat,
   getActor,
   getCampaignState,
@@ -52,12 +76,16 @@ import {
   getEncounterSetupOptions,
   getRecentEvents,
   getSessionHistory,
+  getSoloOptions,
+  getSoloState,
   listActors,
   listCampaigns,
   resolveGameAction,
   removeEncounterParticipant,
+  revealWaypoint,
   startCombat,
   startSession,
+  startSoloMission,
 } from './service.js';
 
 function matchPath(pathname, expression) {
@@ -212,6 +240,190 @@ export async function handleHelperApiRequest(request, response) {
         recentEventLimit: input.recent_event_limit,
       });
       resultingRevision = data.campaign.revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloOptionsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/options$/);
+    if (soloOptionsMatch && request.method === 'GET') {
+      operation = 'get_solo_options';
+      const input = parseSchema(getSoloOptionsInputSchema, { campaign_id: soloOptionsMatch[0] });
+      campaignId = input.campaign_id;
+      const data = await getSoloOptions(user, campaignId);
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloStateMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo$/);
+    if (soloStateMatch && request.method === 'GET') {
+      operation = 'get_solo_state';
+      const input = parseSchema(getSoloStateInputSchema, { campaign_id: soloStateMatch[0] });
+      campaignId = input.campaign_id;
+      const data = await getSoloState(user, campaignId);
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+    if (soloStateMatch && request.method === 'POST') {
+      operation = 'enable_solo_mode';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(enableSoloModeBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(enableSoloModeInputSchema, {
+        campaign_id: soloStateMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await enableSoloMode(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloAbilityMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/heroic-ability$/);
+    if (soloAbilityMatch && request.method === 'POST') {
+      operation = 'select_solo_heroic_ability';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(selectSoloHeroicAbilityBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(selectSoloHeroicAbilityInputSchema, {
+        campaign_id: soloAbilityMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await selectSoloHeroicAbility(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const fortuneMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/fortune$/);
+    if (fortuneMatch && request.method === 'POST') {
+      operation = 'ask_fortune';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(askFortuneBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(askFortuneInputSchema, {
+        campaign_id: fortuneMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await askFortune(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const inspirationMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/inspiration$/);
+    if (inspirationMatch && request.method === 'POST') {
+      operation = 'draw_inspiration';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(drawInspirationBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(drawInspirationInputSchema, {
+        campaign_id: inspirationMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await drawInspiration(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloMissionsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/missions$/);
+    if (soloMissionsMatch && request.method === 'POST') {
+      operation = 'start_solo_mission';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(startSoloMissionBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(startSoloMissionInputSchema, {
+        campaign_id: soloMissionsMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await startSoloMission(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const waypointRevealMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/waypoints\/([^/]+)\/reveal$/,
+    );
+    if (waypointRevealMatch && request.method === 'POST') {
+      operation = 'reveal_waypoint';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(revealWaypointBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(revealWaypointInputSchema, {
+        campaign_id: waypointRevealMatch[0],
+        waypoint_id: waypointRevealMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await revealWaypoint(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const missionCompleteMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/missions\/([^/]+)\/complete$/,
+    );
+    if (missionCompleteMatch && request.method === 'POST') {
+      operation = 'complete_solo_mission';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(completeSoloMissionBodySchema, await readJson(request, 250_000));
+      const input = parseSchema(completeSoloMissionInputSchema, {
+        campaign_id: missionCompleteMatch[0],
+        mission_id: missionCompleteMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await completeSoloMission(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const threatAdvanceMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/threats\/([^/]+)\/advance$/,
+    );
+    if (threatAdvanceMatch && request.method === 'POST') {
+      operation = 'advance_threat';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(advanceThreatBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(advanceThreatInputSchema, {
+        campaign_id: threatAdvanceMatch[0],
+        threat_id: threatAdvanceMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await advanceThreat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }

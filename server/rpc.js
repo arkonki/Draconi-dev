@@ -47,6 +47,58 @@ export async function executeRpc(user, name, args = {}) {
       return result.rows[0] || null;
     }
 
+    if (name === 'spend_solo_survivor_wp') {
+      const characterId = args.p_character_id;
+      const { rows } = await client.query(
+        `SELECT c.id, c.party_id, c.user_id, c.current_wp, c.heroic_ability,
+                solo.enabled AS solo_enabled,
+                solo.player_character_id AS solo_player_character_id
+         FROM characters c
+         LEFT JOIN solo_campaign_states solo ON solo.campaign_id = c.party_id
+         WHERE c.id = $1
+         FOR UPDATE OF c`,
+        [characterId],
+      );
+      const character = rows[0];
+      if (!character) throw new HttpError(404, 'Character not found');
+      if (!character.party_id) throw new HttpError(409, 'Sole Survivor requires an active solo campaign');
+
+      const access = await loadCampaignAccess(client, user, character.party_id);
+      if (!access?.canWrite || (character.user_id !== user.id && !access.isGm)) {
+        throw new HttpError(403, 'Permission denied');
+      }
+      const heroicAbilities = Array.isArray(character.heroic_ability)
+        ? character.heroic_ability.map((ability) => String(ability).trim().toLowerCase())
+        : [];
+      if (
+        !character.solo_enabled
+        || character.solo_player_character_id !== character.id
+        || !heroicAbilities.includes('sole survivor')
+      ) {
+        throw new HttpError(409, 'Sole Survivor is not available to this character');
+      }
+
+      const spent = await client.query(
+        `UPDATE characters
+         SET current_wp = current_wp - 3
+         WHERE id = $1 AND current_wp >= 3
+         RETURNING current_wp`,
+        [character.id],
+      );
+      if (!spent.rows[0]) throw new HttpError(409, 'Sole Survivor requires 3 WP');
+
+      await client.query(
+        `UPDATE encounter_combatants AS combatant
+         SET current_wp = $1
+         FROM encounters AS encounter
+         WHERE combatant.encounter_id = encounter.id
+           AND encounter.status = 'active'
+           AND combatant.character_id = $2`,
+        [spent.rows[0].current_wp, character.id],
+      );
+      return { current_wp: Number(spent.rows[0].current_wp), spent_wp: 3 };
+    }
+
     if (name === 'duplicate_encounter_with_combatants') {
       await requireEncounterAccess(client, user, args.p_encounter_id, true);
       const { rows } = await client.query('SELECT * FROM encounters WHERE id = $1', [args.p_encounter_id]);
@@ -114,7 +166,12 @@ export async function executeRpc(user, name, args = {}) {
     if (name === 'advance_encounter_round') {
       await requireEncounterAccess(client, user, args.p_encounter_id, true);
       await client.query('UPDATE encounters SET current_round = current_round + 1 WHERE id = $1', [args.p_encounter_id]);
-      await client.query('UPDATE encounter_combatants SET has_acted = false WHERE encounter_id = $1', [args.p_encounter_id]);
+      await client.query(
+        `UPDATE encounter_combatants
+         SET has_acted = false, completed_initiative_slots = '{}'::integer[]
+         WHERE encounter_id = $1`,
+        [args.p_encounter_id],
+      );
       return null;
     }
 
@@ -125,7 +182,9 @@ export async function executeRpc(user, name, args = {}) {
       for (const id of ids) {
         const initiative = Math.floor(Math.random() * 10) + 1;
         const { rows } = await client.query(
-          `UPDATE encounter_combatants SET initiative_roll = $1, has_acted = false
+          `UPDATE encounter_combatants
+           SET initiative_roll = $1, initiative_slots = ARRAY[$1]::integer[],
+             completed_initiative_slots = '{}'::integer[], has_acted = false
            WHERE id = $2 AND encounter_id = $3 RETURNING *`,
           [initiative, id, args.p_encounter_id],
         );
@@ -136,7 +195,7 @@ export async function executeRpc(user, name, args = {}) {
 
     if (name === 'swap_initiative') {
       const { rows } = await client.query(
-        'SELECT id, encounter_id, initiative_roll FROM encounter_combatants WHERE id = ANY($1::uuid[])',
+        'SELECT id, encounter_id, initiative_roll, initiative_slots FROM encounter_combatants WHERE id = ANY($1::uuid[])',
         [[args.id1, args.id2]],
       );
       if (rows.length !== 2 || rows[0].encounter_id !== rows[1].encounter_id) throw new HttpError(400, 'Combatants must share an encounter');
@@ -144,10 +203,20 @@ export async function executeRpc(user, name, args = {}) {
       const first = rows.find((row) => row.id === args.id1);
       const second = rows.find((row) => row.id === args.id2);
       await client.query(
-        `UPDATE encounter_combatants SET initiative_roll = CASE id
-           WHEN $1 THEN $3::integer WHEN $2 THEN $4::integer END
-         WHERE id = ANY($5::uuid[])`,
-        [args.id1, args.id2, second.initiative_roll, first.initiative_roll, [args.id1, args.id2]],
+        `UPDATE encounter_combatants SET
+           initiative_roll = CASE id WHEN $1 THEN $3::integer WHEN $2 THEN $4::integer END,
+           initiative_slots = CASE id WHEN $1 THEN $5::integer[] WHEN $2 THEN $6::integer[] END,
+           completed_initiative_slots = '{}'::integer[], has_acted = false
+         WHERE id = ANY($7::uuid[])`,
+        [
+          args.id1,
+          args.id2,
+          second.initiative_roll,
+          first.initiative_roll,
+          second.initiative_slots?.length ? second.initiative_slots : [second.initiative_roll],
+          first.initiative_slots?.length ? first.initiative_slots : [first.initiative_roll],
+          [args.id1, args.id2],
+        ],
       );
       return null;
     }

@@ -57,6 +57,137 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/state?${query}`);
   }
 
+  getSoloOptions({ campaign_id }) {
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/options`);
+  }
+
+  getSoloState({ campaign_id }) {
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo`);
+  }
+
+  enableSoloMode(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  selectSoloHeroicAbility(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/heroic-ability`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  askFortune(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/fortune`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  drawInspiration(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/inspiration`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  startSoloMission(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/missions`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  revealWaypoint(input) {
+    const {
+      campaign_id,
+      waypoint_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/waypoints/${waypoint_id}/reveal`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  completeSoloMission(input) {
+    const {
+      campaign_id,
+      mission_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/missions/${mission_id}/complete`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  advanceThreat(input) {
+    const {
+      campaign_id,
+      threat_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/threats/${threat_id}/advance`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   getSessionHistory({ campaign_id, limit }) {
     const query = new URLSearchParams();
     if (limit) query.set('limit', String(limit));

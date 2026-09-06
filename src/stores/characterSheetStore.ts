@@ -11,7 +11,15 @@ import type { Party } from '../lib/api/parties';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
 
-export interface HeroicAbility { id: string; name: string; description: string; willpower_cost: number | null; }
+export interface HeroicAbility {
+  id: string;
+  name: string;
+  description: string;
+  willpower_cost: number | null;
+  requirement?: string | Record<string, number | null> | null;
+  rule_key?: string | null;
+  activation_type?: 'manual' | 'passive' | 'contextual' | null;
+}
 
 interface PartySummary {
   id: string;
@@ -105,6 +113,7 @@ interface CharacterSheetState {
   _loadGameItems: () => Promise<void>;
   _loadAllHeroicAbilities: () => Promise<void>;
   updateCharacterData: (updates: Partial<Character>) => Promise<void>;
+  spendSoleSurvivorWillpower: () => Promise<void>;
   
   // --- SYNC HELPER ---
   _syncToCombatant: (updates: Partial<EncounterCombatant>) => Promise<void>;
@@ -330,6 +339,37 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
 
   updateCharacterData: async (updates) => {
     return get()._saveCharacter(updates);
+  },
+
+  spendSoleSurvivorWillpower: async () => {
+    const { character, currentCombatant, encounterCombatants } = get();
+    if (!character?.id) throw new Error('Cannot spend willpower: Character ID is missing.');
+    set({ isSaving: true, saveError: null });
+    try {
+      const { data, error } = await supabase.rpc<{ current_wp: number; spent_wp: number }>(
+        'spend_solo_survivor_wp',
+        { p_character_id: character.id },
+      );
+      if (error || !data) throw new Error(error?.message || 'Could not spend willpower.');
+
+      const updatedCharacter = { ...character, current_wp: data.current_wp };
+      syncCharacterCaches(updatedCharacter);
+      set({
+        character: updatedCharacter,
+        currentCombatant: currentCombatant
+          ? { ...currentCombatant, current_wp: data.current_wp }
+          : null,
+        encounterCombatants: encounterCombatants.map((combatant) =>
+          combatant.id === currentCombatant?.id
+            ? { ...combatant, current_wp: data.current_wp }
+            : combatant),
+        isSaving: false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not spend willpower.';
+      set({ saveError: message, isSaving: false });
+      throw error;
+    }
   },
 
   performRest: async (type, hpHealed = 0, wpHealed = 0) => {
@@ -580,11 +620,22 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   setInitiativeForCombatant: async (combatantId, initiative) => {
     set({ isSaving: true, saveError: null });
     try {
-      await apiUpdateCombatant(combatantId, { initiative_roll: initiative });
+      await apiUpdateCombatant(combatantId, {
+        initiative_roll: initiative,
+        initiative_slots: [initiative],
+        completed_initiative_slots: [],
+        has_acted: false,
+      });
       get().setActiveStatusMessage(`Initiative set to ${initiative}`, 4000);
       set(state => ({
         encounterCombatants: state.encounterCombatants.map(c => 
-          c.id === combatantId ? { ...c, initiative_roll: initiative } : c
+          c.id === combatantId ? {
+            ...c,
+            initiative_roll: initiative,
+            initiative_slots: [initiative],
+            completed_initiative_slots: [],
+            has_acted: false,
+          } : c
         )
       }));
     } catch (err) {

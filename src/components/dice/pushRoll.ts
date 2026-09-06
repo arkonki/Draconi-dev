@@ -50,6 +50,7 @@ export interface PushRollAvailabilityInput {
   hasCharacter: boolean;
   hasAlreadyPushed: boolean;
   conditions?: Partial<Conditions> | null;
+  canPushWithoutCondition?: boolean;
 }
 
 export interface PushRollAvailability {
@@ -71,6 +72,7 @@ export function getPushRollAvailability({
   hasCharacter,
   hasAlreadyPushed,
   conditions,
+  canPushWithoutCondition = false,
 }: PushRollAvailabilityInput): PushRollAvailability {
   if (!isSkillCheck || !isPlayer || !isFailure || !hasCharacter) {
     return { canPush: false };
@@ -81,7 +83,7 @@ export function getPushRollAvailability({
   if (hasAlreadyPushed) {
     return { canPush: false, reason: 'This test has already been pushed.' };
   }
-  if (getAvailablePushRollConditions(conditions).length === 0) {
+  if (getAvailablePushRollConditions(conditions).length === 0 && !canPushWithoutCondition) {
     return { canPush: false, reason: 'All six conditions are already active.' };
   }
   return { canPush: true };

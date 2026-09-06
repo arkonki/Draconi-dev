@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useCharacterSheetStore, HeroicAbility } from '../../stores/characterSheetStore';
 import { isSkillNameRequirement } from '../../types/character';
-import { Zap, X, ShieldCheck, Info, Sparkles } from 'lucide-react';
+import { Zap, X, ShieldCheck, Info } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
@@ -45,7 +45,15 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
                   <div className="p-2 bg-white rounded shadow-sm border border-stone-200 text-orange-600"><Zap size={16}/></div>
                   <div>
                      <span className="block text-xs font-bold text-stone-400 uppercase">Cost</span>
-                     <span className="font-bold">{ability.willpower_cost ? `${ability.willpower_cost} WP` : 'Free / Passive'}</span>
+                     <span className="font-bold">
+                       {ability.activation_type === 'contextual'
+                         ? `${ability.willpower_cost ?? 0} WP when used`
+                         : ability.activation_type === 'passive'
+                           ? 'Passive'
+                           : ability.willpower_cost
+                             ? `${ability.willpower_cost} WP`
+                             : 'Free'}
+                     </span>
                   </div>
                </div>
             </div>
@@ -107,16 +115,6 @@ export function HeroicAbilitiesView() {
     if (isLoading) return <div className="flex justify-center p-8"><LoadingSpinner size="sm" /></div>;
     if (error) return <ErrorMessage message={error} />;
     
-    if (character?.profession === 'Mage') { 
-      return (
-        <div className="text-center py-12 px-4 border-2 border-dashed border-stone-200 rounded-lg bg-stone-50/50">
-           <Sparkles className="w-10 h-10 mx-auto text-purple-300 mb-2"/>
-           <p className="text-stone-500 font-medium">Mages rely on Spells.</p>
-           <p className="text-xs text-stone-400">Visit the Spells tab to manage your magic.</p>
-        </div>
-      );
-    }
-    
     if (availableAbilities.length === 0) {
        return (
          <div className="text-center py-12 px-4 border-2 border-dashed border-stone-200 rounded-lg bg-stone-50/50">
@@ -132,6 +130,8 @@ export function HeroicAbilitiesView() {
           const cost = ability.willpower_cost;
           const currentWP = character?.current_wp ?? 0;
           const canAfford = cost === null || cost <= 0 || currentWP >= cost;
+          const isPassive = ability.activation_type === 'passive';
+          const isContextual = ability.activation_type === 'contextual';
           
           return (
             <div 
@@ -149,8 +149,8 @@ export function HeroicAbilitiesView() {
             >
               <div className="flex justify-between items-start mb-3">
                 <h4 className="font-serif font-bold text-stone-800 group-hover:text-orange-700 transition-colors line-clamp-1">{ability.name}</h4>
-                <div className={`text-xs font-bold px-2 py-0.5 rounded ${cost ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
-                   {cost ? `${cost} WP` : 'Passive'}
+                <div className={`text-xs font-bold px-2 py-0.5 rounded ${isContextual ? 'bg-indigo-100 text-indigo-800' : cost ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
+                   {isContextual ? 'Contextual' : isPassive ? 'Passive' : cost ? `${cost} WP` : 'Free'}
                 </div>
               </div>
               
@@ -159,7 +159,11 @@ export function HeroicAbilitiesView() {
               </p>
               
               <div className="mt-auto pt-3 border-t border-stone-100 flex justify-end">
-                 <Button 
+                 {isPassive || isContextual ? (
+                   <div className="w-full rounded-md bg-stone-50 px-3 py-2 text-center text-xs font-semibold text-stone-600">
+                     {isPassive ? 'Applied automatically when its requirement is met.' : 'Available from the relevant action flow.'}
+                   </div>
+                 ) : <Button
                     onClick={(event) => {
                       event.stopPropagation();
                       handleActivate(ability);
@@ -170,7 +174,7 @@ export function HeroicAbilitiesView() {
                     className={`w-full min-h-[44px] touch-manipulation ${canAfford ? 'bg-orange-600 hover:bg-orange-700 text-white' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}
                  >
                     <Zap className="w-3 h-3 mr-1.5 fill-current" /> Activate
-                 </Button>
+                 </Button>}
               </div>
             </div>
           );

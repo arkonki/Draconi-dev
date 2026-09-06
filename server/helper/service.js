@@ -10,6 +10,7 @@ import { requireCampaignAccess } from './auth.js';
 import { HelperError } from './errors.js';
 import { conditionId } from './identifiers.js';
 import { applyActorChangeSet, validateActorCanAct } from './rules.js';
+import { advanceThreatState, resolveFortune, resolveInspiration } from './soloRules.js';
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -213,6 +214,194 @@ function sessionForOutput(row, { includeGm = false } = {}) {
   return session;
 }
 
+function soloStateForOutput(row) {
+  if (!row) {
+    return {
+      enabled: false,
+      rulesetVersion: null,
+      mode: null,
+      playerCharacterId: null,
+      currentMissionId: null,
+      advancementBonusAbilitiesGranted: 0,
+      soloHeroicAbilityId: null,
+      soloHeroicAbilityGranted: false,
+      oracleSettings: { defaultTilt: 'ask' },
+    };
+  }
+  return {
+    enabled: row.enabled,
+    rulesetVersion: row.ruleset_version,
+    mode: row.mode,
+    playerCharacterId: row.player_character_id,
+    currentMissionId: row.current_mission_id || null,
+    advancementBonusAbilitiesGranted: Number(row.advancement_bonus_abilities_granted || 0),
+    soloHeroicAbilityId: row.solo_heroic_ability_id || null,
+    soloHeroicAbilityGranted: Boolean(row.solo_heroic_ability_granted),
+    oracleSettings: { defaultTilt: row.oracle_default_tilt },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function soloMissionForOutput(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    moduleKey: row.module_key,
+    title: row.title,
+    objective: row.objective,
+    status: row.status,
+    currentWaypointIndex: Number(row.current_waypoint_index),
+    activeThreatId: row.active_threat_id,
+    discoveredClues: row.discovered_clues || [],
+    storyFlags: row.story_flags || {},
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function soloWaypointForOutput(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    missionId: row.mission_id,
+    position: Number(row.position),
+    kind: row.kind,
+    status: row.status,
+    title: row.title,
+    description: row.description,
+    dangerIds: row.danger_ids || [],
+    npcIds: row.npc_ids || [],
+    encounterId: row.encounter_id,
+    notes: row.notes || [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function soloThreatForOutput(row, { revealTriggerEffect = false } = {}) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    missionId: row.mission_id,
+    description: row.description,
+    counter: Number(row.counter),
+    recurring: row.recurring,
+    status: row.status,
+    ...(revealTriggerEffect || row.status === 'triggered'
+      ? { triggerEffect: row.trigger_effect || {} }
+      : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function recordedRollForOutput(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    sessionId: row.session_id,
+    encounterId: row.encounter_id,
+    actorId: row.actor_id,
+    purpose: row.purpose,
+    source: row.source,
+    expression: row.expression,
+    dice: row.dice,
+    keptIndices: row.kept_indices,
+    keptValues: row.kept_values,
+    tableKey: row.table_key,
+    tableVersion: row.table_version,
+    result: row.result,
+    previousRollId: row.previous_roll_id,
+    campaignRevision: Number(row.campaign_revision),
+    createdAt: row.created_at,
+  };
+}
+
+async function loadSoloState(client, campaignId, { forUpdate = false } = {}) {
+  const { rows } = await client.query(
+    `SELECT * FROM solo_campaign_states WHERE campaign_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [campaignId],
+  );
+  return rows[0] || null;
+}
+
+function requireEnabledSoloState(row) {
+  if (!row?.enabled) {
+    throw new HelperError(409, 'INVALID_STATE', 'Solo mode is not enabled for this campaign.');
+  }
+  return row;
+}
+
+async function loadSoloRuleTable(client, tableKey, version) {
+  const { rows } = await client.query(
+    `SELECT table_key, version, locale, die_sides, source_kind, display_name, entries
+     FROM solo_rule_tables
+     WHERE table_key = $1 AND version = $2 AND locale = 'en'`,
+    [tableKey, version],
+  );
+  if (!rows[0]) {
+    throw new HelperError(
+      409,
+      'INVALID_STATE',
+      `Solo rule table ${tableKey}@${version} is not installed.`,
+    );
+  }
+  return {
+    tableKey: rows[0].table_key,
+    version: rows[0].version,
+    locale: rows[0].locale,
+    dieSides: Number(rows[0].die_sides),
+    sourceKind: rows[0].source_kind,
+    displayName: rows[0].display_name,
+    entries: rows[0].entries,
+  };
+}
+
+async function insertRecordedRoll(client, {
+  campaignId,
+  sessionId,
+  actorId,
+  userId,
+  purpose,
+  expression,
+  dice,
+  keptIndices,
+  keptValues,
+  tableKey,
+  tableVersion,
+  result,
+  campaignRevision,
+}) {
+  const { rows } = await client.query(
+    `INSERT INTO recorded_rolls (
+       campaign_id, session_id, actor_id, source_user_id, purpose, source,
+       expression, dice, kept_indices, kept_values, table_key, table_version,
+       result, campaign_revision
+     ) VALUES ($1, $2, $3, $4, $5, 'server', $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
+     RETURNING *`,
+    [
+      campaignId,
+      sessionId,
+      actorId,
+      userId,
+      purpose,
+      expression,
+      dice,
+      keptIndices,
+      keptValues,
+      tableKey,
+      tableVersion,
+      JSON.stringify(result),
+      campaignRevision,
+    ],
+  );
+  return rows[0];
+}
+
 export async function listCampaigns(user, { status, limit, cursor }) {
   const values = [user.id];
   const clauses = [
@@ -297,6 +486,1070 @@ export async function getSessionHistory(user, campaignId, { limit = 20 } = {}) {
     campaignRevision: Number(access.campaign.helper_revision || 0),
     sessions: rows.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
   };
+}
+
+export async function getSoloOptions(user, campaignId) {
+  const access = await requireCampaignAccess(pool, user, campaignId);
+  const [{ rows: characters }, { rows: abilities }, soloState] = await Promise.all([
+    pool.query(
+      `SELECT id, name, kin, profession, heroic_ability
+       FROM characters WHERE party_id = $1 ORDER BY name, id`,
+      [campaignId],
+    ),
+    pool.query(
+      `SELECT id, name, description, willpower_cost, requirement, rule_key, activation_type
+       FROM heroic_abilities ORDER BY name, id`,
+    ),
+    loadSoloState(pool, campaignId),
+  ]);
+  return {
+    campaignRevision: Number(access.campaign.helper_revision || 0),
+    solo: soloStateForOutput(soloState),
+    characters: characters.map((character) => ({
+      id: character.id,
+      name: character.name,
+      kin: character.kin,
+      profession: character.profession,
+      heroicAbilities: character.heroic_ability || [],
+    })),
+    heroicAbilities: abilities.map((ability) => ({
+      id: ability.id,
+      name: ability.name,
+      description: ability.description,
+      willpowerCost: ability.willpower_cost,
+      requirement: ability.requirement,
+      ruleKey: ability.rule_key,
+      activationType: ability.activation_type,
+      selected: soloState?.solo_heroic_ability_id === ability.id,
+    })),
+    rulesets: [{ key: 'db-solo-v1.2', name: 'Dragonbane Solo Adventure v1.2' }],
+    modes: [
+      { key: 'custom', available: true, name: 'Custom solo adventure' },
+      {
+        key: 'deepfall_breach',
+        available: false,
+        name: 'Alone in Deepfall Breach',
+        unavailableReason: 'An authorized module data pack has not been installed.',
+      },
+    ],
+    prerequisites: {
+      hasCharacter: characters.length > 0,
+      recommendedSingleCharacter: characters.length === 1,
+      issues: characters.length === 0
+        ? ['Create or add a player character before enabling solo mode.']
+        : characters.length > 1
+          ? ['Select the one player character that will act as the solo hero.']
+          : [],
+    },
+  };
+}
+
+export async function getSoloState(user, campaignId) {
+  const access = await requireCampaignAccess(pool, user, campaignId);
+  const state = await loadSoloState(pool, campaignId);
+  let playerCharacter = null;
+  let soloHeroicAbility = null;
+  if (state?.player_character_id) {
+    const loaded = await loadActor(pool, campaignId, state.player_character_id);
+    playerCharacter = actorForOutput(loaded.actor, { includeGm: access.isGm });
+  }
+  if (state?.solo_heroic_ability_id) {
+    const { rows } = await pool.query(
+      `SELECT id, name, description, willpower_cost, requirement, rule_key, activation_type
+       FROM heroic_abilities WHERE id = $1`,
+      [state.solo_heroic_ability_id],
+    );
+    if (rows[0]) {
+      soloHeroicAbility = {
+        id: rows[0].id,
+        name: rows[0].name,
+        description: rows[0].description,
+        willpowerCost: rows[0].willpower_cost,
+        requirement: rows[0].requirement,
+        ruleKey: rows[0].rule_key,
+        activationType: rows[0].activation_type,
+      };
+    }
+  }
+  let activeMission = null;
+  let waypoints = [];
+  let currentWaypoint = null;
+  let activeThreat = null;
+  if (state?.current_mission_id) {
+    const { rows: missions } = await pool.query(
+      `SELECT * FROM solo_missions WHERE id = $1 AND campaign_id = $2`,
+      [state.current_mission_id, campaignId],
+    );
+    activeMission = missions[0] || null;
+    if (activeMission) {
+      const { rows } = await pool.query(
+        `SELECT * FROM solo_waypoints WHERE mission_id = $1 ORDER BY position`,
+        [activeMission.id],
+      );
+      waypoints = rows;
+      currentWaypoint = rows.find(
+        (waypoint) => Number(waypoint.position) === Number(activeMission.current_waypoint_index),
+      ) || rows.find((waypoint) => waypoint.status === 'active') || null;
+      if (activeMission.active_threat_id) {
+        const { rows: threats } = await pool.query(
+          `SELECT * FROM solo_threats WHERE id = $1 AND mission_id = $2`,
+          [activeMission.active_threat_id, activeMission.id],
+        );
+        activeThreat = threats[0] || null;
+      }
+    }
+  }
+  const { rows: latestRolls } = await pool.query(
+    `SELECT * FROM recorded_rolls
+     WHERE campaign_id = $1
+     ORDER BY created_at DESC
+     LIMIT 10`,
+    [campaignId],
+  );
+  const allowedNextActions = [];
+  if (!state?.enabled) {
+    allowedNextActions.push('get_solo_options', 'enable_solo_mode');
+  } else {
+    if (!soloHeroicAbility) allowedNextActions.push('select_solo_heroic_ability');
+    allowedNextActions.push('ask_fortune', 'draw_inspiration', 'start_session');
+    if (!activeMission) allowedNextActions.push('start_solo_mission');
+    if (activeThreat?.status === 'active') allowedNextActions.push('advance_threat');
+  }
+  return {
+    campaignRevision: Number(access.campaign.helper_revision || 0),
+    solo: soloStateForOutput(state),
+    playerCharacter,
+    soloHeroicAbility,
+    activeSessionId: access.campaign.active_session_id,
+    currentScene: access.campaign.current_scene || {},
+    activeMission: soloMissionForOutput(activeMission),
+    waypoints: waypoints.map(soloWaypointForOutput),
+    currentWaypoint: soloWaypointForOutput(currentWaypoint),
+    activeThreat: soloThreatForOutput(activeThreat),
+    latestRolls: latestRolls.map(recordedRollForOutput),
+    allowedNextActions,
+  };
+}
+
+export async function enableSoloMode(user, input, { sourceClient } = {}) {
+  const operation = 'enable_solo_mode';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    if (input.mode === 'deepfall_breach') {
+      throw new HelperError(
+        409,
+        'INVALID_STATE',
+        'The Deepfall Breach module requires an authorized data pack and is not installed.',
+      );
+    }
+    const { rows: characters } = await client.query(
+      `SELECT id, name, heroic_ability FROM characters
+       WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [input.player_character_id, input.campaign_id],
+    );
+    const character = characters[0];
+    if (!character) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'The selected solo character is not in this campaign.');
+    }
+
+    const resultingRevision = previousRevision + 1;
+    const { rows } = await client.query(
+      `INSERT INTO solo_campaign_states (
+         campaign_id, enabled, ruleset_version, mode, player_character_id,
+         oracle_default_tilt
+       ) VALUES ($1, true, $2, $3, $4, $5)
+       ON CONFLICT (campaign_id) DO UPDATE SET
+         enabled = true,
+         ruleset_version = EXCLUDED.ruleset_version,
+         mode = EXCLUDED.mode,
+         player_character_id = EXCLUDED.player_character_id,
+         oracle_default_tilt = EXCLUDED.oracle_default_tilt
+       RETURNING *`,
+      [
+        input.campaign_id,
+        input.ruleset_version,
+        input.mode,
+        input.player_character_id,
+        input.oracle_default_tilt,
+      ],
+    );
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.enabled',
+      actorId: character.id,
+      payload: {
+        playerCharacterId: character.id,
+        playerCharacterName: character.name,
+        mode: input.mode,
+        rulesetVersion: input.ruleset_version,
+        oracleDefaultTilt: input.oracle_default_tilt,
+        heroicAbilityReviewRequired: true,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Solo mode enabled for ${character.name}. Review the character's extra solo heroic ability before play.`,
+      state_excerpt: {
+        solo: soloStateForOutput(rows[0]),
+        playerCharacter: {
+          id: character.id,
+          name: character.name,
+          heroicAbilities: character.heroic_ability || [],
+        },
+        requiredConfirmation: 'Confirm or select the additional solo heroic ability; no ability was added automatically.',
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}) {
+  const operation = 'select_solo_heroic_ability';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows: characters } = await client.query(
+      `SELECT id, name, heroic_ability FROM characters
+       WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [state.player_character_id, input.campaign_id],
+    );
+    const character = characters[0];
+    if (!character) {
+      throw new HelperError(409, 'INVALID_STATE', 'The configured solo character is no longer in this campaign.');
+    }
+    const { rows: abilities } = await client.query(
+      `SELECT id, name, description, willpower_cost, requirement, rule_key, activation_type
+       FROM heroic_abilities WHERE id = $1`,
+      [input.ability_id],
+    );
+    const ability = abilities[0];
+    if (!ability) throw new HelperError(404, 'NOT_FOUND', 'Heroic ability not found.');
+
+    let abilityNames = Array.isArray(character.heroic_ability) ? [...character.heroic_ability] : [];
+    let previousAbility = null;
+    if (state.solo_heroic_ability_id && state.solo_heroic_ability_id !== ability.id) {
+      const { rows } = await client.query(
+        'SELECT id, name FROM heroic_abilities WHERE id = $1',
+        [state.solo_heroic_ability_id],
+      );
+      previousAbility = rows[0] || null;
+      if (previousAbility && state.solo_heroic_ability_granted) {
+        abilityNames = abilityNames.filter((name) => name !== previousAbility.name);
+      }
+    }
+    const alreadyKnown = abilityNames.some((name) => name.toLocaleLowerCase() === ability.name.toLocaleLowerCase());
+    if (!alreadyKnown) abilityNames.push(ability.name);
+
+    const resultingRevision = previousRevision + 1;
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query(
+      'UPDATE characters SET heroic_ability = $1 WHERE id = $2',
+      [abilityNames, character.id],
+    );
+    const { rows: states } = await client.query(
+      `UPDATE solo_campaign_states
+       SET solo_heroic_ability_id = $1, solo_heroic_ability_granted = $2
+       WHERE campaign_id = $3 RETURNING *`,
+      [ability.id, !alreadyKnown, input.campaign_id],
+    );
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.heroic_ability_selected',
+      actorId: character.id,
+      payload: {
+        abilityId: ability.id,
+        abilityName: ability.name,
+        ruleKey: ability.rule_key,
+        replacedAbilityId: previousAbility?.id || null,
+        addedToCharacter: !alreadyKnown,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${character.name} selected ${ability.name} as the additional solo heroic ability.`,
+      state_excerpt: {
+        solo: soloStateForOutput(states[0]),
+        playerCharacter: {
+          id: character.id,
+          name: character.name,
+          heroicAbilities: abilityNames,
+        },
+        ability: {
+          id: ability.id,
+          name: ability.name,
+          ruleKey: ability.rule_key,
+          activationType: ability.activation_type,
+          willpowerCost: ability.willpower_cost,
+        },
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function askFortune(user, input, { sourceClient } = {}) {
+  const operation = 'ask_fortune';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const table = await loadSoloRuleTable(client, 'fortune', state.ruleset_version);
+    const resolution = resolveFortune({ category: input.category, tilt: input.tilt, entries: table.entries });
+    const resultingRevision = previousRevision + 1;
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `Fortune: ${input.question}`,
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: table.tableKey,
+      tableVersion: table.version,
+      result: {
+        question: input.question,
+        category: input.category,
+        tilt: input.tilt,
+        value: resolution.value,
+        extreme: resolution.extreme,
+        tableRow: resolution.tableRow,
+        context: input.context || null,
+      },
+      campaignRevision: resultingRevision,
+    });
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.fortune_asked',
+      actorId: state.player_character_id,
+      payload: {
+        rollId: rollRow.id,
+        question: input.question,
+        category: input.category,
+        tilt: input.tilt,
+        expression: resolution.expression,
+        dice: resolution.dice,
+        keptIndices: resolution.keptIndices,
+        keptValue: resolution.keptValue,
+        result: resolution.value,
+        extreme: resolution.extreme,
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Fortune answered “${resolution.value}” (${resolution.expression}: ${resolution.dice.join(', ')}; kept ${resolution.keptValue}).`,
+      state_excerpt: { roll: recordedRollForOutput(rollRow) },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function drawInspiration(user, input, { sourceClient } = {}) {
+  const operation = 'draw_inspiration';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const tableList = await Promise.all(input.columns.map((column) => (
+      loadSoloRuleTable(client, `inspiration_${column}`, 'draconi-generic-v1')
+    )));
+    const tables = Object.fromEntries(tableList.map((table, index) => [input.columns[index], table]));
+    const resolution = resolveInspiration({ columns: input.columns, tables });
+    const resultingRevision = previousRevision + 1;
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `Inspiration: ${input.columns.join(', ')}`,
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: 'inspiration',
+      tableVersion: 'draconi-generic-v1',
+      result: {
+        columns: input.columns,
+        results: resolution.results,
+        phrase: resolution.phrase,
+        context: input.context || null,
+        officialTable: false,
+      },
+      campaignRevision: resultingRevision,
+    });
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.inspiration_drawn',
+      actorId: state.player_character_id,
+      payload: {
+        rollId: rollRow.id,
+        expression: resolution.expression,
+        dice: resolution.dice,
+        results: resolution.results,
+        phrase: resolution.phrase,
+        context: input.context || null,
+        officialTable: false,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Inspiration: ${resolution.phrase} (${resolution.dice.join(', ')}).`,
+      state_excerpt: {
+        roll: recordedRollForOutput(rollRow),
+        notice: 'This result uses the generic Draconi inspiration table, not the official adventure table.',
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function startSoloMission(user, input, { sourceClient } = {}) {
+  const operation = 'start_solo_mission';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+
+    if (state.current_mission_id) {
+      const { rows: currentMissions } = await client.query(
+        `SELECT id, title, status FROM solo_missions WHERE id = $1 FOR UPDATE`,
+        [state.current_mission_id],
+      );
+      const current = currentMissions[0];
+      if (current && ['active', 'returning', 'briefing'].includes(current.status)) {
+        throw new HelperError(
+          409,
+          'INVALID_STATE',
+          `Solo mission “${current.title}” is already ${current.status}.`,
+        );
+      }
+    }
+
+    const { rows: missionRows } = await client.query(
+      `INSERT INTO solo_missions (
+         campaign_id, title, objective, status, current_waypoint_index, started_at
+       ) VALUES ($1, $2, $3, 'active', 0, now())
+       RETURNING *`,
+      [input.campaign_id, input.title, input.objective],
+    );
+    let mission = missionRows[0];
+    const waypointRows = [];
+    for (let position = 0; position < input.waypoint_count; position += 1) {
+      const first = position === 0;
+      const last = position === input.waypoint_count - 1;
+      const kind = first || last ? 'foreseen' : 'unknown';
+      const status = first ? 'active' : last ? 'revealed' : 'hidden';
+      const title = first ? input.opening_waypoint.title : last ? 'Objective' : null;
+      const description = first
+        ? input.opening_waypoint.description
+        : last ? input.objective : null;
+      const { rows } = await client.query(
+        `INSERT INTO solo_waypoints (
+           mission_id, position, kind, status, title, description
+         ) VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [mission.id, position, kind, status, title, description],
+      );
+      waypointRows.push(rows[0]);
+      if (kind === 'unknown') {
+        await client.query(
+          `INSERT INTO solo_waypoint_secrets (waypoint_id, payload, generated_from)
+           VALUES ($1, '{}'::jsonb, '[]'::jsonb)`,
+          [rows[0].id],
+        );
+      }
+    }
+
+    const { rows: threatRows } = await client.query(
+      `INSERT INTO solo_threats (
+         mission_id, description, counter, recurring, status, trigger_effect
+       ) VALUES ($1, $2, 1, $3, 'active', $4::jsonb)
+       RETURNING *`,
+      [mission.id, input.threat.description, input.threat.recurring, JSON.stringify(input.threat.trigger_effect)],
+    );
+    const threat = threatRows[0];
+    const { rows: updatedMissionRows } = await client.query(
+      `UPDATE solo_missions SET active_threat_id = $1 WHERE id = $2 RETURNING *`,
+      [threat.id, mission.id],
+    );
+    mission = updatedMissionRows[0];
+    await client.query(
+      `UPDATE solo_campaign_states SET current_mission_id = $1 WHERE campaign_id = $2`,
+      [mission.id, input.campaign_id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.mission_started',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: mission.id,
+        title: mission.title,
+        objective: mission.objective,
+        waypointCount: waypointRows.length,
+        currentWaypointId: waypointRows[0].id,
+        threatId: threat.id,
+        threatCounter: 1,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Solo mission “${mission.title}” started at ${waypointRows[0].title}. Threat begins at 1.`,
+      state_excerpt: {
+        mission: soloMissionForOutput(mission),
+        waypoints: waypointRows.map(soloWaypointForOutput),
+        currentWaypoint: soloWaypointForOutput(waypointRows[0]),
+        threat: soloThreatForOutput(threat),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function revealWaypoint(user, input, { sourceClient } = {}) {
+  const operation = 'reveal_waypoint';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (!state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'There is no current solo mission.');
+    }
+    const { rows: missionRows } = await client.query(
+      `SELECT * FROM solo_missions
+       WHERE id = $1 AND campaign_id = $2 FOR UPDATE`,
+      [state.current_mission_id, input.campaign_id],
+    );
+    const mission = missionRows[0];
+    if (!mission || !['active', 'returning'].includes(mission.status)) {
+      throw new HelperError(409, 'INVALID_STATE', 'The current solo mission cannot advance waypoints.');
+    }
+    const { rows: waypoints } = await client.query(
+      `SELECT * FROM solo_waypoints WHERE mission_id = $1 ORDER BY position FOR UPDATE`,
+      [mission.id],
+    );
+    const current = waypoints.find(
+      (waypoint) => Number(waypoint.position) === Number(mission.current_waypoint_index),
+    );
+    const target = waypoints.find((waypoint) => waypoint.id === input.waypoint_id);
+    if (!target || Number(target.position) !== Number(mission.current_waypoint_index) + 1) {
+      throw new HelperError(
+        400,
+        'VALIDATION_ERROR',
+        'Only the next waypoint in the current mission may be revealed.',
+      );
+    }
+    if (target.kind === 'unknown' && (!input.title || !input.description)) {
+      throw new HelperError(
+        400,
+        'VALIDATION_ERROR',
+        'A newly revealed unknown waypoint requires a title and description.',
+      );
+    }
+    if (input.generated_from_roll_ids.length > 0) {
+      const { rows: rollRows } = await client.query(
+        `SELECT id FROM recorded_rolls
+         WHERE campaign_id = $1 AND id = ANY($2::uuid[])`,
+        [input.campaign_id, input.generated_from_roll_ids],
+      );
+      if (rollRows.length !== new Set(input.generated_from_roll_ids).size) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'One or more referenced rolls do not belong to this campaign.');
+      }
+    }
+
+    if (current?.status === 'active') {
+      await client.query(
+        `UPDATE solo_waypoints SET status = 'resolved' WHERE id = $1`,
+        [current.id],
+      );
+    }
+    const revealedTitle = target.kind === 'unknown' ? input.title : target.title;
+    const revealedDescription = target.kind === 'unknown' ? input.description : target.description;
+    const { rows: targetRows } = await client.query(
+      `UPDATE solo_waypoints
+       SET status = 'active', title = $1, description = $2
+       WHERE id = $3
+       RETURNING *`,
+      [revealedTitle, revealedDescription, target.id],
+    );
+    const revealed = targetRows[0];
+    if (target.kind === 'unknown') {
+      await client.query(
+        `UPDATE solo_waypoint_secrets
+         SET payload = $1::jsonb, generated_from = $2::jsonb
+         WHERE waypoint_id = $3`,
+        [
+          JSON.stringify({ title: revealedTitle, description: revealedDescription }),
+          JSON.stringify(input.generated_from_roll_ids.map((rollId) => ({ rollId }))),
+          target.id,
+        ],
+      );
+    }
+    const { rows: updatedMissionRows } = await client.query(
+      `UPDATE solo_missions SET current_waypoint_index = $1 WHERE id = $2 RETURNING *`,
+      [target.position, mission.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.waypoint_revealed',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: mission.id,
+        previousWaypointId: current?.id || null,
+        waypointId: revealed.id,
+        position: Number(revealed.position),
+        kind: revealed.kind,
+        title: revealed.title,
+        description: revealed.description,
+        generatedFromRollIds: input.generated_from_roll_ids,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const refreshedWaypoints = waypoints.map((waypoint) => {
+      if (current && waypoint.id === current.id) return { ...waypoint, status: 'resolved' };
+      if (waypoint.id === revealed.id) return revealed;
+      return waypoint;
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Waypoint revealed: ${revealed.title}.`,
+      state_excerpt: {
+        mission: soloMissionForOutput(updatedMissionRows[0]),
+        waypoints: refreshedWaypoints.map(soloWaypointForOutput),
+        currentWaypoint: soloWaypointForOutput(revealed),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function advanceThreat(user, input, { sourceClient } = {}) {
+  const operation = 'advance_threat';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (!state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'There is no current solo mission.');
+    }
+    const { rows: threatRows } = await client.query(
+      `SELECT threat.*
+       FROM solo_threats threat
+       JOIN solo_missions mission ON mission.id = threat.mission_id
+       WHERE threat.id = $1 AND mission.id = $2 AND mission.campaign_id = $3
+       FOR UPDATE OF threat`,
+      [input.threat_id, state.current_mission_id, input.campaign_id],
+    );
+    const threat = threatRows[0];
+    if (!threat) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'The requested threat is not active in the current mission.');
+    }
+    let resolution;
+    try {
+      resolution = advanceThreatState({
+        counter: Number(threat.counter),
+        recurring: threat.recurring,
+        status: threat.status,
+      }, input.amount);
+    } catch (error) {
+      throw new HelperError(409, 'INVALID_STATE', error.message);
+    }
+    const { rows: updatedRows } = await client.query(
+      `UPDATE solo_threats SET counter = $1, status = $2 WHERE id = $3 RETURNING *`,
+      [resolution.counter, resolution.status, threat.id],
+    );
+    const updatedThreat = updatedRows[0];
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: resolution.triggered ? 'solo.threat_triggered' : 'solo.threat_advanced',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: state.current_mission_id,
+        threatId: threat.id,
+        previousCounter: resolution.previousCounter,
+        requestedAmount: resolution.requestedAmount,
+        appliedAmount: resolution.appliedAmount,
+        reachedCounter: resolution.reachedCounter,
+        resultingCounter: resolution.counter,
+        recurring: threat.recurring,
+        triggered: resolution.triggered,
+        ...(resolution.triggered ? { triggerEffect: threat.trigger_effect || {} } : {}),
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: resolution.triggered
+        ? `Threat triggered at 6${threat.recurring ? ' and reset to 1' : ''}: ${threat.description}`
+        : `Threat advanced from ${resolution.previousCounter} to ${resolution.counter}: ${threat.description}`,
+      state_excerpt: {
+        threat: soloThreatForOutput(updatedThreat, { revealTriggerEffect: resolution.triggered }),
+        transition: resolution,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function completeSoloMission(user, input, { sourceClient } = {}) {
+  const operation = 'complete_solo_mission';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id !== input.mission_id) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'The requested mission is not the current solo mission.');
+    }
+    const { rows: missionRows } = await client.query(
+      `SELECT mission.*,
+         (SELECT MAX(position) FROM solo_waypoints WHERE mission_id = mission.id) AS final_position
+       FROM solo_missions mission
+       WHERE mission.id = $1 AND mission.campaign_id = $2
+       FOR UPDATE OF mission`,
+      [input.mission_id, input.campaign_id],
+    );
+    const mission = missionRows[0];
+    if (!mission || !['active', 'returning'].includes(mission.status)) {
+      throw new HelperError(409, 'INVALID_STATE', 'The requested solo mission cannot be completed.');
+    }
+    if (input.outcome === 'success'
+      && Number(mission.current_waypoint_index) !== Number(mission.final_position)) {
+      throw new HelperError(
+        409,
+        'INVALID_STATE',
+        'A successful mission may only be completed at its final objective waypoint.',
+      );
+    }
+    await client.query(
+      `UPDATE solo_waypoints
+       SET status = CASE WHEN status = 'active' THEN 'resolved' ELSE status END
+       WHERE mission_id = $1`,
+      [mission.id],
+    );
+    if (mission.active_threat_id) {
+      await client.query(
+        `UPDATE solo_threats
+         SET status = CASE WHEN $1 = 'success' THEN 'resolved' ELSE 'removed' END
+         WHERE id = $2 AND status = 'active'`,
+        [input.outcome, mission.active_threat_id],
+      );
+    }
+    const { rows: completedRows } = await client.query(
+      `UPDATE solo_missions
+       SET status = $1, completed_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [input.outcome, mission.id],
+    );
+    await client.query(
+      `UPDATE solo_campaign_states SET current_mission_id = NULL WHERE campaign_id = $1`,
+      [input.campaign_id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.mission_completed',
+      actorId: state.player_character_id,
+      payload: {
+        missionId: mission.id,
+        title: mission.title,
+        outcome: input.outcome,
+        summary: input.summary,
+        rewards: input.rewards,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Solo mission “${mission.title}” ended with ${input.outcome}: ${input.summary}`,
+      state_excerpt: {
+        mission: soloMissionForOutput(completedRows[0]),
+        currentMissionId: null,
+        rewards: input.rewards,
+        advancementNotice: input.outcome === 'success'
+          ? 'Mission advancement marks are not automated yet; record them before the advancement phase is implemented.'
+          : null,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
 }
 
 export async function startSession(user, input, { sourceClient } = {}) {
@@ -503,6 +1756,54 @@ function participantActorId(row) {
   return row.character_id || row.id;
 }
 
+function initiativeSlotsFor(row) {
+  const stored = Array.isArray(row.initiative_slots)
+    ? row.initiative_slots.filter((value) => Number.isInteger(value) && value >= 1 && value <= 10)
+    : [];
+  if (stored.length > 0) return [...new Set(stored)].sort((left, right) => left - right);
+  return [row.initiative_roll ?? null];
+}
+
+function completedInitiativeSlotsFor(row) {
+  return Array.isArray(row.completed_initiative_slots)
+    ? [...new Set(row.completed_initiative_slots)]
+    : [];
+}
+
+function pendingInitiativeActions(rows) {
+  return rows.flatMap((row) => {
+    if (row.has_acted || row.current_hp <= 0) return [];
+    const completed = new Set(completedInitiativeSlotsFor(row));
+    return initiativeSlotsFor(row)
+      .filter((slot) => slot === null || !completed.has(slot))
+      .map((slot) => ({ row, slot }));
+  }).sort((left, right) => {
+    const leftInitiative = left.slot ?? Number.MAX_SAFE_INTEGER;
+    const rightInitiative = right.slot ?? Number.MAX_SAFE_INTEGER;
+    if (leftInitiative !== rightInitiative) return leftInitiative - rightInitiative;
+    const created = String(left.row.created_at).localeCompare(String(right.row.created_at));
+    return created || left.row.id.localeCompare(right.row.id);
+  });
+}
+
+function currentInitiativeAction(encounter, rows) {
+  const active = rows.find((row) => row.id === encounter.active_combatant_id)
+    || rows.find((row) => row.is_active_turn);
+  if (active) return { row: active, slot: encounter.active_initiative_slot ?? initiativeSlotsFor(active)[0] };
+  return pendingInitiativeActions(rows)[0] || null;
+}
+
+function completeInitiativeAction(row, slot) {
+  if (slot === null || slot === undefined) {
+    return { completedSlots: [], hasActed: true };
+  }
+  const completedSlots = [...new Set([...completedInitiativeSlotsFor(row), slot])];
+  return {
+    completedSlots,
+    hasActed: initiativeSlotsFor(row).every((candidate) => candidate !== null && completedSlots.includes(candidate)),
+  };
+}
+
 function orderedCombatants(rows) {
   return [...rows].sort((left, right) => {
     const leftInitiative = left.initiative_roll ?? Number.MAX_SAFE_INTEGER;
@@ -514,11 +1815,7 @@ function orderedCombatants(rows) {
 }
 
 function currentCombatant(encounter, rows) {
-  const ordered = orderedCombatants(rows);
-  return ordered.find((row) => row.id === encounter.active_combatant_id)
-    || ordered.find((row) => row.is_active_turn)
-    || ordered.find((row) => row.current_hp > 0 && !row.has_acted)
-    || null;
+  return currentInitiativeAction(encounter, rows)?.row || null;
 }
 
 function combatForOutput(access, encounter, rows) {
@@ -530,6 +1827,7 @@ function combatForOutput(access, encounter, rows) {
     round: encounter.current_round,
     activeActorId: rows.find((row) => row.id === encounter.active_combatant_id)?.character_id
       || encounter.active_combatant_id,
+    activeInitiativeSlot: encounter.active_initiative_slot ?? null,
     revision: Number(encounter.helper_revision || 0),
     participants: orderedCombatants(rows).map((row) => ({
       id: row.id,
@@ -537,6 +1835,8 @@ function combatForOutput(access, encounter, rows) {
       name: row.display_name,
       type: row.is_player_character ? 'pc' : row.monster_id ? 'monster' : 'npc',
       initiative: row.initiative_roll,
+      initiativeSlots: initiativeSlotsFor(row),
+      completedInitiativeSlots: completedInitiativeSlotsFor(row),
       hp: { current: row.current_hp, max: row.max_hp },
       wp: { current: row.current_wp ?? 0, max: row.max_wp ?? 0 },
       conditions: access.isGm || row.is_player_character
@@ -577,6 +1877,7 @@ async function loadCombatContext(client, campaignId, combatId, { forUpdate = fal
        c.max_hp AS character_max_hp,
        c.current_wp AS character_current_wp,
        c.max_wp AS character_max_wp
+       , c.heroic_ability AS character_heroic_ability
      FROM encounter_combatants ec
      LEFT JOIN characters c ON c.id = ec.character_id
      WHERE ec.encounter_id = $1
@@ -1213,12 +2514,37 @@ export async function startCombat(user, input, { sourceClient } = {}) {
         );
       }
     }
-    const initiatives = new Map(
-      input.initiatives.map((assignment) => [assignment.actor_id, assignment.initiative]),
-    );
+    const initiatives = new Map(input.initiatives.map((assignment) => {
+      const slots = assignment.initiative_slots || [assignment.initiative];
+      return [assignment.actor_id, [...slots].sort((left, right) => left - right)];
+    }));
+    const livingPlayerCharacters = context.rows.filter((row) => row.is_player_character && row.current_hp > 0);
+    const soloState = await loadSoloState(client, input.campaign_id);
+    const armyOfOneActorId = soloState?.enabled && livingPlayerCharacters.length === 1
+      && livingPlayerCharacters[0].character_id === soloState.player_character_id
+      && (livingPlayerCharacters[0].character_heroic_ability || []).some(
+        (name) => String(name).trim().toLocaleLowerCase() === 'army of one',
+      )
+      ? participantActorId(livingPlayerCharacters[0])
+      : null;
+    if (armyOfOneActorId) {
+      const armySlots = initiatives.get(armyOfOneActorId)
+        || initiativeSlotsFor(livingPlayerCharacters[0]).filter((slot) => slot !== null);
+      if (armySlots.length !== 2 || new Set(armySlots).size !== 2) {
+        throw new HelperError(
+          400,
+          'VALIDATION_ERROR',
+          'Army of One requires two distinct initiative_slots for the solo character.',
+          { actorId: armyOfOneActorId },
+        );
+      }
+      initiatives.set(armyOfOneActorId, armySlots);
+    }
     const preparedRows = context.rows.map((row) => ({
       ...row,
-      initiative_roll: initiatives.get(participantActorId(row)) ?? row.initiative_roll,
+      initiative_slots: initiatives.get(participantActorId(row))
+        || initiativeSlotsFor(row).filter((slot) => slot !== null),
+      initiative_roll: (initiatives.get(participantActorId(row)) || initiativeSlotsFor(row))[0] ?? row.initiative_roll,
       current_hp: row.character_id
         ? row.character_current_hp ?? row.current_hp
         : row.current_hp,
@@ -1232,12 +2558,14 @@ export async function startCombat(user, input, { sourceClient } = {}) {
         ? row.character_max_wp ?? row.max_wp
         : row.max_wp,
       has_acted: false,
+      completed_initiative_slots: [],
       is_active_turn: false,
     }));
-    const first = orderedCombatants(preparedRows).find((row) => row.current_hp > 0);
-    if (!first) {
+    const firstAction = pendingInitiativeActions(preparedRows)[0];
+    if (!firstAction) {
       throw new HelperError(409, 'INVALID_STATE', 'Combat cannot start because every participant is defeated.');
     }
+    const first = firstAction.row;
 
     const resultingRevision = previousRevision + 1;
     const resultingCombatRevision = Number(context.encounter.helper_revision || 0) + 1;
@@ -1250,12 +2578,13 @@ export async function startCombat(user, input, { sourceClient } = {}) {
        WHERE ec.encounter_id = $1 AND ec.character_id = c.id`,
       [input.combat_id],
     );
-    for (const assignment of input.initiatives) {
+    for (const prepared of preparedRows) {
       await client.query(
         `UPDATE encounter_combatants
-         SET initiative_roll = $1
-         WHERE encounter_id = $2 AND (id = $3 OR character_id = $3)`,
-        [assignment.initiative, input.combat_id, assignment.actor_id],
+         SET initiative_roll = $1, initiative_slots = $2,
+           completed_initiative_slots = '{}'::integer[]
+         WHERE encounter_id = $3 AND id = $4`,
+        [prepared.initiative_roll, prepared.initiative_slots, input.combat_id, prepared.id],
       );
     }
     await client.query(
@@ -1267,15 +2596,16 @@ export async function startCombat(user, input, { sourceClient } = {}) {
     await client.query(
       `UPDATE encounters
        SET status = 'active', current_round = 1, active_combatant_id = $1,
-         helper_revision = $2
-       WHERE id = $3`,
-      [first.id, resultingCombatRevision, input.combat_id],
+         active_initiative_slot = $2, helper_revision = $3
+       WHERE id = $4`,
+      [first.id, firstAction.slot, resultingCombatRevision, input.combat_id],
     );
     await appendCombatLog(client, input.combat_id, {
       type: 'combat_started',
       ts: Date.now(),
       round: 1,
       activeActorId: participantActorId(first),
+      initiativeSlot: firstAction.slot,
       message: input.reason,
     });
     await client.query(
@@ -1296,7 +2626,7 @@ export async function startCombat(user, input, { sourceClient } = {}) {
         round: 1,
         participantActorIds: orderedCombatants(preparedRows).map(participantActorId),
         initiatives: Object.fromEntries(
-          orderedCombatants(preparedRows).map((row) => [participantActorId(row), row.initiative_roll]),
+          orderedCombatants(preparedRows).map((row) => [participantActorId(row), initiativeSlotsFor(row)]),
         ),
         reason: input.reason,
       },
@@ -1355,7 +2685,8 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       { forUpdate: true },
     ));
     assertCombatStatus(context.encounter, 'active');
-    const active = currentCombatant(context.encounter, context.rows);
+    const activeAction = currentInitiativeAction(context.encounter, context.rows);
+    const active = activeAction?.row;
     if (!active) {
       throw new HelperError(409, 'INVALID_STATE', 'Combat has no actor available to act.');
     }
@@ -1408,11 +2739,12 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       await persistActor(client, item.resolution.result, item.storage);
     }
     if (input.consume_turn) {
+      const completed = completeInitiativeAction(active, activeAction.slot);
       await client.query(
         `UPDATE encounter_combatants
-         SET has_acted = true
-         WHERE id = $1 AND encounter_id = $2`,
-        [active.id, input.combat_id],
+         SET completed_initiative_slots = $1, has_acted = $2
+         WHERE id = $3 AND encounter_id = $4`,
+        [completed.completedSlots, completed.hasActed, active.id, input.combat_id],
       );
     }
     await client.query(
@@ -1423,6 +2755,7 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       type: 'action_resolved',
       ts: Date.now(),
       round: context.encounter.current_round,
+      initiativeSlot: activeAction.slot,
       actorId: input.actor_id,
       actorName: active.display_name,
       action: input.action,
@@ -1472,6 +2805,7 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       payload: {
         combatId: input.combat_id,
         round: context.encounter.current_round,
+        initiativeSlot: activeAction.slot,
         action: input.action,
         outcome: input.outcome,
         consumeTurn: input.consume_turn,
@@ -1541,8 +2875,14 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
       { forUpdate: true },
     ));
     assertCombatStatus(context.encounter, 'active');
-    const active = currentCombatant(context.encounter, context.rows);
-    if (active && active.current_hp > 0 && !active.has_acted) {
+    const activeAction = currentInitiativeAction(context.encounter, context.rows);
+    const active = activeAction?.row || null;
+    const activeCompleted = !active
+      || active.current_hp <= 0
+      || active.has_acted
+      || (activeAction.slot !== null && activeAction.slot !== undefined
+        && completedInitiativeSlotsFor(active).includes(activeAction.slot));
+    if (!activeCompleted) {
       throw new HelperError(
         409,
         'INVALID_STATE',
@@ -1552,20 +2892,24 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     }
 
     const afterCurrent = context.rows.map((row) => (
-      active && row.id === active.id && row.current_hp <= 0 ? { ...row, has_acted: true } : row
+      active && row.id === active.id && row.current_hp <= 0
+        ? { ...row, has_acted: true, completed_initiative_slots: initiativeSlotsFor(row).filter((slot) => slot !== null) }
+        : row
     ));
     let round = context.encounter.current_round;
-    let next = orderedCombatants(afterCurrent).find((row) => row.current_hp > 0 && !row.has_acted);
+    let nextAction = pendingInitiativeActions(afterCurrent)[0];
     let startedNewRound = false;
-    if (!next) {
+    if (!nextAction) {
       const living = orderedCombatants(afterCurrent).filter((row) => row.current_hp > 0);
       if (living.length === 0) {
         throw new HelperError(409, 'INVALID_STATE', 'No living combatant remains. End the combat instead.');
       }
       round += 1;
       startedNewRound = true;
-      next = living[0];
+      const resetRows = living.map((row) => ({ ...row, has_acted: false, completed_initiative_slots: [] }));
+      nextAction = pendingInitiativeActions(resetRows)[0];
     }
+    const next = nextAction.row;
 
     const resultingRevision = previousRevision + 1;
     const resultingCombatRevision = Number(context.encounter.helper_revision || 0) + 1;
@@ -1573,14 +2917,14 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     if (startedNewRound) {
       await client.query(
         `UPDATE encounter_combatants
-         SET has_acted = false, is_active_turn = (id = $2)
+         SET has_acted = false, completed_initiative_slots = '{}'::integer[], is_active_turn = (id = $2)
          WHERE encounter_id = $1`,
         [input.combat_id, next.id],
       );
     } else {
       if (active && active.current_hp <= 0 && !active.has_acted) {
         await client.query(
-          'UPDATE encounter_combatants SET has_acted = true WHERE id = $1',
+          'UPDATE encounter_combatants SET has_acted = true, completed_initiative_slots = initiative_slots WHERE id = $1',
           [active.id],
         );
       }
@@ -1593,9 +2937,10 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     }
     await client.query(
       `UPDATE encounters
-       SET current_round = $1, active_combatant_id = $2, helper_revision = $3
-       WHERE id = $4`,
-      [round, next.id, resultingCombatRevision, input.combat_id],
+       SET current_round = $1, active_combatant_id = $2, active_initiative_slot = $3,
+         helper_revision = $4
+       WHERE id = $5`,
+      [round, next.id, nextAction.slot, resultingCombatRevision, input.combat_id],
     );
     await appendCombatLog(client, input.combat_id, {
       type: startedNewRound ? 'round_advanced' : 'turn_advanced',
@@ -1603,6 +2948,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
       round,
       previousActorId: active ? participantActorId(active) : null,
       activeActorId: participantActorId(next),
+      initiativeSlot: nextAction.slot,
       message: input.reason,
     });
     await client.query(
@@ -1623,6 +2969,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
         round,
         previousActorId: active ? participantActorId(active) : null,
         activeActorId: participantActorId(next),
+        initiativeSlot: nextAction.slot,
         reason: input.reason,
       },
       visibility: 'players',
@@ -1694,7 +3041,8 @@ export async function endCombat(user, input, { sourceClient } = {}) {
     );
     await client.query(
       `UPDATE encounters
-       SET status = 'completed', active_combatant_id = NULL, helper_revision = $1
+       SET status = 'completed', active_combatant_id = NULL,
+         active_initiative_slot = NULL, helper_revision = $1
        WHERE id = $2`,
       [resultingCombatRevision, input.combat_id],
     );

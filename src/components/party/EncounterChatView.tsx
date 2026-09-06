@@ -16,6 +16,7 @@ import {
   POISONED_STATUS_EFFECT,
   toggleEncounterStatusEffect,
 } from '../../lib/encounterStatusEffects';
+import { completeCurrentInitiativeSlot, initiativeSlotsFor } from '../../lib/initiativeSlots';
 
 // --- HELPER: Editable Stat Box ---
 interface StatInputProps {
@@ -59,6 +60,7 @@ const StatInput = ({ value, max, icon: Icon, colorClass, onChange, disabled }: S
 const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
+  const initiativeDisplay = initiativeSlotsFor(combatant).filter((value) => value !== null).join('/') || '-';
 
   useEffect(() => { setInitiativeValue(combatant.initiative_roll?.toString() ?? ''); }, [combatant.initiative_roll]);
 
@@ -121,7 +123,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
               {!combatant.initiative_roll && <Button onClick={handleSetInitiative} size="sm" variant="secondary" disabled={isSaving}>Set</Button>}
             </div>
           ) : (
-            <div className="w-8 h-8 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-lg shadow-sm">{combatant.initiative_roll}</div>
+            <div className="min-w-8 h-8 px-1 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-sm shadow-sm">{initiativeDisplay}</div>
           )}
         </div>
       </div>
@@ -131,7 +133,7 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
           {showWp && <StatInput value={combatant.current_wp || combatant.character?.current_wp || 0} max={maxWp} icon={Zap} colorClass="text-blue-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_wp: val })} />}
         </div>
         {(isMyCharacter || !isPlayer) && !isDefeated && (
-          <Button onClick={() => updateCombatant(combatant.id, { has_acted: !combatant.has_acted })} size="sm" variant={hasActed ? "ghost" : "outline"} className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"} title="End Turn">
+          <Button onClick={() => updateCombatant(combatant.id, hasActed ? { has_acted: false, completed_initiative_slots: [] } : completeCurrentInitiativeSlot(combatant))} size="sm" variant={hasActed ? "ghost" : "outline"} className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"} title="End Turn">
             {hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}
           </Button>
         )}

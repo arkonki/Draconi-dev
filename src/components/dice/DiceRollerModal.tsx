@@ -19,6 +19,8 @@ import {
   type PushRollConditionKey,
 } from './pushRoll';
 import { resolveDiceRoll } from './resolveDiceRoll';
+import { fetchSoloCampaignStatus, type SoloCampaignStatus } from '../../lib/api/solo';
+import { characterHasSoloAbility, SOLE_SURVIVOR_WP_COST } from '../../lib/soloAbilities';
 
 const DiceIcon = ({ type }: { type: DiceType }) => (
   <span className="font-semibold text-xs uppercase">{type}</span>
@@ -48,6 +50,7 @@ export function DiceRollerModal() {
     markSkillThisSession, 
     performRest, 
     setInitiativeForCombatant,
+    spendSoleSurvivorWillpower,
     updateConditions,
     isSaving: isSavingCharacter,
     character: currentCharacter 
@@ -73,7 +76,7 @@ export function DiceRollerModal() {
   const [displayedOutcome, setDisplayedOutcome] = useState<string | number>('...');
   const [lastRolledEntry, setLastRolledEntry] = useState<RollHistoryEntry | null>(null); 
   const [pendingPostRollAction, setPendingPostRollAction] = useState<PostRollAction | null>(null);
-  const [pushRollStage, setPushRollStage] = useState<'idle' | 'choose-condition' | 'ready'>('idle');
+  const [pushRollStage, setPushRollStage] = useState<'idle' | 'choose-cost' | 'choose-condition' | 'ready'>('idle');
   const [selectedPushCondition, setSelectedPushCondition] = useState<PushRollConditionKey | null>(null);
   const [pushRollError, setPushRollError] = useState<string | null>(null);
   const [hasPushedCurrentTest, setHasPushedCurrentTest] = useState(false);
@@ -81,6 +84,8 @@ export function DiceRollerModal() {
   const [manualValues, setManualValues] = useState<string[]>([]);
   const [manualError, setManualError] = useState<string | null>(null);
   const [isManualPushRoll, setIsManualPushRoll] = useState(false);
+  const [usedSoleSurvivor, setUsedSoleSurvivor] = useState(false);
+  const [soloStatus, setSoloStatus] = useState<SoloCampaignStatus | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCompletionRef = useRef<(() => void) | null>(null);
@@ -93,6 +98,27 @@ export function DiceRollerModal() {
   const isAdvancementRoll = rollMode === 'advancementRoll';
   const isInitiative = rollMode === 'initiative';
   const isRest = rollMode === 'rest';
+  const isConfiguredSoloHero = Boolean(
+    soloStatus?.enabled
+    && currentCharacter?.id
+    && soloStatus.playerCharacterId === currentCharacter.id,
+  );
+  const knowsSoleSurvivor = characterHasSoloAbility(currentCharacter?.heroic_abilities, 'soleSurvivor');
+  const hasSoleSurvivor = isConfiguredSoloHero && knowsSoleSurvivor;
+  const canAffordSoleSurvivor = hasSoleSurvivor
+    && (currentCharacter?.current_wp ?? 0) >= SOLE_SURVIVOR_WP_COST;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!showDiceRoller || !effectivePartyId || !currentCharacter?.id) {
+      setSoloStatus(null);
+      return () => { cancelled = true; };
+    }
+    fetchSoloCampaignStatus(effectivePartyId)
+      .then((status) => { if (!cancelled) setSoloStatus(status); })
+      .catch(() => { if (!cancelled) setSoloStatus(null); });
+    return () => { cancelled = true; };
+  }, [currentCharacter?.id, effectivePartyId, showDiceRoller]);
 
   const discardPendingCompletion = useCallback(() => {
     if (completionTimeoutRef.current) {
@@ -140,6 +166,7 @@ export function DiceRollerModal() {
     setHasPushedCurrentTest(isPushedRoll);
     setPushRollStage('idle');
     setSelectedPushCondition(null);
+    setUsedSoleSurvivor(false);
     setPushRollError(null);
     setIsRolling(true);
     setResults([]);
@@ -240,6 +267,7 @@ export function DiceRollerModal() {
       hasCharacter: Boolean(currentCharacter),
       hasAlreadyPushed: isPushedRoll,
       conditions: currentCharacter?.conditions,
+      canPushWithoutCondition: canAffordSoleSurvivor,
     });
 
     if (isSkillCheck && (currentConfig?.onRollComplete || currentConfig?.onRoll)) {
@@ -253,7 +281,7 @@ export function DiceRollerModal() {
     } else {
       runCompletionCallbacks();
     }
-  }, [addRollToHistory, currentCharacter, currentConfig, dicePool, flushPendingCompletion, isBaneActive, isBoonActive, isInitiative, isPlayer, isRest, isSkillCheck, markSkillThisSession, performRest, rollMode, setInitiativeForCombatant]);
+  }, [addRollToHistory, canAffordSoleSurvivor, currentCharacter, currentConfig, dicePool, flushPendingCompletion, isBaneActive, isBoonActive, isInitiative, isPlayer, isRest, isSkillCheck, markSkillThisSession, performRest, rollMode, setInitiativeForCombatant]);
 
   const handleRoll = useCallback((isPushedRoll = false) => {
     if (dicePool.length === 0) return;
@@ -358,6 +386,7 @@ export function DiceRollerModal() {
       setManualValues([]);
       setManualError(null);
       setIsManualPushRoll(false);
+      setUsedSoleSurvivor(false);
       if (intervalRef.current) clearInterval(intervalRef.current);
       flushPendingCompletion();
     }
@@ -387,8 +416,22 @@ export function DiceRollerModal() {
   };
 
   const handlePushReroll = () => {
-    if (!selectedPushCondition || isSavingCharacter) return;
+    if ((!selectedPushCondition && !usedSoleSurvivor) || isSavingCharacter) return;
     handleRoll(true);
+  };
+
+  const handleUseSoleSurvivor = async () => {
+    if (!currentCharacter || !canAffordSoleSurvivor) return;
+    setPushRollError(null);
+    try {
+      await spendSoleSurvivorWillpower();
+      discardPendingCompletion();
+      setSelectedPushCondition(null);
+      setUsedSoleSurvivor(true);
+      setPushRollStage('ready');
+    } catch (error) {
+      setPushRollError(error instanceof Error ? error.message : 'Could not spend willpower.');
+    }
   };
 
   const handleShare = async (entry: RollHistoryEntry) => {
@@ -415,6 +458,7 @@ export function DiceRollerModal() {
     hasCharacter: Boolean(currentCharacter),
     hasAlreadyPushed: hasPushedCurrentTest,
     conditions: currentCharacter?.conditions,
+    canPushWithoutCondition: canAffordSoleSurvivor,
   });
   const shouldShowPushAction =
     isSkillCheck
@@ -561,7 +605,39 @@ export function DiceRollerModal() {
             </div>
           ) : pushRollStage !== 'idle' ? (
             <div className="dice-modal-push-condition flex flex-col h-full animate-in slide-in-from-right-4 duration-200">
-              {pushRollStage === 'choose-condition' ? (
+              {pushRollStage === 'choose-cost' ? (
+                <div className="m-auto w-full">
+                  <div className="text-center">
+                    <ShieldQuestion className="mx-auto h-10 w-10 text-indigo-600" />
+                    <h3 className="mt-3 text-lg font-bold text-stone-900">Choose the push cost</h3>
+                    <p className="mt-1 text-sm text-stone-600">You must keep the new result.</p>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      disabled={availablePushConditions.length === 0 || isSavingCharacter}
+                      onClick={() => setPushRollStage('choose-condition')}
+                      className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <div className="font-bold text-amber-950">Take a condition</div>
+                      <p className="mt-1 text-xs text-amber-800">Explain how it applies, then reroll.</p>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canAffordSoleSurvivor || isSavingCharacter}
+                      onClick={handleUseSoleSurvivor}
+                      className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-left hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <div className="font-bold text-indigo-950">Sole Survivor · 3 WP</div>
+                      <p className="mt-1 text-xs text-indigo-800">
+                        Push without gaining a condition.
+                        {!canAffordSoleSurvivor && ` Requires ${SOLE_SURVIVOR_WP_COST} WP.`}
+                      </p>
+                    </button>
+                  </div>
+                  {pushRollError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{pushRollError}</div>}
+                </div>
+              ) : pushRollStage === 'choose-condition' ? (
                 <>
                   <div className="text-center">
                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
@@ -631,14 +707,16 @@ export function DiceRollerModal() {
               ) : (
                 <div className="m-auto w-full rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
                   <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
-                  <h3 className="mt-3 text-lg font-bold text-emerald-950">Condition taken</h3>
+                  <h3 className="mt-3 text-lg font-bold text-emerald-950">{usedSoleSurvivor ? 'Sole Survivor used' : 'Condition taken'}</h3>
                   <p className="mt-1 text-sm text-emerald-800">
-                    {PUSH_ROLL_CONDITIONS.find(
+                    {usedSoleSurvivor ? `${SOLE_SURVIVOR_WP_COST} WP spent. No condition was added.` : `${PUSH_ROLL_CONDITIONS.find(
                       (condition) => condition.key === selectedPushCondition,
-                    )?.label ?? 'Condition'} is now active. You must keep the new result.
+                    )?.label ?? 'Condition'} is now active.`} You must keep the new result.
                   </p>
                   <p className="mt-3 text-xs text-emerald-700">
-                    Describe how the condition resulted from the action, then roll the test again.
+                    {usedSoleSurvivor
+                      ? 'Roll the test again using the same dice and modifiers.'
+                      : 'Describe how the condition resulted from the action, then roll the test again.'}
                   </p>
                 </div>
               )}
@@ -714,7 +792,7 @@ export function DiceRollerModal() {
                               <Button
                                 onClick={() => {
                                   setPushRollError(null);
-                                  setPushRollStage('choose-condition');
+                                  setPushRollStage(hasSoleSurvivor ? 'choose-cost' : 'choose-condition');
                                 }}
                                 disabled={!pushAvailability.canPush}
                                 size="sm"
@@ -726,7 +804,9 @@ export function DiceRollerModal() {
                             </span>
                             <p className="mt-2 text-xs text-stone-600">
                               {pushAvailability.reason
-                                || 'Take a new condition, explain how it applies, and reroll the test.'}
+                                || (hasSoleSurvivor
+                                  ? 'Take a condition or spend 3 WP with Sole Survivor, then reroll.'
+                                  : 'Take a new condition, explain how it applies, and reroll the test.')}
                             </p>
                           </div>
                         )}
@@ -793,11 +873,11 @@ export function DiceRollerModal() {
               >
                 Back
               </Button>
-            ) : pushRollStage === 'choose-condition' ? (
+            ) : pushRollStage === 'choose-condition' || pushRollStage === 'choose-cost' ? (
               <Button
                 onClick={() => {
                   setPushRollError(null);
-                  setPushRollStage('idle');
+                  setPushRollStage(pushRollStage === 'choose-condition' && hasSoleSurvivor ? 'choose-cost' : 'idle');
                 }}
                 variant="ghost"
                 size="sm"

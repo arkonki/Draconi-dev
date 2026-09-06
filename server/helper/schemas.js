@@ -19,6 +19,146 @@ export const getCampaignStateInputSchema = z.object({
   recent_event_limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();
 
+export const getSoloOptionsInputSchema = z.object({
+  campaign_id: uuidSchema,
+}).strict();
+
+export const getSoloStateInputSchema = z.object({
+  campaign_id: uuidSchema,
+}).strict();
+
+const soloModeSchema = z.enum(['custom', 'deepfall_breach']);
+const oracleDefaultTiltSchema = z.enum(['even', 'ask']);
+
+export const enableSoloModeInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  player_character_id: uuidSchema,
+  mode: soloModeSchema.default('custom'),
+  ruleset_version: z.literal('db-solo-v1.2').default('db-solo-v1.2'),
+  oracle_default_tilt: oracleDefaultTiltSchema.default('ask'),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const enableSoloModeBodySchema = enableSoloModeInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const selectSoloHeroicAbilityInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ability_id: uuidSchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const selectSoloHeroicAbilityBodySchema = selectSoloHeroicAbilityInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const askFortuneInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  question: z.string().trim().min(1).max(1_000),
+  category: z.enum(['yes_no', 'number', 'scale', 'power', 'quality', 'reaction']),
+  tilt: z.enum(['unlikely', 'even', 'likely']),
+  context: z.string().trim().max(5_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const askFortuneBodySchema = askFortuneInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+const inspirationColumnSchema = z.enum(['action', 'attribute', 'thing']);
+const drawInspirationSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  columns: z.array(inspirationColumnSchema).min(1).max(3),
+  context: z.string().trim().max(5_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const drawInspirationInputSchema = drawInspirationSchema.superRefine((value, context) => {
+  if (new Set(value.columns).size !== value.columns.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Each Inspiration column may be selected only once.' });
+  }
+});
+
+export const drawInspirationBodySchema = drawInspirationSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true })
+  .superRefine((value, context) => {
+    if (new Set(value.columns).size !== value.columns.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Each Inspiration column may be selected only once.' });
+    }
+  });
+
+const openingWaypointSchema = z.object({
+  title: z.string().trim().min(1).max(200).default('Departure'),
+  description: z.string().trim().min(1).max(2_000),
+}).strict();
+
+const missionThreatSchema = z.object({
+  description: z.string().trim().min(1).max(2_000),
+  recurring: z.boolean().default(false),
+  trigger_effect: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+
+export const startSoloMissionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  title: z.string().trim().min(1).max(200),
+  objective: z.string().trim().min(1).max(2_000),
+  waypoint_count: z.number().int().min(2).max(12).default(3),
+  opening_waypoint: openingWaypointSchema,
+  threat: missionThreatSchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const startSoloMissionBodySchema = startSoloMissionInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const advanceThreatInputSchema = z.object({
+  campaign_id: uuidSchema,
+  threat_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  amount: z.number().int().min(1).max(2).default(1),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const advanceThreatBodySchema = advanceThreatInputSchema
+  .omit({ campaign_id: true, threat_id: true, expected_revision: true, idempotency_key: true });
+
+export const revealWaypointInputSchema = z.object({
+  campaign_id: uuidSchema,
+  waypoint_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().min(1).max(2_000).optional(),
+  generated_from_roll_ids: z.array(uuidSchema).max(20).default([]),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const revealWaypointBodySchema = revealWaypointInputSchema
+  .omit({ campaign_id: true, waypoint_id: true, expected_revision: true, idempotency_key: true });
+
+export const completeSoloMissionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  mission_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  outcome: z.enum(['success', 'failure', 'abandoned']),
+  summary: z.string().trim().min(1).max(10_000),
+  rewards: z.record(z.string(), z.unknown()).default({}),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const completeSoloMissionBodySchema = completeSoloMissionInputSchema
+  .omit({ campaign_id: true, mission_id: true, expected_revision: true, idempotency_key: true });
+
 export const getActorInputSchema = z.object({
   campaign_id: uuidSchema,
   actor_id: uuidSchema,
@@ -214,8 +354,17 @@ export const removeEncounterParticipantBodySchema = removeEncounterParticipantIn
 
 const initiativeAssignmentSchema = z.object({
   actor_id: uuidSchema,
-  initiative: z.number().int().min(1).max(10),
-}).strict();
+  initiative: z.number().int().min(1).max(10).optional(),
+  initiative_slots: z.array(z.number().int().min(1).max(10)).min(1).max(2).optional(),
+}).strict().superRefine((value, context) => {
+  const slots = value.initiative_slots || (value.initiative === undefined ? [] : [value.initiative]);
+  if (slots.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide initiative or initiative_slots.' });
+  }
+  if (new Set(slots).size !== slots.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Initiative slots for one actor must be distinct.' });
+  }
+});
 
 function uniqueActorIds(value, context, message) {
   const actorIds = value.map((entry) => entry.actor_id);
