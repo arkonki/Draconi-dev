@@ -10,6 +10,7 @@ import {
   completeSessionInputSchema,
   createEncounterInputSchema,
   drawInspirationInputSchema,
+  disableSoloModeInputSchema,
   enableSoloModeInputSchema,
   selectSoloHeroicAbilityInputSchema,
   endCombatInputSchema,
@@ -122,7 +123,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.6.0' },
+    { name: 'dragonbane-helper', version: '1.7.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -177,6 +178,14 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.enableSoloMode(input))));
+
+  server.registerTool('disable_solo_mode', {
+    title: 'Disable solo mode for a campaign',
+    description: 'GM-only. Disable solo mode after active solo missions and combat are complete. Removes only an additional heroic ability that Draconi itself granted for solo play.',
+    inputSchema: disableSoloModeInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.disableSoloMode(input))));
 
   server.registerTool('select_solo_heroic_ability', {
     title: 'Select the solo hero additional ability',
@@ -420,6 +429,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'get_solo_options',
         'get_solo_state',
         'enable_solo_mode',
+        'disable_solo_mode',
         'select_solo_heroic_ability',
         'ask_fortune',
         'draw_inspiration',
@@ -461,6 +471,7 @@ export const mcpToolAnnotations = {
   get_solo_options: READ_ONLY,
   get_solo_state: READ_ONLY,
   enable_solo_mode: MODIFYING,
+  disable_solo_mode: MODIFYING,
   select_solo_heroic_ability: MODIFYING,
   ask_fortune: MODIFYING,
   draw_inspiration: MODIFYING,

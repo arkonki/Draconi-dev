@@ -10,6 +10,7 @@ import {
   completeSessionBodySchema,
   createEncounterBodySchema,
   drawInspirationBodySchema,
+  disableSoloModeBodySchema,
   enableSoloModeBodySchema,
   selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
@@ -130,7 +131,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.6.0',
+    version: '1.7.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -237,6 +238,24 @@ export const openApiDocument = {
         },
         responses: {
           200: { description: 'Solo mode enabled', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Solo'],
+        summary: 'Disable solo mode for a campaign',
+        description: 'GM-only. Active solo missions and combat must be completed first. Removes only a solo ability that Draconi originally granted.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(disableSoloModeBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Solo mode disabled', content: { 'application/json': { schema: successEnvelope() } } },
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,

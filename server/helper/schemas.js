@@ -44,6 +44,16 @@ export const enableSoloModeInputSchema = z.object({
 export const enableSoloModeBodySchema = enableSoloModeInputSchema
   .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
 
+export const disableSoloModeInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const disableSoloModeBodySchema = disableSoloModeInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
 export const selectSoloHeroicAbilityInputSchema = z.object({
   campaign_id: uuidSchema,
   expected_revision: revisionSchema,

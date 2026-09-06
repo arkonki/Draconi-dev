@@ -336,6 +336,38 @@ function requireEnabledSoloState(row) {
   return row;
 }
 
+async function revokeGrantedSoloAbility(client, state) {
+  if (
+    !state?.player_character_id
+    || !state.solo_heroic_ability_id
+    || !state.solo_heroic_ability_granted
+  ) return null;
+
+  const { rows: abilities } = await client.query(
+    'SELECT id, name, rule_key FROM heroic_abilities WHERE id = $1',
+    [state.solo_heroic_ability_id],
+  );
+  const ability = abilities[0];
+  if (!ability) return null;
+
+  const { rows: characters } = await client.query(
+    'SELECT id, heroic_ability FROM characters WHERE id = $1 FOR UPDATE',
+    [state.player_character_id],
+  );
+  const character = characters[0];
+  if (!character) return ability;
+  const abilityNames = Array.isArray(character.heroic_ability)
+    ? character.heroic_ability.filter(
+      (name) => String(name).trim().toLocaleLowerCase() !== ability.name.toLocaleLowerCase(),
+    )
+    : [];
+  await client.query(
+    'UPDATE characters SET heroic_ability = $1 WHERE id = $2',
+    [abilityNames, character.id],
+  );
+  return ability;
+}
+
 async function loadSoloRuleTable(client, tableKey, version) {
   const { rows } = await client.query(
     `SELECT table_key, version, locale, die_sides, source_kind, display_name, entries
@@ -606,13 +638,27 @@ export async function getSoloState(user, campaignId) {
      LIMIT 10`,
     [campaignId],
   );
+  const { rows: activeCombats } = await pool.query(
+    `SELECT id, name FROM encounters
+     WHERE party_id = $1 AND status = 'active'
+     ORDER BY created_at DESC LIMIT 1`,
+    [campaignId],
+  );
   const allowedNextActions = [];
   if (!state?.enabled) {
     allowedNextActions.push('get_solo_options', 'enable_solo_mode');
   } else {
     if (!soloHeroicAbility) allowedNextActions.push('select_solo_heroic_ability');
     allowedNextActions.push('ask_fortune', 'draw_inspiration', 'start_session');
-    if (!activeMission) allowedNextActions.push('start_solo_mission');
+    if (!activeMission) {
+      allowedNextActions.push('start_solo_mission');
+    } else {
+      const nextWaypoint = waypoints.find(
+        (waypoint) => Number(waypoint.position) === Number(activeMission.current_waypoint_index) + 1,
+      );
+      if (nextWaypoint) allowedNextActions.push('reveal_waypoint');
+      allowedNextActions.push('complete_solo_mission');
+    }
     if (activeThreat?.status === 'active') allowedNextActions.push('advance_threat');
   }
   return {
@@ -626,6 +672,9 @@ export async function getSoloState(user, campaignId) {
     waypoints: waypoints.map(soloWaypointForOutput),
     currentWaypoint: soloWaypointForOutput(currentWaypoint),
     activeThreat: soloThreatForOutput(activeThreat),
+    activeCombat: activeCombats[0]
+      ? { id: activeCombats[0].id, name: activeCombats[0].name }
+      : null,
     latestRolls: latestRolls.map(recordedRollForOutput),
     allowedNextActions,
   };
@@ -648,6 +697,7 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
 
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const previousState = await loadSoloState(client, input.campaign_id, { forUpdate: true });
     if (input.mode === 'deepfall_breach') {
       throw new HelperError(
         409,
@@ -666,6 +716,26 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
     }
 
     const resultingRevision = previousRevision + 1;
+    const characterChanged = Boolean(
+      previousState?.player_character_id
+      && previousState.player_character_id !== character.id,
+    );
+    if (characterChanged && previousState?.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'Complete or abandon the active solo mission before changing the solo hero.');
+    }
+    if (characterChanged) {
+      const { rows: activeCombats } = await client.query(
+        `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+        [input.campaign_id],
+      );
+      if (activeCombats[0]) {
+        throw new HelperError(409, 'INVALID_STATE', 'End the active combat encounter before changing the solo hero.');
+      }
+    }
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const revokedAbility = characterChanged
+      ? await revokeGrantedSoloAbility(client, previousState)
+      : null;
     const { rows } = await client.query(
       `INSERT INTO solo_campaign_states (
          campaign_id, enabled, ruleset_version, mode, player_character_id,
@@ -676,7 +746,15 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
          ruleset_version = EXCLUDED.ruleset_version,
          mode = EXCLUDED.mode,
          player_character_id = EXCLUDED.player_character_id,
-         oracle_default_tilt = EXCLUDED.oracle_default_tilt
+         oracle_default_tilt = EXCLUDED.oracle_default_tilt,
+         solo_heroic_ability_id = CASE
+           WHEN solo_campaign_states.player_character_id IS DISTINCT FROM EXCLUDED.player_character_id THEN NULL
+           ELSE solo_campaign_states.solo_heroic_ability_id
+         END,
+         solo_heroic_ability_granted = CASE
+           WHEN solo_campaign_states.player_character_id IS DISTINCT FROM EXCLUDED.player_character_id THEN false
+           ELSE solo_campaign_states.solo_heroic_ability_granted
+         END
        RETURNING *`,
       [
         input.campaign_id,
@@ -703,7 +781,9 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
         mode: input.mode,
         rulesetVersion: input.ruleset_version,
         oracleDefaultTilt: input.oracle_default_tilt,
-        heroicAbilityReviewRequired: true,
+        heroicAbilityReviewRequired: !rows[0].solo_heroic_ability_id,
+        previousPlayerCharacterId: previousState?.player_character_id || null,
+        revokedGrantedAbilityId: revokedAbility?.id || null,
         reason: input.reason,
       },
       visibility: 'players',
@@ -716,7 +796,7 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
       success: true,
       campaign_revision: resultingRevision,
       event_ids: [eventId],
-      summary: `Solo mode enabled for ${character.name}. Review the character's extra solo heroic ability before play.`,
+      summary: `Solo mode enabled for ${character.name}.${rows[0].solo_heroic_ability_id ? '' : ' Review the character\'s extra solo heroic ability before play.'}`,
       state_excerpt: {
         solo: soloStateForOutput(rows[0]),
         playerCharacter: {
@@ -724,7 +804,96 @@ export async function enableSoloMode(user, input, { sourceClient } = {}) {
           name: character.name,
           heroicAbilities: character.heroic_ability || [],
         },
-        requiredConfirmation: 'Confirm or select the additional solo heroic ability; no ability was added automatically.',
+        ...(rows[0].solo_heroic_ability_id
+          ? {}
+          : { requiredConfirmation: 'Confirm or select the additional solo heroic ability; no ability was added automatically.' }),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function disableSoloMode(user, input, { sourceClient } = {}) {
+  const operation = 'disable_solo_mode';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'Complete or abandon the active solo mission before disabling solo mode.');
+    }
+    const { rows: activeCombats } = await client.query(
+      `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (activeCombats[0]) {
+      throw new HelperError(409, 'INVALID_STATE', 'End the active combat encounter before disabling solo mode.');
+    }
+
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const revokedAbility = await revokeGrantedSoloAbility(client, state);
+    const { rows } = await client.query(
+      `UPDATE solo_campaign_states
+       SET enabled = false,
+         solo_heroic_ability_id = NULL,
+         solo_heroic_ability_granted = false
+       WHERE campaign_id = $1
+       RETURNING *`,
+      [input.campaign_id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      [resultingRevision, input.campaign_id],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'solo.disabled',
+      actorId: state.player_character_id,
+      payload: {
+        playerCharacterId: state.player_character_id,
+        revokedGrantedAbilityId: revokedAbility?.id || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: 'Solo mode disabled for this campaign.',
+      state_excerpt: {
+        solo: soloStateForOutput(rows[0]),
+        revokedGrantedAbility: revokedAbility
+          ? { id: revokedAbility.id, name: revokedAbility.name, ruleKey: revokedAbility.rule_key }
+          : null,
       },
     };
     await storeIdempotentResult(client, {
@@ -757,6 +926,18 @@ export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id && state.solo_heroic_ability_id !== input.ability_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'Complete or abandon the active solo mission before changing the solo heroic ability.');
+    }
+    if (state.solo_heroic_ability_id !== input.ability_id) {
+      const { rows: activeCombats } = await client.query(
+        `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+        [input.campaign_id],
+      );
+      if (activeCombats[0]) {
+        throw new HelperError(409, 'INVALID_STATE', 'End the active combat encounter before changing the solo heroic ability.');
+      }
+    }
     const { rows: characters } = await client.query(
       `SELECT id, name, heroic_ability FROM characters
        WHERE id = $1 AND party_id = $2 FOR UPDATE`,
@@ -788,6 +969,10 @@ export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}
     }
     const alreadyKnown = abilityNames.some((name) => name.toLocaleLowerCase() === ability.name.toLocaleLowerCase());
     if (!alreadyKnown) abilityNames.push(ability.name);
+    const sameSelection = state.solo_heroic_ability_id === ability.id;
+    const grantedBySolo = sameSelection
+      ? Boolean(state.solo_heroic_ability_granted || !alreadyKnown)
+      : !alreadyKnown;
 
     const resultingRevision = previousRevision + 1;
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
@@ -799,7 +984,7 @@ export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}
       `UPDATE solo_campaign_states
        SET solo_heroic_ability_id = $1, solo_heroic_ability_granted = $2
        WHERE campaign_id = $3 RETURNING *`,
-      [ability.id, !alreadyKnown, input.campaign_id],
+      [ability.id, grantedBySolo, input.campaign_id],
     );
     await client.query(
       'UPDATE parties SET helper_revision = $1 WHERE id = $2',
@@ -1812,10 +1997,6 @@ function orderedCombatants(rows) {
     const created = String(left.created_at).localeCompare(String(right.created_at));
     return created || left.id.localeCompare(right.id);
   });
-}
-
-function currentCombatant(encounter, rows) {
-  return currentInitiativeAction(encounter, rows)?.row || null;
 }
 
 function combatForOutput(access, encounter, rows) {

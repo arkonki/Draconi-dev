@@ -57,6 +57,11 @@ Solo foundation already delivered toward this phase:
   condition.
 - [x] Model Army of One as one actor with two distinct initiative slots and two
   ordered turns per round in both the web encounter and Helper combat flows.
+- [x] Add campaign-level Solo Mode settings for the solo hero, Fortune default,
+  additional ability, current mission/threat status, and safe disable behavior.
+- [x] Add a responsive Solo Dashboard with hero vitals, mission/waypoint state,
+  threat clock, authoritative roll history, realtime refresh, and controls for
+  all currently implemented Solo operations.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

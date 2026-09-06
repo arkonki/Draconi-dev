@@ -57,6 +57,16 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-solo-enable', campaignRevision: 43 },
     })),
+    disableSoloMode: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 51,
+        event_ids: ['6acbf745-8217-45dc-90c2-1ce65f29e19d'],
+        summary: 'Solo mode disabled for this campaign.',
+        state_excerpt: { solo: { enabled: false } },
+      },
+      meta: { requestId: 'request-solo-disable', campaignRevision: 51 },
+    })),
     selectSoloHeroicAbility: vi.fn(async () => ({
       data: {
         success: true,
@@ -710,8 +720,23 @@ describe('Dragonbane MCP server', () => {
       campaign_revision: 50,
       state_excerpt: { currentMissionId: null },
     });
+    const disabled = await client.callTool({
+      name: 'disable_solo_mode',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 50,
+        idempotency_key: 'solo-disable-1',
+        reason: 'The user confirmed that solo mode should be disabled.',
+      },
+    });
+    expect(disabled.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 51,
+      state_excerpt: { solo: { enabled: false } },
+    });
     expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
     expect(api.enableSoloMode).toHaveBeenCalledTimes(1);
+    expect(api.disableSoloMode).toHaveBeenCalledTimes(1);
     expect(api.selectSoloHeroicAbility).toHaveBeenCalledTimes(1);
     expect(api.askFortune).toHaveBeenCalledTimes(1);
     expect(api.drawInspiration).toHaveBeenCalledTimes(1);

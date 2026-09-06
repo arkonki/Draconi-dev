@@ -783,6 +783,10 @@ try {
   assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
   assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
   assert(soloState.payload.data.latestRolls.length === 2, 'Solo state did not return both recorded rolls.');
+  assert(
+    soloState.payload.data.allowedNextActions.includes('start_solo_mission'),
+    'Solo state did not advertise mission start while idle.',
+  );
   const storedRolls = await pool.query(
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
@@ -863,6 +867,14 @@ try {
   const continuedSoloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
   assert(continuedSoloState.response.status === 200, 'Solo mission continuation state failed.');
   assert(continuedSoloState.payload.data.activeMission.id === missionId, 'Solo state lost the active mission.');
+  assert(
+    continuedSoloState.payload.data.allowedNextActions.includes('reveal_waypoint'),
+    'Solo state did not advertise the next waypoint reveal.',
+  );
+  assert(
+    continuedSoloState.payload.data.allowedNextActions.includes('complete_solo_mission'),
+    'Solo state did not advertise mission conclusion.',
+  );
   assert(continuedSoloState.payload.data.currentWaypoint.status === 'active', 'Solo state lost the active waypoint.');
   assert(
     continuedSoloState.payload.data.waypoints.filter(({ kind }) => kind === 'unknown')
@@ -926,6 +938,10 @@ try {
   const postMissionState = await api(`/api/v1/campaigns/${campaignId}/solo`);
   assert(postMissionState.payload.data.activeMission === null, 'Completed mission remained active in Solo state.');
   assert(postMissionState.payload.data.solo.currentMissionId === null, 'Solo campaign retained a completed current mission ID.');
+  assert(
+    postMissionState.payload.data.allowedNextActions.includes('start_solo_mission'),
+    'Solo state did not return to mission-start readiness after completion.',
+  );
 
   const playerToken = `smoke-player-${randomUUID()}`;
   const playerIdentity = randomUUID();
@@ -996,6 +1012,7 @@ try {
       'get_solo_options',
       'get_solo_state',
       'enable_solo_mode',
+      'disable_solo_mode',
       'select_solo_heroic_ability',
       'ask_fortune',
       'draw_inspiration',
@@ -1110,6 +1127,30 @@ try {
     );
   }
 
+  const soloBeforeDisable = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(soloBeforeDisable.response.status === 200, 'Solo state before disable failed.');
+  const soloDisabled = await api(
+    `/api/v1/campaigns/${campaignId}/solo`,
+    {
+      method: 'DELETE',
+      headers: {
+        'if-match': `"${soloBeforeDisable.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-solo-disable-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Verify safe solo-mode disable behavior.' }),
+    },
+  );
+  assert(soloDisabled.response.status === 200, `Solo disable failed: ${JSON.stringify(soloDisabled.payload)}`);
+  assert(soloDisabled.payload.data.state_excerpt.solo.enabled === false, 'Solo mode remained enabled.');
+  const characterAfterSoloDisable = await pool.query(
+    'SELECT heroic_ability FROM characters WHERE id = $1',
+    [actorId],
+  );
+  assert(
+    !(characterAfterSoloDisable.rows[0].heroic_ability || []).includes('Sole Survivor'),
+    'A system-granted solo ability remained after disabling solo mode.',
+  );
+
   console.log(JSON.stringify({
     success: true,
     checks: [
@@ -1135,6 +1176,7 @@ try {
       'solo setup, idempotency, confirmed heroic ability selection, Fortune, Inspiration, and persisted state',
       'Army of One two-slot combat sequencing',
       'Sole Survivor exact WP cost, condition isolation, and atomic insufficient-WP rejection',
+      'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',

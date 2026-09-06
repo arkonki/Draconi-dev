@@ -121,6 +121,7 @@ Modifying:
 - `start_session`
 - `complete_session`
 - `enable_solo_mode`
+- `disable_solo_mode`
 - `select_solo_heroic_ability`
 - `ask_fortune`
 - `draw_inspiration`
@@ -146,6 +147,20 @@ abilities are stored as normal compendium abilities with stable rule keys:
 `solo.army_of_one` and `solo.sole_survivor`. Replacing a previous solo choice
 removes it only when Draconi originally granted it, so pre-existing character
 abilities are preserved.
+
+Campaign owners and GMs can configure the same state from the campaign's Solo
+Mode settings panel. The panel selects the solo hero, Fortune default, and
+additional heroic ability, and shows the active mission, waypoint, and threat.
+Disabling solo mode is blocked during active combat or an active solo mission.
+It removes only an additional ability that Draconi itself granted for solo play.
+
+The campaign's Solo Adventure tab provides the playable web dashboard. It shows
+the bound hero's HP, WP, conditions, equipped items and Solo ability alongside
+the mission route, current waypoint, threat counter, active combat, and recent
+authoritative rolls. Campaign owners and GMs can use the same guarded operations
+as MCP to ask Fortune, draw Inspiration, create a custom mission, reveal the next
+waypoint, advance its threat, and conclude it. Campaign events refresh this view
+over the existing WebSocket channel, with periodic refetch as a fallback.
 
 `Sole Survivor` is integrated into the failed-test push flow. A lone configured
 solo character may spend exactly 3 WP to reroll without taking a condition;

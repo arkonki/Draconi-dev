@@ -19,11 +19,13 @@ import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
 import { CampaignRoleManager } from '../components/party/CampaignRoleManager';
+import { SoloModeSettings } from '../components/party/SoloModeSettings';
 import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../lib/appUrl';
+import { fetchSoloCampaignStatus } from '../lib/api/solo';
 
-type Tab = 'members' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
-const VALID_PARTY_TABS: Tab[] = ['members', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
+type Tab = 'members' | 'solo' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
+const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
 
 const StoryHelperApp = lazy(() =>
   import('../components/party/StoryHelper').then((module) => ({
@@ -75,6 +77,11 @@ const GMScreen = lazy(() =>
     default: module.GMScreen,
   }))
 );
+const SoloDashboard = lazy(() =>
+  import('../components/party/SoloDashboard').then((module) => ({
+    default: module.SoloDashboard,
+  }))
+);
 
 export function PartyView() {
   const { id: partyId } = useParams<{ id: string }>();
@@ -89,6 +96,7 @@ export function PartyView() {
   const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
   const [isProjectorManagerOpen, setIsProjectorManagerOpen] = useState(false);
   const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
+  const [isSoloSettingsOpen, setIsSoloSettingsOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -116,6 +124,13 @@ export function PartyView() {
     queryKey: ['party', partyId],
     queryFn: () => fetchPartyById(partyId),
     enabled: !!partyId,
+  });
+
+  const { data: soloStatus } = useQuery({
+    queryKey: ['solo-status', partyId],
+    queryFn: () => fetchSoloCampaignStatus(partyId!),
+    enabled: Boolean(partyId),
+    retry: false,
   });
 
   const badgeBindings = useMemo(() => (
@@ -190,6 +205,7 @@ export function PartyView() {
 
   const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Roster', icon: Users },
+    { id: 'solo', label: 'Solo Adventure', icon: Sparkles },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'notes', label: 'Journal', icon: FileText },
     { id: 'atlas', label: 'Atlas', icon: Map },
@@ -202,7 +218,10 @@ export function PartyView() {
     { id: 'storyhelper', label: 'Story AI', icon: Sparkles, dmOnly: true },
   ];
 
-  const visibleTabs = allTabs.filter(tab => !tab.dmOnly || isCampaignGM);
+  const visibleTabs = allTabs.filter((tab) => (
+    (!tab.dmOnly || isCampaignGM)
+    && (tab.id !== 'solo' || isCampaignGM || soloStatus?.enabled)
+  ));
 
   // Helper function to get tab label
   const getTabLabel = (tabId: Tab): string => {
@@ -257,21 +276,26 @@ export function PartyView() {
                   Invite
                 </Button>
 
-                {isPartyOwner && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" aria-label="Party Settings"><MoreVertical className="h-5 w-5" /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" aria-label="Campaign settings"><MoreVertical className="h-5 w-5" /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => setIsSoloSettingsOpen(true)}>
+                      <Sparkles className="w-4 h-4 mr-2" /> Solo Mode
+                    </DropdownMenuItem>
+                    {isPartyOwner && (
                       <DropdownMenuItem onSelect={() => setIsRoleManagerOpen(true)}>
                         <Users className="w-4 h-4 mr-2" /> Campaign Roles
                       </DropdownMenuItem>
+                    )}
+                    {isPartyOwner && (
                       <DropdownMenuItem onSelect={() => setDialogOpen('deleteParty')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
                         <Trash2 className="w-4 h-4 mr-2" /> Disband Party
                       </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
           </div>
@@ -376,6 +400,17 @@ export function PartyView() {
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
           </div>
+        )}
+
+        {activeTab === 'solo' && (
+          <Suspense fallback={lazyTabFallback}>
+            <SoloDashboard
+              partyId={partyId!}
+              partyName={party.name}
+              canManage={isCampaignGM}
+              onOpenSettings={() => setIsSoloSettingsOpen(true)}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'chat' && (
@@ -505,6 +540,12 @@ export function PartyView() {
         party={party}
         isOpen={isRoleManagerOpen}
         onClose={() => setIsRoleManagerOpen(false)}
+      />
+      <SoloModeSettings
+        partyId={partyId!}
+        partyName={party.name}
+        isOpen={isSoloSettingsOpen}
+        onClose={() => setIsSoloSettingsOpen(false)}
       />
       {partyId && <EncounterChatView forcedPartyId={partyId} forcedPartyName={party.name} forcedMembers={party.members} />}
     </div>

@@ -80,6 +80,21 @@ export class HelperApiClient {
     });
   }
 
+  disableSoloMode(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo`, {
+      method: 'DELETE',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   selectSoloHeroicAbility(input) {
     const {
       campaign_id,

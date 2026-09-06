@@ -26,6 +26,8 @@ import {
   createEncounterInputSchema,
   drawInspirationBodySchema,
   drawInspirationInputSchema,
+  disableSoloModeBodySchema,
+  disableSoloModeInputSchema,
   enableSoloModeBodySchema,
   enableSoloModeInputSchema,
   selectSoloHeroicAbilityBodySchema,
@@ -67,6 +69,7 @@ import {
   completeSession,
   createEncounter,
   drawInspiration,
+  disableSoloMode,
   enableSoloMode,
   selectSoloHeroicAbility,
   endCombat,
@@ -278,6 +281,23 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await enableSoloMode(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+    if (soloStateMatch && request.method === 'DELETE') {
+      operation = 'disable_solo_mode';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(disableSoloModeBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(disableSoloModeInputSchema, {
+        campaign_id: soloStateMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await disableSoloMode(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

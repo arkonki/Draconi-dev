@@ -10,6 +10,7 @@ const TABLES = new Set([
   'compendium', 'compendium_templates', 'encounters', 'encounter_combatants',
   'party_maps', 'party_map_pins', 'party_map_drawings', 'party_display_sessions',
   'party_display_slots', 'push_subscriptions', 'user_notification_settings',
+  'campaign_events',
 ]);
 
 const REFERENCE_TABLES = new Set([
@@ -145,6 +146,10 @@ function partyWriteAccess(ctx, partyId) {
 
 function canRead(table, row, ctx) {
   if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return true;
+  if (table === 'campaign_events') {
+    return partyAccess(ctx, row.campaign_id)
+      && (partyGmAccess(ctx, row.campaign_id) || ['public', 'players'].includes(row.visibility));
+  }
   if (table === 'characters') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
   if (table === 'parties') return partyAccess(ctx, row.id);
   if (table === 'party_members') {
