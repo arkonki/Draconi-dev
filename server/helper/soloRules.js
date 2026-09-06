@@ -150,6 +150,123 @@ export function resolveSoloRest({ restType, useHealing = false, healingTarget = 
   };
 }
 
+function rollDice(count, sides, rollDie) {
+  return Array.from({ length: count }, () => rollDie(sides));
+}
+
+export function resolveSevereInjury(entries, rollDie = secureRollDie) {
+  const tableRoll = rollDie(20);
+  const entry = findTableEntry(entries, tableRoll);
+  if (!entry || typeof entry !== 'object' || !entry.key || !entry.name || !entry.effect) {
+    throw new Error(`Severe injury table has an invalid result for ${tableRoll}.`);
+  }
+  const healingCount = Number(entry.healing_dice?.count || 0);
+  const healingSides = Number(entry.healing_dice?.sides || 0);
+  const healingDice = healingCount > 0 ? rollDice(healingCount, healingSides, rollDie) : [];
+  return {
+    tableRoll,
+    dice: [tableRoll, ...healingDice],
+    key: entry.key,
+    name: entry.name,
+    effect: entry.effect,
+    permanent: Boolean(entry.permanent),
+    healingExpression: healingDice.length > 0 ? `${healingCount}d${healingSides} days` : null,
+    healingDice,
+    healingDays: healingDice.length > 0 ? healingDice.reduce((sum, value) => sum + value, 0) : null,
+  };
+}
+
+function resolveDyingRecovery(injuryEntries, rollDie) {
+  const recoveredHp = rollDie(6);
+  const injury = resolveSevereInjury(injuryEntries, rollDie);
+  return { recoveredHp, injury, dice: [recoveredHp, ...injury.dice] };
+}
+
+export function resolveSoloDyingAction({ action, target = null, passed = 0, failed = 0, injuryEntries }, rollDie = secureRollDie) {
+  if (!['death_roll', 'self_rally', 'life_saving_healing', 'recover_stabilized'].includes(action)) {
+    throw new Error(`Unsupported solo dying action: ${action}`);
+  }
+  if (!Number.isInteger(passed) || passed < 0 || passed > 3 || !Number.isInteger(failed) || failed < 0 || failed > 3) {
+    throw new Error('Death-roll counters must be integers between 0 and 3.');
+  }
+
+  if (action === 'recover_stabilized') {
+    const recovery = resolveDyingRecovery(injuryEntries, rollDie);
+    return {
+      expression: `1d6 + 1d20${recovery.injury.healingDice.length ? ` + ${recovery.injury.healingDice.length}d6` : ''}`,
+      dice: recovery.dice,
+      keptIndices: recovery.dice.map((_, index) => index),
+      keptValues: [...recovery.dice],
+      check: null,
+      deathRolls: { passed, failed },
+      rallied: false,
+      dead: false,
+      recoveredHp: recovery.recoveredHp,
+      injury: recovery.injury,
+    };
+  }
+
+  const check = resolveSoloSkillCheck({ target }, rollDie);
+  const succeeded = ['dragon', 'success'].includes(check.outcome);
+  let nextPassed = passed;
+  let nextFailed = failed;
+  let rallied = false;
+  let recovery = null;
+  if (action === 'death_roll') {
+    if (succeeded) nextPassed = Math.min(3, passed + (check.outcome === 'dragon' ? 2 : 1));
+    else nextFailed = Math.min(3, failed + (check.outcome === 'demon' ? 2 : 1));
+    if (nextPassed >= 3) recovery = resolveDyingRecovery(injuryEntries, rollDie);
+  } else if (action === 'self_rally') {
+    rallied = succeeded;
+  } else if (succeeded) {
+    recovery = resolveDyingRecovery(injuryEntries, rollDie);
+  }
+  const dice = [...check.dice, ...(recovery?.dice || [])];
+  const expressionParts = ['1d20'];
+  if (recovery) {
+    expressionParts.push('1d6', '1d20');
+    if (recovery.injury.healingDice.length) expressionParts.push(`${recovery.injury.healingDice.length}d6`);
+  }
+  return {
+    expression: expressionParts.join(' + '),
+    dice,
+    keptIndices: dice.map((_, index) => index),
+    keptValues: [...dice],
+    check,
+    deathRolls: { passed: nextPassed, failed: nextFailed },
+    rallied,
+    dead: nextFailed >= 3,
+    recoveredHp: recovery?.recoveredHp || 0,
+    injury: recovery?.injury || null,
+  };
+}
+
+export function resolveNarrativeDamage({ severity, entries }, rollDie = secureRollDie) {
+  const severityRoll = severity === 'unknown' ? rollDie(6) : null;
+  const entry = severityRoll === null
+    ? entries.find((candidate) => candidate?.key === severity)
+    : findTableEntry(entries, severityRoll);
+  const count = Number(entry?.damage_dice?.count);
+  const sides = Number(entry?.damage_dice?.sides);
+  if (!entry?.key || !Number.isInteger(count) || count < 1 || !Number.isInteger(sides) || sides < 2) {
+    throw new Error(`Narrative damage table has no valid ${severity} result.`);
+  }
+  const damageDice = rollDice(count, sides, rollDie);
+  const dice = [...(severityRoll === null ? [] : [severityRoll]), ...damageDice];
+  return {
+    expression: `${severityRoll === null ? '' : '1d6 + '}${count}d${sides}`,
+    dice,
+    keptIndices: dice.map((_, index) => index),
+    keptValues: [...dice],
+    severityRoll,
+    severity: entry.key,
+    severityLabel: entry.label || entry.key,
+    damageExpression: `${count}d${sides}`,
+    damageDice,
+    damage: damageDice.reduce((sum, value) => sum + value, 0),
+  };
+}
+
 export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5) {
   if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
   const dice = [];

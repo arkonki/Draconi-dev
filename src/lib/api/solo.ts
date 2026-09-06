@@ -34,9 +34,27 @@ export interface SoloActor {
   hp: { current: number; max: number };
   wp: { current: number; max: number };
   conditions: SoloActorCondition[];
+  attributes?: Record<string, number>;
+  skills?: Record<string, number>;
+  isRallied: boolean;
+  deathRolls: { passed: number; failed: number };
+  lifeStatus: 'active' | 'dying' | 'dead';
   armor?: number | null;
   inventory: SoloActorInventoryItem[];
   tags: string[];
+}
+
+export interface SoloCharacterInjury {
+  id: string;
+  injuryKey: string;
+  name: string;
+  effect: string;
+  healingDays?: number | null;
+  permanent: boolean;
+  status: 'active' | 'healed';
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SoloMission {
@@ -149,6 +167,7 @@ export interface SoloState {
     lastRestAt?: string | null;
     available: { round: boolean; stretch: boolean; shift: boolean };
   };
+  activeInjuries: SoloCharacterInjury[];
   latestRolls: SoloRecordedRoll[];
   allowedNextActions: string[];
 }
@@ -440,6 +459,46 @@ export async function takeSoloRest(
     }),
   });
   return parseResponse<SoloWriteResult>(response, 'Could not resolve the solo rest.');
+}
+
+export async function resolveSoloDyingAction(
+  partyId: string,
+  revision: number,
+  input: {
+    action: 'death_roll' | 'self_rally' | 'life_saving_healing' | 'recover_stabilized';
+    context?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/dying/actions`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      action: input.action,
+      context: input.context || undefined,
+      reason: `The solo player chose the ${input.action.replaceAll('_', ' ')} action at 0 HP.`,
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the solo dying action.');
+}
+
+export async function resolveSoloNarrativeDamage(
+  partyId: string,
+  revision: number,
+  input: {
+    severity: 'unknown' | 'slight' | 'moderate' | 'severe';
+    context?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/damage`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      severity: input.severity,
+      context: input.context || undefined,
+      reason: `The solo player confirmed ${input.severity} narrative damage.`,
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve narrative damage.');
 }
 
 export async function advanceSoloThreat(

@@ -68,6 +68,9 @@ Solo foundation already delivered toward this phase:
 - [x] Add rules-aware round, stretch, and shift rests with authoritative
   recovery rolls, explicit condition and safety choices, per-shift limits,
   game-time advancement, and active-mission threat consequences.
+- [x] Add authoritative Solo narrative damage and 0 HP resolution with CON
+  death rolls, unbaned Persuasion self-rally, life-saving Healing, D6 recovery,
+  and persisted severe injuries.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

@@ -46,6 +46,10 @@ import {
   listCampaignsInputSchema,
   resolveGameActionBodySchema,
   resolveGameActionInputSchema,
+  resolveSoloDyingActionBodySchema,
+  resolveSoloDyingActionInputSchema,
+  resolveSoloNarrativeDamageBodySchema,
+  resolveSoloNarrativeDamageInputSchema,
   removeEncounterParticipantBodySchema,
   removeEncounterParticipantInputSchema,
   revealWaypointBodySchema,
@@ -90,6 +94,8 @@ import {
   listActors,
   listCampaigns,
   resolveGameAction,
+  resolveSoloDyingAction,
+  resolveSoloNarrativeDamage,
   removeEncounterParticipant,
   revealWaypoint,
   scavengeWaypoint,
@@ -407,6 +413,44 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await takeSoloRest(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloDyingMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/dying\/actions$/);
+    if (soloDyingMatch && request.method === 'POST') {
+      operation = 'resolve_solo_dying_action';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloDyingActionBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(resolveSoloDyingActionInputSchema, {
+        campaign_id: soloDyingMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloDyingAction(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloDamageMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/damage$/);
+    if (soloDamageMatch && request.method === 'POST') {
+      operation = 'resolve_solo_narrative_damage';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloNarrativeDamageBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(resolveSoloNarrativeDamageInputSchema, {
+        campaign_id: soloDamageMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloNarrativeDamage(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

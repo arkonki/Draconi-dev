@@ -15,6 +15,8 @@ import {
   selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
   resolveGameActionBodySchema,
+  resolveSoloDyingActionBodySchema,
+  resolveSoloNarrativeDamageBodySchema,
   removeEncounterParticipantBodySchema,
   revealWaypointBodySchema,
   scavengeWaypointBodySchema,
@@ -134,7 +136,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.9.0',
+    version: '1.10.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -366,6 +368,46 @@ export const openApiDocument = {
         },
         responses: {
           200: { description: 'Solo rest resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/dying/actions': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve an authoritative action while the solo hero is dying',
+        description: 'Resolve a CON death roll, unbaned Persuasion self-rally, life-saving Healing attempt, or legacy stabilized recovery. Three successes recover D6 HP; three failures mean death. Recovery also creates a persisted severe injury.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloDyingActionBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Dying action resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/damage': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve narrative damage outside combat',
+        description: 'Use a chosen slight, moderate, or severe rating, or roll an unknown severity. The server rolls and applies damage atomically. Damage at 0 HP adds a failed death roll; combat damage must use the combat action engine.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloNarrativeDamageBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Narrative damage resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,

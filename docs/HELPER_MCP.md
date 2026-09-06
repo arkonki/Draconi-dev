@@ -130,6 +130,8 @@ Modifying:
 - `search_waypoint`
 - `scavenge_waypoint`
 - `take_solo_rest`
+- `resolve_solo_dying_action`
+- `resolve_solo_narrative_damage`
 - `advance_threat`
 - `complete_solo_mission`
 
@@ -214,6 +216,23 @@ six standard conditions. It begins a new shift and resets the round/stretch
 limits. Stretch and shift rests advance an active mission threat by 1. Poison,
 fear effects, and custom statuses are deliberately preserved. Every recovery
 roll, state change, game-time advance, and threat consequence is recorded.
+
+At 0 HP, `resolve_solo_dying_action` owns the authoritative dying flow. A death
+roll tests CON; ordinary outcomes add one success or failure, while Dragon and
+Demon add two. Three successes immediately recover D6 HP and create a severe
+injury, while three failures record the character's death. The Solo self-rally
+tests the stored Persuasion value without a bane and a successful life-saving
+Healing test also recovers D6 HP. Recovery rolls a versioned severe-injury table
+and persists the injury, mechanical effect, permanence, and rolled healing
+days. Legacy characters already stored at three successes can explicitly
+complete recovery without another death roll.
+
+`resolve_solo_narrative_damage` applies damage outside combat only after the
+player confirms the consequence. Known severity uses slight D6, moderate 2D6,
+or severe 2D10; unknown severity first rolls the Solo D6 severity table. Damage
+at 0 HP adds a failed death roll. Every die, HP transition, death counter, and
+instant-death result is stored in the same transaction. Active combat rejects
+this route so combat damage remains in `resolve_game_action`.
 
 ## Combat workflow
 

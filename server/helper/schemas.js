@@ -202,6 +202,38 @@ export const takeSoloRestInputSchema = z.object({
 
 export const takeSoloRestBodySchema = z.object(soloRestFields).strict().superRefine(validateSoloRest);
 
+const soloDyingActionSchema = z.enum([
+  'death_roll',
+  'self_rally',
+  'life_saving_healing',
+  'recover_stabilized',
+]);
+const soloDyingActionFields = {
+  action: soloDyingActionSchema,
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+export const resolveSoloDyingActionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloDyingActionFields,
+}).strict();
+export const resolveSoloDyingActionBodySchema = z.object(soloDyingActionFields).strict();
+
+const soloNarrativeDamageFields = {
+  severity: z.enum(['unknown', 'slight', 'moderate', 'severe']).default('unknown'),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+export const resolveSoloNarrativeDamageInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloNarrativeDamageFields,
+}).strict();
+export const resolveSoloNarrativeDamageBodySchema = z.object(soloNarrativeDamageFields).strict();
+
 export const revealWaypointInputSchema = z.object({
   campaign_id: uuidSchema,
   waypoint_id: uuidSchema,

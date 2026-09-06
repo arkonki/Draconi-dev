@@ -26,6 +26,8 @@ import {
   mcpReadResultSchema,
   mcpWriteResultSchema,
   resolveGameActionInputSchema,
+  resolveSoloDyingActionInputSchema,
+  resolveSoloNarrativeDamageInputSchema,
   removeEncounterParticipantInputSchema,
   revealWaypointInputSchema,
   scavengeWaypointInputSchema,
@@ -126,7 +128,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.9.0' },
+    { name: 'dragonbane-helper', version: '1.10.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -138,6 +140,8 @@ export function createDragonbaneMcpServer(apiClient) {
         'For solo play, call get_solo_state before narrating. Fortune and Inspiration results are authoritative only when returned by their tools.',
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
         'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
+        'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
+        'Use resolve_solo_narrative_damage only after the user confirms that narrative damage applies and whether severity is known. During active combat, use resolve_game_action instead.',
         'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
@@ -255,6 +259,22 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.takeSoloRest(input))));
+
+  server.registerTool('resolve_solo_dying_action', {
+    title: 'Resolve a solo dying action',
+    description: 'GM-only. At 0 HP, resolve a CON death roll, an unbaned Persuasion self-rally, a life-saving Healing attempt, or recovery for legacy state already at three successes. The server records all dice, counters, recovery, death, and any persisted severe injury.',
+    inputSchema: resolveSoloDyingActionInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloDyingAction(input))));
+
+  server.registerTool('resolve_solo_narrative_damage', {
+    title: 'Resolve solo narrative damage',
+    description: 'GM-only. After explicit user confirmation, resolve slight, moderate, severe, or unknown narrative damage outside combat. Unknown severity is rolled from the Solo table; damage and any death-state consequence are applied atomically.',
+    inputSchema: resolveSoloNarrativeDamageInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloNarrativeDamage(input))));
 
   server.registerTool('advance_threat', {
     title: 'Advance the active solo threat',
@@ -467,6 +487,8 @@ export function createDragonbaneMcpServer(apiClient) {
         'search_waypoint',
         'scavenge_waypoint',
         'take_solo_rest',
+        'resolve_solo_dying_action',
+        'resolve_solo_narrative_damage',
         'advance_threat',
         'complete_solo_mission',
       ],
@@ -512,6 +534,8 @@ export const mcpToolAnnotations = {
   search_waypoint: MODIFYING,
   scavenge_waypoint: MODIFYING,
   take_solo_rest: MODIFYING,
+  resolve_solo_dying_action: MODIFYING,
+  resolve_solo_narrative_damage: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
   get_actor: READ_ONLY,

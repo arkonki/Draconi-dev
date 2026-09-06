@@ -175,6 +175,32 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-solo-rest', campaignRevision: 52 },
     })),
+    resolveSoloDyingAction: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 55,
+        event_ids: ['6e82d77a-697e-4d04-a398-ed301214f8e2'],
+        summary: 'Alaric rallied successfully and may act at 0 HP.',
+        state_excerpt: {
+          actor: { id: actorId, hp: { current: 0, max: 14 }, isRallied: true, lifeStatus: 'dying' },
+          roll: { expression: '1d20', dice: [7] },
+        },
+      },
+      meta: { requestId: 'request-solo-dying', campaignRevision: 55 },
+    })),
+    resolveSoloNarrativeDamage: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 55,
+        event_ids: ['0d7873d0-a014-4832-8804-42ca1e3c19af'],
+        summary: 'Moderate narrative damage: 7 damage (2d6).',
+        state_excerpt: {
+          actor: { id: actorId, hp: { current: 7, max: 14 }, lifeStatus: 'active' },
+          roll: { expression: '2d6', dice: [3, 4] },
+        },
+      },
+      meta: { requestId: 'request-solo-damage', campaignRevision: 55 },
+    })),
     completeSoloMission: vi.fn(async () => ({
       data: {
         success: true,
@@ -832,6 +858,35 @@ describe('Dragonbane MCP server', () => {
       campaign_revision: 54,
       state_excerpt: { solo: { enabled: false } },
     });
+    const damaged = await client.callTool({
+      name: 'resolve_solo_narrative_damage',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 54,
+        idempotency_key: 'solo-damage-1',
+        severity: 'moderate',
+        context: 'Falling stone strikes the hero.',
+        reason: 'The player confirmed the narrative consequence.',
+      },
+    });
+    expect(damaged.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { roll: { expression: '2d6' } },
+    });
+    const dying = await client.callTool({
+      name: 'resolve_solo_dying_action',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 54,
+        idempotency_key: 'solo-dying-1',
+        action: 'self_rally',
+        reason: 'The player chose to attempt a self-rally.',
+      },
+    });
+    expect(dying.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { actor: { isRallied: true } },
+    });
     expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
     expect(api.enableSoloMode).toHaveBeenCalledTimes(1);
     expect(api.disableSoloMode).toHaveBeenCalledTimes(1);
@@ -844,6 +899,8 @@ describe('Dragonbane MCP server', () => {
     expect(api.searchWaypoint).toHaveBeenCalledTimes(1);
     expect(api.scavengeWaypoint).toHaveBeenCalledTimes(1);
     expect(api.takeSoloRest).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloDyingAction).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloNarrativeDamage).toHaveBeenCalledTimes(1);
     expect(api.completeSoloMission).toHaveBeenCalledTimes(1);
   });
 

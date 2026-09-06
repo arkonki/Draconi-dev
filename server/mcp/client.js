@@ -218,6 +218,36 @@ export class HelperApiClient {
     });
   }
 
+  resolveSoloDyingAction(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/dying/actions`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveSoloNarrativeDamage(input) {
+    const {
+      campaign_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/damage`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   completeSoloMission(input) {
     const {
       campaign_id,

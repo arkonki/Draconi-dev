@@ -97,6 +97,14 @@ function characterActor(row, combatant) {
       currentWp,
       maxWp,
       conditions: combineConditions(row.id, row.conditions, combatant?.status_effects),
+      isRallied: Boolean(row.is_rallied),
+      deathRolls: {
+        passed: Number(row.death_rolls_passed || 0),
+        failed: Number(row.death_rolls_failed || 0),
+      },
+      lifeStatus: Number(row.death_rolls_failed || 0) >= 3
+        ? 'dead'
+        : currentHp <= 0 ? 'dying' : 'active',
       attributes: row.attributes || {},
       skills: row.skill_levels || {},
       movement: null,
@@ -104,7 +112,7 @@ function characterActor(row, combatant) {
       inventory: equipment.inventory,
       notes: row.notes || null,
       tags: [row.kin, row.profession].filter(Boolean),
-      isAlive: currentHp > 0,
+      isAlive: currentHp > 0 && Number(row.death_rolls_failed || 0) < 3,
       isVisibleToPlayers: true,
       revision: Number(row.campaign_revision || 0),
       updatedAt: row.updated_at,
@@ -242,8 +250,9 @@ export async function persistActor(client, actor, storage) {
     await client.query(
       `UPDATE characters
        SET current_hp = $1, max_hp = $2, current_wp = $3, max_wp = $4,
-         conditions = $5::jsonb, equipment = $6::jsonb
-       WHERE id = $7`,
+         conditions = $5::jsonb, equipment = $6::jsonb,
+         is_rallied = $7, death_rolls_passed = $8, death_rolls_failed = $9
+       WHERE id = $10`,
       [
         actor.currentHp,
         actor.maxHp,
@@ -251,6 +260,9 @@ export async function persistActor(client, actor, storage) {
         actor.maxWp,
         JSON.stringify(conditions),
         JSON.stringify(equipment),
+        Boolean(actor.isRallied),
+        Number(actor.deathRolls?.passed || 0),
+        Number(actor.deathRolls?.failed || 0),
         actor.id,
       ],
     );

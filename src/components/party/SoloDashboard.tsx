@@ -11,6 +11,7 @@ import {
   Flag,
   Gauge,
   Heart,
+  HeartPulse,
   LockKeyhole,
   MapPin,
   PackageSearch,
@@ -19,6 +20,8 @@ import {
   Search,
   Settings2,
   Shield,
+  ShieldQuestion,
+  Skull,
   Sparkles,
   Swords,
   Wand2,
@@ -40,6 +43,8 @@ import {
   SoloRecordedRoll,
   SoloWaypoint,
   startSoloMission,
+  resolveSoloDyingAction,
+  resolveSoloNarrativeDamage,
   takeSoloRest,
 } from '../../lib/api/solo';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
@@ -53,7 +58,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'advance-threat' | 'complete-mission';
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
 
@@ -130,6 +135,8 @@ function ActionModal({
     search: 'Search the current waypoint',
     scavenge: 'Scavenge the current waypoint',
     rest: 'Rest and recover',
+    dying: 'Resolve a dying action',
+    damage: 'Resolve narrative damage',
     'advance-threat': 'Advance the threat',
     'complete-mission': 'Conclude the mission',
   };
@@ -194,6 +201,10 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const [restCondition, setRestCondition] = useState('');
   const [restSafeLocation, setRestSafeLocation] = useState(false);
   const [restContext, setRestContext] = useState('');
+  const [dyingAction, setDyingAction] = useState<'death_roll' | 'self_rally' | 'life_saving_healing' | 'recover_stabilized'>('death_roll');
+  const [dyingContext, setDyingContext] = useState('');
+  const [damageSeverity, setDamageSeverity] = useState<'unknown' | 'slight' | 'moderate' | 'severe'>('unknown');
+  const [damageContext, setDamageContext] = useState('');
   const [threatAmount, setThreatAmount] = useState<1 | 2>(1);
   const [threatReason, setThreatReason] = useState('');
   const [missionOutcome, setMissionOutcome] = useState<'success' | 'failure' | 'abandoned'>('success');
@@ -297,6 +308,16 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
             safeLocation: restType === 'shift' && restSafeLocation,
             context: restContext.trim(),
           });
+        case 'dying':
+          return resolveSoloDyingAction(partyId, revision, {
+            action: dyingAction,
+            context: dyingContext.trim(),
+          });
+        case 'damage':
+          return resolveSoloNarrativeDamage(partyId, revision, {
+            severity: damageSeverity,
+            context: damageContext.trim(),
+          });
         case 'advance-threat':
           if (!state.activeThreat) throw new Error('There is no active threat.');
           return advanceSoloThreat(partyId, state.activeThreat.id, revision, {
@@ -352,6 +373,14 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
       setRestCondition('');
       setRestSafeLocation(false);
       setRestContext('');
+    }
+    if (action === 'dying') {
+      setDyingAction(Number(state?.playerCharacter?.deathRolls.passed || 0) >= 3 ? 'recover_stabilized' : 'death_roll');
+      setDyingContext('');
+    }
+    if (action === 'damage') {
+      setDamageSeverity('unknown');
+      setDamageContext('');
     }
     if (action === 'advance-threat') {
       setThreatReason('');
@@ -529,6 +558,12 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                     <Button icon={Gauge} onClick={() => openAction('fortune')}>Ask Fortune</Button>
                     <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>Inspire</Button>
                     <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>Rest</Button>
+                    {hero && hero.hp.current > 0 && (
+                      <Button variant="outline" icon={HeartPulse} disabled={Boolean(state.activeCombat)} onClick={() => openAction('damage')}>Narrative damage</Button>
+                    )}
+                    {hero && hero.hp.current === 0 && hero.lifeStatus !== 'dead' && (
+                      <Button icon={Skull} onClick={() => openAction('dying')}>Dying action</Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -592,6 +627,19 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 </div>
               )}
 
+              {hero?.hp.current === 0 && (
+                <div className={`mt-4 rounded-xl border p-3 ${hero.lifeStatus === 'dead' ? 'border-stone-700 bg-stone-900 text-white' : 'border-red-200 bg-red-50 text-red-950'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-1.5 text-sm font-bold"><Skull className="h-4 w-4" /> {hero.lifeStatus === 'dead' ? 'Dead' : hero.isRallied ? 'Dying · rallied' : 'Dying'}</span>
+                    <span className="text-xs font-bold">CON {hero.attributes?.CON ?? '—'}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold">
+                    <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">Successes {hero.deathRolls.passed}/3</span>
+                    <span className="rounded bg-red-100 px-2 py-1 text-red-800">Failures {hero.deathRolls.failed}/3</span>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-5 border-t border-stone-100 pt-4">
                 <div className="text-xs font-bold uppercase tracking-wide text-stone-500">Conditions</div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -608,6 +656,20 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   <span className={`rounded-full px-2.5 py-1 ${state.restState.available.stretch ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Stretch {state.restState.available.stretch ? 'available' : 'used'}</span>
                 </div>
               </div>
+
+              {state.activeInjuries.length > 0 && (
+                <div className="mt-4 border-t border-stone-100 pt-4">
+                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><HeartPulse className="h-3.5 w-3.5" /> Severe injuries</div>
+                  <div className="mt-2 space-y-2">
+                    {state.activeInjuries.map((injury) => (
+                      <div key={injury.id} className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-950">
+                        <div className="font-bold">{injury.name}{injury.permanent ? ' · permanent' : injury.healingDays ? ` · ${injury.healingDays} days` : ''}</div>
+                        <div className="mt-0.5 text-amber-800">{injury.effect}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Sparkles className="h-3.5 w-3.5" /> Solo ability</div>
@@ -867,6 +929,58 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 >
                   Take {titleCase(restType)} Rest
                 </Button>
+              </>
+            )}
+
+            {activeAction === 'dying' && hero && (
+              <>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-950">
+                  <div className="font-bold">{hero.name} is at 0 HP</div>
+                  <div className="mt-1">Death rolls: {hero.deathRolls.passed}/3 successes · {hero.deathRolls.failed}/3 failures{hero.isRallied ? ' · currently rallied' : ''}</div>
+                </div>
+                <fieldset>
+                  <legend className="text-sm font-bold text-stone-700">Choose the action</legend>
+                  <div className="mt-2 grid gap-2">
+                    {([
+                      { action: 'death_roll' as const, title: `Death roll · CON ${hero.attributes?.CON ?? '—'}`, detail: 'Success adds one success; Dragon adds two. Failure adds one failure; Demon adds two.', disabled: hero.deathRolls.passed >= 3 },
+                      { action: 'self_rally' as const, title: `Self-rally · Persuasion ${hero.skills?.Persuasion ?? '—'}`, detail: 'Solo exception: roll without a bane. Success lets the hero act at 0 HP.', disabled: hero.isRallied || hero.deathRolls.passed >= 3 },
+                      { action: 'life_saving_healing' as const, title: `Save your life · Healing ${hero.skills?.Healing ?? '—'}`, detail: 'On success, recover D6 HP and roll a severe injury.', disabled: hero.deathRolls.passed >= 3 },
+                      { action: 'recover_stabilized' as const, title: 'Recover after three successes', detail: 'Recover D6 HP and roll a severe injury. Available only for persisted legacy stabilized state.', disabled: hero.deathRolls.passed < 3 },
+                    ]).map((option) => (
+                      <label key={option.action} htmlFor={`solo-dying-${option.action}`} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${dyingAction === option.action ? 'border-red-400 bg-red-50' : 'border-stone-200'} ${option.disabled ? 'cursor-not-allowed opacity-50' : ''}`}>
+                        <input id={`solo-dying-${option.action}`} type="radio" name="solo-dying-action" checked={dyingAction === option.action} disabled={option.disabled} onChange={() => setDyingAction(option.action)} className="mt-1 h-4 w-4 border-stone-300 text-red-600" />
+                        <span className="sr-only">Dying action option</span>
+                        <span className="text-sm"><strong className="block text-stone-800">{option.title}</strong><span className="text-stone-500">{option.detail}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="block text-sm font-bold text-stone-700">What happens in the fiction? <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={dyingContext} onChange={(event) => setDyingContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The hero grips the altar and refuses to fall…" />
+                </label>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">The server decides the mechanical result. Recovery automatically creates a persisted severe injury and its healing time.</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={ShieldQuestion}>Resolve {titleCase(dyingAction)}</Button>
+              </>
+            )}
+
+            {activeAction === 'damage' && hero && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  Apply this only after confirming that the fiction causes damage. Active combat damage belongs in the encounter action flow.
+                </div>
+                <label className="block text-sm font-bold text-stone-700">Severity
+                  <select value={damageSeverity} onChange={(event) => setDamageSeverity(event.target.value as typeof damageSeverity)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                    <option value="unknown">Unknown · roll D6 severity</option>
+                    <option value="slight">Slight · D6 damage</option>
+                    <option value="moderate">Moderate · 2D6 damage</option>
+                    <option value="severe">Severe · 2D10 damage</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">Cause and context <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={damageContext} onChange={(event) => setDamageContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The collapsing ceiling catches the hero beneath falling stone." />
+                </label>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">The server records the severity die (when unknown), every damage die, HP before/after, and any transition to dying or death.</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse}>Roll and Apply Damage</Button>
               </>
             )}
 

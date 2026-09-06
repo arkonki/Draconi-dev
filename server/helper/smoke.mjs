@@ -57,12 +57,13 @@ try {
     const actor = await client.query(
       `INSERT INTO characters (
          user_id, party_id, name, max_hp, current_hp, max_wp, current_wp,
-         conditions, equipment, skill_levels
+         conditions, equipment, skill_levels, attributes
        ) VALUES (
          $1, $2, 'Smoke Hero', 14, 14, 8, 8,
          '{"exhausted":true,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false,"poisoned":true}'::jsonb,
          '{"inventory":[],"equipped":{"weapons":[]},"money":{}}'::jsonb,
-         '{"Spot Hidden":12,"Healing":12}'::jsonb
+         '{"Spot Hidden":12,"Healing":12,"Persuasion":12}'::jsonb,
+         '{"CON":10,"WIL":10}'::jsonb
        ) RETURNING id`,
       [users[0].id, campaignId],
     );
@@ -1021,6 +1022,102 @@ try {
   assert(shiftRest.payload.data.state_excerpt.gameTime.elapsedSeconds >= 22510, 'Rest durations were not added to game time.');
   threatRevision = shiftRest.payload.data.campaign_revision;
 
+  await pool.query(
+    `UPDATE characters
+     SET current_hp = 1, death_rolls_passed = 0, death_rolls_failed = 0, is_rallied = false
+     WHERE id = $1`,
+    [actorId],
+  );
+  const beforeNarrativeDamage = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  const narrativeDamage = await api(
+    `/api/v1/campaigns/${campaignId}/solo/damage`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeNarrativeDamage.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-narrative-damage-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        severity: 'slight',
+        context: 'Falling stone catches the hero on the flooded stair.',
+        reason: 'Verify that confirmed narrative damage can move the hero to 0 HP.',
+      }),
+    },
+  );
+  assert(narrativeDamage.response.status === 200, `Narrative damage failed: ${JSON.stringify(narrativeDamage.payload)}`);
+  assert(narrativeDamage.payload.data.state_excerpt.actor.hp.current === 0, 'Narrative damage did not move the one-HP hero to 0 HP.');
+  assert(narrativeDamage.payload.data.state_excerpt.actor.lifeStatus === 'dying', 'Narrative damage did not expose dying state.');
+
+  const deathRoll = await api(
+    `/api/v1/campaigns/${campaignId}/solo/dying/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${narrativeDamage.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-death-roll-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'death_roll',
+        reason: 'Verify an authoritative CON death roll.',
+      }),
+    },
+  );
+  assert(deathRoll.response.status === 200, `Death roll failed: ${JSON.stringify(deathRoll.payload)}`);
+  assert(deathRoll.payload.data.state_excerpt.roll.result.skill === 'CON', 'Death roll did not identify CON as its target.');
+  assert(deathRoll.payload.data.state_excerpt.roll.result.check.target === 10, 'Death roll did not use the stored CON value.');
+
+  const selfRally = await api(
+    `/api/v1/campaigns/${campaignId}/solo/dying/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${deathRoll.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-self-rally-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'self_rally',
+        reason: 'Verify the Solo self-rally uses Persuasion without a bane.',
+      }),
+    },
+  );
+  assert(selfRally.response.status === 200, `Self-rally failed: ${JSON.stringify(selfRally.payload)}`);
+  assert(selfRally.payload.data.state_excerpt.roll.result.skill === 'Persuasion', 'Self-rally did not use Persuasion.');
+  assert(selfRally.payload.data.state_excerpt.roll.dice.length === 1, 'Solo self-rally incorrectly rolled a bane die.');
+  const rallySucceeded = ['dragon', 'success'].includes(selfRally.payload.data.state_excerpt.roll.result.check.outcome);
+  assert(selfRally.payload.data.state_excerpt.actor.isRallied === rallySucceeded, 'Self-rally state did not match its authoritative roll.');
+
+  await pool.query(
+    `UPDATE characters
+     SET death_rolls_passed = 3, death_rolls_failed = 0, is_rallied = false
+     WHERE id = $1`,
+    [actorId],
+  );
+  const stabilizedState = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  const stabilizedRecovery = await api(
+    `/api/v1/campaigns/${campaignId}/solo/dying/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${stabilizedState.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-stabilized-recovery-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'recover_stabilized',
+        reason: 'Verify D6 recovery and persisted severe injury for legacy stabilized state.',
+      }),
+    },
+  );
+  assert(stabilizedRecovery.response.status === 200, `Stabilized recovery failed: ${JSON.stringify(stabilizedRecovery.payload)}`);
+  assert(stabilizedRecovery.payload.data.state_excerpt.actor.hp.current >= 1, 'Stabilized recovery did not restore D6 HP.');
+  assert(stabilizedRecovery.payload.data.state_excerpt.actor.deathRolls.passed === 0, 'Recovery did not reset successful death rolls.');
+  assert(stabilizedRecovery.payload.data.state_excerpt.injury?.id, 'Recovery did not persist a severe injury.');
+  const stateWithInjury = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(
+    stateWithInjury.payload.data.activeInjuries.some(({ id }) => id === stabilizedRecovery.payload.data.state_excerpt.injury.id),
+    'Solo state did not return the persisted severe injury.',
+  );
+  threatRevision = stabilizedRecovery.payload.data.campaign_revision;
+
   for (const [index, amount] of [1].entries()) {
     const advanced = await api(
       `/api/v1/campaigns/${campaignId}/solo/threats/${threatId}/advance`,
@@ -1176,6 +1273,8 @@ try {
   const openapiDocument = await openapi.json();
   assert(
     openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/dying/actions']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/damage']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge'],
     'OpenAPI document is missing Solo exploration operations.',
@@ -1209,6 +1308,8 @@ try {
       'search_waypoint',
       'scavenge_waypoint',
       'take_solo_rest',
+      'resolve_solo_dying_action',
+      'resolve_solo_narrative_damage',
       'advance_threat',
       'complete_solo_mission',
       'start_combat',
@@ -1371,6 +1472,7 @@ try {
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
       'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
+      'narrative damage, CON death rolls, unbaned Solo self-rally, D6 recovery, and persisted severe injuries',
       'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',
       'GM context isolation',

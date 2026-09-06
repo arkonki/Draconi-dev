@@ -15,6 +15,8 @@ import {
   resolveExplorationFind,
   resolveFortune,
   resolveInspiration,
+  resolveNarrativeDamage,
+  resolveSoloDyingAction as resolveSoloDyingActionRoll,
   resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
@@ -360,6 +362,23 @@ function soloRestStateForOutput(row) {
   };
 }
 
+function characterInjuryForOutput(row) {
+  return {
+    id: row.id,
+    characterId: row.character_id,
+    sourceRollId: row.source_roll_id,
+    key: row.injury_key,
+    name: row.name,
+    effect: row.effect,
+    healingDays: row.healing_days === null ? null : Number(row.healing_days),
+    permanent: row.permanent,
+    status: row.status,
+    metadata: row.metadata || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function loadSoloRestState(client, campaignId, { forUpdate = false } = {}) {
   const { rows } = await client.query(
     `SELECT * FROM solo_rest_states WHERE campaign_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
@@ -476,6 +495,37 @@ async function insertRecordedRoll(client, {
       tableVersion,
       JSON.stringify(result),
       campaignRevision,
+    ],
+  );
+  return rows[0];
+}
+
+async function insertCharacterInjury(client, {
+  campaignId,
+  characterId,
+  rollId,
+  injury,
+}) {
+  const { rows } = await client.query(
+    `INSERT INTO character_injuries (
+       campaign_id, character_id, source_roll_id, injury_key, name, effect,
+       healing_days, permanent, metadata
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+     RETURNING *`,
+    [
+      campaignId,
+      characterId,
+      rollId,
+      injury.key,
+      injury.name,
+      injury.effect,
+      injury.healingDays,
+      injury.permanent,
+      JSON.stringify({
+        tableRoll: injury.tableRoll,
+        healingExpression: injury.healingExpression,
+        healingDice: injury.healingDice,
+      }),
     ],
   );
   return rows[0];
@@ -627,10 +677,18 @@ export async function getSoloState(user, campaignId) {
   const access = await requireCampaignAccess(pool, user, campaignId);
   const state = await loadSoloState(pool, campaignId);
   let playerCharacter = null;
+  let activeInjuries = [];
   let soloHeroicAbility = null;
   if (state?.player_character_id) {
     const loaded = await loadActor(pool, campaignId, state.player_character_id);
     playerCharacter = actorForOutput(loaded.actor, { includeGm: access.isGm });
+    const { rows } = await pool.query(
+      `SELECT * FROM character_injuries
+       WHERE campaign_id = $1 AND character_id = $2 AND status = 'active'
+       ORDER BY created_at DESC`,
+      [campaignId, state.player_character_id],
+    );
+    activeInjuries = rows;
   }
   if (state?.solo_heroic_ability_id) {
     const { rows } = await pool.query(
@@ -719,7 +777,10 @@ export async function getSoloState(user, campaignId) {
       allowedNextActions.push('search_waypoint', 'scavenge_waypoint');
     }
     if (!activeCombats[0] && playerCharacter?.hp?.current > 0) {
-      allowedNextActions.push('take_solo_rest');
+      allowedNextActions.push('take_solo_rest', 'resolve_solo_narrative_damage');
+    }
+    if (playerCharacter?.hp?.current === 0 && Number(playerCharacter.deathRolls?.failed || 0) < 3) {
+      allowedNextActions.push('resolve_solo_dying_action');
     }
   }
   return {
@@ -738,6 +799,7 @@ export async function getSoloState(user, campaignId) {
       : null,
     gameTime: access.campaign.game_time || {},
     restState: soloRestStateForOutput(restState),
+    activeInjuries: activeInjuries.map(characterInjuryForOutput),
     latestRolls: latestRolls.map(recordedRollForOutput),
     allowedNextActions,
   };
@@ -2165,6 +2227,10 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       wp: { current: nextWp, max: actor.maxWp },
       conditions: nextConditions,
       isAlive: nextHp > 0,
+      ...(input.rest_type === 'shift' ? {
+        isRallied: false,
+        deathRolls: { passed: 0, failed: 0 },
+      } : {}),
     };
     await persistActor(client, resultingActor, loadedActor.storage);
 
@@ -2337,6 +2403,317 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
           ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
           : null,
         preservedEffects,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function resolveSoloDyingAction(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_solo_dying_action';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+    const actor = loadedActor.actor;
+    if (actor.currentHp !== 0) {
+      throw new HelperError(409, 'INVALID_STATE', 'Dying actions are available only while the solo hero is at 0 HP.');
+    }
+    if (Number(actor.deathRolls?.failed || 0) >= 3) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero has already accumulated three failed death rolls.');
+    }
+    if (Number(actor.deathRolls?.passed || 0) >= 3 && input.action !== 'recover_stabilized') {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero is stabilized and must resolve recovery.');
+    }
+    if (input.action === 'self_rally' && actor.isRallied) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero is already rallied.');
+    }
+    if (input.action === 'recover_stabilized' && Number(actor.deathRolls?.passed || 0) < 3) {
+      throw new HelperError(409, 'INVALID_STATE', 'The solo hero has not yet accumulated three successful death rolls.');
+    }
+
+    let target = null;
+    let skill = null;
+    if (input.action === 'death_roll') {
+      target = Number(actor.attributes?.CON);
+      skill = 'CON';
+    } else if (input.action === 'self_rally') {
+      target = actorSkillTarget(actor, 'Persuasion');
+      skill = 'Persuasion';
+    } else if (input.action === 'life_saving_healing') {
+      target = actorSkillTarget(actor, 'Healing');
+      skill = 'Healing';
+    }
+    if (input.action !== 'recover_stabilized'
+      && (!Number.isInteger(target) || target < 1 || target > 20)) {
+      throw new HelperError(409, 'INVALID_STATE', `The solo hero has no usable ${skill} value.`);
+    }
+
+    const injuryTable = await loadSoloRuleTable(client, 'severe_injury', 'dragonbane-core-existing-v1');
+    const resolution = resolveSoloDyingActionRoll({
+      action: input.action,
+      target,
+      passed: Number(actor.deathRolls?.passed || 0),
+      failed: Number(actor.deathRolls?.failed || 0),
+      injuryEntries: injuryTable.entries,
+    });
+    const recovered = resolution.recoveredHp > 0;
+    const nextDeathRolls = recovered
+      ? { passed: 0, failed: 0 }
+      : resolution.deathRolls;
+    const resultingActor = {
+      ...actor,
+      currentHp: recovered ? Math.min(actor.maxHp, resolution.recoveredHp) : 0,
+      hp: { current: recovered ? Math.min(actor.maxHp, resolution.recoveredHp) : 0, max: actor.maxHp },
+      deathRolls: nextDeathRolls,
+      isRallied: recovered || resolution.dead
+        ? false
+        : input.action === 'self_rally' ? resolution.rallied : actor.isRallied,
+      isAlive: recovered,
+      lifeStatus: resolution.dead ? 'dead' : recovered ? 'active' : 'dying',
+    };
+    await persistActor(client, resultingActor, loadedActor.storage);
+
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: input.action === 'death_roll'
+        ? 'Solo death roll'
+        : input.action === 'self_rally'
+          ? 'Solo self-rally'
+          : input.action === 'life_saving_healing'
+            ? 'Solo life-saving Healing'
+            : 'Solo stabilized recovery',
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: resolution.injury ? injuryTable.tableKey : null,
+      tableVersion: resolution.injury ? injuryTable.version : null,
+      result: {
+        action: input.action,
+        skill,
+        check: resolution.check,
+        deathRollsBefore: actor.deathRolls,
+        deathRollsAfter: nextDeathRolls,
+        rallied: resultingActor.isRallied,
+        dead: resolution.dead,
+        recoveredHp: resultingActor.currentHp,
+        injury: resolution.injury,
+        context: input.context || null,
+      },
+      campaignRevision: resultingRevision,
+    });
+    const injuryRow = resolution.injury ? await insertCharacterInjury(client, {
+      campaignId: input.campaign_id,
+      characterId: state.player_character_id,
+      rollId: rollRow.id,
+      injury: resolution.injury,
+    }) : null;
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: resolution.dead
+        ? 'solo.hero_died'
+        : recovered
+          ? 'solo.hero_recovered'
+          : input.action === 'self_rally' ? 'solo.hero_rallied' : 'solo.death_roll_resolved',
+      actorId: state.player_character_id,
+      payload: {
+        action: input.action,
+        rollId: rollRow.id,
+        skill,
+        check: resolution.check,
+        before: {
+          hp: actor.currentHp,
+          deathRolls: actor.deathRolls,
+          isRallied: actor.isRallied,
+        },
+        after: {
+          hp: resultingActor.currentHp,
+          deathRolls: nextDeathRolls,
+          isRallied: resultingActor.isRallied,
+          dead: resolution.dead,
+        },
+        injuryId: injuryRow?.id || null,
+        injury: resolution.injury,
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+
+    let summary;
+    if (resolution.dead) {
+      summary = `${actor.name} failed the final death roll and died.`;
+    } else if (recovered) {
+      summary = `${actor.name} recovered ${resultingActor.currentHp} HP and suffered ${resolution.injury.name}${resolution.injury.healingDays ? ` (${resolution.injury.healingDays} days to heal)` : ''}.`;
+    } else if (input.action === 'self_rally') {
+      summary = resolution.rallied
+        ? `${actor.name} rallied successfully and may act at 0 HP.`
+        : `${actor.name} failed to rally.`;
+    } else if (input.action === 'life_saving_healing') {
+      summary = `${actor.name}'s life-saving Healing attempt failed.`;
+    } else {
+      summary = `${actor.name} recorded a ${resolution.check.outcome} death roll: ${nextDeathRolls.passed} successes, ${nextDeathRolls.failed} failures.`;
+    }
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary,
+      state_excerpt: {
+        actor: actorForOutput(resultingActor),
+        roll: recordedRollForOutput(rollRow),
+        injury: injuryRow ? characterInjuryForOutput(injuryRow) : null,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function resolveSoloNarrativeDamage(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_solo_narrative_damage';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows: activeCombats } = await client.query(
+      `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (activeCombats[0]) {
+      throw new HelperError(409, 'INVALID_STATE', 'Use the combat action engine for damage during an active encounter.');
+    }
+    const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+    const actor = loadedActor.actor;
+    if (Number(actor.deathRolls?.failed || 0) >= 3) {
+      throw new HelperError(409, 'INVALID_STATE', 'Narrative damage cannot be applied to a dead character.');
+    }
+    const severityTable = await loadSoloRuleTable(client, 'narrative_damage_severity', 'db-solo-v1.2');
+    const resolution = resolveNarrativeDamage({ severity: input.severity, entries: severityTable.entries });
+    const rawHp = actor.currentHp - resolution.damage;
+    const instantDeath = actor.currentHp > 0 && rawHp < -actor.maxHp;
+    const damageWhileDying = actor.currentHp === 0;
+    const nextFailed = instantDeath
+      ? 3
+      : damageWhileDying ? Math.min(3, Number(actor.deathRolls?.failed || 0) + 1) : 0;
+    const nextHp = Math.max(0, rawHp);
+    const dead = instantDeath || nextFailed >= 3;
+    const resultingActor = {
+      ...actor,
+      currentHp: nextHp,
+      hp: { current: nextHp, max: actor.maxHp },
+      deathRolls: actor.currentHp > 0
+        ? { passed: 0, failed: nextFailed }
+        : { passed: Number(actor.deathRolls?.passed || 0), failed: nextFailed },
+      isRallied: nextHp === 0 ? false : actor.isRallied,
+      isAlive: nextHp > 0 && !dead,
+      lifeStatus: dead ? 'dead' : nextHp === 0 ? 'dying' : 'active',
+    };
+    await persistActor(client, resultingActor, loadedActor.storage);
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: 'Solo narrative damage',
+      expression: resolution.expression,
+      dice: resolution.dice,
+      keptIndices: resolution.keptIndices,
+      keptValues: resolution.keptValues,
+      tableKey: severityTable.tableKey,
+      tableVersion: severityTable.version,
+      result: {
+        action: 'narrative_damage',
+        severityRoll: resolution.severityRoll,
+        severity: resolution.severity,
+        damageExpression: resolution.damageExpression,
+        damageDice: resolution.damageDice,
+        damage: resolution.damage,
+        appliedDamage: actor.currentHp - nextHp,
+        damageWhileDying,
+        instantDeath,
+        deathRollsAfter: resultingActor.deathRolls,
+        context: input.context || null,
+      },
+      campaignRevision: resultingRevision,
+    });
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: dead ? 'solo.hero_died' : 'solo.narrative_damage',
+      actorId: state.player_character_id,
+      payload: {
+        rollId: rollRow.id,
+        severity: resolution.severity,
+        damageExpression: resolution.damageExpression,
+        damage: resolution.damage,
+        appliedDamage: actor.currentHp - nextHp,
+        damageWhileDying,
+        instantDeath,
+        before: { hp: actor.currentHp, deathRolls: actor.deathRolls },
+        after: { hp: nextHp, deathRolls: resultingActor.deathRolls, dead },
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const status = dead
+      ? ' The hero died.'
+      : damageWhileDying ? ` Death failures: ${nextFailed}/3.` : nextHp === 0 ? ' The hero is now dying.' : '';
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${resolution.severityLabel} narrative damage: ${resolution.damage} damage (${resolution.damageExpression}).${status}`,
+      state_excerpt: {
+        actor: actorForOutput(resultingActor),
+        roll: recordedRollForOutput(rollRow),
+        instantDeath,
       },
     };
     await storeIdempotentResult(client, {

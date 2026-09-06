@@ -6,6 +6,9 @@ import {
   resolveFortune,
   resolveExplorationFind,
   resolveInspiration,
+  resolveNarrativeDamage,
+  resolveSevereInjury,
+  resolveSoloDyingAction,
   resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
@@ -15,6 +18,17 @@ const fortuneEntries = [
   { min: 2, max: 3, values: { yes_no: 'no', quality: 'mundane' } },
   { min: 4, max: 5, values: { yes_no: 'yes', quality: 'fine' } },
   { min: 6, max: 6, values: { yes_no: 'extreme yes', quality: 'precious' } },
+];
+
+const injuryEntries = [
+  { min: 1, max: 10, key: 'broken_nose', name: 'Broken nose', effect: 'Bane on Awareness.', healing_dice: { count: 1, sides: 6 } },
+  { min: 11, max: 20, key: 'gouged_eye', name: 'Gouged eye', effect: 'Spot Hidden is reduced.', permanent: true },
+];
+
+const damageEntries = [
+  { min: 1, max: 2, key: 'slight', label: 'Slight', damage_dice: { count: 1, sides: 6 } },
+  { min: 3, max: 5, key: 'moderate', label: 'Moderate', damage_dice: { count: 2, sides: 6 } },
+  { min: 6, max: 6, key: 'severe', label: 'Severe', damage_dice: { count: 2, sides: 10 } },
 ];
 
 function fixedRolls(...values) {
@@ -113,6 +127,66 @@ describe('Solo rule resolution', () => {
       hpRecovery: null,
       wpRecovery: null,
       fullRecovery: true,
+    });
+  });
+
+  it('counts Dragon and Demon death rolls twice', () => {
+    expect(resolveSoloDyingAction(
+      { action: 'death_roll', target: 12, passed: 0, failed: 0, injuryEntries },
+      fixedRolls(1),
+    )).toMatchObject({ deathRolls: { passed: 2, failed: 0 }, dead: false, recoveredHp: 0 });
+    expect(resolveSoloDyingAction(
+      { action: 'death_roll', target: 12, passed: 0, failed: 1, injuryEntries },
+      fixedRolls(20),
+    )).toMatchObject({ deathRolls: { passed: 0, failed: 3 }, dead: true, recoveredHp: 0 });
+  });
+
+  it('recovers D6 HP and resolves a severe injury on the third death-roll success', () => {
+    expect(resolveSoloDyingAction(
+      { action: 'death_roll', target: 12, passed: 2, failed: 1, injuryEntries },
+      fixedRolls(8, 5, 4, 3),
+    )).toMatchObject({
+      expression: '1d20 + 1d6 + 1d20 + 1d6',
+      dice: [8, 5, 4, 3],
+      deathRolls: { passed: 3, failed: 1 },
+      recoveredHp: 5,
+      injury: { key: 'broken_nose', healingDays: 3 },
+    });
+  });
+
+  it('allows an unbaned self-rally check without recovering HP', () => {
+    expect(resolveSoloDyingAction(
+      { action: 'self_rally', target: 11, passed: 1, failed: 0, injuryEntries },
+      fixedRolls(9),
+    )).toMatchObject({ check: { outcome: 'success' }, rallied: true, recoveredHp: 0 });
+  });
+
+  it('lets a successful life-saving Healing check recover the solo hero', () => {
+    expect(resolveSoloDyingAction(
+      { action: 'life_saving_healing', target: 13, passed: 0, failed: 2, injuryEntries },
+      fixedRolls(12, 6, 15),
+    )).toMatchObject({
+      dice: [12, 6, 15],
+      check: { outcome: 'success' },
+      recoveredHp: 6,
+      injury: { key: 'gouged_eye', permanent: true, healingDays: null },
+    });
+  });
+
+  it('resolves unknown and chosen narrative damage severity', () => {
+    expect(resolveNarrativeDamage(
+      { severity: 'unknown', entries: damageEntries },
+      fixedRolls(4, 3, 5),
+    )).toMatchObject({ severityRoll: 4, severity: 'moderate', damageExpression: '2d6', damage: 8, dice: [4, 3, 5] });
+    expect(resolveNarrativeDamage(
+      { severity: 'severe', entries: damageEntries },
+      fixedRolls(7, 9),
+    )).toMatchObject({ severityRoll: null, severity: 'severe', damageExpression: '2d10', damage: 16, dice: [7, 9] });
+  });
+
+  it('records injury healing-time dice separately', () => {
+    expect(resolveSevereInjury(injuryEntries, fixedRolls(2, 6))).toMatchObject({
+      tableRoll: 2, dice: [2, 6], healingExpression: '1d6 days', healingDays: 6,
     });
   });
 
