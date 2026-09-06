@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   addEncounterParticipantsBodySchema,
   advanceCombatTurnBodySchema,
+  advanceCharacterInjuryRecoveryBodySchema,
   advanceThreatBodySchema,
   askFortuneBodySchema,
   appendCampaignEventBodySchema,
@@ -16,7 +17,9 @@ import {
   endCombatBodySchema,
   resolveGameActionBodySchema,
   resolveSoloDyingActionBodySchema,
+  resolveSoloInjuryActionBodySchema,
   resolveSoloNarrativeDamageBodySchema,
+  rollCharacterSevereInjuryBodySchema,
   removeEncounterParticipantBodySchema,
   revealWaypointBodySchema,
   scavengeWaypointBodySchema,
@@ -97,6 +100,20 @@ const combatParameter = {
   schema: { type: 'string', format: 'uuid' },
 };
 
+const injuryParameter = {
+  name: 'injuryId',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', format: 'uuid' },
+};
+
+const characterParameter = {
+  name: 'characterId',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', format: 'uuid' },
+};
+
 const revisionHeader = {
   name: 'If-Match',
   in: 'header',
@@ -136,7 +153,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.10.0',
+    version: '1.12.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -360,7 +377,7 @@ export const openApiDocument = {
       post: {
         tags: ['Solo'],
         summary: 'Resolve rest and recovery for the solo hero',
-        description: 'Round and stretch rests are limited to once per shift. Stretch rests can clear one explicitly chosen standard condition, shift rests require a confirmed safe location, and stretch-or-longer rests advance an active mission threat. Poison, fear, and custom effects are preserved.',
+        description: 'Round and stretch rests are limited to once per shift. Stretch rests can clear one explicitly chosen standard condition, shift rests require a confirmed safe location and advance temporary severe-injury recovery by six hours, and stretch-or-longer rests advance an active mission threat. Poison, fear, and custom effects are preserved.',
         parameters: [campaignParameter, revisionHeader, idempotencyHeader],
         requestBody: {
           required: true,
@@ -411,6 +428,99 @@ export const openApiDocument = {
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/injuries/{injuryId}/actions': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Treat or explicitly resolve a severe injury',
+        description: 'Medical care rolls the solo hero’s stored Healing skill and, on success, halves the remaining recovery time. A failed attempt cannot be repeated for the same injury until a shift rest is completed. Marking an injury healed is an explicit, audited GM override and requires user confirmation.',
+        parameters: [campaignParameter, injuryParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloInjuryActionBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Injury action resolved and recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries': {
+      get: {
+        tags: ['Actors'],
+        summary: 'List a player character’s active and resolved severe injuries',
+        parameters: [campaignParameter, characterParameter],
+        responses: {
+          200: { description: 'Character severe-injury state', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/roll': {
+      post: {
+        tags: ['Actors'],
+        summary: 'Roll and persist a severe injury for a player character',
+        parameters: [campaignParameter, characterParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(rollCharacterSevereInjuryBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Severe injury rolled and persisted', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/recovery': {
+      post: {
+        tags: ['Actors'],
+        summary: 'Advance severe-injury recovery after a confirmed shift rest',
+        parameters: [campaignParameter, characterParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(advanceCharacterInjuryRecoveryBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Injury recovery advanced', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/{injuryId}/actions': {
+      post: {
+        tags: ['Actors'],
+        summary: 'Treat or explicitly resolve a player character’s severe injury',
+        description: 'The character owner or campaign GM can request medical care or explicitly confirm a healed override. Medical care uses the character’s stored Healing skill and shares the same authoritative recovery engine as Solo Mode.',
+        parameters: [campaignParameter, characterParameter, injuryParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloInjuryActionBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Character injury action resolved', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
           409: errorResponse,
           428: errorResponse,
         },

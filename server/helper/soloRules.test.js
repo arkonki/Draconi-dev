@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
+  advanceSoloInjuryRecovery,
   advanceThreatState,
   findTableEntry,
   resolveFortune,
@@ -9,6 +10,7 @@ import {
   resolveNarrativeDamage,
   resolveSevereInjury,
   resolveSoloDyingAction,
+  resolveSoloInjuryTreatment,
   resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
@@ -127,6 +129,44 @@ describe('Solo rule resolution', () => {
       hpRecovery: null,
       wpRecovery: null,
       fullRecovery: true,
+    });
+  });
+
+  it('halves remaining severe-injury recovery after successful medical care', () => {
+    expect(resolveSoloInjuryTreatment(
+      { healingTarget: 12, remainingHealingShifts: 21 },
+      fixedRolls(9),
+    )).toMatchObject({
+      check: { roll: 9, target: 12, outcome: 'success' },
+      succeeded: true,
+      previousRemainingHealingShifts: 21,
+      remainingHealingShifts: 11,
+      shiftsReduced: 10,
+    });
+  });
+
+  it('does not shorten recovery after failed medical care', () => {
+    expect(resolveSoloInjuryTreatment(
+      { healingTarget: 12, remainingHealingShifts: 12 },
+      fixedRolls(18),
+    )).toMatchObject({
+      check: { outcome: 'failure' },
+      succeeded: false,
+      remainingHealingShifts: 12,
+      shiftsReduced: 0,
+    });
+  });
+
+  it('advances temporary injury recovery in exact six-hour shifts', () => {
+    expect(advanceSoloInjuryRecovery({ remainingHealingShifts: 2 })).toEqual({
+      previousRemainingHealingShifts: 2,
+      remainingHealingShifts: 1,
+      elapsedShifts: 1,
+      healed: false,
+    });
+    expect(advanceSoloInjuryRecovery({ remainingHealingShifts: 1 })).toMatchObject({
+      remainingHealingShifts: 0,
+      healed: true,
     });
   });
 

@@ -46,12 +46,20 @@ export interface SoloActor {
 
 export interface SoloCharacterInjury {
   id: string;
-  injuryKey: string;
+  key: string;
   name: string;
   effect: string;
   healingDays?: number | null;
+  remainingHealingShifts?: number | null;
+  remainingHealingDays?: number | null;
   permanent: boolean;
   status: 'active' | 'healed';
+  recoveryStatus: 'untreated' | 'recovering' | 'healed' | 'permanent';
+  medicalCareApplied: boolean;
+  treatmentAttempts: number;
+  lastTreatmentShift?: number | null;
+  healedAt?: string | null;
+  resolutionReason?: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -499,6 +507,30 @@ export async function resolveSoloNarrativeDamage(
     }),
   });
   return parseResponse<SoloWriteResult>(response, 'Could not resolve narrative damage.');
+}
+
+export async function resolveSoloInjuryAction(
+  partyId: string,
+  injuryId: string,
+  revision: number,
+  input: {
+    action: 'medical_care' | 'mark_healed';
+    context?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/injuries/${injuryId}/actions`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      action: input.action,
+      confirmed_by_user: true,
+      context: input.context || undefined,
+      reason: input.action === 'medical_care'
+        ? 'The solo player explicitly chose to attempt medical care for this injury.'
+        : 'The solo player explicitly confirmed that this injury should be marked healed.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the severe injury action.');
 }
 
 export async function advanceSoloThreat(

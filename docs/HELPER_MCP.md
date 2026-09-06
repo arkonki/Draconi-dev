@@ -132,6 +132,7 @@ Modifying:
 - `take_solo_rest`
 - `resolve_solo_dying_action`
 - `resolve_solo_narrative_damage`
+- `resolve_solo_injury_action`
 - `advance_threat`
 - `complete_solo_mission`
 
@@ -233,6 +234,29 @@ or severe 2D10; unknown severity first rolls the Solo D6 severity table. Damage
 at 0 HP adds a failed death roll. Every die, HP transition, death counter, and
 instant-death result is stored in the same transaction. Active combat rejects
 this route so combat damage remains in `resolve_game_action`.
+
+Temporary severe injuries track their original rolled healing days and their
+remaining recovery in exact six-hour shifts. Every shift rest advances each
+temporary injury by one shift and automatically marks it healed when the
+remaining duration reaches zero. Permanent injuries do not advance naturally.
+
+After the player explicitly chooses it, `resolve_solo_injury_action` can make a
+server-authoritative medical-care test using the solo hero's stored Healing
+value. Success halves the remaining recovery duration, while failure leaves it
+unchanged and cannot be retried for that injury until a shift rest has begun a
+new shift. Successful care is applied only once. An explicitly confirmed
+`mark_healed` action is available as a GM correction, including for a permanent
+injury; it records the before/after injury, confirmation, reason, campaign
+revision, and immutable event instead of silently deleting history.
+
+The same persistence and rule engine is available outside Solo Mode through the
+normal player-character sheet. Campaign characters expose active and resolved
+injury history, can roll and record a new severe injury, receive medical care,
+and advance recovery after an ordinary shift rest. Character owners may manage
+their own records, campaign owners/GMs may manage any campaign character, and
+other campaign viewers are read-only. These operations use the campaign-scoped
+`/characters/{characterId}/injuries` REST routes and retain the same revision,
+idempotency, recorded-roll, and event guarantees as Solo actions.
 
 ## Combat workflow
 

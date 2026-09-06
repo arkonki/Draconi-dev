@@ -150,6 +150,44 @@ export function resolveSoloRest({ restType, useHealing = false, healingTarget = 
   };
 }
 
+export function resolveSoloInjuryTreatment({ healingTarget, remainingHealingShifts }, rollDie = secureRollDie) {
+  if (!Number.isInteger(remainingHealingShifts) || remainingHealingShifts < 1) {
+    throw new Error('Remaining injury recovery must be a positive number of shifts.');
+  }
+  const check = resolveSoloSkillCheck({ target: healingTarget }, rollDie);
+  const succeeded = ['dragon', 'success'].includes(check.outcome);
+  const nextRemainingHealingShifts = succeeded
+    ? Math.max(1, Math.ceil(remainingHealingShifts / 2))
+    : remainingHealingShifts;
+  return {
+    expression: check.expression,
+    dice: check.dice,
+    keptIndices: [0],
+    keptValues: [...check.dice],
+    check,
+    succeeded,
+    previousRemainingHealingShifts: remainingHealingShifts,
+    remainingHealingShifts: nextRemainingHealingShifts,
+    shiftsReduced: remainingHealingShifts - nextRemainingHealingShifts,
+  };
+}
+
+export function advanceSoloInjuryRecovery({ remainingHealingShifts, elapsedShifts = 1 }) {
+  if (!Number.isInteger(remainingHealingShifts) || remainingHealingShifts < 1) {
+    throw new Error('Remaining injury recovery must be a positive number of shifts.');
+  }
+  if (!Number.isInteger(elapsedShifts) || elapsedShifts < 1) {
+    throw new Error('Elapsed injury recovery must be a positive number of shifts.');
+  }
+  const nextRemainingHealingShifts = Math.max(0, remainingHealingShifts - elapsedShifts);
+  return {
+    previousRemainingHealingShifts: remainingHealingShifts,
+    remainingHealingShifts: nextRemainingHealingShifts,
+    elapsedShifts: Math.min(elapsedShifts, remainingHealingShifts),
+    healed: nextRemainingHealingShifts === 0,
+  };
+}
+
 function rollDice(count, sides, rollDie) {
   return Array.from({ length: count }, () => rollDie(sides));
 }

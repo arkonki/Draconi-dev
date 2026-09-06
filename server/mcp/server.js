@@ -27,6 +27,7 @@ import {
   mcpWriteResultSchema,
   resolveGameActionInputSchema,
   resolveSoloDyingActionInputSchema,
+  resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageInputSchema,
   removeEncounterParticipantInputSchema,
   revealWaypointInputSchema,
@@ -128,7 +129,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.10.0' },
+    { name: 'dragonbane-helper', version: '1.11.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -141,6 +142,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
         'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
         'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
+        'Use resolve_solo_injury_action only after the user explicitly chooses medical care or explicitly confirms a manual healed override. Medical care uses the stored Healing skill, successful care halves remaining recovery, failed care cannot be retried until the next shift, and shift rests advance temporary recovery automatically.',
         'Use resolve_solo_narrative_damage only after the user confirms that narrative damage applies and whether severity is known. During active combat, use resolve_game_action instead.',
         'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
@@ -254,7 +256,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('take_solo_rest', {
     title: 'Take a solo rest',
-    description: 'GM-only. Resolve a round, stretch, or shift rest for the solo hero. The server enforces once-per-shift limits, rolls recovery, requires an explicit condition choice and safe-location confirmation where applicable, advances game time, and advances an active mission threat for stretch or shift rests.',
+    description: 'GM-only. Resolve a round, stretch, or shift rest for the solo hero. The server enforces once-per-shift limits, rolls recovery, requires an explicit condition choice and safe-location confirmation where applicable, advances game time and temporary injury recovery, and advances an active mission threat for stretch or shift rests.',
     inputSchema: takeSoloRestInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
@@ -275,6 +277,14 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.resolveSoloNarrativeDamage(input))));
+
+  server.registerTool('resolve_solo_injury_action', {
+    title: 'Treat or resolve a solo severe injury',
+    description: 'GM-only. After explicit user confirmation, attempt medical care with the stored Healing skill or apply an audited manual healed override. Successful care halves remaining recovery time; failed care is limited to once per injury per shift. Permanent injuries cannot be removed by medical care.',
+    inputSchema: resolveSoloInjuryActionInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloInjuryAction(input))));
 
   server.registerTool('advance_threat', {
     title: 'Advance the active solo threat',
@@ -489,6 +499,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'take_solo_rest',
         'resolve_solo_dying_action',
         'resolve_solo_narrative_damage',
+        'resolve_solo_injury_action',
         'advance_threat',
         'complete_solo_mission',
       ],
@@ -536,6 +547,7 @@ export const mcpToolAnnotations = {
   take_solo_rest: MODIFYING,
   resolve_solo_dying_action: MODIFYING,
   resolve_solo_narrative_damage: MODIFYING,
+  resolve_solo_injury_action: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
   get_actor: READ_ONLY,

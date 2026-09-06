@@ -44,6 +44,7 @@ import {
   SoloWaypoint,
   startSoloMission,
   resolveSoloDyingAction,
+  resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
   takeSoloRest,
 } from '../../lib/api/solo';
@@ -58,7 +59,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'complete-mission';
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
 
@@ -84,6 +85,17 @@ function percentage(current: number, maximum: number) {
 
 function titleCase(value: string) {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function injuryRecoveryLabel(shifts?: number | null) {
+  if (shifts === null || shifts === undefined) return 'No natural recovery';
+  if (shifts === 0) return 'Healed';
+  const days = Math.floor(shifts / 4);
+  const remainingShifts = shifts % 4;
+  const parts = [];
+  if (days > 0) parts.push(`${days} day${days === 1 ? '' : 's'}`);
+  if (remainingShifts > 0) parts.push(`${remainingShifts} shift${remainingShifts === 1 ? '' : 's'}`);
+  return `${parts.join(' ')} remaining`;
 }
 
 function rollResultLabel(roll: SoloRecordedRoll) {
@@ -137,6 +149,7 @@ function ActionModal({
     rest: 'Rest and recover',
     dying: 'Resolve a dying action',
     damage: 'Resolve narrative damage',
+    injury: 'Treat a severe injury',
     'advance-threat': 'Advance the threat',
     'complete-mission': 'Conclude the mission',
   };
@@ -205,6 +218,9 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const [dyingContext, setDyingContext] = useState('');
   const [damageSeverity, setDamageSeverity] = useState<'unknown' | 'slight' | 'moderate' | 'severe'>('unknown');
   const [damageContext, setDamageContext] = useState('');
+  const [selectedInjuryId, setSelectedInjuryId] = useState<string | null>(null);
+  const [injuryAction, setInjuryAction] = useState<'medical_care' | 'mark_healed'>('medical_care');
+  const [injuryContext, setInjuryContext] = useState('');
   const [threatAmount, setThreatAmount] = useState<1 | 2>(1);
   const [threatReason, setThreatReason] = useState('');
   const [missionOutcome, setMissionOutcome] = useState<'success' | 'failure' | 'abandoned'>('success');
@@ -216,6 +232,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
     staleTime: 0,
   });
   const state = stateQuery.data;
+  const selectedInjury = state?.activeInjuries.find((injury) => injury.id === selectedInjuryId) || null;
 
   const realtimeBindings = useMemo(() => [{
     bindingId: 'solo-campaign-event',
@@ -318,6 +335,12 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
             severity: damageSeverity,
             context: damageContext.trim(),
           });
+        case 'injury':
+          if (!selectedInjury) throw new Error('Choose an active severe injury.');
+          return resolveSoloInjuryAction(partyId, selectedInjury.id, revision, {
+            action: injuryAction,
+            context: injuryContext.trim(),
+          });
         case 'advance-threat':
           if (!state.activeThreat) throw new Error('There is no active threat.');
           return advanceSoloThreat(partyId, state.activeThreat.id, revision, {
@@ -382,6 +405,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
       setDamageSeverity('unknown');
       setDamageContext('');
     }
+    if (action === 'injury') setInjuryContext('');
     if (action === 'advance-threat') {
       setThreatReason('');
     }
@@ -390,6 +414,12 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
       setMissionSummary('');
     }
     setActiveAction(action);
+  };
+
+  const openInjuryAction = (injuryId: string, action: 'medical_care' | 'mark_healed') => {
+    setSelectedInjuryId(injuryId);
+    setInjuryAction(action);
+    openAction('injury');
   };
 
   const submitAction = (event: FormEvent) => {
@@ -663,8 +693,32 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   <div className="mt-2 space-y-2">
                     {state.activeInjuries.map((injury) => (
                       <div key={injury.id} className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-950">
-                        <div className="font-bold">{injury.name}{injury.permanent ? ' · permanent' : injury.healingDays ? ` · ${injury.healingDays} days` : ''}</div>
+                        <div className="font-bold">{injury.name} · {injury.permanent ? 'permanent' : injuryRecoveryLabel(injury.remainingHealingShifts)}</div>
                         <div className="mt-0.5 text-amber-800">{injury.effect}</div>
+                        <div className="mt-1 text-[11px] font-semibold text-amber-700">
+                          {injury.permanent
+                            ? 'Permanent injury'
+                            : injury.medicalCareApplied
+                              ? 'Medical care applied · recovery time halved'
+                              : injury.lastTreatmentShift === state.restState.shiftCount
+                                ? 'Medical care already attempted this shift'
+                                : `${titleCase(injury.recoveryStatus)} · original recovery ${injury.healingDays || '—'} days`}
+                        </div>
+                        {canManage && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {!injury.permanent && !injury.medicalCareApplied && (
+                              <Button
+                                size="sm"
+                                icon={HeartPulse}
+                                disabled={Boolean(state.activeCombat) || injury.lastTreatmentShift === state.restState.shiftCount}
+                                onClick={() => openInjuryAction(injury.id, 'medical_care')}
+                              >
+                                Medical care
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" onClick={() => openInjuryAction(injury.id, 'mark_healed')}>Mark healed</Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -874,7 +928,7 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                     {([
                       { type: 'round' as const, title: 'Round rest · 10 seconds', detail: 'Recover D6 WP. Once per shift.', available: state.restState.available.round },
                       { type: 'stretch' as const, title: 'Stretch rest · 15 minutes', detail: 'Recover D6 HP and D6 WP, and clear one chosen standard condition. Once per shift.', available: state.restState.available.stretch },
-                      { type: 'shift' as const, title: 'Shift rest · 6 hours', detail: 'Requires safety. Fully restore HP/WP and clear all standard conditions.', available: true },
+                      { type: 'shift' as const, title: 'Shift rest · 6 hours', detail: 'Requires safety. Fully restore HP/WP, clear standard conditions, and advance temporary injury recovery by one shift.', available: true },
                     ]).map((option) => (
                       <label key={option.type} htmlFor={`solo-rest-${option.type}`} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${restType === option.type ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'} ${option.available ? '' : 'cursor-not-allowed opacity-50'}`}>
                         <input id={`solo-rest-${option.type}`} type="radio" name="solo-rest-type" value={option.type} checked={restType === option.type} disabled={!option.available} onChange={() => { setRestType(option.type); setRestUseHealing(false); setRestCondition(''); setRestSafeLocation(false); }} className="mt-1 h-4 w-4 border-stone-300 text-indigo-600" />
@@ -981,6 +1035,36 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                 </label>
                 <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">The server records the severity die (when unknown), every damage die, HP before/after, and any transition to dying or death.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse}>Roll and Apply Damage</Button>
+              </>
+            )}
+
+            {activeAction === 'injury' && selectedInjury && hero && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  <div className="font-bold">{selectedInjury.name}</div>
+                  <div className="mt-1">{selectedInjury.effect}</div>
+                  <div className="mt-2 text-xs font-semibold">
+                    {selectedInjury.permanent
+                      ? 'Permanent injury'
+                      : injuryRecoveryLabel(selectedInjury.remainingHealingShifts)}
+                  </div>
+                </div>
+                {injuryAction === 'medical_care' ? (
+                  <div className="rounded-lg bg-stone-50 p-3 text-sm text-stone-700">
+                    Roll Healing {hero.skills?.Healing ?? '—'}. Success halves the remaining recovery time. A failed attempt can be tried again after completing the next shift rest.
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                    This is a manual GM override. It immediately removes the injury from the active list, including permanent injuries, and records the correction in campaign history.
+                  </div>
+                )}
+                <label className="block text-sm font-bold text-stone-700">
+                  {injuryAction === 'medical_care' ? 'How is the injury treated?' : 'Why is this injury resolved?'} <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={injuryContext} onChange={(event) => setInjuryContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={injuryAction === 'medical_care' ? 'The hero cleans the wound and binds it carefully…' : 'The injury was already healed during downtime…'} />
+                </label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse} variant={injuryAction === 'mark_healed' ? 'danger' : 'primary'}>
+                  {injuryAction === 'medical_care' ? 'Roll Healing and Apply Care' : 'Confirm and Mark Healed'}
+                </Button>
               </>
             )}
 

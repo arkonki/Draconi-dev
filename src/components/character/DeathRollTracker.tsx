@@ -102,7 +102,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
   const handleRecoveryRollComplete = (resultEntry: Omit<RollHistoryEntry, 'id' | 'timestamp'>) => {
     setIsRolling(false);
     const hpRecovered = resultEntry.selectedValue ?? resultEntry.results[0].value;
-    setLastRollResult({ msg: `Recovered ${hpRecovered} HP! Roll on SEVERE INJURIES table.`, type: 'success' });
+    setLastRollResult({ msg: `Recovered ${hpRecovered} HP! Use the Severe Injuries panel to roll and record the injury.`, type: 'success' });
     adjustStat('current_hp', hpRecovered); 
     toggleDiceRoller();
   };
@@ -116,7 +116,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
         return;
       }
       adjustStat('current_hp', amount);
-      setLastRollResult({ msg: `Manually Recovered ${amount} HP. Roll on SEVERE INJURIES table.`, type: 'success' });
+      setLastRollResult({ msg: `Manually recovered ${amount} HP. Use the Severe Injuries panel to roll and record the injury.`, type: 'success' });
       setManualHP('');
     }
   };
@@ -301,7 +301,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
             <div className="flex items-start gap-2 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900">
               <Info className="w-4 h-4 mt-0.5 shrink-0" />
               <p className="text-xs font-semibold leading-relaxed">
-                Recovery reminder: Roll on the <span className="uppercase">Severe Injuries</span> table after recovering.
+                Recovery reminder: use the <span className="uppercase">Severe Injuries</span> panel after recovering.
               </p>
             </div>
             <Button 

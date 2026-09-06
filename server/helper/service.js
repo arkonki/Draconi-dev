@@ -11,12 +11,15 @@ import { HelperError } from './errors.js';
 import { conditionId } from './identifiers.js';
 import { applyActorChangeSet, validateActorCanAct } from './rules.js';
 import {
+  advanceSoloInjuryRecovery,
   advanceThreatState,
   resolveExplorationFind,
   resolveFortune,
   resolveInspiration,
   resolveNarrativeDamage,
+  resolveSevereInjury,
   resolveSoloDyingAction as resolveSoloDyingActionRoll,
+  resolveSoloInjuryTreatment,
   resolveSoloRest,
   resolveSoloSkillCheck,
 } from './soloRules.js';
@@ -363,6 +366,9 @@ function soloRestStateForOutput(row) {
 }
 
 function characterInjuryForOutput(row) {
+  const remainingHealingShifts = row.remaining_healing_shifts === null
+    ? null
+    : Number(row.remaining_healing_shifts);
   return {
     id: row.id,
     characterId: row.character_id,
@@ -371,8 +377,16 @@ function characterInjuryForOutput(row) {
     name: row.name,
     effect: row.effect,
     healingDays: row.healing_days === null ? null : Number(row.healing_days),
+    remainingHealingShifts,
+    remainingHealingDays: remainingHealingShifts === null ? null : remainingHealingShifts / 4,
     permanent: row.permanent,
     status: row.status,
+    recoveryStatus: row.recovery_status || (row.permanent ? 'permanent' : row.status === 'healed' ? 'healed' : 'untreated'),
+    medicalCareApplied: Boolean(row.medical_care_applied),
+    treatmentAttempts: Number(row.treatment_attempts || 0),
+    lastTreatmentShift: row.last_treatment_shift === null ? null : Number(row.last_treatment_shift),
+    healedAt: row.healed_at,
+    resolutionReason: row.resolution_reason,
     metadata: row.metadata || {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -385,6 +399,30 @@ async function loadSoloRestState(client, campaignId, { forUpdate = false } = {})
     [campaignId],
   );
   return rows[0] || null;
+}
+
+async function loadCharacterRecoveryState(client, campaignId, characterId, { forUpdate = false } = {}) {
+  const { rows } = await client.query(
+    `SELECT * FROM character_recovery_states
+     WHERE campaign_id = $1 AND character_id = $2${forUpdate ? ' FOR UPDATE' : ''}`,
+    [campaignId, characterId],
+  );
+  return rows[0] || null;
+}
+
+async function advanceCharacterRecoveryShift(client, campaignId, characterId, elapsedShifts = 1) {
+  const { rows } = await client.query(
+    `INSERT INTO character_recovery_states (
+       campaign_id, character_id, shift_count, last_shift_at
+     ) VALUES ($1, $2, $3, now())
+     ON CONFLICT (character_id) DO UPDATE SET
+       campaign_id = EXCLUDED.campaign_id,
+       shift_count = character_recovery_states.shift_count + EXCLUDED.shift_count,
+       last_shift_at = now()
+     RETURNING *`,
+    [campaignId, characterId, elapsedShifts],
+  );
+  return rows[0];
 }
 
 async function loadSoloState(client, campaignId, { forUpdate = false } = {}) {
@@ -509,8 +547,8 @@ async function insertCharacterInjury(client, {
   const { rows } = await client.query(
     `INSERT INTO character_injuries (
        campaign_id, character_id, source_roll_id, injury_key, name, effect,
-       healing_days, permanent, metadata
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       healing_days, permanent, metadata, recovery_status, remaining_healing_shifts
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
      RETURNING *`,
     [
       campaignId,
@@ -526,9 +564,49 @@ async function insertCharacterInjury(client, {
         healingExpression: injury.healingExpression,
         healingDice: injury.healingDice,
       }),
+      injury.permanent ? 'permanent' : 'untreated',
+      injury.healingDays === null ? null : injury.healingDays * 4,
     ],
   );
   return rows[0];
+}
+
+async function advanceActiveInjuryRecovery(client, campaignId, characterId, elapsedShifts = 1) {
+  const { rows } = await client.query(
+    `SELECT * FROM character_injuries
+     WHERE campaign_id = $1 AND character_id = $2 AND status = 'active'
+       AND NOT permanent AND remaining_healing_shifts > 0
+     ORDER BY created_at
+     FOR UPDATE`,
+    [campaignId, characterId],
+  );
+  const changes = [];
+  for (const row of rows) {
+    const recovery = advanceSoloInjuryRecovery({
+      remainingHealingShifts: Number(row.remaining_healing_shifts),
+      elapsedShifts,
+    });
+    const { rows: updated } = await client.query(
+      `UPDATE character_injuries SET
+         remaining_healing_shifts = $2,
+         recovery_status = $3,
+         status = CASE WHEN $4 THEN 'healed' ELSE status END,
+         healed_at = CASE WHEN $4 THEN now() ELSE healed_at END,
+         resolution_reason = CASE WHEN $4 THEN 'Recovery time completed.' ELSE resolution_reason END
+       WHERE id = $1
+       RETURNING *`,
+      [row.id, recovery.remainingHealingShifts, recovery.healed ? 'healed' : 'recovering', recovery.healed],
+    );
+    changes.push({
+      injuryId: row.id,
+      name: row.name,
+      before: characterInjuryForOutput(row),
+      after: characterInjuryForOutput(updated[0]),
+      healed: recovery.healed,
+      elapsedShifts: recovery.elapsedShifts,
+    });
+  }
+  return changes;
 }
 
 export async function listCampaigns(user, { status, limit, cursor }) {
@@ -782,6 +860,7 @@ export async function getSoloState(user, campaignId) {
     if (playerCharacter?.hp?.current === 0 && Number(playerCharacter.deathRolls?.failed || 0) < 3) {
       allowedNextActions.push('resolve_solo_dying_action');
     }
+    if (activeInjuries.length > 0) allowedNextActions.push('resolve_solo_injury_action');
   }
   return {
     campaignRevision: Number(access.campaign.helper_revision || 0),
@@ -2270,6 +2349,18 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       [input.campaign_id, input.rest_type],
     );
 
+    let injuryChanges = [];
+    let characterRecoveryState = null;
+    if (input.rest_type === 'shift') {
+      characterRecoveryState = await advanceCharacterRecoveryShift(
+        client,
+        input.campaign_id,
+        state.player_character_id,
+        1,
+      );
+      injuryChanges = await advanceActiveInjuryRecovery(client, input.campaign_id, state.player_character_id, 1);
+    }
+
     let mission = null;
     let threatResult = null;
     if (input.rest_type !== 'round' && state.current_mission_id) {
@@ -2353,6 +2444,13 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         wpRecoveryApplied: wpApplied,
         clearedConditions,
         preservedEffects,
+        injuryRecovery: injuryChanges.map((change) => ({
+          injuryId: change.injuryId,
+          name: change.name,
+          previousRemainingHealingShifts: change.before.remainingHealingShifts,
+          remainingHealingShifts: change.after.remainingHealingShifts,
+          healed: change.healed,
+        })),
         context: input.context || null,
         reason: input.reason,
       },
@@ -2362,11 +2460,33 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       previousRevision,
       resultingRevision,
     })];
+    for (const [index, change] of injuryChanges.entries()) {
+      eventIds.push(await insertEvent(client, {
+        campaign: access.campaign,
+        user,
+        sequence: sequence + 1 + index,
+        type: change.healed ? 'solo.injury_healed' : 'solo.injury_recovery_advanced',
+        actorId: state.player_character_id,
+        payload: {
+          injuryId: change.injuryId,
+          name: change.name,
+          elapsedShifts: change.elapsedShifts,
+          before: change.before,
+          after: change.after,
+          reason: 'A completed shift rest advances severe-injury recovery by one six-hour shift.',
+        },
+        visibility: 'players',
+        sourceClient,
+        idempotencyKey: input.idempotency_key,
+        previousRevision,
+        resultingRevision,
+      }));
+    }
     if (threatResult) {
       eventIds.push(await insertEvent(client, {
         campaign: access.campaign,
         user,
-        sequence: sequence + 1,
+        sequence: sequence + 1 + injuryChanges.length,
         type: threatResult.transition.triggered ? 'solo.threat_triggered' : 'solo.threat_advanced',
         actorId: state.player_character_id,
         payload: {
@@ -2389,16 +2509,23 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
     const recoverySummary = input.rest_type === 'shift'
       ? 'HP and WP fully restored'
       : `${hpApplied} HP and ${wpApplied} WP restored`;
+    const injurySummary = injuryChanges.length > 0
+      ? ` ${injuryChanges.filter((change) => change.healed).length > 0
+        ? `${injuryChanges.filter((change) => change.healed).map((change) => change.name).join(', ')} healed; `
+        : ''}injury recovery advanced by one shift.`
+      : '';
     const response = {
       success: true,
       campaign_revision: resultingRevision,
       event_ids: eventIds,
-      summary: `${input.rest_type[0].toUpperCase()}${input.rest_type.slice(1)} rest: ${recoverySummary}${clearedConditions.length ? `; cleared ${clearedConditions.join(', ')}` : ''}.${threatResult ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ''}`,
+      summary: `${input.rest_type[0].toUpperCase()}${input.rest_type.slice(1)} rest: ${recoverySummary}${clearedConditions.length ? `; cleared ${clearedConditions.join(', ')}` : ''}.${injurySummary}${threatResult ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ''}`,
       state_excerpt: {
         actor: actorForOutput(resultingActor),
         restState: soloRestStateForOutput(restRows[0]),
         gameTime,
         roll: rollRow ? recordedRollForOutput(rollRow) : null,
+        injuryRecovery: injuryChanges.map((change) => change.after),
+        injuryShiftCount: characterRecoveryState ? Number(characterRecoveryState.shift_count) : null,
         threat: threatResult
           ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
           : null,
@@ -2726,6 +2853,378 @@ export async function resolveSoloNarrativeDamage(user, input, { sourceClient } =
     });
     return response;
   });
+}
+
+function assertCharacterInjuryManagementAccess(access, user, loadedActor) {
+  if (loadedActor.storage.type !== 'character') {
+    throw new HelperError(400, 'VALIDATION_ERROR', 'Severe injuries can only be managed for player characters.');
+  }
+  if (loadedActor.storage.row.user_id !== user.id && !access.isGm) {
+    throw new HelperError(403, 'PERMISSION_DENIED', 'Only the character owner or campaign GM can manage this character’s injuries.');
+  }
+}
+
+export async function getCharacterInjuries(user, campaignId, characterId) {
+  const access = await requireCampaignAccess(pool, user, campaignId);
+  const loadedActor = await loadActor(pool, campaignId, characterId);
+  const canManage = loadedActor.storage.type === 'character'
+    && (loadedActor.storage.row.user_id === user.id || access.isGm);
+  const { rows } = await pool.query(
+    `SELECT * FROM character_injuries
+     WHERE campaign_id = $1 AND character_id = $2
+     ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, created_at DESC
+     LIMIT 100`,
+    [campaignId, characterId],
+  );
+  const recoveryState = await loadCharacterRecoveryState(pool, campaignId, characterId);
+  return {
+    campaignRevision: Number(access.campaign.helper_revision || 0),
+    character: actorForOutput(loadedActor.actor, { includeGm: access.isGm }),
+    canManage,
+    shiftCount: Number(recoveryState?.shift_count || 0),
+    activeInjuries: rows.filter((row) => row.status === 'active').map(characterInjuryForOutput),
+    injuryHistory: rows.filter((row) => row.status !== 'active').map(characterInjuryForOutput),
+  };
+}
+
+export async function rollCharacterSevereInjury(user, input, { sourceClient } = {}) {
+  const operation = 'roll_character_severe_injury';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { write: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const loadedActor = await loadActor(client, input.campaign_id, input.character_id, { forUpdate: true });
+    assertCharacterInjuryManagementAccess(access, user, loadedActor);
+    const injuryTable = await loadSoloRuleTable(client, 'severe_injury', 'dragonbane-core-existing-v1');
+    const injury = resolveSevereInjury(injuryTable.entries);
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: input.character_id,
+      userId: user.id,
+      purpose: 'Severe injury',
+      expression: `1d20${injury.healingDice.length ? ` + ${injury.healingDice.length}d6` : ''}`,
+      dice: injury.dice,
+      keptIndices: injury.dice.map((_, index) => index),
+      keptValues: [...injury.dice],
+      tableKey: injuryTable.tableKey,
+      tableVersion: injuryTable.version,
+      result: { action: 'severe_injury', injury, context: input.context || null },
+      campaignRevision: resultingRevision,
+    });
+    const injuryRow = await insertCharacterInjury(client, {
+      campaignId: input.campaign_id,
+      characterId: input.character_id,
+      rollId: rollRow.id,
+      injury,
+    });
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'character.severe_injury_added',
+      actorId: input.character_id,
+      payload: {
+        injuryId: injuryRow.id,
+        rollId: rollRow.id,
+        injury: characterInjuryForOutput(injuryRow),
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${loadedActor.actor.name} suffered ${injury.name}${injury.healingDays ? ` (${injury.healingDays} days to heal)` : ' (permanent)'}.`,
+      state_excerpt: {
+        injury: characterInjuryForOutput(injuryRow),
+        roll: recordedRollForOutput(rollRow),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export async function advanceCharacterInjuryRecovery(user, input, { sourceClient } = {}) {
+  const operation = 'advance_character_injury_recovery';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { write: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const loadedActor = await loadActor(client, input.campaign_id, input.character_id, { forUpdate: true });
+    assertCharacterInjuryManagementAccess(access, user, loadedActor);
+    const recoveryState = await advanceCharacterRecoveryShift(
+      client,
+      input.campaign_id,
+      input.character_id,
+      input.elapsed_shifts,
+    );
+    const changes = await advanceActiveInjuryRecovery(
+      client,
+      input.campaign_id,
+      input.character_id,
+      input.elapsed_shifts,
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'character.injury_recovery_advanced',
+      actorId: input.character_id,
+      payload: {
+        elapsedShifts: input.elapsed_shifts,
+        shiftCount: Number(recoveryState.shift_count),
+        injuries: changes.map((change) => ({
+          injuryId: change.injuryId,
+          name: change.name,
+          before: change.before,
+          after: change.after,
+          healed: change.healed,
+        })),
+        confirmedByUser: input.confirmed_by_user,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const healedNames = changes.filter((change) => change.healed).map((change) => change.name);
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: changes.length === 0
+        ? `${loadedActor.actor.name} completed a shift with no temporary injuries to advance.`
+        : `Advanced ${changes.length} ${changes.length === 1 ? 'injury' : 'injuries'} by one shift${healedNames.length ? `; healed ${healedNames.join(', ')}` : ''}.`,
+      state_excerpt: {
+        shiftCount: Number(recoveryState.shift_count),
+        injuryRecovery: changes.map((change) => change.after),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+async function resolveCharacterInjuryActionInternal(user, input, { sourceClient, soloMode }) {
+  const operation = soloMode ? 'resolve_solo_injury_action' : 'resolve_character_injury_action';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(
+      client,
+      user,
+      input.campaign_id,
+      soloMode ? { gm: true } : { write: true },
+    );
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = soloMode
+      ? requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }))
+      : null;
+    const characterId = soloMode ? state.player_character_id : input.character_id;
+    const loadedActor = await loadActor(client, input.campaign_id, characterId, { forUpdate: true });
+    if (loadedActor.storage.type !== 'character') {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Severe injuries can only be managed for player characters.');
+    }
+    if (!soloMode && loadedActor.storage.row.user_id !== user.id && !access.isGm) {
+      throw new HelperError(403, 'PERMISSION_DENIED', 'Only the character owner or campaign GM can manage this injury.');
+    }
+    const { rows: injuryRows } = await client.query(
+      `SELECT * FROM character_injuries
+       WHERE id = $1 AND campaign_id = $2 AND character_id = $3
+       FOR UPDATE`,
+      [input.injury_id, input.campaign_id, characterId],
+    );
+    const injury = injuryRows[0];
+    if (!injury) throw new HelperError(404, 'NOT_FOUND', 'Severe injury not found for this character.');
+    if (injury.status !== 'active') {
+      throw new HelperError(409, 'INVALID_STATE', 'This severe injury has already been resolved.');
+    }
+
+    let resolution = null;
+    let rollRow = null;
+    let updatedInjury;
+    if (input.action === 'medical_care') {
+      if (injury.permanent || injury.remaining_healing_shifts === null) {
+        throw new HelperError(409, 'INVALID_STATE', 'Medical care cannot remove a permanent injury.');
+      }
+      if (injury.medical_care_applied) {
+        throw new HelperError(409, 'INVALID_STATE', 'Successful medical care has already reduced this injury’s healing time.');
+      }
+      const { rows: activeCombats } = await client.query(
+        `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+        [input.campaign_id],
+      );
+      if (activeCombats[0]) {
+        throw new HelperError(409, 'INVALID_STATE', 'Medical care cannot be attempted during an active combat encounter.');
+      }
+      const recoveryState = await loadCharacterRecoveryState(
+        client,
+        input.campaign_id,
+        characterId,
+        { forUpdate: true },
+      );
+      const currentShift = Number(recoveryState?.shift_count || 0);
+      if (injury.last_treatment_shift !== null && Number(injury.last_treatment_shift) === currentShift) {
+        throw new HelperError(409, 'INVALID_STATE', 'Medical care has already been attempted for this injury during the current shift.');
+      }
+      const healingTarget = actorSkillTarget(loadedActor.actor, 'Healing');
+      if (healingTarget === null) {
+        throw new HelperError(409, 'INVALID_STATE', 'The character has no usable Healing skill value.');
+      }
+      resolution = resolveSoloInjuryTreatment({
+        healingTarget,
+        remainingHealingShifts: Number(injury.remaining_healing_shifts),
+      });
+      const { rows } = await client.query(
+        `UPDATE character_injuries SET
+           remaining_healing_shifts = $2,
+           recovery_status = CASE WHEN $3 THEN 'recovering' ELSE recovery_status END,
+           medical_care_applied = $3,
+           treatment_attempts = treatment_attempts + 1,
+           last_treatment_shift = $4
+         WHERE id = $1
+         RETURNING *`,
+        [injury.id, resolution.remainingHealingShifts, resolution.succeeded, currentShift],
+      );
+      updatedInjury = rows[0];
+    } else {
+      const { rows } = await client.query(
+        `UPDATE character_injuries SET
+           status = 'healed', recovery_status = 'healed', remaining_healing_shifts = 0,
+           healed_at = now(), resolution_reason = $2
+         WHERE id = $1
+         RETURNING *`,
+        [injury.id, input.reason],
+      );
+      updatedInjury = rows[0];
+    }
+
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    if (resolution) {
+      rollRow = await insertRecordedRoll(client, {
+        campaignId: input.campaign_id,
+        sessionId: access.campaign.active_session_id,
+        actorId: characterId,
+        userId: user.id,
+        purpose: `Medical care for ${injury.name}`,
+        expression: resolution.expression,
+        dice: resolution.dice,
+        keptIndices: resolution.keptIndices,
+        keptValues: resolution.keptValues,
+        tableKey: null,
+        tableVersion: state?.ruleset_version || 'dragonbane-core-existing-v1',
+        result: {
+          action: 'medical_care',
+          injuryId: injury.id,
+          check: resolution.check,
+          succeeded: resolution.succeeded,
+          previousRemainingHealingShifts: resolution.previousRemainingHealingShifts,
+          remainingHealingShifts: resolution.remainingHealingShifts,
+          shiftsReduced: resolution.shiftsReduced,
+          context: input.context || null,
+        },
+        campaignRevision: resultingRevision,
+      });
+    }
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: input.action === 'mark_healed'
+        ? `${soloMode ? 'solo' : 'character'}.injury_healed`
+        : `${soloMode ? 'solo' : 'character'}.injury_medical_care`,
+      actorId: characterId,
+      payload: {
+        action: input.action,
+        injuryId: injury.id,
+        rollId: rollRow?.id || null,
+        check: resolution?.check || null,
+        succeeded: resolution?.succeeded ?? true,
+        before: characterInjuryForOutput(injury),
+        after: characterInjuryForOutput(updatedInjury),
+        confirmedByUser: input.confirmed_by_user,
+        context: input.context || null,
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const summary = input.action === 'mark_healed'
+      ? `${injury.name} was explicitly marked healed.`
+      : resolution.succeeded
+        ? `Medical care succeeded for ${injury.name}; remaining recovery was reduced from ${resolution.previousRemainingHealingShifts} to ${resolution.remainingHealingShifts} shifts.`
+        : `Medical care failed for ${injury.name}; recovery remains at ${resolution.remainingHealingShifts} shifts.`;
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary,
+      state_excerpt: {
+        injury: characterInjuryForOutput(updatedInjury),
+        roll: rollRow ? recordedRollForOutput(rollRow) : null,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
+export function resolveSoloInjuryAction(user, input, { sourceClient } = {}) {
+  return resolveCharacterInjuryActionInternal(user, input, { sourceClient, soloMode: true });
+}
+
+export function resolveCharacterInjuryAction(user, input, { sourceClient } = {}) {
+  return resolveCharacterInjuryActionInternal(user, input, { sourceClient, soloMode: false });
 }
 
 export async function completeSoloMission(user, input, { sourceClient } = {}) {

@@ -37,6 +37,7 @@ let combatId;
 let combatantId;
 let monsterId;
 let playerUserId;
+let playerCharacterId;
 let mcpClient;
 
 try {
@@ -1116,7 +1117,56 @@ try {
     stateWithInjury.payload.data.activeInjuries.some(({ id }) => id === stabilizedRecovery.payload.data.state_excerpt.injury.id),
     'Solo state did not return the persisted severe injury.',
   );
-  threatRevision = stabilizedRecovery.payload.data.campaign_revision;
+  const recoveryInjuryId = stabilizedRecovery.payload.data.state_excerpt.injury.id;
+  await pool.query(
+    `UPDATE character_injuries SET
+       permanent = false, healing_days = 2, remaining_healing_shifts = 8,
+       recovery_status = 'untreated', medical_care_applied = false,
+       treatment_attempts = 0, last_treatment_shift = NULL
+     WHERE id = $1`,
+    [recoveryInjuryId],
+  );
+  const beforeMedicalCare = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  const medicalCare = await api(
+    `/api/v1/campaigns/${campaignId}/solo/injuries/${recoveryInjuryId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeMedicalCare.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-injury-care-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'medical_care',
+        confirmed_by_user: true,
+        context: 'The hero cleans and binds the injury.',
+        reason: 'Verify server-authoritative medical care and recovery reduction.',
+      }),
+    },
+  );
+  assert(medicalCare.response.status === 200, `Medical care failed: ${JSON.stringify(medicalCare.payload)}`);
+  assert(medicalCare.payload.data.state_excerpt.roll.result.check.target === 12, 'Medical care did not use the stored Healing value.');
+  const careSucceeded = medicalCare.payload.data.state_excerpt.roll.result.succeeded;
+  assert(
+    medicalCare.payload.data.state_excerpt.injury.remainingHealingShifts === (careSucceeded ? 4 : 8),
+    'Medical care did not preserve or halve the remaining recovery time correctly.',
+  );
+  const repeatedMedicalCare = await api(
+    `/api/v1/campaigns/${campaignId}/solo/injuries/${recoveryInjuryId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${medicalCare.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-injury-care-repeat-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'medical_care',
+        confirmed_by_user: true,
+        reason: 'Verify medical care cannot be repeated in the same shift.',
+      }),
+    },
+  );
+  assert(repeatedMedicalCare.response.status === 409, 'Medical care was repeated for the same injury in one shift.');
+  threatRevision = medicalCare.payload.data.campaign_revision;
 
   for (const [index, amount] of [1].entries()) {
     const advanced = await api(
@@ -1221,6 +1271,78 @@ try {
     'Solo state did not return to mission-start readiness after completion.',
   );
 
+  await pool.query(
+    `UPDATE character_injuries SET
+       status = 'active', recovery_status = 'recovering', remaining_healing_shifts = 1,
+       healed_at = NULL, resolution_reason = NULL
+     WHERE id = $1`,
+    [recoveryInjuryId],
+  );
+  const beforeHealingShift = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  const healingShift = await api(
+    `/api/v1/campaigns/${campaignId}/solo/rest`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeHealingShift.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-injury-shift-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        rest_type: 'shift',
+        safe_location: true,
+        reason: 'Verify a shift rest advances and completes temporary injury recovery.',
+      }),
+    },
+  );
+  assert(healingShift.response.status === 200, `Injury recovery shift failed: ${JSON.stringify(healingShift.payload)}`);
+  assert(healingShift.payload.data.state_excerpt.injuryRecovery[0].status === 'healed', 'The final recovery shift did not heal the injury.');
+  const afterHealingShift = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(!afterHealingShift.payload.data.activeInjuries.some(({ id }) => id === recoveryInjuryId), 'A healed injury remained active.');
+  const { rows: overrideInjuries } = await pool.query(
+    `INSERT INTO character_injuries (
+       campaign_id, character_id, injury_key, name, effect, permanent,
+       recovery_status, remaining_healing_shifts
+     ) VALUES ($1, $2, 'smoke_permanent', 'Smoke permanent injury',
+       'Only an explicit override can remove this injury.', true, 'permanent', NULL)
+     RETURNING id`,
+    [campaignId, actorId],
+  );
+  const overrideInjuryId = overrideInjuries[0].id;
+  const beforeOverride = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  const unconfirmedOverride = await api(
+    `/api/v1/campaigns/${campaignId}/solo/injuries/${overrideInjuryId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeOverride.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-injury-unconfirmed-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'mark_healed',
+        confirmed_by_user: false,
+        reason: 'An unconfirmed manual override must be rejected.',
+      }),
+    },
+  );
+  assert(unconfirmedOverride.response.status === 400, 'An unconfirmed manual injury override was accepted.');
+  const confirmedOverride = await api(
+    `/api/v1/campaigns/${campaignId}/solo/injuries/${overrideInjuryId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeOverride.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-injury-confirmed-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'mark_healed',
+        confirmed_by_user: true,
+        reason: 'Verify a confirmed permanent-injury correction remains auditable.',
+      }),
+    },
+  );
+  assert(confirmedOverride.response.status === 200, `Confirmed injury override failed: ${JSON.stringify(confirmedOverride.payload)}`);
+  assert(confirmedOverride.payload.data.state_excerpt.injury.recoveryStatus === 'healed', 'The confirmed injury override did not resolve the injury.');
+
   const playerToken = `smoke-player-${randomUUID()}`;
   const playerIdentity = randomUUID();
   await withTransaction(async (client) => {
@@ -1231,10 +1353,11 @@ try {
     );
     playerUserId = player.rows[0].id;
     const playerCharacter = await client.query(
-      `INSERT INTO characters (user_id, party_id, name)
-       VALUES ($1, $2, 'Smoke Player') RETURNING id`,
+      `INSERT INTO characters (user_id, party_id, name, skill_levels, attributes)
+       VALUES ($1, $2, 'Smoke Player', '{"Healing":12}'::jsonb, '{"CON":10}'::jsonb) RETURNING id`,
       [playerUserId, campaignId],
     );
+    playerCharacterId = playerCharacter.rows[0].id;
     await client.query(
       `INSERT INTO party_members (party_id, character_id, user_id)
        VALUES ($1, $2, $3)`,
@@ -1250,6 +1373,105 @@ try {
   assert(playerState.response.status === 200, 'Authenticated player could not read campaign state.');
   assert(!Object.hasOwn(playerState.payload.data, 'gmContext'), 'Player received GM-only context.');
   assert(playerState.payload.data.openThreads.length === 0, 'Player received GM-only open threads.');
+
+  const emptyCharacterInjuries = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries`,
+    {},
+    playerToken,
+  );
+  assert(emptyCharacterInjuries.response.status === 200, 'A player could not read their severe-injury state.');
+  assert(emptyCharacterInjuries.payload.data.canManage, 'A player was not allowed to manage their own severe injuries.');
+  const rolledCharacterInjury = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries/roll`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${emptyCharacterInjuries.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-character-injury-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        context: 'The player recovered from dying.',
+        reason: 'Verify severe-injury rolling from the regular character sheet.',
+      }),
+    },
+    playerToken,
+  );
+  assert(rolledCharacterInjury.response.status === 200, `Character injury roll failed: ${JSON.stringify(rolledCharacterInjury.payload)}`);
+  assert(rolledCharacterInjury.payload.data.state_excerpt.roll.tableKey === 'severe_injury', 'Character injury roll did not use the severe-injury table.');
+  const playerInjuryId = rolledCharacterInjury.payload.data.state_excerpt.injury.id;
+  const forbiddenOtherCharacterInjury = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${actorId}/injuries/roll`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${rolledCharacterInjury.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-character-injury-forbidden-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'A player must not manage another player character injury.' }),
+    },
+    playerToken,
+  );
+  assert(forbiddenOtherCharacterInjury.response.status === 403, 'A player managed another character’s severe injuries.');
+  await pool.query(
+    `UPDATE character_injuries SET
+       permanent = false, healing_days = 2, remaining_healing_shifts = 8,
+       recovery_status = 'untreated', medical_care_applied = false,
+       treatment_attempts = 0, last_treatment_shift = NULL
+     WHERE id = $1`,
+    [playerInjuryId],
+  );
+  const beforeCharacterCare = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries`,
+    {},
+    playerToken,
+  );
+  const characterCare = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries/${playerInjuryId}/actions`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeCharacterCare.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-character-care-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        action: 'medical_care',
+        confirmed_by_user: true,
+        reason: 'Verify regular-sheet medical care uses the shared injury engine.',
+      }),
+    },
+    playerToken,
+  );
+  assert(characterCare.response.status === 200, `Character medical care failed: ${JSON.stringify(characterCare.payload)}`);
+  assert(characterCare.payload.data.state_excerpt.roll.result.check.target === 12, 'Character medical care did not use Healing.');
+  await pool.query(
+    `UPDATE character_injuries SET status = 'active', recovery_status = 'recovering',
+       remaining_healing_shifts = 1, healed_at = NULL
+     WHERE id = $1`,
+    [playerInjuryId],
+  );
+  const beforeCharacterShift = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries`,
+    {},
+    playerToken,
+  );
+  const characterShift = await api(
+    `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries/recovery`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${beforeCharacterShift.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-character-shift-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        elapsed_shifts: 1,
+        confirmed_by_user: true,
+        reason: 'Verify a regular character shift rest completes injury recovery.',
+      }),
+    },
+    playerToken,
+  );
+  assert(characterShift.response.status === 200, `Character injury recovery failed: ${JSON.stringify(characterShift.payload)}`);
+  assert(characterShift.payload.data.state_excerpt.injuryRecovery[0].status === 'healed', 'Regular character injury recovery did not heal at zero remaining shifts.');
   const forbiddenCombatWrite = await api(
     `/api/v1/campaigns/${campaignId}/combat/${combatId}/end`,
     {
@@ -1275,6 +1497,11 @@ try {
     openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/dying/actions']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/damage']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/injuries/{injuryId}/actions']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/roll']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/recovery']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/{injuryId}/actions']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge'],
     'OpenAPI document is missing Solo exploration operations.',
@@ -1310,6 +1537,7 @@ try {
       'take_solo_rest',
       'resolve_solo_dying_action',
       'resolve_solo_narrative_damage',
+      'resolve_solo_injury_action',
       'advance_threat',
       'complete_solo_mission',
       'start_combat',
@@ -1473,6 +1701,8 @@ try {
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
       'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
       'narrative damage, CON death rolls, unbaned Solo self-rally, D6 recovery, and persisted severe injuries',
+      'medical care, per-shift retry limits, automatic injury recovery, confirmation, and audited healing overrides',
+      'regular character injury rolls, owner authorization, medical care, and shift recovery',
       'sequential waypoint reveal and successful mission completion',
       'GM-only combat authorization',
       'GM context isolation',

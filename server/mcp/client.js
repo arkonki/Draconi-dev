@@ -248,6 +248,22 @@ export class HelperApiClient {
     });
   }
 
+  resolveSoloInjuryAction(input) {
+    const {
+      campaign_id,
+      injury_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/injuries/${injury_id}/actions`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   completeSoloMission(input) {
     const {
       campaign_id,

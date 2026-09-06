@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
@@ -14,6 +15,7 @@ import { HeroicAbilitiesView } from './HeroicAbilitiesView';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { AdvancementSystem } from './AdvancementSystem';
 import { DeathRollTracker } from './DeathRollTracker';
+import { CharacterInjuriesPanel } from './CharacterInjuriesPanel';
 import { StatusPanelView } from './StatusPanelView';
 import { BioModal } from './modals/BioModal';
 import { PlayerAidModal } from './modals/PlayerAidModal';
@@ -22,6 +24,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PdfExportButton } from './PdfExportButton'; 
+import { advanceCharacterInjuryRecovery, fetchCharacterInjuries } from '../../lib/api/injuries';
 
 // --- HELPER COMPONENTS ---
 
@@ -602,7 +605,8 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 // --- MAIN SHEET COMPONENT ---
 
 export function CharacterSheet() {
-  const { character, fetchCharacter, adjustStat, toggleCondition, performRest, isLoading, error, isSaving, saveError } = useCharacterSheetStore();
+  const queryClient = useQueryClient();
+  const { character, fetchCharacter, adjustStat, toggleCondition, performRest, isLoading, error, isSaving, saveError, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
 
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
   const [showRestOptionsModal, setShowRestOptionsModal] = useState(false);
@@ -620,7 +624,31 @@ export function CharacterSheet() {
   if (!character) return <div className="p-4 text-center">Character data not available.</div>;
 
   const handleConditionToggle = (condition: keyof Character['conditions']) => { toggleCondition(condition); };
-  const handleRest = async (type: 'round' | 'stretch' | 'shift') => { setShowRestOptionsModal(false); await performRest(type, type === 'stretch' ? healerPresent : undefined); setHealerPresent(false); };
+  const handleRest = async (type: 'round' | 'stretch' | 'shift') => {
+    setShowRestOptionsModal(false);
+    await performRest(type, type === 'stretch' ? healerPresent : undefined);
+    setHealerPresent(false);
+    if (type !== 'shift' || !character.party_id) return;
+    try {
+      const injuryState = await fetchCharacterInjuries(character.party_id, character.id);
+      if (injuryState.activeInjuries.some((injury) => !injury.permanent)) {
+        const result = await advanceCharacterInjuryRecovery(
+          character.party_id,
+          character.id,
+          injuryState.campaignRevision,
+        );
+        setActiveStatusMessage(result.summary, 5000);
+        await queryClient.invalidateQueries({
+          queryKey: ['character-injuries', character.party_id, character.id],
+        });
+      }
+    } catch (injuryError) {
+      setActiveStatusMessage(
+        injuryError instanceof Error ? injuryError.message : 'Could not advance severe-injury recovery.',
+        5000,
+      );
+    }
+  };
   const canCastSpells = () => { const skills = Object.keys(character?.skill_levels || {}); return character?.profession?.endsWith('Mage') || skills.some(s => ['ELEMENTALISM', 'ANIMISM', 'MENTALISM'].includes(s.toUpperCase())); };
 
   const currentHP = character?.current_hp ?? 0;
@@ -678,7 +706,7 @@ export function CharacterSheet() {
               </div>
               <button onClick={() => handleRest('shift')} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation">
                 <div className="font-bold text-[#1a472a]">Shift Rest (6 hours)</div>
-                <div className="text-sm text-stone-600">Full Recovery of HP & WP. Heal all conditions.</div>
+                <div className="text-sm text-stone-600">Full HP/WP and conditions. Advances temporary severe injuries by one shift.</div>
               </button>
             </div>
             <button onClick={() => setShowRestOptionsModal(false)} className="mt-4 w-full py-3 text-stone-500 hover:text-stone-800 font-bold uppercase text-xs tracking-widest">Cancel</button>
@@ -812,6 +840,16 @@ export function CharacterSheet() {
                   </div>
                   <div className="mt-4 pt-4 border-t border-stone-300"><StatusPanelView /></div>
                </PaperSection>
+               {character.party_id && (
+                 <PaperSection title="Severe Injuries">
+                   <CharacterInjuriesPanel
+                     campaignId={character.party_id}
+                     characterId={character.id}
+                     inActiveCombat={Boolean(activeEncounter)}
+                     onStatus={(message) => setActiveStatusMessage(message, 5000)}
+                   />
+                 </PaperSection>
+               )}
             </div>
 
             <div className="space-y-4 md:space-y-6">

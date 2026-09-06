@@ -14,6 +14,7 @@ const sessionId = '9e748766-03c7-48ca-a59b-d17d66173c3f';
 const missionId = 'f35f9f4e-65c8-4a7f-a63a-3aa66ac84f48';
 const threatId = '4a7fd3d4-384d-42bc-9362-2c6379d70291';
 const waypointId = 'b93bd6e4-7b86-4ccd-8639-cb5f5fd5dd56';
+const injuryId = '997f700a-c155-41e5-9070-4cead9e84d65';
 const soloAbilityId = '30000000-0000-4000-8000-000000000101';
 
 let client;
@@ -200,6 +201,19 @@ beforeEach(async () => {
         },
       },
       meta: { requestId: 'request-solo-damage', campaignRevision: 55 },
+    })),
+    resolveSoloInjuryAction: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 56,
+        event_ids: ['8f2e2d7f-864a-4cce-a3cc-e390fffa3659'],
+        summary: 'Medical care succeeded for Broken ribs; remaining recovery was reduced from 20 to 10 shifts.',
+        state_excerpt: {
+          injury: { id: injuryId, recoveryStatus: 'recovering', remainingHealingShifts: 10, medicalCareApplied: true },
+          roll: { expression: '1d20', dice: [7] },
+        },
+      },
+      meta: { requestId: 'request-solo-injury', campaignRevision: 56 },
     })),
     completeSoloMission: vi.fn(async () => ({
       data: {
@@ -887,6 +901,23 @@ describe('Dragonbane MCP server', () => {
       success: true,
       state_excerpt: { actor: { isRallied: true } },
     });
+    const injury = await client.callTool({
+      name: 'resolve_solo_injury_action',
+      arguments: {
+        campaign_id: campaignId,
+        injury_id: injuryId,
+        expected_revision: 55,
+        idempotency_key: 'solo-injury-care-1',
+        action: 'medical_care',
+        confirmed_by_user: true,
+        context: 'The hero cleans and binds the wound.',
+        reason: 'The player explicitly chose to attempt medical care.',
+      },
+    });
+    expect(injury.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { injury: { remainingHealingShifts: 10, medicalCareApplied: true } },
+    });
     expect(api.getSoloOptions).toHaveBeenCalledTimes(1);
     expect(api.enableSoloMode).toHaveBeenCalledTimes(1);
     expect(api.disableSoloMode).toHaveBeenCalledTimes(1);
@@ -901,6 +932,7 @@ describe('Dragonbane MCP server', () => {
     expect(api.takeSoloRest).toHaveBeenCalledTimes(1);
     expect(api.resolveSoloDyingAction).toHaveBeenCalledTimes(1);
     expect(api.resolveSoloNarrativeDamage).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloInjuryAction).toHaveBeenCalledTimes(1);
     expect(api.completeSoloMission).toHaveBeenCalledTimes(1);
   });
 

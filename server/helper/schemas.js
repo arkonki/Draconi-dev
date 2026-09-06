@@ -234,6 +234,62 @@ export const resolveSoloNarrativeDamageInputSchema = z.object({
 }).strict();
 export const resolveSoloNarrativeDamageBodySchema = z.object(soloNarrativeDamageFields).strict();
 
+const soloInjuryActionFields = {
+  action: z.enum(['medical_care', 'mark_healed']),
+  confirmed_by_user: z.literal(true),
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+export const resolveSoloInjuryActionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  injury_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloInjuryActionFields,
+}).strict();
+export const resolveSoloInjuryActionBodySchema = z.object(soloInjuryActionFields).strict();
+
+export const getCharacterInjuriesInputSchema = z.object({
+  campaign_id: uuidSchema,
+  character_id: uuidSchema,
+}).strict();
+
+const rollCharacterSevereInjuryFields = {
+  context: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+export const rollCharacterSevereInjuryInputSchema = z.object({
+  campaign_id: uuidSchema,
+  character_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...rollCharacterSevereInjuryFields,
+}).strict();
+export const rollCharacterSevereInjuryBodySchema = z.object(rollCharacterSevereInjuryFields).strict();
+
+export const resolveCharacterInjuryActionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  character_id: uuidSchema,
+  injury_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...soloInjuryActionFields,
+}).strict();
+
+const advanceCharacterInjuryRecoveryFields = {
+  elapsed_shifts: z.literal(1).default(1),
+  confirmed_by_user: z.literal(true),
+  reason: z.string().trim().min(1).max(500),
+};
+export const advanceCharacterInjuryRecoveryInputSchema = z.object({
+  campaign_id: uuidSchema,
+  character_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...advanceCharacterInjuryRecoveryFields,
+}).strict();
+export const advanceCharacterInjuryRecoveryBodySchema = z.object(advanceCharacterInjuryRecoveryFields).strict();
+
 export const revealWaypointInputSchema = z.object({
   campaign_id: uuidSchema,
   waypoint_id: uuidSchema,

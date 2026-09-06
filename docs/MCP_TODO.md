@@ -71,6 +71,12 @@ Solo foundation already delivered toward this phase:
 - [x] Add authoritative Solo narrative damage and 0 HP resolution with CON
   death rolls, unbaned Persuasion self-rally, life-saving Healing, D6 recovery,
   and persisted severe injuries.
+- [x] Track severe-injury recovery in six-hour shifts, advance it during shift
+  rests, halve remaining time after successful medical care, limit failed care
+  retries to once per shift, and retain audited manual healing corrections.
+- [x] Generalize severe-injury persistence to every campaign character sheet,
+  including authoritative injury rolls, owner/GM authorization, resolved
+  history, medical care, and ordinary shift-rest recovery.
 
 - [ ] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.

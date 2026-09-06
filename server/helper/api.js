@@ -35,6 +35,7 @@ import {
   endCombatBodySchema,
   endCombatInputSchema,
   getActorInputSchema,
+  getCharacterInjuriesInputSchema,
   getCampaignStateInputSchema,
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
@@ -48,8 +49,15 @@ import {
   resolveGameActionInputSchema,
   resolveSoloDyingActionBodySchema,
   resolveSoloDyingActionInputSchema,
+  resolveSoloInjuryActionBodySchema,
+  resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageBodySchema,
   resolveSoloNarrativeDamageInputSchema,
+  resolveCharacterInjuryActionInputSchema,
+  rollCharacterSevereInjuryBodySchema,
+  rollCharacterSevereInjuryInputSchema,
+  advanceCharacterInjuryRecoveryBodySchema,
+  advanceCharacterInjuryRecoveryInputSchema,
   removeEncounterParticipantBodySchema,
   removeEncounterParticipantInputSchema,
   revealWaypointBodySchema,
@@ -84,6 +92,7 @@ import {
   selectSoloHeroicAbility,
   endCombat,
   getActor,
+  getCharacterInjuries,
   getCampaignState,
   getCombatState,
   getEncounterSetupOptions,
@@ -94,8 +103,12 @@ import {
   listActors,
   listCampaigns,
   resolveGameAction,
+  resolveCharacterInjuryAction,
   resolveSoloDyingAction,
+  resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
+  rollCharacterSevereInjury,
+  advanceCharacterInjuryRecovery,
   removeEncounterParticipant,
   revealWaypoint,
   scavengeWaypoint,
@@ -451,6 +464,116 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await resolveSoloNarrativeDamage(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloInjuryMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/injuries\/([^/]+)\/actions$/,
+    );
+    if (soloInjuryMatch && request.method === 'POST') {
+      operation = 'resolve_solo_injury_action';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloInjuryActionBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(resolveSoloInjuryActionInputSchema, {
+        campaign_id: soloInjuryMatch[0],
+        injury_id: soloInjuryMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloInjuryAction(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const characterInjuriesMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/characters\/([^/]+)\/injuries$/,
+    );
+    if (characterInjuriesMatch && request.method === 'GET') {
+      operation = 'get_character_injuries';
+      const input = parseSchema(getCharacterInjuriesInputSchema, {
+        campaign_id: characterInjuriesMatch[0],
+        character_id: characterInjuriesMatch[1],
+      });
+      campaignId = input.campaign_id;
+      const data = await getCharacterInjuries(user, input.campaign_id, input.character_id);
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const characterInjuryRollMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/characters\/([^/]+)\/injuries\/roll$/,
+    );
+    if (characterInjuryRollMatch && request.method === 'POST') {
+      operation = 'roll_character_severe_injury';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(rollCharacterSevereInjuryBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(rollCharacterSevereInjuryInputSchema, {
+        campaign_id: characterInjuryRollMatch[0],
+        character_id: characterInjuryRollMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await rollCharacterSevereInjury(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const characterInjuryRecoveryMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/characters\/([^/]+)\/injuries\/recovery$/,
+    );
+    if (characterInjuryRecoveryMatch && request.method === 'POST') {
+      operation = 'advance_character_injury_recovery';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(advanceCharacterInjuryRecoveryBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(advanceCharacterInjuryRecoveryInputSchema, {
+        campaign_id: characterInjuryRecoveryMatch[0],
+        character_id: characterInjuryRecoveryMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await advanceCharacterInjuryRecovery(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const characterInjuryActionMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/characters\/([^/]+)\/injuries\/([^/]+)\/actions$/,
+    );
+    if (characterInjuryActionMatch && request.method === 'POST') {
+      operation = 'resolve_character_injury_action';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloInjuryActionBodySchema, await readJson(request, 150_000));
+      const input = parseSchema(resolveCharacterInjuryActionInputSchema, {
+        campaign_id: characterInjuryActionMatch[0],
+        character_id: characterInjuryActionMatch[1],
+        injury_id: characterInjuryActionMatch[2],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveCharacterInjuryAction(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
