@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import {
@@ -31,11 +31,11 @@ import { advanceCharacterInjuryRecovery, fetchCharacterInjuries } from '../../li
 const PaperSection = ({ title, children, className = "", action }: { title?: string, children: React.ReactNode, className?: string, action?: React.ReactNode }) => (
   <div className={`paper-section relative bg-white/40 border-2 border-stone-300 rounded-sm p-4 shadow-sm ${className}`}>
     {title && (
-      <div className="paper-section-title absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a472a] text-[#e8d5b5] px-4 py-0.5 text-xs md:text-sm font-serif font-bold tracking-wider uppercase shadow-md flex items-center gap-2 whitespace-nowrap z-10 clip-path-banner">
+      <div className="paper-section-title absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a472a] text-[#e8d5b5] px-4 py-0.5 text-xs md:text-sm font-serif font-bold tracking-wider uppercase shadow-md whitespace-nowrap z-10 clip-path-banner">
         {title}
-        {action}
       </div>
     )}
+    {action && <div className="absolute -top-4 right-3 z-20 md:right-4">{action}</div>}
     <div className="pt-2">{children}</div>
   </div>
 );
@@ -615,9 +615,39 @@ export function CharacterSheet() {
   const [showAdvancementSystem, setShowAdvancementSystem] = useState(false);
   const [showBioModal, setShowBioModal] = useState(false);
   const [showPlayerAidModal, setShowPlayerAidModal] = useState(false);
+  const [showSevereInjuriesModal, setShowSevereInjuriesModal] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<{name: AttributeName, value: number} | null>(null);
   const [healerPresent, setHealerPresent] = useState(false);
   const [activeTab, setActiveTab] = useState<'equipment' | 'abilities' | 'notes'>('equipment');
+
+  const characterInjuriesQuery = useQuery({
+    queryKey: ['character-injuries', character?.party_id, character?.id],
+    queryFn: () => {
+      if (!character?.party_id || !character.id) {
+        throw new Error('This character is not attached to a campaign.');
+      }
+      return fetchCharacterInjuries(character.party_id, character.id);
+    },
+    enabled: Boolean(character?.party_id && character?.id),
+    staleTime: 0,
+  });
+  const hasActiveSevereInjuries = Boolean(characterInjuriesQuery.data?.activeInjuries.length);
+  const showSevereInjuriesShortcut = Boolean(
+    character?.party_id && !characterInjuriesQuery.isLoading && !hasActiveSevereInjuries,
+  );
+
+  useEffect(() => {
+    if (hasActiveSevereInjuries) setShowSevereInjuriesModal(false);
+  }, [hasActiveSevereInjuries]);
+
+  useEffect(() => {
+    if (!showSevereInjuriesModal) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowSevereInjuriesModal(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [showSevereInjuriesModal]);
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-[#f5f0e1]"><LoadingSpinner size="lg" /><span className="ml-3 font-serif text-xl text-[#1a472a]">Unrolling Scroll...</span></div>;
   if (error) return <div className="p-4 text-center text-red-500 font-serif">Error loading scroll: {error}</div>;
@@ -814,7 +844,20 @@ export function CharacterSheet() {
           {/* TOP SECTION: 3 Columns */}
           <div className="character-sheet-top-grid grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
             <div className="space-y-4 md:space-y-6">
-               <PaperSection title="Vitals & Combat">
+               <PaperSection
+                 title="Vitals & Combat"
+                 action={showSevereInjuriesShortcut ? (
+                   <button
+                     type="button"
+                     onClick={() => setShowSevereInjuriesModal(true)}
+                     aria-label="Open severe injuries"
+                     title="Severe injuries"
+                     className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#1a472a] bg-[#fdfbf7] text-[#1a472a] shadow-md transition-colors hover:bg-[#e8d5b5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1a472a]"
+                   >
+                     <Book size={18} aria-hidden="true" />
+                   </button>
+                 ) : undefined}
+               >
                   <div className="space-y-4 pt-2">
                     {/* UPDATED: StatTracker for HP */}
                     {currentHP > 0 ? (
@@ -840,7 +883,7 @@ export function CharacterSheet() {
                   </div>
                   <div className="mt-4 pt-4 border-t border-stone-300"><StatusPanelView /></div>
                </PaperSection>
-               {character.party_id && (
+               {character.party_id && hasActiveSevereInjuries && (
                  <PaperSection title="Severe Injuries">
                    <CharacterInjuriesPanel
                      campaignId={character.party_id}
@@ -906,6 +949,38 @@ export function CharacterSheet() {
         {showInventoryModal && <InventoryModal onClose={() => setShowInventoryModal(false)} />}
         {showAdvancementSystem && <AdvancementSystem character={character} onClose={() => { setShowAdvancementSystem(false); if (character?.id && character?.user_id) fetchCharacter(character.id, character.user_id); }} />}
         {showPlayerAidModal && <PlayerAidModal onClose={() => setShowPlayerAidModal(false)} />}
+        {showSevereInjuriesModal && character.party_id && (
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="severe-injuries-modal-title"
+          >
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded border-4 border-[#1a472a] bg-[#fdfbf7] shadow-2xl">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b-4 border-[#d4c5a3] bg-[#1a472a] p-4 text-[#e8d5b5]">
+                <h2 id="severe-injuries-modal-title" className="flex items-center gap-2 font-serif text-xl font-bold uppercase tracking-wide">
+                  <Book size={20} aria-hidden="true" /> Severe Injuries
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowSevereInjuriesModal(false)}
+                  aria-label="Close severe injuries"
+                  className="rounded bg-white/10 p-1.5 transition-colors hover:bg-white/20 hover:text-white"
+                >
+                  <X size={20} aria-hidden="true" />
+                </button>
+              </div>
+              <div className="overflow-y-auto p-4 md:p-6">
+                <CharacterInjuriesPanel
+                  campaignId={character.party_id}
+                  characterId={character.id}
+                  inActiveCombat={Boolean(activeEncounter)}
+                  onStatus={(message) => setActiveStatusMessage(message, 5000)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         {editingAttribute && (<AttributeEditModal attribute={editingAttribute.name} value={editingAttribute.value} onClose={() => setEditingAttribute(null)} onSave={handleAttributeUpdate} />)}
         {renderRestModal()}
         {isSaving && <div className="fixed bottom-4 right-4 bg-[#1a472a] text-[#e8d5b5] px-4 py-2 rounded shadow-lg text-sm z-50 animate-pulse font-serif border border-[#e8d5b5]">Inscribing...</div>}
