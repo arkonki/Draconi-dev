@@ -86,21 +86,28 @@ Solo foundation already delivered toward this phase:
   immutable source-roll linkage, guarded mechanical effects, realtime events,
   dashboard controls, REST, and MCP.
 
-- [ ] Add immutable roll-request and roll-result records linked to campaign,
+- [x] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.
-- [ ] Support player, server, and mixed roll modes.
-- [ ] Generate server rolls with a cryptographically secure random source.
-- [ ] Record dice expression, individual dice, target value, boons/banes,
+- [x] Support player, server, and mixed roll modes.
+- [x] Generate server rolls with a cryptographically secure random source.
+- [x] Record dice expression, individual dice, target value, boons/banes,
   Dragon/Demon results, damage, outcome, source, and timestamps.
-- [ ] Connect pushed rolls to their original roll and record the condition taken.
-- [ ] Add MCP tools for requesting a roll, reading its result, performing an
-  authorized server roll, and pushing an eligible failed roll.
-- [ ] Deliver roll requests and results through the existing realtime system.
+- [x] Connect pushed rolls to their original request and recorded roll, apply and
+  record the chosen condition, and require its narrative context.
+- [x] Add MCP tools for requesting a roll, reading its result, and performing an
+  authorized server roll. Physical dice can be submitted only through the
+  authenticated REST route, never by the model.
+- [x] Add an MCP operation for pushing an eligible failed roll without accepting
+  die values from the model.
+- [x] Deliver roll requests and results through the existing realtime campaign
+  event system, including assigned-user visibility.
 - [ ] Show trusted rolls consistently in the web app, encounter view, projector,
   and MCP campaign history.
-- [ ] Prevent ChatGPT from supplying or replacing authoritative dice outcomes.
-- [ ] Add tests for authorization, malformed dice expressions, retries,
-  idempotency, pushed rolls, and concurrent results.
+- [x] Prevent ChatGPT from supplying or replacing authoritative dice outcomes.
+- [x] Add tests for malformed dice expressions, mode enforcement, retries,
+  idempotency, secure server resolution, pushed-roll linkage, and immutable
+  readback.
+- [ ] Add remaining authorization and concurrent-result tests.
 
 ## Phase 3 — GM workflow package
 

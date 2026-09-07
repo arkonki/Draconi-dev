@@ -396,6 +396,8 @@ function rollRequestForOutput(row) {
     visibility: row.visibility,
     context: row.context,
     metadata: row.metadata || {},
+    pushedFromRequestId: row.pushed_from_request_id || null,
+    pushCondition: row.push_condition || null,
     campaignRevision: Number(row.campaign_revision),
     expiresAt: row.expires_at,
     createdAt: row.created_at,
@@ -414,10 +416,13 @@ async function loadRollRequest(client, campaignId, requestId, { forUpdate = fals
     `SELECT request.*, result.resolution_source,
        result.submitted_by AS result_submitted_by,
        result.created_at AS result_created_at,
+       source_result.roll_id AS previous_roll_id,
        CASE WHEN roll.id IS NULL THEN NULL ELSE to_jsonb(roll) END AS resolved_roll
      FROM roll_requests request
      LEFT JOIN roll_request_results result ON result.request_id = request.id
      LEFT JOIN recorded_rolls roll ON roll.id = result.roll_id
+     LEFT JOIN roll_request_results source_result
+       ON source_result.request_id = request.pushed_from_request_id
      WHERE request.id = $1 AND request.campaign_id = $2
      ${forUpdate ? 'FOR UPDATE OF request' : ''}`,
     [requestId, campaignId],
@@ -963,6 +968,176 @@ export async function getRollRequest(user, campaignId, requestId) {
   };
 }
 
+export async function pushRollRequest(user, input, { sourceClient } = {}) {
+  const operation = 'push_roll';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { write: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const sourceRequest = await loadRollRequest(
+      client,
+      input.campaign_id,
+      input.request_id,
+      { forUpdate: true },
+    );
+    if (!sourceRequest) throw new HelperError(404, 'NOT_FOUND', 'Roll request not found.');
+    assertRollRequestVisible(user, access, sourceRequest);
+    if (!access.isGm && sourceRequest.assigned_user_id !== user.id) {
+      throw new HelperError(403, 'PERMISSION_DENIED', 'Only the assigned player or a campaign GM can push this roll.');
+    }
+    if (!sourceRequest.resolved_roll) {
+      throw new HelperError(409, 'INVALID_STATE', 'Only a resolved failed check can be pushed.');
+    }
+    if (sourceRequest.roll_kind !== 'check' || sourceRequest.target_value === null) {
+      throw new HelperError(409, 'INVALID_STATE', 'Only a failed d20 check can be pushed.');
+    }
+    if (sourceRequest.resolved_roll.result?.outcome !== 'failure') {
+      throw new HelperError(409, 'INVALID_STATE', 'Only an ordinary failed check can be pushed; Dragon, Demon, and successful rolls are ineligible.');
+    }
+    if (sourceRequest.pushed_from_request_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'A pushed roll cannot be pushed again.');
+    }
+    const { rows: existingPushes } = await client.query(
+      'SELECT id FROM roll_requests WHERE pushed_from_request_id = $1 LIMIT 1',
+      [sourceRequest.id],
+    );
+    if (existingPushes[0]) {
+      throw new HelperError(409, 'INVALID_STATE', 'This failed check has already been pushed.');
+    }
+    if (!sourceRequest.actor_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'A pushed check must be linked to a player character.');
+    }
+
+    let loadedActor = await loadActor(client, input.campaign_id, sourceRequest.actor_id, {
+      forUpdate: true,
+      combatId: sourceRequest.encounter_id,
+    });
+    if (loadedActor.storage.type === 'combatant' && loadedActor.storage.row.character_id) {
+      loadedActor = await loadActor(client, input.campaign_id, loadedActor.storage.row.character_id, {
+        forUpdate: true,
+        combatId: sourceRequest.encounter_id,
+      });
+    }
+    if (loadedActor.storage.type !== 'character') {
+      throw new HelperError(409, 'INVALID_STATE', 'Only a player character can take a condition to push a check.');
+    }
+    if (loadedActor.actor.conditions.some(({ key }) => key === input.condition)) {
+      throw new HelperError(409, 'INVALID_STATE', `${loadedActor.actor.name} already has the ${input.condition} condition.`);
+    }
+
+    const conditionResolution = applyActorChangeSet(
+      loadedActor.actor,
+      [{
+        type: 'add_condition',
+        key: input.condition,
+        source: `Pushed roll: ${input.condition_context}`,
+      }],
+      conditionId,
+    );
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await persistActor(client, conditionResolution.result, loadedActor.storage);
+
+    const resultingRevision = previousRevision + 1;
+    const { rows } = await client.query(
+      `INSERT INTO roll_requests (
+         campaign_id, session_id, encounter_id, actor_id, requested_by,
+         assigned_user_id, purpose, expression, roll_kind, target_value,
+         modifier, mode, visibility, context, metadata, campaign_revision,
+         expires_at, pushed_from_request_id, push_condition
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+         $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19
+       ) RETURNING *`,
+      [
+        input.campaign_id,
+        sourceRequest.session_id,
+        sourceRequest.encounter_id,
+        sourceRequest.actor_id,
+        user.id,
+        sourceRequest.assigned_user_id,
+        sourceRequest.purpose,
+        sourceRequest.expression,
+        sourceRequest.roll_kind,
+        sourceRequest.target_value,
+        sourceRequest.modifier,
+        sourceRequest.mode,
+        sourceRequest.visibility,
+        sourceRequest.context,
+        JSON.stringify({
+          ...(sourceRequest.metadata || {}),
+          push: {
+            sourceRequestId: sourceRequest.id,
+            sourceRollId: sourceRequest.resolved_roll.id,
+            condition: input.condition,
+            conditionContext: input.condition_context,
+          },
+        }),
+        resultingRevision,
+        null,
+        sourceRequest.id,
+        input.condition,
+      ],
+    );
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'roll.pushed',
+      actorId: sourceRequest.actor_id,
+      payload: {
+        requestId: rows[0].id,
+        sourceRequestId: sourceRequest.id,
+        sourceRollId: sourceRequest.resolved_roll.id,
+        assignedUserId: sourceRequest.assigned_user_id,
+        condition: input.condition,
+        conditionContext: input.condition_context,
+        mode: sourceRequest.mode,
+        reason: input.reason,
+      },
+      visibility: sourceRequest.visibility,
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${loadedActor.actor.name} took the ${input.condition} condition and may reroll ${sourceRequest.purpose}.`,
+      state_excerpt: {
+        request: rollRequestForOutput(rows[0]),
+        sourceRequestId: sourceRequest.id,
+        sourceRollId: sourceRequest.resolved_roll.id,
+        condition: input.condition,
+        conditionContext: input.condition_context,
+        actor: actorForOutput(conditionResolution.result, { includeGm: access.isGm }),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
 async function resolveRollRequest(user, input, { sourceClient, resolutionSource }) {
   const operation = resolutionSource === 'server' ? 'resolve_roll_server' : 'submit_manual_roll_result';
   return withTransaction(async (client) => {
@@ -1026,11 +1201,14 @@ async function resolveRollRequest(user, input, { sourceClient, resolutionSource 
       result: {
         action: 'trusted_roll',
         requestId: request.id,
+        pushedFromRequestId: request.pushed_from_request_id || null,
+        pushCondition: request.push_condition || null,
         ...resolution,
         context: request.context,
         metadata: request.metadata,
       },
       source: resolutionSource,
+      previousRollId: request.previous_roll_id || null,
       campaignRevision: resultingRevision,
     });
     await client.query(
@@ -1049,6 +1227,8 @@ async function resolveRollRequest(user, input, { sourceClient, resolutionSource 
       payload: {
         requestId: request.id,
         rollId: rollRow.id,
+        pushedFromRequestId: request.pushed_from_request_id || null,
+        pushCondition: request.push_condition || null,
         assignedUserId: request.assigned_user_id,
         resolutionSource,
         purpose: request.purpose,

@@ -68,12 +68,13 @@ The Helper integration uses the existing data model instead of duplicating it:
 The current MVP provides the read-only MCP tools `list_campaigns`,
 `get_campaign_state`, `get_actor`, `get_combat_state`,
 `get_encounter_setup_options`, `get_session_history`, `get_recent_events`,
-`get_solo_options`, and `get_solo_state`.
+`get_roll_request`, `get_solo_options`, and `get_solo_state`.
 It also provides the
 modifying tools `apply_actor_changes`, `append_campaign_event`,
 `create_encounter`, `add_encounter_participants`,
 `remove_encounter_participant`, `start_combat`, `resolve_game_action`,
 `advance_combat_turn`, `end_combat`, `start_session`, `complete_session`,
+`request_roll`, `push_roll`, `resolve_roll_server`,
 `enable_solo_mode`, `disable_solo_mode`, `select_solo_heroic_ability`,
 `ask_fortune`, `draw_inspiration`, `start_solo_mission`, `reveal_waypoint`,
 `resolve_solo_check`, `resolve_solo_check_consequence`, `search_waypoint`,
@@ -91,6 +92,13 @@ catalog, and expands monster ferocity into separate initiative actions. Combat
 actions apply effects to multiple participants in one transaction and enforce
 the active turn. Session lifecycle tools bind subsequent events to an active
 game session and persist its ending summary, scene, and unresolved threads.
+Trusted general rolls support player, server, and mixed modes. Server dice use
+a cryptographically secure source; assigned players can submit validated
+physical dice through the authenticated REST endpoint. MCP can request, resolve
+with server dice, and read rolls, but cannot supply or replace physical results.
+An ordinary failed d20 check can be pushed once after the user selects an
+inactive condition and explains how it applies. Draconi applies the condition,
+creates a linked request, and preserves the original and pushed result chain.
 
 Every modifying call:
 

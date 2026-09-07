@@ -104,6 +104,7 @@ Read-only:
 - `get_encounter_setup_options`
 - `get_session_history`
 - `get_recent_events`
+- `get_roll_request`
 - `get_solo_options`
 - `get_solo_state`
 
@@ -120,6 +121,9 @@ Modifying:
 - `end_combat`
 - `start_session`
 - `complete_session`
+- `request_roll`
+- `push_roll`
+- `resolve_roll_server`
 - `enable_solo_mode`
 - `disable_solo_mode`
 - `select_solo_heroic_ability`
@@ -140,6 +144,35 @@ Modifying:
 
 The modifying tools have `readOnlyHint: false`, `idempotentHint: true`, and
 `openWorldHint: false`. Read-only tools advertise `readOnlyHint: true`.
+
+## Trusted general rolls
+
+Campaign owners and GMs use `request_roll` to create an immutable request in
+`player`, `server`, or `mixed` mode. A request can be linked to the active game
+session and to a campaign encounter, actor, requester, and assigned player. It
+also stores its purpose, bounded dice expression, roll kind, target, boon or
+bane, visibility, context, revision, expiry, and timestamps.
+
+`resolve_roll_server` resolves server and mixed requests with cryptographically
+secure dice. `get_roll_request` returns the pending or resolved request and its
+immutable recorded result. Supported expressions use 1–20 dice with d4, d6,
+d8, d10, d12, d20, or d100 sides and an optional flat modifier. Targeted checks
+and advancement rolls use an unmodified d20; boons and banes preserve both dice
+and the kept value.
+
+For player and mixed requests, the assigned player may submit physical results
+through the authenticated REST route. The server validates the exact die count
+and every face before calculating the total and outcome. That route is
+intentionally absent from MCP, so ChatGPT cannot invent, replace, or submit a
+player's dice. Request and result events use the existing realtime campaign
+channel and honor GM, all-player, or assigned-player visibility.
+
+`push_roll` is available only for an ordinary failed d20 check, never a Demon,
+success, non-check roll, or an already pushed result. It requires the user to
+choose one inactive standard condition and describe how that condition follows
+from the action. Draconi applies the condition and creates one linked unresolved
+request atomically. The reroll follows the original mode; after resolution, its
+immutable record points to the original roll and retains the chosen condition.
 
 ## Solo foundation
 
@@ -335,9 +368,9 @@ session pointer while keeping its immutable event history.
   deferred until item-definition and freeform-item validation is finalized.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
-- General player/manual/mixed roll modes are not implemented. Solo Fortune,
-  Inspiration, Search, and Scavenge do have immutable cryptographically
-  generated server rolls.
+- Trusted player/server/mixed rolls and one-time pushed-roll linkage are
+  implemented, but consistent presentation in the character sheet, encounter,
+  and projector views remains pending.
 - Inviting a GM or observer without first joining as a player is not yet
   implemented; owners can promote an existing campaign member in Campaign
   Roles.
@@ -347,6 +380,7 @@ session pointer while keeping its immutable event history.
 The detailed, checkable roadmap is maintained in
 [Draconi MCP To-Do List](MCP_TODO.md).
 
-1. Add player/server/mixed roll modes and immutable roll events.
+1. Add trusted-roll presentation across web surfaces and complete concurrent
+   authorization tests.
 2. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
    evaluations before enabling the public connector.

@@ -16,6 +16,8 @@ const threatId = '4a7fd3d4-384d-42bc-9362-2c6379d70291';
 const waypointId = 'b93bd6e4-7b86-4ccd-8639-cb5f5fd5dd56';
 const injuryId = '997f700a-c155-41e5-9070-4cead9e84d65';
 const soloAbilityId = '30000000-0000-4000-8000-000000000101';
+const rollRequestId = '16cf09b9-fec2-47a5-ab41-052a6d88bc89';
+const pushedRollRequestId = '71df15b5-d192-4f15-b2f4-af51bf5af252';
 
 let client;
 let server;
@@ -30,6 +32,67 @@ beforeEach(async () => {
     getCampaignState: vi.fn(async () => ({
       data: { campaign: { id: campaignId, revision: 42 }, actors: [] },
       meta: { requestId: 'request-2', campaignRevision: 42 },
+    })),
+    createRollRequest: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 43,
+        event_ids: ['3b1651cf-61da-4071-81ef-4ae29f56fc3d'],
+        summary: 'Roll requested: Spot Hidden (1d20, mixed mode).',
+        state_excerpt: {
+          request: {
+            id: rollRequestId,
+            status: 'pending',
+            expression: '1d20',
+            modifier: 'boon',
+            mode: 'mixed',
+          },
+        },
+      },
+      meta: { requestId: 'request-roll-create', campaignRevision: 43 },
+    })),
+    getRollRequest: vi.fn(async () => ({
+      data: {
+        campaignRevision: 44,
+        request: {
+          id: rollRequestId,
+          status: 'resolved',
+          result: { source: 'server', roll: { dice: [14, 6], keptValues: [6] } },
+        },
+      },
+      meta: { requestId: 'request-roll-get', campaignRevision: 44 },
+    })),
+    pushRollRequest: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 45,
+        event_ids: ['22de8250-a31e-4b32-aa70-d151842a7dbc'],
+        summary: 'Alaric took the exhausted condition and may reroll Spot Hidden.',
+        state_excerpt: {
+          request: {
+            id: pushedRollRequestId,
+            status: 'pending',
+            pushedFromRequestId: rollRequestId,
+            pushCondition: 'exhausted',
+          },
+          sourceRequestId: rollRequestId,
+          condition: 'exhausted',
+        },
+      },
+      meta: { requestId: 'request-roll-push', campaignRevision: 45 },
+    })),
+    resolveRollRequestServer: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 44,
+        event_ids: ['87813dd6-f63c-4731-91d0-c06d1364d9bd'],
+        summary: 'Spot Hidden: 6 (success).',
+        state_excerpt: {
+          request: { id: rollRequestId, status: 'resolved' },
+          roll: { expression: '2d20', dice: [14, 6], keptIndices: [1], keptValues: [6] },
+        },
+      },
+      meta: { requestId: 'request-roll-resolve', campaignRevision: 44 },
     })),
     getSoloOptions: vi.fn(async () => ({
       data: {
@@ -417,6 +480,98 @@ describe('Dragonbane MCP server', () => {
     });
     expect(stateTool.description).toMatch(/before continuing/i);
     expect(writeTool.description).toMatch(/latest campaign revision/i);
+  });
+
+  it('uses trusted roll requests without accepting physical dice through MCP', async () => {
+    const requested = await client.callTool({
+      name: 'request_roll',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 42,
+        idempotency_key: 'trusted-roll-request-1',
+        actor_id: actorId,
+        assigned_user_id: actorId,
+        purpose: 'Spot Hidden',
+        expression: '1d20',
+        roll_kind: 'check',
+        target_value: 12,
+        modifier: 'boon',
+        mode: 'mixed',
+        visibility: 'assigned',
+        reason: 'Ask the player for a Spot Hidden test.',
+      },
+    });
+    expect(requested.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 43,
+      state_excerpt: { request: { id: rollRequestId, status: 'pending' } },
+    });
+
+    const resolved = await client.callTool({
+      name: 'resolve_roll_server',
+      arguments: {
+        campaign_id: campaignId,
+        request_id: rollRequestId,
+        expected_revision: 43,
+        idempotency_key: 'trusted-roll-resolve-1',
+        reason: 'Resolve the mixed-mode request with server dice.',
+      },
+    });
+    expect(resolved.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 44,
+      state_excerpt: {
+        request: { id: rollRequestId, status: 'resolved' },
+        roll: { dice: [14, 6], keptValues: [6] },
+      },
+    });
+
+    const read = await client.callTool({
+      name: 'get_roll_request',
+      arguments: { campaign_id: campaignId, request_id: rollRequestId },
+    });
+    expect(read.structuredContent).toMatchObject({
+      success: true,
+      data: {
+        request: {
+          id: rollRequestId,
+          status: 'resolved',
+          result: { source: 'server' },
+        },
+      },
+    });
+
+    const pushed = await client.callTool({
+      name: 'push_roll',
+      arguments: {
+        campaign_id: campaignId,
+        request_id: rollRequestId,
+        expected_revision: 44,
+        idempotency_key: 'trusted-roll-push-1',
+        condition: 'exhausted',
+        condition_context: 'The long search leaves Alaric shaking with fatigue.',
+        reason: 'The user chose Exhausted and described how it applies.',
+      },
+    });
+    expect(pushed.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 45,
+      state_excerpt: {
+        request: {
+          id: pushedRollRequestId,
+          status: 'pending',
+          pushedFromRequestId: rollRequestId,
+          pushCondition: 'exhausted',
+        },
+      },
+    });
+
+    const listed = await client.listTools();
+    expect(listed.tools.some(({ name }) => name === 'submit_manual_roll_result')).toBe(false);
+    expect(api.createRollRequest).toHaveBeenCalledTimes(1);
+    expect(api.resolveRollRequestServer).toHaveBeenCalledTimes(1);
+    expect(api.getRollRequest).toHaveBeenCalledTimes(1);
+    expect(api.pushRollRequest).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an invalid UUID before calling the API', async () => {

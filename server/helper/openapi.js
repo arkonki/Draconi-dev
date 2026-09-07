@@ -11,6 +11,7 @@ import {
   completeSessionBodySchema,
   createEncounterBodySchema,
   createRollRequestBodySchema,
+  pushRollRequestBodySchema,
   drawInspirationBodySchema,
   disableSoloModeBodySchema,
   enableSoloModeBodySchema,
@@ -158,7 +159,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.15.0',
+    version: '1.16.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -263,6 +264,32 @@ export const openApiDocument = {
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/push': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Take a condition and create one linked pushed-roll request',
+        description: 'A resolved ordinary failed d20 check may be pushed exactly once. The assigned player or a campaign GM selects one inactive standard condition and explains how it applies. This creates a new unresolved request; it never accepts die values.',
+        parameters: [
+          campaignParameter,
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(pushRollRequestBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Condition applied and linked pushed request created', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
         },
       },
     },

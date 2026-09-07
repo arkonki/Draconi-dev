@@ -24,6 +24,8 @@ import {
   completeSessionInputSchema,
   createRollRequestBodySchema,
   createRollRequestInputSchema,
+  pushRollRequestBodySchema,
+  pushRollRequestInputSchema,
   createEncounterBodySchema,
   createEncounterInputSchema,
   drawInspirationBodySchema,
@@ -116,6 +118,7 @@ import {
   listActors,
   listCampaigns,
   resolveGameAction,
+  pushRollRequest,
   resolveRollRequestServer,
   resolveCharacterInjuryAction,
   resolveSoloDyingAction,
@@ -321,6 +324,26 @@ export async function handleHelperApiRequest(request, response) {
       campaignId = input.campaign_id;
       const data = await getRollRequest(user, input.campaign_id, input.request_id);
       resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const pushRollMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests\/([^/]+)\/push$/);
+    if (pushRollMatch && request.method === 'POST') {
+      operation = 'push_roll';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(pushRollRequestBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(pushRollRequestInputSchema, {
+        campaign_id: pushRollMatch[0],
+        request_id: pushRollMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await pushRollRequest(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }

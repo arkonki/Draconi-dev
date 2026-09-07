@@ -83,6 +83,31 @@ export const submitManualRollResultInputSchema = z.object({
 
 export const submitManualRollResultBodySchema = z.object(submitManualRollFields).strict();
 
+const pushRollConditionSchema = z.enum([
+  'exhausted',
+  'sickly',
+  'dazed',
+  'angry',
+  'scared',
+  'disheartened',
+]);
+
+const pushRollRequestFields = {
+  condition: pushRollConditionSchema,
+  condition_context: z.string().trim().min(1).max(500),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const pushRollRequestInputSchema = z.object({
+  campaign_id: uuidSchema,
+  request_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...pushRollRequestFields,
+}).strict();
+
+export const pushRollRequestBodySchema = z.object(pushRollRequestFields).strict();
+
 export const getSoloOptionsInputSchema = z.object({
   campaign_id: uuidSchema,
 }).strict();

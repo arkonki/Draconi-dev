@@ -124,13 +124,258 @@ try {
   const originalRevision = state.payload.data.campaign.revision;
   assert(Number.isInteger(originalRevision), 'Campaign state did not contain an integer revision.');
 
+  const invalidRollRequest = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${originalRevision}"`,
+        'idempotency-key': `smoke-invalid-roll-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: actorId,
+        purpose: 'Invalid die test',
+        expression: '1d7',
+        roll_kind: 'generic',
+        mode: 'server',
+        visibility: 'players',
+        reason: 'Reject unsupported dice before creating a request.',
+      }),
+    },
+  );
+  assert(invalidRollRequest.response.status === 400, 'An unsupported die expression was accepted.');
+  assert(invalidRollRequest.payload.error.code === 'VALIDATION_ERROR', 'Invalid dice returned the wrong error code.');
+
+  const serverRequestHeaders = {
+    'if-match': `"${originalRevision}"`,
+    'idempotency-key': `smoke-roll-request-${randomUUID()}`,
+  };
+  const serverRequestBody = {
+    actor_id: actorId,
+    encounter_id: combatId,
+    purpose: 'Spot Hidden',
+    expression: '1d20',
+    roll_kind: 'check',
+    target_value: 12,
+    modifier: 'boon',
+    mode: 'mixed',
+    visibility: 'assigned',
+    context: 'Search the ruined watchtower.',
+    reason: 'Create a trusted mixed-mode skill test.',
+  };
+  const serverRequest = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests`,
+    { method: 'POST', headers: serverRequestHeaders, body: JSON.stringify(serverRequestBody) },
+  );
+  assert(serverRequest.response.status === 200, `Roll request failed: ${JSON.stringify(serverRequest.payload)}`);
+  const serverRequestExcerpt = serverRequest.payload.data.state_excerpt.request;
+  assert(serverRequestExcerpt.status === 'pending', 'New trusted roll request was not pending.');
+  assert(serverRequestExcerpt.sessionId === null, 'Request unexpectedly linked to a session.');
+  assert(serverRequestExcerpt.encounterId === combatId, 'Request lost its encounter link.');
+  assert(serverRequestExcerpt.actorId === actorId, 'Request lost its actor link.');
+  const serverRequestId = serverRequestExcerpt.id;
+
+  const pendingRequest = await api(`/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}`);
+  assert(pendingRequest.response.status === 200, 'Pending roll request could not be read.');
+  assert(pendingRequest.payload.data.request.status === 'pending', 'Pending read returned the wrong status.');
+
+  const serverResolveHeaders = {
+    'if-match': `"${serverRequest.payload.data.campaign_revision}"`,
+    'idempotency-key': `smoke-roll-resolve-${randomUUID()}`,
+  };
+  const serverResolveBody = { reason: 'Resolve the mixed-mode request with secure server dice.' };
+  const serverResolved = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}/server-roll`,
+    { method: 'POST', headers: serverResolveHeaders, body: JSON.stringify(serverResolveBody) },
+  );
+  assert(serverResolved.response.status === 200, `Server roll failed: ${JSON.stringify(serverResolved.payload)}`);
+  const secureRoll = serverResolved.payload.data.state_excerpt.roll;
+  assert(secureRoll.source === 'server', 'Secure roll did not record its server source.');
+  assert(secureRoll.expression === '2d20', 'Boon request did not expand to two d20 dice.');
+  assert(secureRoll.dice.length === 2, 'Boon request did not retain both dice.');
+  assert(secureRoll.keptValues[0] === Math.min(...secureRoll.dice), 'Boon request did not keep the lower die.');
+  assert(secureRoll.result.outcome, 'Targeted server roll did not record an outcome.');
+
+  const serverResolvedReplay = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}/server-roll`,
+    { method: 'POST', headers: serverResolveHeaders, body: JSON.stringify(serverResolveBody) },
+  );
+  assert(serverResolvedReplay.response.status === 200, 'Server roll idempotent replay failed.');
+  assert(
+    serverResolvedReplay.payload.data.state_excerpt.roll.id === secureRoll.id,
+    'Server roll replay created a different result.',
+  );
+
+  const resolvedRequest = await api(`/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}`);
+  assert(resolvedRequest.response.status === 200, 'Resolved roll request could not be read.');
+  assert(resolvedRequest.payload.data.request.status === 'resolved', 'Resolved read returned the wrong status.');
+  assert(resolvedRequest.payload.data.request.result.source === 'server', 'Resolved read lost the roll source.');
+  assert(resolvedRequest.payload.data.request.result.roll.id === secureRoll.id, 'Resolved read lost its recorded roll link.');
+
+  const playerRequest = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${serverResolved.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-player-roll-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: actorId,
+        purpose: 'Physical weapon damage',
+        expression: '2d6',
+        roll_kind: 'damage',
+        mode: 'player',
+        visibility: 'assigned',
+        reason: 'Let the assigned player enter a physical dice result.',
+      }),
+    },
+  );
+  assert(playerRequest.response.status === 200, `Player roll request failed: ${JSON.stringify(playerRequest.payload)}`);
+  const playerRequestId = playerRequest.payload.data.state_excerpt.request.id;
+  const playerRequestRevision = playerRequest.payload.data.campaign_revision;
+
+  const rejectedServerResolution = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${playerRequestId}/server-roll`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${playerRequestRevision}"`,
+        'idempotency-key': `smoke-player-server-reject-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Verify player-only mode cannot use server dice.' }),
+    },
+  );
+  assert(rejectedServerResolution.response.status === 409, 'Player-only request accepted a server roll.');
+  assert(rejectedServerResolution.payload.error.code === 'INVALID_STATE', 'Player-only rejection returned the wrong error.');
+
+  const manualResolved = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${playerRequestId}/manual-result`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${playerRequestRevision}"`,
+        'idempotency-key': `smoke-player-manual-${randomUUID()}`,
+      },
+      body: JSON.stringify({ dice: [3, 5], reason: 'Record the assigned player physical dice.' }),
+    },
+  );
+  assert(manualResolved.response.status === 200, `Manual roll failed: ${JSON.stringify(manualResolved.payload)}`);
+  assert(manualResolved.payload.data.state_excerpt.roll.source === 'manual', 'Manual roll did not record its source.');
+  assert(manualResolved.payload.data.state_excerpt.roll.result.total === 8, 'Manual roll total was calculated incorrectly.');
+
+  const failedCheckRequest = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${manualResolved.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-push-source-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        actor_id: actorId,
+        purpose: 'Pushable Spot Hidden check',
+        expression: '1d20',
+        roll_kind: 'check',
+        target_value: 12,
+        mode: 'mixed',
+        visibility: 'assigned',
+        reason: 'Create a deterministic ordinary failure for the pushed-roll test.',
+      }),
+    },
+  );
+  assert(failedCheckRequest.response.status === 200, 'Push source request failed.');
+  const failedCheckRequestId = failedCheckRequest.payload.data.state_excerpt.request.id;
+  const failedCheck = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${failedCheckRequestId}/manual-result`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${failedCheckRequest.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-push-source-result-${randomUUID()}`,
+      },
+      body: JSON.stringify({ dice: [14], reason: 'Record an ordinary failed physical d20 result.' }),
+    },
+  );
+  assert(failedCheck.response.status === 200, `Push source resolution failed: ${JSON.stringify(failedCheck.payload)}`);
+  assert(failedCheck.payload.data.state_excerpt.roll.result.outcome === 'failure', 'Push source was not an ordinary failure.');
+  const failedCheckRollId = failedCheck.payload.data.state_excerpt.roll.id;
+
+  const pushHeaders = {
+    'if-match': `"${failedCheck.payload.data.campaign_revision}"`,
+    'idempotency-key': `smoke-push-${randomUUID()}`,
+  };
+  const pushBody = {
+    condition: 'sickly',
+    condition_context: 'Dust from the crypt leaves Smoke Hero nauseated and unsteady.',
+    reason: 'The user chose Sickly and explained how the failed search caused it.',
+  };
+  const pushed = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${failedCheckRequestId}/push`,
+    { method: 'POST', headers: pushHeaders, body: JSON.stringify(pushBody) },
+  );
+  assert(pushed.response.status === 200, `Pushed roll creation failed: ${JSON.stringify(pushed.payload)}`);
+  const pushedRequest = pushed.payload.data.state_excerpt.request;
+  assert(pushedRequest.status === 'pending', 'Pushed request was not left pending for resolution.');
+  assert(pushedRequest.pushedFromRequestId === failedCheckRequestId, 'Pushed request lost its source request link.');
+  assert(pushedRequest.pushCondition === 'sickly', 'Pushed request did not record the chosen condition.');
+  assert(
+    pushed.payload.data.state_excerpt.actor.conditions.some(({ key }) => key === 'sickly'),
+    'Pushing did not atomically apply the selected condition.',
+  );
+
+  const pushedReplay = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${failedCheckRequestId}/push`,
+    { method: 'POST', headers: pushHeaders, body: JSON.stringify(pushBody) },
+  );
+  assert(pushedReplay.response.status === 200, 'Pushed-roll idempotent replay failed.');
+  assert(
+    pushedReplay.payload.data.state_excerpt.request.id === pushedRequest.id,
+    'Pushed-roll replay created a second request.',
+  );
+  const duplicatePush = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${failedCheckRequestId}/push`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${pushed.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-push-duplicate-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        ...pushBody,
+        condition: 'dazed',
+        condition_context: 'A second condition must never be accepted for the same source roll.',
+      }),
+    },
+  );
+  assert(duplicatePush.response.status === 409, 'The same failed check was pushed twice.');
+  assert(duplicatePush.payload.error.code === 'INVALID_STATE', 'Duplicate push returned the wrong error code.');
+
+  const pushedResolved = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${pushedRequest.id}/server-roll`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${pushed.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-push-resolve-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'Resolve the linked pushed request with secure server dice.' }),
+    },
+  );
+  assert(pushedResolved.response.status === 200, `Pushed resolution failed: ${JSON.stringify(pushedResolved.payload)}`);
+  const pushedRoll = pushedResolved.payload.data.state_excerpt.roll;
+  assert(pushedRoll.previousRollId === failedCheckRollId, 'Pushed result lost its previous-roll link.');
+  assert(pushedRoll.result.pushedFromRequestId === failedCheckRequestId, 'Pushed result lost its source-request link.');
+  assert(pushedRoll.result.pushCondition === 'sickly', 'Pushed result lost the selected condition.');
+  const trustedRollRevision = pushedResolved.payload.data.campaign_revision;
+
   const idempotencyKey = `smoke-damage-${randomUUID()}`;
   const damageBody = {
     reason: 'Automated integration-test sword hit',
     changes: [{ type: 'damage', amount: 6, damage_type: 'slashing' }],
   };
   const damageHeaders = {
-    'if-match': `"${originalRevision}"`,
+    'if-match': `"${trustedRollRevision}"`,
     'idempotency-key': idempotencyKey,
   };
   const damage = await api(
@@ -862,7 +1107,7 @@ try {
   const soloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
   assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
   assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
-  assert(soloState.payload.data.latestRolls.length === 5, 'Solo state did not return all recorded rolls.');
+  assert(soloState.payload.data.latestRolls.length === 9, 'Solo state did not return all recorded rolls.');
   const resolvedFailure = soloState.payload.data.latestRolls.find((roll) => roll.id === pendingFailureId);
   assert(resolvedFailure?.consequence?.resolutionMode === 'roll_choice', 'Solo state did not expose the resolved consequence.');
   assert(
@@ -873,7 +1118,7 @@ try {
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
   );
-  assert(storedRolls.rows[0].count === 5, 'Solo rolls were not persisted exactly once.');
+  assert(storedRolls.rows[0].count === 9, 'Trusted, pushed, and Solo rolls were not persisted exactly once.');
 
   const missionStarted = await api(
     `/api/v1/campaigns/${campaignId}/solo/missions`,
@@ -1573,7 +1818,12 @@ try {
   assert(openapi.ok, 'OpenAPI document is unavailable.');
   const openapiDocument = await openapi.json();
   assert(
-    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
+    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/push']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/server-roll']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/manual-result']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/consequence']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/dying/actions']
@@ -1604,6 +1854,10 @@ try {
       'get_session_history',
       'start_session',
       'complete_session',
+      'request_roll',
+      'get_roll_request',
+      'push_roll',
+      'resolve_roll_server',
       'get_solo_options',
       'get_solo_state',
       'enable_solo_mode',
@@ -1630,6 +1884,10 @@ try {
     ]) {
       assert(tools.tools.some((tool) => tool.name === name), `MCP tool is missing: ${name}`);
     }
+    assert(
+      !tools.tools.some((tool) => tool.name === 'submit_manual_roll_result'),
+      'MCP must not expose a tool that lets the model supply physical dice.',
+    );
     const mcpState = await mcpClient.callTool({
       name: 'get_campaign_state',
       arguments: { campaign_id: campaignId },
@@ -1651,11 +1909,52 @@ try {
       mcpOptions.structuredContent?.data?.monsters?.some(({ id }) => id === monsterId),
       'MCP encounter options did not return the smoke monster.',
     );
+    const mcpRollRequested = await mcpClient.callTool({
+      name: 'request_roll',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: mcpState.structuredContent.data.campaign.revision,
+        idempotency_key: `smoke-mcp-roll-request-${randomUUID()}`,
+        actor_id: actorId,
+        purpose: 'MCP secure damage die',
+        expression: '1d6',
+        roll_kind: 'damage',
+        mode: 'server',
+        visibility: 'players',
+        reason: 'Verify trusted-roll creation through MCP.',
+      },
+    });
+    assert(mcpRollRequested.structuredContent?.success === true, 'MCP trusted roll request failed.');
+    const mcpRollRequestId = mcpRollRequested.structuredContent.state_excerpt.request.id;
+    const mcpRollResolved = await mcpClient.callTool({
+      name: 'resolve_roll_server',
+      arguments: {
+        campaign_id: campaignId,
+        request_id: mcpRollRequestId,
+        expected_revision: mcpRollRequested.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-roll-resolve-${randomUUID()}`,
+        reason: 'Resolve the MCP request with secure server dice.',
+      },
+    });
+    assert(mcpRollResolved.structuredContent?.success === true, 'MCP secure roll resolution failed.');
+    assert(
+      mcpRollResolved.structuredContent.state_excerpt.roll.source === 'server',
+      'MCP secure roll did not preserve its server source.',
+    );
+    const mcpRollRead = await mcpClient.callTool({
+      name: 'get_roll_request',
+      arguments: { campaign_id: campaignId, request_id: mcpRollRequestId },
+    });
+    assert(
+      mcpRollRead.structuredContent?.data?.request?.result?.roll?.id
+        === mcpRollResolved.structuredContent.state_excerpt.roll.id,
+      'MCP roll readback did not return the immutable result.',
+    );
     const mcpSessionStarted = await mcpClient.callTool({
       name: 'start_session',
       arguments: {
         campaign_id: campaignId,
-        expected_revision: mcpState.structuredContent.data.campaign.revision,
+        expected_revision: mcpRollResolved.structuredContent.campaign_revision,
         idempotency_key: `smoke-mcp-session-start-${randomUUID()}`,
         title: 'MCP smoke game session',
         opening_scene: { location: 'MCP smoke bridge' },
@@ -1759,6 +2058,8 @@ try {
     checks: [
       'campaign state',
       'combat revision',
+      'trusted roll validation, secure server dice, physical-player dice, mode enforcement, replay, and immutable readback',
+      'one-time pushed-roll condition, narrative context, request/result linkage, and secure reroll',
       'damage write',
       'idempotent replay',
       'idempotency conflict',
@@ -1791,7 +2092,7 @@ try {
       'GM-only combat authorization',
       'GM context isolation',
       'OpenAPI document',
-      ...(mcpUrl ? ['MCP discovery, solo abilities, solo state, encounter preparation, and session lifecycle'] : []),
+      ...(mcpUrl ? ['MCP discovery, trusted rolls and push operation, solo abilities, solo state, encounter preparation, and session lifecycle'] : []),
     ],
   }));
 } finally {
