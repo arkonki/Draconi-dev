@@ -46,6 +46,11 @@ import {
   takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
+import {
+  GM_WORKFLOW_URI,
+  gmWorkflowGuide,
+  gmWorkflowPrompts,
+} from './workflows.js';
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -136,12 +141,16 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.15.0' },
+    { name: 'dragonbane-helper', version: '1.16.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
+        `Use the ${GM_WORKFLOW_URI} resource or a published Dragonbane workflow prompt for the complete session, recovery, and privacy procedures.`,
         'Before every write use the latest campaign revision and a unique idempotency key.',
         'On REVISION_CONFLICT, read state again and reassess; never repeat stale arguments.',
+        'After a disconnect or lost response, read campaign state and recent events before retrying. Reuse an idempotency key only for the exact same uncertain request.',
+        'If an identifier is missing, rediscover it with a read tool; never guess it. Resume an active session or combat from returned state instead of creating a duplicate.',
+        'Treat gmContext, private GM notes, hidden content, and GM-only open threads as secret. Never expose or hint at them in player-facing narration, events, or shared session summaries.',
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
@@ -601,6 +610,21 @@ export function createDragonbaneMcpServer(apiClient) {
       ],
     }),
   );
+
+  server.registerResource(
+    'gm-session-workflow',
+    GM_WORKFLOW_URI,
+    {
+      title: 'Dragonbane GM session workflow',
+      description: 'State-first session, roll, encounter, combat, recovery, privacy, and example-prompt guidance',
+      mimeType: 'application/json',
+    },
+    async (uri) => jsonResource(uri, gmWorkflowGuide),
+  );
+
+  for (const prompt of gmWorkflowPrompts) {
+    server.registerPrompt(prompt.name, prompt.config, prompt.render);
+  }
 
   return server;
 }

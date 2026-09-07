@@ -495,6 +495,77 @@ describe('Dragonbane MCP server', () => {
     expect(writeTool.description).toMatch(/latest campaign revision/i);
   });
 
+  it('publishes state-first GM workflow prompts and recovery guidance', async () => {
+    const listedPrompts = await client.listPrompts();
+    expect(listedPrompts.prompts.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      'run_dragonbane_session',
+      'resume_dragonbane_session',
+      'complete_dragonbane_session',
+    ]));
+
+    const runPrompt = await client.getPrompt({
+      name: 'run_dragonbane_session',
+      arguments: {
+        campaign_id: campaignId,
+        play_mode: 'solo',
+        request: 'Continue from the current scene.',
+      },
+    });
+    expect(runPrompt.messages[0].content).toMatchObject({ type: 'text' });
+    expect(runPrompt.messages[0].content.text).toMatch(/call get_campaign_state/i);
+    expect(runPrompt.messages[0].content.text).toMatch(/call get_solo_state/i);
+    expect(runPrompt.messages[0].content.text).toContain(campaignId);
+    expect(runPrompt.messages[0].content.text).toMatch(/GM-only information/i);
+
+    const resumePrompt = await client.getPrompt({
+      name: 'resume_dragonbane_session',
+      arguments: { last_known_context: 'The goblin may have acted.' },
+    });
+    expect(resumePrompt.messages[0].content.text).toMatch(/list_campaigns/i);
+    expect(resumePrompt.messages[0].content.text).toMatch(/do not create duplicates/i);
+    expect(resumePrompt.messages[0].content.text).toMatch(/non-authoritative context/i);
+
+    const completePrompt = await client.getPrompt({
+      name: 'complete_dragonbane_session',
+      arguments: { campaign_id: campaignId },
+    });
+    expect(completePrompt.messages[0].content.text).toMatch(/get_recent_events/i);
+    expect(completePrompt.messages[0].content.text).toMatch(/private GM notes/i);
+    expect(completePrompt.messages[0].content.text).toMatch(/unresolved_threads/i);
+
+    const listedResources = await client.listResources();
+    expect(listedResources.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'gm-session-workflow',
+        uri: 'dragonbane://workflows/gm-session',
+        mimeType: 'application/json',
+      }),
+    ]));
+
+    const resource = await client.readResource({ uri: 'dragonbane://workflows/gm-session' });
+    const workflow = JSON.parse(resource.contents[0].text);
+    expect(workflow).toMatchObject({
+      version: 'draconi-gm-v1',
+      workflows: {
+        sessionStart: expect.any(Array),
+        scene: expect.any(Array),
+        playerDecision: expect.any(Array),
+        roll: expect.any(Array),
+        encounter: expect.any(Array),
+        combatTurn: expect.any(Array),
+        sessionCompletion: expect.any(Array),
+      },
+      recovery: {
+        revisionConflict: expect.any(Array),
+        interruptedConversation: expect.any(Array),
+        missingIdentifiers: expect.any(Array),
+        reconnect: expect.any(Array),
+      },
+      privacy: { summaries: expect.any(Array) },
+      examplePrompts: { gm: expect.any(Array), player: expect.any(Array) },
+    });
+  });
+
   it('uses trusted roll requests without accepting physical dice through MCP', async () => {
     const requested = await client.callTool({
       name: 'request_roll',

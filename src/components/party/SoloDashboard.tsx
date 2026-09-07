@@ -56,6 +56,7 @@ import {
   SoloConsequenceEffect,
   SoloConsequenceOption,
   SoloJournalEvent,
+  SoloWriteResult,
 } from '../../lib/api/solo';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import type { Character } from '../../types/character';
@@ -166,6 +167,87 @@ function journalEventSummary(event: SoloJournalEvent): string | null {
     if (typeof value === 'string' && value.trim()) return value;
   }
   return null;
+}
+
+function recordedRollFromWrite(result: SoloWriteResult): SoloRecordedRoll | null {
+  const roll = result.state_excerpt.roll;
+  if (!roll || typeof roll !== 'object' || Array.isArray(roll)) return null;
+  return roll as SoloRecordedRoll;
+}
+
+export function OracleActionResult({
+  action,
+  result,
+  onDone,
+}: {
+  action: 'fortune' | 'inspiration';
+  result: SoloWriteResult;
+  onDone: () => void;
+}) {
+  const roll = recordedRollFromWrite(result);
+  const answer = roll?.result.value;
+  const phrase = roll?.result.phrase;
+  const question = roll?.result.question;
+  const extreme = roll?.result.extreme === true;
+  const notice = result.state_excerpt.notice;
+  const inspirationResults = Array.isArray(roll?.result.results)
+    ? roll.result.results.filter((entry): entry is Record<string, unknown> => (
+      Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+    ))
+    : [];
+  const primaryResult = action === 'fortune'
+    ? (typeof answer === 'string' || typeof answer === 'number' ? String(answer) : result.summary)
+    : (typeof phrase === 'string' ? phrase : result.summary);
+
+  return (
+    <div className="space-y-5" role="status" aria-live="polite">
+      <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-amber-50 p-5 text-center shadow-sm">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white text-emerald-700 shadow-sm">
+          {action === 'fortune' ? <Gauge className="h-6 w-6" /> : <Wand2 className="h-6 w-6" />}
+        </div>
+        <div className="mt-3 text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-700">
+          {action === 'fortune' ? 'Fortune answers' : 'Inspiration drawn'}
+        </div>
+        <div className="mt-2 font-serif text-3xl font-bold text-stone-950">{primaryResult}</div>
+        {action === 'fortune' && typeof question === 'string' && (
+          <p className="mt-3 text-sm italic text-stone-600">“{question}”</p>
+        )}
+        {extreme && (
+          <span className="mt-3 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900">Extreme result</span>
+        )}
+      </div>
+
+      {action === 'inspiration' && inspirationResults.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {inspirationResults.map((entry, index) => (
+            <div key={`${String(entry.column || 'result')}-${index}`} className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-center">
+              <div className="text-[10px] font-extrabold uppercase tracking-wide text-indigo-500">{titleCase(String(entry.column || 'result'))}</div>
+              <div className="mt-1 font-bold text-indigo-950">{String(entry.keyword || '—')}</div>
+              {typeof entry.roll === 'number' && <div className="mt-1 text-xs text-indigo-600">D20: {entry.roll}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {roll && (
+        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-bold">{roll.expression}</span>
+            <span>Rolled: <strong>{roll.dice.join(', ')}</strong></span>
+          </div>
+          {action === 'fortune' && roll.keptValues.length > 0 && (
+            <div className="mt-1 text-xs text-stone-500">Kept result: {roll.keptValues.join(', ')}</div>
+          )}
+        </div>
+      )}
+
+      {typeof notice === 'string' && (
+        <p className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">{notice}</p>
+      )}
+
+      <Button type="button" fullWidth icon={CheckCircle2} onClick={onDone}>Done</Button>
+    </div>
+  );
 }
 
 function ActionModal({
@@ -291,6 +373,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
   const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('adventure');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [oracleActionResult, setOracleActionResult] = useState<SoloWriteResult | null>(null);
   const [isCharacterSheetOpen, setIsCharacterSheetOpen] = useState(false);
   const previousViewedCharacterRef = useRef<Character | null>(null);
   const activeSheetRequestIdRef = useRef(0);
@@ -580,8 +663,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       }
     },
     onSuccess: async (result) => {
-      setActiveAction(null);
       setSuccessMessage(result.summary);
+      if (activeAction === 'fortune' || activeAction === 'inspiration') {
+        setOracleActionResult(result);
+      } else {
+        setActiveAction(null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] }),
         queryClient.invalidateQueries({ queryKey: ['solo-status', partyId] }),
@@ -598,6 +685,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const openAction = (action: SoloAction) => {
     setSuccessMessage(null);
+    setOracleActionResult(null);
     actionMutation.reset();
     if (action === 'fortune') {
       setFortuneTilt('even');
@@ -654,6 +742,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setMissionSummary('');
     }
     setActiveAction(action);
+  };
+
+  const closeAction = () => {
+    setActiveAction(null);
+    setOracleActionResult(null);
+    actionMutation.reset();
   };
 
   const openInjuryAction = (injuryId: string, action: 'medical_care' | 'mark_healed') => {
@@ -1277,8 +1371,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       />
 
       {activeAction && (
-        <ActionModal action={activeAction} busy={actionMutation.isPending} error={actionMutation.error} onClose={() => setActiveAction(null)}>
+        <ActionModal action={activeAction} busy={actionMutation.isPending} error={actionMutation.error} onClose={closeAction}>
           <form onSubmit={submitAction} className="space-y-4">
+            {(activeAction === 'fortune' || activeAction === 'inspiration') && oracleActionResult && (
+              <OracleActionResult action={activeAction} result={oracleActionResult} onDone={closeAction} />
+            )}
+
             {activeAction === 'check' && hero && (
               <>
                 <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
@@ -1447,7 +1545,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
-            {activeAction === 'fortune' && (
+            {activeAction === 'fortune' && !oracleActionResult && (
               <>
                 <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Ask only when the answer is genuinely uncertain. A certain or more interesting answer may be decided without rolling.</p>
                 <label className="block text-sm font-bold text-stone-700">Question
@@ -1474,7 +1572,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
-            {activeAction === 'inspiration' && (
+            {activeAction === 'inspiration' && !oracleActionResult && (
               <>
                 <p className="text-sm text-stone-600">Choose one or more independent prompt columns. The generated phrase is inspiration, not an authoritative story fact until you apply it.</p>
                 <fieldset>

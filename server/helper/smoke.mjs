@@ -2013,6 +2013,42 @@ try {
       !tools.tools.some((tool) => tool.name === 'submit_manual_roll_result'),
       'MCP must not expose a tool that lets the model supply physical dice.',
     );
+    const prompts = await mcpClient.listPrompts();
+    for (const name of [
+      'run_dragonbane_session',
+      'resume_dragonbane_session',
+      'complete_dragonbane_session',
+    ]) {
+      assert(prompts.prompts.some((prompt) => prompt.name === name), `MCP prompt is missing: ${name}`);
+    }
+    const runSessionPrompt = await mcpClient.getPrompt({
+      name: 'run_dragonbane_session',
+      arguments: {
+        campaign_id: campaignId,
+        play_mode: 'standard',
+        request: 'Continue from the authoritative campaign state.',
+      },
+    });
+    assert(
+      runSessionPrompt.messages[0]?.content?.type === 'text'
+        && /get_campaign_state/i.test(runSessionPrompt.messages[0].content.text),
+      'MCP run-session prompt does not require authoritative state.',
+    );
+    const workflowResources = await mcpClient.listResources();
+    assert(
+      workflowResources.resources.some(({ uri }) => uri === 'dragonbane://workflows/gm-session'),
+      'MCP GM workflow resource is missing.',
+    );
+    const workflowResource = await mcpClient.readResource({
+      uri: 'dragonbane://workflows/gm-session',
+    });
+    const workflowGuide = JSON.parse(workflowResource.contents[0].text);
+    assert(
+      workflowGuide.version === 'draconi-gm-v1'
+        && workflowGuide.recovery?.revisionConflict
+        && workflowGuide.privacy?.gmPrivate,
+      'MCP GM workflow resource is incomplete.',
+    );
     const mcpState = await mcpClient.callTool({
       name: 'get_campaign_state',
       arguments: { campaign_id: campaignId },
@@ -2228,7 +2264,7 @@ try {
       'GM-only combat authorization',
       'GM context isolation',
       'OpenAPI document',
-      ...(mcpUrl ? ['MCP discovery, trusted rolls and push operation, solo abilities, solo state, encounter preparation, and session lifecycle'] : []),
+      ...(mcpUrl ? ['MCP discovery, GM workflow prompts/resources, trusted rolls and push operation, solo abilities, solo state, encounter preparation, and session lifecycle'] : []),
     ],
   }));
 } finally {

@@ -367,6 +367,14 @@ durable container for the campaign events produced during one period of play:
 Only one session may be active for a campaign. Completing it clears the active
 session pointer while keeping its immutable event history.
 
+The MCP server also publishes the machine-readable
+`dragonbane://workflows/gm-session` resource and the
+`run_dragonbane_session`, `resume_dragonbane_session`, and
+`complete_dragonbane_session` prompts. They package the state-first session,
+trusted-roll, encounter, combat, recovery, and privacy rules for clients that
+support MCP prompts and resources. The equivalent human-readable guide is
+[Draconi MCP GM workflow](MCP_GM_WORKFLOW.md).
+
 ## Deliberate MVP limits
 
 - Initiative is preserved at round rollover. Re-drawing or swapping initiative
@@ -386,6 +394,6 @@ session pointer while keeping its immutable event history.
 The detailed, checkable roadmap is maintained in
 [Draconi MCP To-Do List](MCP_TODO.md).
 
-1. Complete trusted-roll authorization and concurrent-result tests.
-2. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
-   evaluations before enabling the public connector.
+1. Run the production evaluation matrix for exploration, social, trusted-roll,
+   reconnect, concurrent-edit, authorization, and tool-selection behavior.
+2. Record the baseline and rerun it after MCP schema or workflow changes.

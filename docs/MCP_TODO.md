@@ -112,15 +112,15 @@ Solo foundation already delivered toward this phase:
 
 ## Phase 3 — GM workflow package
 
-- [ ] Package instructions that make ChatGPT load current campaign state before
+- [x] Package instructions that make ChatGPT load current campaign state before
   acting and treat Draconi as the authoritative source.
-- [ ] Define the recommended session start, scene, player-decision, roll,
+- [x] Define the recommended session start, scene, player-decision, roll,
   encounter, combat-turn, and session-completion workflows.
-- [ ] Define recovery behavior for stale revisions, interrupted conversations,
+- [x] Define recovery behavior for stale revisions, interrupted conversations,
   missing identifiers, and reconnecting during an active session.
-- [ ] Ensure summaries preserve important events and unresolved story threads
+- [x] Ensure summaries preserve important events and unresolved story threads
   without exposing private GM notes to players.
-- [ ] Add example prompts for common GM and player workflows.
+- [x] Add example prompts for common GM and player workflows.
 
 ## Phase 4 — Production evaluations
 

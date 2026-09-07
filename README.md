@@ -101,6 +101,11 @@ inactive condition and explains how it applies. Draconi applies the condition,
 creates a linked request, and preserves the original and pushed result chain.
 The campaign Roll History tab, encounter sidebar, player projector, and MCP
 `get_roll_history` tool read these same visibility-filtered authoritative records.
+The MCP server also publishes state-first GM workflow prompts for running,
+recovering, and completing sessions plus the
+`dragonbane://workflows/gm-session` guidance resource. See
+[docs/MCP_GM_WORKFLOW.md](docs/MCP_GM_WORKFLOW.md) for the full workflow,
+recovery, privacy, and example-prompt package.
 
 Every modifying call:
 
