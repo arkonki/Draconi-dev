@@ -18,6 +18,7 @@ import {
   PackageSearch,
   RefreshCw,
   Route,
+  ScrollText,
   Search,
   Settings2,
   Shield,
@@ -72,6 +73,7 @@ interface SoloDashboardProps {
 }
 
 type SoloAction = 'check' | 'consequence' | 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'complete-mission';
+type SoloDashboardTab = 'adventure' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
@@ -287,6 +289,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     setCharacter: setViewedSheetCharacter,
   } = useCharacterSheetStore();
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
+  const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('adventure');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isCharacterSheetOpen, setIsCharacterSheetOpen] = useState(false);
   const previousViewedCharacterRef = useRef<Character | null>(null);
@@ -720,6 +723,17 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const currentSceneEntries = Object.entries(journal.currentScene || {});
   const activeJournalSession = journal.sessions.find((session) => session.status === 'active') || null;
   const completedJournalSessions = journal.sessions.filter((session) => session.status === 'completed');
+  const unresolvedRolls = state.latestRolls.filter((roll) => (
+    roll.result.action === 'solo_check'
+    && roll.result.requiresFailForward === true
+    && !roll.consequence
+  ));
+  const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
+    { id: 'adventure', label: 'Adventure', icon: Route, badge: unresolvedRolls.length || undefined },
+    { id: 'state', label: 'State', icon: HeartPulse, badge: state.activeInjuries.length || undefined },
+    { id: 'journal', label: 'Journal', icon: BookOpen, badge: journal.openThreads.length || undefined },
+    { id: 'logs', label: 'Logs', icon: ScrollText },
+  ];
 
   return (
     <div className="bg-stone-50/70">
@@ -744,6 +758,29 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         </div>
       </div>
 
+      <div className="overflow-x-auto border-b border-stone-200 bg-white px-3 sm:px-6">
+        <div className="flex min-w-max gap-1" role="tablist" aria-label="Solo adventure sections">
+          {dashboardTabs.map(({ id, label, icon: Icon, badge }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={activeDashboardTab === id}
+              onClick={() => setActiveDashboardTab(id)}
+              className={`flex min-h-12 items-center gap-2 border-b-2 px-3 py-3 text-sm font-bold transition-colors sm:px-4 ${
+                activeDashboardTab === id
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-stone-500 hover:border-stone-300 hover:text-stone-800'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+              {badge ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-800">{badge}</span> : null}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-5 p-4 sm:p-6">
         {successMessage && (
           <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -757,9 +794,28 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           </div>
         )}
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(290px,0.75fr)]">
-          <div className="space-y-5">
-            <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+        <div className={activeDashboardTab === 'adventure' || activeDashboardTab === 'state'
+          ? 'grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(290px,0.75fr)]'
+          : 'block'}>
+          <div className="flex min-w-0 flex-col gap-5">
+            {activeDashboardTab === 'adventure' && unresolvedRolls.length > 0 && (
+              <section className="order-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><AlertTriangle className="h-5 w-5 text-amber-600" /> Complication awaiting resolution</h3>
+                    <p className="mt-1 text-sm text-amber-800">The latest failed check needs a consequence before the story continues.</p>
+                  </div>
+                  {canManage && (
+                    <Button size="sm" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>
+                      Resolve now
+                    </Button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {activeDashboardTab === 'adventure' && (
+            <section className="order-3 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900"><Route className="h-5 w-5 text-violet-600" /> Current mission</h3>
                 {state.activeMission && <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-700">{titleCase(state.activeMission.status)}</span>}
@@ -838,15 +894,27 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               )}
             </section>
+            )}
 
+            {activeDashboardTab !== 'adventure' && (
             <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
-                <h3 className="flex items-center gap-2 font-bold text-stone-900"><BookOpen className="h-5 w-5 text-teal-700" /> Adventure State / Journal</h3>
-                <p className="mt-1 text-sm text-stone-500">Persistent campaign memory saved by the Helper MCP. Entries marked GM remain private.</p>
+                <h3 className="flex items-center gap-2 font-bold text-stone-900">
+                  {activeDashboardTab === 'state' ? <HeartPulse className="h-5 w-5 text-red-600" /> : activeDashboardTab === 'journal' ? <BookOpen className="h-5 w-5 text-teal-700" /> : <ScrollText className="h-5 w-5 text-amber-700" />}
+                  {activeDashboardTab === 'state' ? 'Adventure State' : activeDashboardTab === 'journal' ? 'Journal' : 'ChatGPT Event Log'}
+                </h3>
+                <p className="mt-1 text-sm text-stone-500">
+                  {activeDashboardTab === 'state'
+                    ? 'Current scene and mechanical campaign state at a glance.'
+                    : activeDashboardTab === 'journal'
+                      ? 'Persistent session memory and unresolved story threads. Entries marked GM remain private.'
+                      : 'Recent visible events written through the Helper MCP, with their saved details.'}
+                </p>
               </div>
 
               <div className="space-y-5 p-5">
-                <div className="grid gap-4 md:grid-cols-2">
+                {activeDashboardTab === 'state' && (
+                <div className="grid gap-4">
                   <div className="rounded-xl border border-teal-100 bg-teal-50/70 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <h4 className="text-xs font-bold uppercase tracking-wide text-teal-800">Current scene</h4>
@@ -865,7 +933,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       </dl>
                     )}
                   </div>
+                  <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Game time</h4>
+                    {Object.keys(state.gameTime || {}).length === 0 ? (
+                      <p className="mt-2 text-sm text-stone-500">No campaign time has been recorded yet.</p>
+                    ) : (
+                      <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words text-sm text-stone-700">{JSON.stringify(state.gameTime, null, 2)}</pre>
+                    )}
+                  </div>
+                </div>
+                )}
 
+                {activeDashboardTab === 'journal' && (
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
                     <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Session</h4>
                     {activeJournalSession ? (
@@ -883,9 +962,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       <p className="mt-2 text-sm text-stone-500">No active game session.</p>
                     )}
                   </div>
-                </div>
+                )}
 
-                {journal.openThreads.length > 0 && (
+                {activeDashboardTab === 'journal' && journal.openThreads.length > 0 && (
                   <div>
                     <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Unresolved threads · GM</h4>
                     <ul className="mt-2 space-y-2">
@@ -896,6 +975,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                 )}
 
+                {activeDashboardTab === 'logs' && (
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Recent ChatGPT journal entries</h4>
                   {journal.recentEvents.length === 0 ? (
@@ -926,8 +1006,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     </ol>
                   )}
                 </div>
+                )}
 
-                {completedJournalSessions.length > 0 && (
+                {activeDashboardTab === 'journal' && completedJournalSessions.length > 0 && (
                   <details>
                     <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-stone-600 hover:text-stone-900">Previous session summaries ({completedJournalSessions.length})</summary>
                     <div className="mt-3 space-y-2">
@@ -946,8 +1027,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 )}
               </div>
             </section>
+            )}
 
-            <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            {activeDashboardTab === 'adventure' && (
+            <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-indigo-600" /> Solo tools</h3>
@@ -969,7 +1052,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 )}
               </div>
             </section>
+            )}
 
+            {activeDashboardTab === 'logs' && (
             <section className="rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-amber-600" /> Recent authoritative rolls</h3>
@@ -1016,32 +1101,30 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               )}
             </section>
+            )}
           </div>
 
-          <aside className="space-y-5">
+          {(activeDashboardTab === 'adventure' || activeDashboardTab === 'state') && (
+          <aside className="order-first space-y-5 lg:order-none">
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-indigo-100 font-bold text-indigo-700">
                   {hero?.portraitUrl ? <img src={hero.portraitUrl} alt="" className="h-full w-full object-cover" /> : hero?.name?.charAt(0) || '?'}
                 </div>
-                <div className="min-w-0">
-                  <h3 className="truncate text-lg font-bold text-stone-900">{hero?.name || 'Solo hero'}</h3>
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    disabled={!hero || !soloCharacterId || !currentUserId}
+                    onClick={handleOpenCharacterSheet}
+                    className="group flex max-w-full items-center gap-1.5 text-left text-lg font-bold text-stone-900 hover:text-indigo-700 disabled:cursor-default disabled:hover:text-stone-900"
+                    title={hero ? `Open ${hero.name}'s character sheet` : undefined}
+                  >
+                    <span className="truncate">{hero?.name || 'Solo hero'}</span>
+                    {hero && <BookOpen className="h-4 w-4 shrink-0 text-stone-400 transition-colors group-hover:text-indigo-600" />}
+                  </button>
                   <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{hero?.tags.join(' · ') || 'Player character'}</p>
                 </div>
               </div>
-
-              {hero && (
-                <Button
-                  className="mt-4"
-                  variant="outline"
-                  fullWidth
-                  icon={BookOpen}
-                  disabled={!soloCharacterId || !currentUserId}
-                  onClick={handleOpenCharacterSheet}
-                >
-                  Open character sheet
-                </Button>
-              )}
 
               {hero && (
                 <div className="mt-5 space-y-4">
@@ -1078,15 +1161,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               </div>
 
+              {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Bed className="h-3.5 w-3.5" /> Rest this shift</div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
                   <span className={`rounded-full px-2.5 py-1 ${state.restState.available.round ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Round {state.restState.available.round ? 'available' : 'used'}</span>
                   <span className={`rounded-full px-2.5 py-1 ${state.restState.available.stretch ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Stretch {state.restState.available.stretch ? 'available' : 'used'}</span>
                 </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Tracked by Solo Rest actions. Character-sheet rests do not update this availability.</p>
               </div>
+              )}
 
-              {state.activeInjuries.length > 0 && (
+              {activeDashboardTab === 'state' && state.activeInjuries.length > 0 && (
                 <div className="mt-4 border-t border-stone-100 pt-4">
                   <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><HeartPulse className="h-3.5 w-3.5" /> Severe injuries</div>
                   <div className="mt-2 space-y-2">
@@ -1124,19 +1210,24 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               )}
 
+              {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Sparkles className="h-3.5 w-3.5" /> Solo ability</div>
                 <div className="mt-1.5 text-sm font-semibold text-stone-800">{state.soloHeroicAbility?.name || 'Not selected'}</div>
               </div>
+              )}
 
+              {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Shield className="h-3.5 w-3.5" /> Equipped</div>
                 <div className="mt-2 space-y-1 text-sm text-stone-700">
                   {equippedItems.length > 0 ? equippedItems.map((item) => <div key={item.id}>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</div>) : <span className="text-stone-400">No equipped items</span>}
                 </div>
               </div>
+              )}
             </section>
 
+            {activeDashboardTab === 'adventure' && (
             <section className={`rounded-2xl border p-5 shadow-sm ${state.activeThreat ? 'border-amber-200 bg-amber-50' : 'border-stone-200 bg-white'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1162,14 +1253,16 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </>
               )}
             </section>
+            )}
 
-            {state.activeCombat && (
+            {activeDashboardTab === 'adventure' && state.activeCombat && (
               <section className="rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 font-bold text-red-950"><Swords className="h-5 w-5 text-red-600" /> Combat active</h3>
                 <p className="mt-1 text-sm text-red-800">{state.activeCombat.name}</p>
               </section>
             )}
           </aside>
+          )}
         </div>
       </div>
 
