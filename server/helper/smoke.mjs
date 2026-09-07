@@ -1180,6 +1180,24 @@ try {
   assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
   assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
   assert(soloState.payload.data.latestRolls.length === 10, 'Solo state did not return all recorded rolls.');
+  assert(
+    soloState.payload.data.journal.currentScene.location === 'Smoke bridge',
+    'Solo journal did not expose the saved current scene.',
+  );
+  assert(
+    soloState.payload.data.journal.openThreads.includes('A disposable unresolved smoke-test hook.'),
+    'Solo journal did not expose the GM unresolved threads.',
+  );
+  assert(
+    soloState.payload.data.journal.sessions.some(({ id, summary }) => (
+      id === sessionId && summary.includes('disposable battle')
+    )),
+    'Solo journal did not expose the saved session summary.',
+  );
+  assert(
+    soloState.payload.data.journal.recentEvents.every(({ sourceType }) => sourceType === 'chatgpt'),
+    'Solo journal included a non-ChatGPT event.',
+  );
   const resolvedFailure = soloState.payload.data.latestRolls.find((roll) => roll.id === pendingFailureId);
   assert(resolvedFailure?.consequence?.resolutionMode === 'roll_choice', 'Solo state did not expose the resolved consequence.');
   assert(
@@ -1769,6 +1787,19 @@ try {
   assert(playerState.response.status === 200, 'Authenticated player could not read campaign state.');
   assert(!Object.hasOwn(playerState.payload.data, 'gmContext'), 'Player received GM-only context.');
   assert(playerState.payload.data.openThreads.length === 0, 'Player received GM-only open threads.');
+  const playerSoloState = await api(`/api/v1/campaigns/${campaignId}/solo`, {}, playerToken);
+  assert(playerSoloState.response.status === 200, 'Authenticated player could not read Solo journal state.');
+  assert(playerSoloState.payload.data.journal.openThreads.length === 0, 'Solo journal leaked GM-only open threads.');
+  assert(
+    playerSoloState.payload.data.journal.sessions.every((session) => !Object.hasOwn(session, 'gmNotes')),
+    'Solo journal leaked private session GM notes.',
+  );
+  assert(
+    playerSoloState.payload.data.journal.recentEvents.every(({ visibility }) => (
+      visibility === 'public' || visibility === 'players' || visibility === 'assigned'
+    )),
+    'Solo journal leaked a GM-only ChatGPT event.',
+  );
   const forbiddenAssignedRoll = await api(
     `/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}`,
     {},

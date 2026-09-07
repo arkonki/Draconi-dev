@@ -144,6 +144,40 @@ export interface SoloDanger {
   updatedAt: string;
 }
 
+export interface SoloJournalSession {
+  id: string;
+  campaignId: string;
+  title: string;
+  status: 'planned' | 'active' | 'completed';
+  summary?: string | null;
+  gmNotes?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SoloJournalEvent {
+  id: string;
+  campaignId: string;
+  sessionId?: string | null;
+  sequence: number;
+  type: string;
+  actorId?: string | null;
+  targetId?: string | null;
+  payload: Record<string, unknown>;
+  visibility: 'public' | 'players' | 'gm' | 'system' | 'assigned';
+  sourceType: 'user' | 'chatgpt' | 'system';
+  createdAt: string;
+}
+
+export interface SoloAdventureJournal {
+  currentScene: Record<string, unknown>;
+  openThreads: unknown[];
+  sessions: SoloJournalSession[];
+  recentEvents: SoloJournalEvent[];
+}
+
 export interface SoloCharacterOption {
   id: string;
   name: string;
@@ -184,6 +218,7 @@ export interface SoloState {
   soloHeroicAbility?: Omit<SoloHeroicAbilityOption, 'selected'> | null;
   activeSessionId?: string | null;
   currentScene?: Record<string, unknown>;
+  journal: SoloAdventureJournal;
   activeMission?: SoloMission | null;
   waypoints: SoloWaypoint[];
   currentWaypoint?: SoloWaypoint | null;

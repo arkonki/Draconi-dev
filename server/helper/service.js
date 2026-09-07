@@ -192,6 +192,7 @@ async function eventRows(client, access, campaignId, filters, userId) {
   if (filters.afterSequence !== undefined) add('sequence > ?', filters.afterSequence);
   if (filters.beforeSequence !== undefined) add('sequence < ?', filters.beforeSequence);
   if (filters.type) add('type = ?', filters.type);
+  if (filters.sourceType) add('source_type = ?', filters.sourceType);
   if (filters.actorId) {
     values.push(filters.actorId);
     clauses.push(`(actor_id = $${values.length} OR target_id = $${values.length})`);
@@ -1480,6 +1481,19 @@ export async function getSoloState(user, campaignId) {
      LIMIT 10`,
     [campaignId],
   );
+  const [{ rows: journalSessionRows }, journalEvents] = await Promise.all([
+    pool.query(
+      `SELECT * FROM game_sessions
+       WHERE campaign_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [campaignId],
+    ),
+    eventRows(pool, access, campaignId, {
+      sourceType: 'chatgpt',
+      limit: 20,
+    }, user.id),
+  ]);
   const restState = await loadSoloRestState(pool, campaignId);
   const { rows: activeCombats } = await pool.query(
     `SELECT id, name FROM encounters
@@ -1528,6 +1542,12 @@ export async function getSoloState(user, campaignId) {
     soloHeroicAbility,
     activeSessionId: access.campaign.active_session_id,
     currentScene: access.campaign.current_scene || {},
+    journal: {
+      currentScene: access.campaign.current_scene || {},
+      openThreads: access.isGm ? access.campaign.open_threads || [] : [],
+      sessions: journalSessionRows.map((session) => sessionForOutput(session, { includeGm: access.isGm })),
+      recentEvents: journalEvents,
+    },
     activeMission: soloMissionForOutput(activeMission),
     waypoints: waypoints.map(soloWaypointForOutput),
     currentWaypoint: soloWaypointForOutput(currentWaypoint),

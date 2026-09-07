@@ -1,8 +1,9 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Brain,
+  BookOpen,
   Bed,
   CheckCircle2,
   ChevronRight,
@@ -53,14 +54,19 @@ import {
   SoloCheckType,
   SoloConsequenceEffect,
   SoloConsequenceOption,
+  SoloJournalEvent,
 } from '../../lib/api/solo';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import type { Character } from '../../types/character';
+import { useCharacterSheetStore } from '../../stores/characterSheetStore';
+import { CharacterSheet } from '../character/CharacterSheet';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 
 interface SoloDashboardProps {
   partyId: string;
   partyName: string;
+  currentUserId?: string;
   canManage: boolean;
   onOpenSettings: () => void;
 }
@@ -141,6 +147,25 @@ function waypointLabel(waypoint: SoloWaypoint) {
   return waypoint.title || `Waypoint ${waypoint.position + 1}`;
 }
 
+function journalValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) && value.every((entry) => ['string', 'number', 'boolean'].includes(typeof entry))) {
+    return value.map(String).join(' · ');
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function journalEventSummary(event: SoloJournalEvent): string | null {
+  const keys = ['summary', 'description', 'reason', 'title', 'question', 'outcome'];
+  for (const key of keys) {
+    const value = event.payload[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
+}
+
 function ActionModal({
   action,
   busy,
@@ -198,10 +223,75 @@ function ActionModal({
   );
 }
 
-export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }: SoloDashboardProps) {
+function SoloCharacterSheetModal({
+  isOpen,
+  title,
+  isLoading,
+  isReady,
+  error,
+  onClose,
+  onRetry,
+}: {
+  isOpen: boolean;
+  title: string;
+  isLoading: boolean;
+  isReady: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm md:p-4">
+      <div role="dialog" aria-modal="true" aria-label={`${title} character sheet`} className="flex h-[96vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-stone-300 bg-white shadow-2xl md:h-[92vh]">
+        <div className="flex items-center justify-between border-b bg-stone-800 p-3 text-white md:p-4">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-base font-bold font-serif md:text-lg"><BookOpen className="h-5 w-5" /> Character Sheet</h3>
+            <p className="truncate text-xs text-stone-300">{title}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-700 hover:text-white" aria-label="Close character sheet">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-[#f5f0e1]">
+          {error ? (
+            <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+              <p className="font-semibold text-red-600">{error}</p>
+              <div className="mt-4 flex gap-2">
+                <Button variant="secondary" onClick={onClose}>Close</Button>
+                <Button onClick={onRetry}>Retry</Button>
+              </div>
+            </div>
+          ) : isLoading || !isReady ? (
+            <div className="flex h-full items-center justify-center gap-3 text-stone-600">
+              <LoadingSpinner />
+              <span className="font-medium">Loading character sheet...</span>
+            </div>
+          ) : (
+            <CharacterSheet />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SoloDashboard({ partyId, partyName, currentUserId, canManage, onOpenSettings }: SoloDashboardProps) {
   const queryClient = useQueryClient();
+  const {
+    character: viewedSheetCharacter,
+    isLoading: isCharacterSheetLoading,
+    error: characterSheetError,
+    fetchCharacter: fetchCharacterSheetData,
+    setCharacter: setViewedSheetCharacter,
+  } = useCharacterSheetStore();
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isCharacterSheetOpen, setIsCharacterSheetOpen] = useState(false);
+  const previousViewedCharacterRef = useRef<Character | null>(null);
+  const activeSheetRequestIdRef = useRef(0);
+  const shouldRestoreCharacterContextRef = useRef(false);
 
   const [checkType, setCheckType] = useState<SoloCheckType>('skill');
   const [checkName, setCheckName] = useState('');
@@ -263,6 +353,55 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   });
   const state = stateQuery.data;
   const selectedInjury = state?.activeInjuries.find((injury) => injury.id === selectedInjuryId) || null;
+  const soloCharacterId = state?.solo.playerCharacterId || state?.playerCharacter?.id || null;
+  const isSoloCharacterSheetReady = Boolean(
+    soloCharacterId && viewedSheetCharacter?.id === soloCharacterId,
+  );
+
+  const restorePreviousCharacterContext = () => {
+    const previousCharacter = previousViewedCharacterRef.current;
+    previousViewedCharacterRef.current = null;
+    shouldRestoreCharacterContextRef.current = false;
+    setViewedSheetCharacter(previousCharacter ?? null);
+  };
+
+  const loadSoloCharacterSheet = (characterId: string, userId: string) => {
+    shouldRestoreCharacterContextRef.current = false;
+    const requestId = ++activeSheetRequestIdRef.current;
+
+    void fetchCharacterSheetData(characterId, userId).finally(() => {
+      if (activeSheetRequestIdRef.current !== requestId) return;
+      if (shouldRestoreCharacterContextRef.current) restorePreviousCharacterContext();
+    });
+  };
+
+  const handleOpenCharacterSheet = () => {
+    if (!soloCharacterId || !currentUserId) return;
+    if (!isCharacterSheetOpen) {
+      previousViewedCharacterRef.current = useCharacterSheetStore.getState().character;
+    }
+    setIsCharacterSheetOpen(true);
+    loadSoloCharacterSheet(soloCharacterId, currentUserId);
+  };
+
+  const handleCloseCharacterSheet = () => {
+    setIsCharacterSheetOpen(false);
+    shouldRestoreCharacterContextRef.current = true;
+    void queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] });
+    void queryClient.invalidateQueries({ queryKey: ['party', partyId] });
+    if (!isCharacterSheetLoading) restorePreviousCharacterContext();
+  };
+
+  const handleRetryCharacterSheet = () => {
+    if (!soloCharacterId || !currentUserId) return;
+    loadSoloCharacterSheet(soloCharacterId, currentUserId);
+  };
+
+  useEffect(() => () => {
+    if (previousViewedCharacterRef.current || shouldRestoreCharacterContextRef.current) {
+      restorePreviousCharacterContext();
+    }
+  }, []);
 
   const realtimeBindings = useMemo(() => [{
     bindingId: 'solo-campaign-event',
@@ -572,6 +711,15 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
   const attributeOptions = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA']
     .flatMap((name) => Number.isInteger(hero?.attributes?.[name]) ? [[name, hero!.attributes![name]] as const] : []);
   const threatCounter = state.activeThreat?.counter || 0;
+  const journal = state.journal || {
+    currentScene: state.currentScene || {},
+    openThreads: [],
+    sessions: [],
+    recentEvents: [],
+  };
+  const currentSceneEntries = Object.entries(journal.currentScene || {});
+  const activeJournalSession = journal.sessions.find((session) => session.status === 'active') || null;
+  const completedJournalSessions = journal.sessions.filter((session) => session.status === 'completed');
 
   return (
     <div className="bg-stone-50/70">
@@ -691,6 +839,114 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
               )}
             </section>
 
+            <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+              <div className="border-b border-stone-100 px-5 py-4">
+                <h3 className="flex items-center gap-2 font-bold text-stone-900"><BookOpen className="h-5 w-5 text-teal-700" /> Adventure State / Journal</h3>
+                <p className="mt-1 text-sm text-stone-500">Persistent campaign memory saved by the Helper MCP. Entries marked GM remain private.</p>
+              </div>
+
+              <div className="space-y-5 p-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-teal-100 bg-teal-50/70 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wide text-teal-800">Current scene</h4>
+                      {activeJournalSession && <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-800">Session active</span>}
+                    </div>
+                    {currentSceneEntries.length === 0 ? (
+                      <p className="mt-2 text-sm text-teal-900/60">No current scene has been saved yet.</p>
+                    ) : (
+                      <dl className="mt-3 space-y-3">
+                        {currentSceneEntries.map(([key, value]) => (
+                          <div key={key}>
+                            <dt className="text-[11px] font-bold uppercase tracking-wide text-teal-700">{titleCase(key)}</dt>
+                            <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-teal-950">{journalValue(value)}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Session</h4>
+                    {activeJournalSession ? (
+                      <div className="mt-2">
+                        <div className="font-bold text-stone-900">{activeJournalSession.title}</div>
+                        {activeJournalSession.startedAt && <div className="mt-1 text-xs text-stone-500">Started {new Date(activeJournalSession.startedAt).toLocaleString()}</div>}
+                        {activeJournalSession.gmNotes && (
+                          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                            <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700">Private GM notes</div>
+                            <div className="mt-1 whitespace-pre-wrap">{activeJournalSession.gmNotes}</div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-stone-500">No active game session.</p>
+                    )}
+                  </div>
+                </div>
+
+                {journal.openThreads.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Unresolved threads · GM</h4>
+                    <ul className="mt-2 space-y-2">
+                      {journal.openThreads.map((thread, index) => (
+                        <li key={index} className="whitespace-pre-wrap break-words rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">{journalValue(thread)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Recent ChatGPT journal entries</h4>
+                  {journal.recentEvents.length === 0 ? (
+                    <p className="mt-2 text-sm text-stone-500">ChatGPT has not saved a visible campaign event yet.</p>
+                  ) : (
+                    <ol className="mt-2 space-y-2">
+                      {journal.recentEvents.map((event) => {
+                        const summary = journalEventSummary(event);
+                        return (
+                          <li key={event.id} className="rounded-lg border border-stone-200 px-3 py-3">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <div className="text-sm font-bold text-stone-900">{titleCase(event.type)}</div>
+                                {summary && <p className="mt-0.5 text-sm text-stone-700">{summary}</p>}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2 text-[11px] font-semibold text-stone-400">
+                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{titleCase(event.visibility)}</span>
+                                <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
+                              </div>
+                            </div>
+                            <details className="mt-2 text-xs text-stone-500">
+                              <summary className="cursor-pointer font-semibold hover:text-stone-800">Saved details</summary>
+                              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-stone-950 p-3 text-stone-100">{JSON.stringify(event.payload, null, 2)}</pre>
+                            </details>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                </div>
+
+                {completedJournalSessions.length > 0 && (
+                  <details>
+                    <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-stone-600 hover:text-stone-900">Previous session summaries ({completedJournalSessions.length})</summary>
+                    <div className="mt-3 space-y-2">
+                      {completedJournalSessions.map((session) => (
+                        <div key={session.id} className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="text-sm font-bold text-stone-900">{session.title}</div>
+                            {session.endedAt && <time className="text-xs text-stone-400" dateTime={session.endedAt}>{new Date(session.endedAt).toLocaleString()}</time>}
+                          </div>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-stone-700">{session.summary || 'No summary was saved.'}</p>
+                          {session.gmNotes && <p className="mt-2 whitespace-pre-wrap rounded bg-amber-50 p-2 text-xs text-amber-900"><strong>Private GM notes:</strong> {session.gmNotes}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            </section>
+
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -773,6 +1029,19 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
                   <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{hero?.tags.join(' · ') || 'Player character'}</p>
                 </div>
               </div>
+
+              {hero && (
+                <Button
+                  className="mt-4"
+                  variant="outline"
+                  fullWidth
+                  icon={BookOpen}
+                  disabled={!soloCharacterId || !currentUserId}
+                  onClick={handleOpenCharacterSheet}
+                >
+                  Open character sheet
+                </Button>
+              )}
 
               {hero && (
                 <div className="mt-5 space-y-4">
@@ -903,6 +1172,16 @@ export function SoloDashboard({ partyId, partyName, canManage, onOpenSettings }:
           </aside>
         </div>
       </div>
+
+      <SoloCharacterSheetModal
+        isOpen={isCharacterSheetOpen}
+        title={state.playerCharacter?.name || 'Solo hero'}
+        isLoading={isCharacterSheetLoading}
+        isReady={isSoloCharacterSheetReady}
+        error={characterSheetError}
+        onClose={handleCloseCharacterSheet}
+        onRetry={handleRetryCharacterSheet}
+      />
 
       {activeAction && (
         <ActionModal action={activeAction} busy={actionMutation.isPending} error={actionMutation.error} onClose={() => setActiveAction(null)}>

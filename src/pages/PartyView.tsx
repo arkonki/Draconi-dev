@@ -409,6 +409,7 @@ export function PartyView() {
             <SoloDashboard
               partyId={partyId!}
               partyName={party.name}
+              currentUserId={user?.id}
               canManage={isCampaignGM}
               onOpenSettings={() => setIsSoloSettingsOpen(true)}
             />
