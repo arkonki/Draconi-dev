@@ -105,6 +105,7 @@ Read-only:
 - `get_session_history`
 - `get_recent_events`
 - `get_roll_request`
+- `get_roll_history`
 - `get_solo_options`
 - `get_solo_state`
 
@@ -173,6 +174,12 @@ choose one inactive standard condition and describe how that condition follows
 from the action. Draconi applies the condition and creates one linked unresolved
 request atomically. The reroll follows the original mode; after resolution, its
 immutable record points to the original roll and retains the chosen condition.
+
+`get_roll_history` returns the same role-filtered request/result records used by
+the campaign Roll History tab and encounter sidebar. It can be restricted to an
+encounter. The player projector receives only records explicitly visible to all
+players; assigned-player and GM-only requests are never included in its public
+session response.
 
 ## Solo foundation
 
@@ -368,9 +375,8 @@ session pointer while keeping its immutable event history.
   deferred until item-definition and freeform-item validation is finalized.
 - Existing boolean character conditions are exposed as stable UUID condition
   instances without replacing the web UI storage format.
-- Trusted player/server/mixed rolls and one-time pushed-roll linkage are
-  implemented, but consistent presentation in the character sheet, encounter,
-  and projector views remains pending.
+- Trusted player/server/mixed rolls and one-time pushed-roll linkage are shown
+  in campaign history, encounter history, the player projector, and MCP history.
 - Inviting a GM or observer without first joining as a player is not yet
   implemented; owners can promote an existing campaign member in Campaign
   Roles.
@@ -380,7 +386,6 @@ session pointer while keeping its immutable event history.
 The detailed, checkable roadmap is maintained in
 [Draconi MCP To-Do List](MCP_TODO.md).
 
-1. Add trusted-roll presentation across web surfaces and complete concurrent
-   authorization tests.
+1. Complete trusted-roll authorization and concurrent-result tests.
 2. Package the workflow skill and run production HTTPS/ChatGPT developer-mode
    evaluations before enabling the public connector.

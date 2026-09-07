@@ -54,6 +54,12 @@ export const getRollRequestInputSchema = z.object({
   request_id: uuidSchema,
 }).strict();
 
+export const getRollHistoryInputSchema = z.object({
+  campaign_id: uuidSchema,
+  encounter_id: uuidSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+}).strict();
+
 const resolveRollRequestFields = {
   reason: z.string().trim().min(1).max(500),
 };

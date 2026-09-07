@@ -232,6 +232,22 @@ export const openApiDocument = {
       },
     },
     '/api/v1/campaigns/{campaignId}/roll-requests': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'List visible trusted roll requests and immutable results',
+        description: 'Returns GM, all-player, or assigned-player records according to the current campaign role. Results can be restricted to one encounter.',
+        parameters: [
+          campaignParameter,
+          { name: 'encounterId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 } },
+        ],
+        responses: {
+          200: { description: 'Trusted roll history', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
       post: {
         tags: ['Campaigns'],
         summary: 'Create an immutable trusted roll request',

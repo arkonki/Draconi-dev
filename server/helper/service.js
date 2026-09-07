@@ -968,6 +968,44 @@ export async function getRollRequest(user, campaignId, requestId) {
   };
 }
 
+export async function getRollHistory(user, campaignId, { encounterId, limit = 30 } = {}) {
+  const access = await requireCampaignAccess(pool, user, campaignId);
+  const values = [campaignId];
+  const clauses = ['request.campaign_id = $1'];
+  if (encounterId) {
+    values.push(encounterId);
+    clauses.push(`request.encounter_id = $${values.length}`);
+  }
+  if (!access.isGm) {
+    values.push(user.id);
+    clauses.push(`(
+      request.visibility = 'players'
+      OR (request.visibility = 'assigned' AND request.assigned_user_id = $${values.length})
+    )`);
+  }
+  values.push(limit);
+  const { rows } = await pool.query(
+    `SELECT request.*, result.resolution_source,
+       result.submitted_by AS result_submitted_by,
+       result.created_at AS result_created_at,
+       source_result.roll_id AS previous_roll_id,
+       CASE WHEN roll.id IS NULL THEN NULL ELSE to_jsonb(roll) END AS resolved_roll
+     FROM roll_requests request
+     LEFT JOIN roll_request_results result ON result.request_id = request.id
+     LEFT JOIN recorded_rolls roll ON roll.id = result.roll_id
+     LEFT JOIN roll_request_results source_result
+       ON source_result.request_id = request.pushed_from_request_id
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY request.created_at DESC, request.id DESC
+     LIMIT $${values.length}`,
+    values,
+  );
+  return {
+    campaignRevision: Number(access.campaign.helper_revision || 0),
+    requests: rows.map(rollRequestForOutput),
+  };
+}
+
 export async function pushRollRequest(user, input, { sourceClient } = {}) {
   const operation = 'push_roll';
   return withTransaction(async (client) => {

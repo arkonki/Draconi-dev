@@ -71,6 +71,13 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests/${request_id}`);
   }
 
+  getRollHistory({ campaign_id, encounter_id, limit }) {
+    const query = new URLSearchParams();
+    if (encounter_id) query.set('encounterId', encounter_id);
+    if (limit) query.set('limit', String(limit));
+    return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests?${query}`);
+  }
+
   pushRollRequest(input) {
     const { campaign_id, request_id, expected_revision, idempotency_key, ...body } = input;
     return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests/${request_id}/push`, {

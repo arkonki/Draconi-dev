@@ -20,6 +20,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getRollHistoryInputSchema,
   getRollRequestInputSchema,
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
@@ -190,6 +191,14 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
   }, safe(async (input) => readResult(await apiClient.getRollRequest(input))));
+
+  server.registerTool('get_roll_history', {
+    title: 'List trusted campaign rolls',
+    description: 'Read visible pending and resolved trusted rolls, optionally restricted to one encounter. Use this for campaign roll history instead of reconstructing results from narrative events.',
+    inputSchema: getRollHistoryInputSchema,
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getRollHistory(input))));
 
   server.registerTool('push_roll', {
     title: 'Push one failed trusted roll',
@@ -544,6 +553,7 @@ export function createDragonbaneMcpServer(apiClient) {
       supportedRollOperations: [
         'request_roll',
         'get_roll_request',
+        'get_roll_history',
         'push_roll',
         'resolve_roll_server',
       ],
@@ -600,6 +610,7 @@ export const mcpToolAnnotations = {
   get_campaign_state: READ_ONLY,
   request_roll: MODIFYING,
   get_roll_request: READ_ONLY,
+  get_roll_history: READ_ONLY,
   push_roll: MODIFYING,
   resolve_roll_server: MODIFYING,
   get_solo_options: READ_ONLY,

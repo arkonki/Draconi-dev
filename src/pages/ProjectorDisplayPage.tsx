@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Heart, Maximize, Minimize, Minus, Monitor, RotateCcw, Search, Plus, Shield, Skull, Zap } from 'lucide-react';
+import { AlertTriangle, Dices, Heart, Maximize, Minimize, Minus, Monitor, RotateCcw, Search, Plus, Shield, Skull, Zap } from 'lucide-react';
 import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
@@ -203,6 +203,49 @@ function SlotCard({
           <p className="mt-1 text-xs text-white/50">The GM has not assigned a character to this side yet.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProjectorRollFeed({ rolls }: { rolls: PlayerDisplayState['rollHistory'] }) {
+  if (!rolls?.length) return null;
+
+  return (
+    <div className="absolute bottom-4 left-4 z-20 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/15 bg-black/80 text-white shadow-2xl backdrop-blur-md">
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-white/65">
+        <Dices className="h-4 w-4" />
+        Trusted rolls
+      </div>
+      <div className="divide-y divide-white/10">
+        {rolls.slice(0, 3).map((roll) => (
+          <div key={roll.id} className="px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate text-sm font-semibold">{roll.purpose}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                roll.status === 'resolved'
+                  ? roll.outcome === 'failure' || roll.outcome === 'demon'
+                    ? 'bg-red-500/20 text-red-200'
+                    : 'bg-emerald-500/20 text-emerald-200'
+                  : 'bg-amber-500/20 text-amber-100'
+              }`}>
+                {roll.status === 'resolved' ? roll.outcome || 'resolved' : 'waiting'}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-white/60">
+              <span>{roll.expression}</span>
+              {roll.status === 'resolved' ? (
+                <>
+                  <span>Dice: {roll.dice.join(', ')}</span>
+                  <span className="font-bold text-white">Total {roll.total}</span>
+                </>
+              ) : (
+                <span>{roll.mode} mode</span>
+              )}
+              {roll.pushCondition ? <span className="text-amber-200">Pushed · {roll.pushCondition}</span> : null}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -701,6 +744,8 @@ export function ProjectorDisplayPage() {
           </div>
         ) : null
       ))}
+
+      <ProjectorRollFeed rolls={data.rollHistory || []} />
 
       <div
         className={`absolute right-4 bottom-24 z-30 flex max-w-[calc(100vw-2rem)] justify-end transition-opacity duration-300 ${

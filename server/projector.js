@@ -141,13 +141,26 @@ export async function getPlayerDisplayState(token) {
   const session = sessions[0];
   if (!session) throw new HttpError(410, 'Display session is invalid, expired, or revoked');
   await pool.query('UPDATE party_display_sessions SET last_seen_at = now() WHERE id = $1', [session.id]);
-  const [partyResult, mapResult, encounterResult, slotsResult] = await Promise.all([
+  const [partyResult, mapResult, encounterResult, slotsResult, rollHistoryResult] = await Promise.all([
     pool.query('SELECT id, name FROM parties WHERE id = $1', [session.party_id]),
     session.display_map_id
       ? pool.query('SELECT * FROM party_maps WHERE id = $1 AND party_id = $2', [session.display_map_id, session.party_id])
       : pool.query('SELECT * FROM party_maps WHERE party_id = $1 AND is_active = true ORDER BY updated_at DESC LIMIT 1', [session.party_id]),
     pool.query("SELECT id, name, current_round FROM encounters WHERE party_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1", [session.party_id]),
     pool.query('SELECT * FROM party_display_slots WHERE session_id = $1 ORDER BY sort_order', [session.id]),
+    pool.query(
+      `SELECT request.id, request.purpose, request.expression, request.modifier,
+         request.mode, request.pushed_from_request_id, request.push_condition,
+         request.created_at, result.resolution_source, result.created_at AS resolved_at,
+         roll.dice, roll.kept_values, roll.result AS roll_result
+       FROM roll_requests request
+       LEFT JOIN roll_request_results result ON result.request_id = request.id
+       LEFT JOIN recorded_rolls roll ON roll.id = result.roll_id
+       WHERE request.campaign_id = $1 AND request.visibility = 'players'
+       ORDER BY COALESCE(result.created_at, request.created_at) DESC, request.id DESC
+       LIMIT 5`,
+      [session.party_id],
+    ),
   ]);
   const party = partyResult.rows[0];
   if (!party) throw new HttpError(404, 'Party not found');
@@ -186,6 +199,22 @@ export async function getPlayerDisplayState(token) {
       gridRotation: Number(map.grid_rotation),
     } : null,
     encounter: { isActive: Boolean(encounter), name: encounter?.name ?? null, round: encounter?.current_round ?? null },
+    rollHistory: rollHistoryResult.rows.map((row) => ({
+      id: row.id,
+      purpose: row.purpose,
+      expression: row.expression,
+      modifier: row.modifier,
+      mode: row.mode,
+      status: row.dice ? 'resolved' : 'pending',
+      source: row.resolution_source || null,
+      dice: row.dice || [],
+      keptValues: row.kept_values || [],
+      total: row.roll_result?.total ?? null,
+      outcome: row.roll_result?.outcome ?? null,
+      pushedFromRequestId: row.pushed_from_request_id || null,
+      pushCondition: row.push_condition || null,
+      createdAt: row.resolved_at || row.created_at,
+    })),
     slots: slots.map((slot) => {
       const character = byId.get(slot.character_id);
       const synchronizedState = character

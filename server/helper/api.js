@@ -44,6 +44,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getRollHistoryInputSchema,
   getRollRequestInputSchema,
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
@@ -111,6 +112,7 @@ import {
   getCombatState,
   getEncounterSetupOptions,
   getRecentEvents,
+  getRollHistory,
   getRollRequest,
   getSessionHistory,
   getSoloOptions,
@@ -296,6 +298,22 @@ export async function handleHelperApiRequest(request, response) {
     }
 
     const rollRequestsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/roll-requests$/);
+    if (rollRequestsMatch && request.method === 'GET') {
+      operation = 'get_roll_history';
+      const input = parseSchema(getRollHistoryInputSchema, {
+        campaign_id: rollRequestsMatch[0],
+        encounter_id: url.searchParams.get('encounterId') || undefined,
+        limit: url.searchParams.get('limit') || undefined,
+      });
+      campaignId = input.campaign_id;
+      const data = await getRollHistory(user, campaignId, {
+        encounterId: input.encounter_id,
+        limit: input.limit,
+      });
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
     if (rollRequestsMatch && request.method === 'POST') {
       operation = 'request_roll';
       previousRevision = parseRevision(request);

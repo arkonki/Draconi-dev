@@ -23,9 +23,10 @@ import { SoloModeSettings } from '../components/party/SoloModeSettings';
 import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../lib/appUrl';
 import { fetchSoloCampaignStatus } from '../lib/api/solo';
+import { TrustedRollFeed } from '../components/party/TrustedRollFeed';
 
-type Tab = 'members' | 'solo' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
-const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
+type Tab = 'members' | 'solo' | 'rolls' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
+const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'rolls', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
 
 const StoryHelperApp = lazy(() =>
   import('../components/party/StoryHelper').then((module) => ({
@@ -206,6 +207,7 @@ export function PartyView() {
   const allTabs: { id: Tab; label: string; icon: React.ElementType; dmOnly?: boolean }[] = [
     { id: 'members', label: 'Roster', icon: Users },
     { id: 'solo', label: 'Solo Adventure', icon: Sparkles },
+    { id: 'rolls', label: 'Roll History', icon: Dices },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'notes', label: 'Journal', icon: FileText },
     { id: 'atlas', label: 'Atlas', icon: Map },
@@ -411,6 +413,12 @@ export function PartyView() {
               onOpenSettings={() => setIsSoloSettingsOpen(true)}
             />
           </Suspense>
+        )}
+
+        {activeTab === 'rolls' && (
+          <div className="p-6">
+            <TrustedRollFeed partyId={partyId!} />
+          </div>
         )}
 
         {activeTab === 'chat' && (

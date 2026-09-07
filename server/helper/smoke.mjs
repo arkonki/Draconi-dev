@@ -367,7 +367,79 @@ try {
   assert(pushedRoll.previousRollId === failedCheckRollId, 'Pushed result lost its previous-roll link.');
   assert(pushedRoll.result.pushedFromRequestId === failedCheckRequestId, 'Pushed result lost its source-request link.');
   assert(pushedRoll.result.pushCondition === 'sickly', 'Pushed result lost the selected condition.');
-  const trustedRollRevision = pushedResolved.payload.data.campaign_revision;
+  const trustedHistory = await api(`/api/v1/campaigns/${campaignId}/roll-requests?limit=20`);
+  assert(trustedHistory.response.status === 200, 'Trusted roll history could not be read.');
+  const pushedHistoryEntry = trustedHistory.payload.data.requests.find(({ id }) => id === pushedRequest.id);
+  assert(pushedHistoryEntry?.result?.roll?.id === pushedRoll.id, 'Trusted history lost the pushed result.');
+  assert(pushedHistoryEntry?.result?.roll?.previousRollId === failedCheckRollId, 'Trusted history lost previous-roll linkage.');
+  const encounterRollHistory = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests?encounterId=${combatId}&limit=20`,
+  );
+  assert(encounterRollHistory.response.status === 200, 'Encounter roll history could not be read.');
+  assert(
+    encounterRollHistory.payload.data.requests.some(({ id }) => id === serverRequestId),
+    'Encounter history omitted its linked trusted roll.',
+  );
+  assert(
+    encounterRollHistory.payload.data.requests.every(({ encounterId }) => encounterId === combatId),
+    'Encounter history included a roll from another context.',
+  );
+
+  const concurrentRequest = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${pushedResolved.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-concurrent-request-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        purpose: 'Concurrent secure roll',
+        expression: '1d6',
+        roll_kind: 'generic',
+        mode: 'server',
+        visibility: 'players',
+        reason: 'Verify that simultaneous result submissions cannot create two outcomes.',
+      }),
+    },
+  );
+  assert(concurrentRequest.response.status === 200, 'Concurrent-result request could not be created.');
+  const concurrentRequestId = concurrentRequest.payload.data.state_excerpt.request.id;
+  const concurrentRevision = concurrentRequest.payload.data.campaign_revision;
+  const concurrentResults = await Promise.all([
+    api(
+      `/api/v1/campaigns/${campaignId}/roll-requests/${concurrentRequestId}/server-roll`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${concurrentRevision}"`,
+          'idempotency-key': `smoke-concurrent-a-${randomUUID()}`,
+        },
+        body: JSON.stringify({ reason: 'First simultaneous secure resolution.' }),
+      },
+    ),
+    api(
+      `/api/v1/campaigns/${campaignId}/roll-requests/${concurrentRequestId}/server-roll`,
+      {
+        method: 'POST',
+        headers: {
+          'if-match': `"${concurrentRevision}"`,
+          'idempotency-key': `smoke-concurrent-b-${randomUUID()}`,
+        },
+        body: JSON.stringify({ reason: 'Second simultaneous secure resolution.' }),
+      },
+    ),
+  ]);
+  const concurrentSuccesses = concurrentResults.filter(({ response }) => response.status === 200);
+  const concurrentConflicts = concurrentResults.filter(({ response }) => response.status === 409);
+  assert(concurrentSuccesses.length === 1, 'Concurrent resolution did not produce exactly one authoritative result.');
+  assert(concurrentConflicts.length === 1, 'Concurrent resolution did not reject exactly one competing result.');
+  const concurrentStoredResults = await pool.query(
+    'SELECT COUNT(*)::integer AS count FROM roll_request_results WHERE request_id = $1',
+    [concurrentRequestId],
+  );
+  assert(concurrentStoredResults.rows[0].count === 1, 'Concurrent resolution persisted more than one result.');
+  const trustedRollRevision = concurrentSuccesses[0].payload.data.campaign_revision;
 
   const idempotencyKey = `smoke-damage-${randomUUID()}`;
   const damageBody = {
@@ -1107,7 +1179,7 @@ try {
   const soloState = await api(`/api/v1/campaigns/${campaignId}/solo`);
   assert(soloState.response.status === 200, `Solo state failed: ${JSON.stringify(soloState.payload)}`);
   assert(soloState.payload.data.solo.playerCharacterId === actorId, 'Solo state lost the selected character.');
-  assert(soloState.payload.data.latestRolls.length === 9, 'Solo state did not return all recorded rolls.');
+  assert(soloState.payload.data.latestRolls.length === 10, 'Solo state did not return all recorded rolls.');
   const resolvedFailure = soloState.payload.data.latestRolls.find((roll) => roll.id === pendingFailureId);
   assert(resolvedFailure?.consequence?.resolutionMode === 'roll_choice', 'Solo state did not expose the resolved consequence.');
   assert(
@@ -1118,7 +1190,7 @@ try {
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
   );
-  assert(storedRolls.rows[0].count === 9, 'Trusted, pushed, and Solo rolls were not persisted exactly once.');
+  assert(storedRolls.rows[0].count === 10, 'Trusted, pushed, concurrent, and Solo rolls were not persisted exactly once.');
 
   const missionStarted = await api(
     `/api/v1/campaigns/${campaignId}/solo/missions`,
@@ -1697,6 +1769,26 @@ try {
   assert(playerState.response.status === 200, 'Authenticated player could not read campaign state.');
   assert(!Object.hasOwn(playerState.payload.data, 'gmContext'), 'Player received GM-only context.');
   assert(playerState.payload.data.openThreads.length === 0, 'Player received GM-only open threads.');
+  const forbiddenAssignedRoll = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests/${serverRequestId}`,
+    {},
+    playerToken,
+  );
+  assert(forbiddenAssignedRoll.response.status === 403, 'A player read a roll assigned to another user.');
+  const playerRollHistory = await api(
+    `/api/v1/campaigns/${campaignId}/roll-requests?limit=100`,
+    {},
+    playerToken,
+  );
+  assert(playerRollHistory.response.status === 200, 'Player could not read visible trusted-roll history.');
+  assert(
+    playerRollHistory.payload.data.requests.some(({ id }) => id === concurrentRequestId),
+    'Player history omitted an all-player trusted roll.',
+  );
+  assert(
+    !playerRollHistory.payload.data.requests.some(({ id }) => id === serverRequestId),
+    'Player history leaked a roll assigned to another user.',
+  );
 
   const emptyCharacterInjuries = await api(
     `/api/v1/campaigns/${campaignId}/characters/${playerCharacterId}/injuries`,
@@ -1818,7 +1910,8 @@ try {
   assert(openapi.ok, 'OpenAPI document is unavailable.');
   const openapiDocument = await openapi.json();
   assert(
-    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests']
+    openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests']?.get
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests']?.post
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/push']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/server-roll']
@@ -1856,6 +1949,7 @@ try {
       'complete_session',
       'request_roll',
       'get_roll_request',
+      'get_roll_history',
       'push_roll',
       'resolve_roll_server',
       'get_solo_options',
@@ -1949,6 +2043,16 @@ try {
       mcpRollRead.structuredContent?.data?.request?.result?.roll?.id
         === mcpRollResolved.structuredContent.state_excerpt.roll.id,
       'MCP roll readback did not return the immutable result.',
+    );
+    const mcpRollHistory = await mcpClient.callTool({
+      name: 'get_roll_history',
+      arguments: { campaign_id: campaignId, limit: 20 },
+    });
+    assert(
+      mcpRollHistory.structuredContent?.data?.requests?.some(
+        ({ id }) => id === mcpRollRequestId,
+      ),
+      'MCP trusted-roll history omitted the newly resolved request.',
     );
     const mcpSessionStarted = await mcpClient.callTool({
       name: 'start_session',
@@ -2060,6 +2164,7 @@ try {
       'combat revision',
       'trusted roll validation, secure server dice, physical-player dice, mode enforcement, replay, and immutable readback',
       'one-time pushed-roll condition, narrative context, request/result linkage, and secure reroll',
+      'visibility-filtered campaign and encounter roll history, assigned-user isolation, and concurrent-result safety',
       'damage write',
       'idempotent replay',
       'idempotency conflict',

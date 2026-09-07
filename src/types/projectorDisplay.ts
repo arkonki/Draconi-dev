@@ -54,6 +54,22 @@ export interface PlayerDisplayState {
     name: string | null;
     round: number | null;
   };
+  rollHistory: Array<{
+    id: string;
+    purpose: string;
+    expression: string;
+    modifier: 'normal' | 'boon' | 'bane';
+    mode: 'player' | 'server' | 'mixed';
+    status: 'pending' | 'resolved';
+    source: 'server' | 'manual' | null;
+    dice: number[];
+    keptValues: number[];
+    total: number | null;
+    outcome: 'dragon' | 'demon' | 'success' | 'failure' | null;
+    pushedFromRequestId: string | null;
+    pushCondition: string | null;
+    createdAt: string;
+  }>;
   slots: Array<{
     corner: DisplayCorner;
     rotationDeg: number;

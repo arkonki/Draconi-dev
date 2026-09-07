@@ -50,6 +50,7 @@ import {
   pendingInitiativeSlotsFor,
   usesArmyOfOne,
 } from '../../lib/initiativeSlots';
+import { TrustedRollFeed } from './TrustedRollFeed';
 
 // --- TYPES ---
 export interface MonsterStats {
@@ -2540,6 +2541,9 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-4 lg:col-span-1 h-fit lg:sticky lg:top-24">
             <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden"><div className="p-3 bg-stone-50 border-b border-stone-200"><h4 className="font-bold text-stone-600 text-sm uppercase">Combat Log</h4></div><div className="h-64 lg:h-[calc(100vh-300px)] overflow-y-auto p-3 bg-white"><CombatLogView log={(encounterDetails.log as CombatLogEntry[] | undefined) || []} /></div></div>
+            <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
+              <TrustedRollFeed partyId={partyId} encounterId={currentEncounterId} compact />
+            </div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200"><textarea className="w-full text-sm p-2 border rounded bg-yellow-50/50 min-h-[100px]" placeholder={isDM ? "DM Notes..." : "Encounter Notes"} disabled={!isDM} value={temporaryNotes} onChange={e => setTemporaryNotes(e.target.value)} />{isDM && <div className="mt-2 flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setIsEditingEncounter(true)} icon={Edit3}>Edit Encounter</Button></div>}</div>
           </div>
           <div className="lg:col-span-2 space-y-4">

@@ -68,7 +68,7 @@ The Helper integration uses the existing data model instead of duplicating it:
 The current MVP provides the read-only MCP tools `list_campaigns`,
 `get_campaign_state`, `get_actor`, `get_combat_state`,
 `get_encounter_setup_options`, `get_session_history`, `get_recent_events`,
-`get_roll_request`, `get_solo_options`, and `get_solo_state`.
+`get_roll_request`, `get_roll_history`, `get_solo_options`, and `get_solo_state`.
 It also provides the
 modifying tools `apply_actor_changes`, `append_campaign_event`,
 `create_encounter`, `add_encounter_participants`,
@@ -99,6 +99,8 @@ with server dice, and read rolls, but cannot supply or replace physical results.
 An ordinary failed d20 check can be pushed once after the user selects an
 inactive condition and explains how it applies. Draconi applies the condition,
 creates a linked request, and preserves the original and pushed result chain.
+The campaign Roll History tab, encounter sidebar, player projector, and MCP
+`get_roll_history` tool read these same visibility-filtered authoritative records.
 
 Every modifying call:
 

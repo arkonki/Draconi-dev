@@ -62,6 +62,19 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-roll-get', campaignRevision: 44 },
     })),
+    getRollHistory: vi.fn(async () => ({
+      data: {
+        campaignRevision: 44,
+        requests: [{
+          id: rollRequestId,
+          encounterId: combatId,
+          status: 'resolved',
+          purpose: 'Spot Hidden',
+          result: { source: 'server', roll: { dice: [14, 6], keptValues: [6] } },
+        }],
+      },
+      meta: { requestId: 'request-roll-history', campaignRevision: 44 },
+    })),
     pushRollRequest: vi.fn(async () => ({
       data: {
         success: true,
@@ -541,6 +554,17 @@ describe('Dragonbane MCP server', () => {
       },
     });
 
+    const history = await client.callTool({
+      name: 'get_roll_history',
+      arguments: { campaign_id: campaignId, encounter_id: combatId, limit: 10 },
+    });
+    expect(history.structuredContent).toMatchObject({
+      success: true,
+      data: {
+        requests: [{ id: rollRequestId, encounterId: combatId, status: 'resolved' }],
+      },
+    });
+
     const pushed = await client.callTool({
       name: 'push_roll',
       arguments: {
@@ -571,6 +595,7 @@ describe('Dragonbane MCP server', () => {
     expect(api.createRollRequest).toHaveBeenCalledTimes(1);
     expect(api.resolveRollRequestServer).toHaveBeenCalledTimes(1);
     expect(api.getRollRequest).toHaveBeenCalledTimes(1);
+    expect(api.getRollHistory).toHaveBeenCalledTimes(1);
     expect(api.pushRollRequest).toHaveBeenCalledTimes(1);
   });
 

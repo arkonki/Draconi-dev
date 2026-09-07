@@ -101,13 +101,14 @@ Solo foundation already delivered toward this phase:
   die values from the model.
 - [x] Deliver roll requests and results through the existing realtime campaign
   event system, including assigned-user visibility.
-- [ ] Show trusted rolls consistently in the web app, encounter view, projector,
-  and MCP campaign history.
+- [x] Show visibility-filtered trusted rolls in the web app, encounter view,
+  player projector, and dedicated MCP campaign history.
 - [x] Prevent ChatGPT from supplying or replacing authoritative dice outcomes.
 - [x] Add tests for malformed dice expressions, mode enforcement, retries,
   idempotency, secure server resolution, pushed-roll linkage, and immutable
   readback.
-- [ ] Add remaining authorization and concurrent-result tests.
+- [x] Add assigned-user/all-player visibility authorization and concurrent-result
+  tests, alongside the existing campaign-role and cross-campaign coverage.
 
 ## Phase 3 — GM workflow package
 
