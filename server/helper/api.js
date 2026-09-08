@@ -20,6 +20,8 @@ import {
   campaignIdInputSchema,
   completeSoloMissionBodySchema,
   completeSoloMissionInputSchema,
+  checkpointSessionBodySchema,
+  checkpointSessionInputSchema,
   completeSessionBodySchema,
   completeSessionInputSchema,
   createRollRequestBodySchema,
@@ -98,6 +100,7 @@ import {
   applyActorChanges,
   askFortune,
   completeSoloMission,
+  checkpointSession,
   completeSession,
   createRollRequest,
   createEncounter,
@@ -917,6 +920,29 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await completeSession(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const sessionCheckpointMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/sessions\/([^/]+)\/checkpoints$/,
+    );
+    if (sessionCheckpointMatch && request.method === 'POST') {
+      operation = 'checkpoint_session';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(checkpointSessionBodySchema, await readJson(request, 300_000));
+      const input = parseSchema(checkpointSessionInputSchema, {
+        campaign_id: sessionCheckpointMatch[0],
+        session_id: sessionCheckpointMatch[1],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await checkpointSession(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

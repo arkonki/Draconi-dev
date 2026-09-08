@@ -7,6 +7,7 @@ import {
   askFortuneBodySchema,
   appendCampaignEventBodySchema,
   applyActorChangesBodySchema,
+  checkpointSessionBodySchema,
   completeSoloMissionBodySchema,
   completeSessionBodySchema,
   createEncounterBodySchema,
@@ -907,6 +908,49 @@ export const openApiDocument = {
         },
         responses: {
           200: { description: 'Session completed or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+          429: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/sessions/{sessionId}/checkpoints': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Checkpoint the active game session',
+        description: 'GM-only. Atomically saves a continuation summary, validated current scene, and optional unresolved threads without ending the session.',
+        parameters: [
+          campaignParameter,
+          { name: 'sessionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: z.toJSONSchema(checkpointSessionBodySchema),
+              example: {
+                summary: 'The heroes inserted the combined item into the gate mechanism.',
+                scene: {
+                  location: 'Old bridge gate',
+                  description: 'The eastern gate remains sealed while its mechanism hums.',
+                  activeObjects: [{ name: 'Gate mechanism', state: { combinedItemInserted: true } }],
+                  exits: [{ name: 'West road', status: 'open' }],
+                  dangers: [{ description: 'A delayed trap is armed.' }],
+                },
+                unresolved_threads: ['What activates the delayed trap?'],
+                reason: 'Save an authoritative continuation point.',
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Checkpoint saved or original idempotent result', content: { 'application/json': { schema: successEnvelope() } } },
           400: errorResponse,
           401: errorResponse,
           403: errorResponse,

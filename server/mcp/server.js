@@ -6,6 +6,7 @@ import {
   askFortuneInputSchema,
   appendCampaignEventInputSchema,
   applyActorChangesInputSchema,
+  checkpointSessionInputSchema,
   completeSoloMissionInputSchema,
   completeSessionInputSchema,
   createEncounterInputSchema,
@@ -155,6 +156,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'If an identifier is missing, rediscover it with a read tool; never guess it. Resume an active session or combat from returned state instead of creating a duplicate.',
         'Treat gmContext, private GM notes, hidden content, and GM-only open threads as secret. Never expose or hint at them in player-facing narration, events, or shared session summaries.',
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
+        'During an active session, use checkpoint_session to save the current structured scene and durable continuation summary instead of relying on narrative event text.',
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
         'For a trusted general roll, use request_roll first. Use resolve_roll_server only when the request mode permits server dice, then read the immutable result with get_roll_request. An ordinary failed check may use push_roll once, but only after the user chooses an inactive condition and describes how it applies; resolve the returned request according to its mode. Never supply physical dice through MCP or replace a returned result.',
@@ -398,6 +400,14 @@ export function createDragonbaneMcpServer(apiClient) {
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.startSession(input))));
 
+  server.registerTool('checkpoint_session', {
+    title: 'Checkpoint an active game session',
+    description: 'GM-only. Atomically save a durable continuation summary, validated current scene, and optional unresolved threads without ending the active session. Read the latest campaign revision first.',
+    inputSchema: checkpointSessionInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.checkpointSession(input))));
+
   server.registerTool('complete_session', {
     title: 'Complete a game session',
     description: 'GM-only. Complete the active session with a durable summary, ending scene, and explicit unresolved threads for future continuation. Read the latest campaign revision first.',
@@ -562,6 +572,7 @@ export function createDragonbaneMcpServer(apiClient) {
       supportedSessionOperations: [
         'get_session_history',
         'start_session',
+        'checkpoint_session',
         'complete_session',
       ],
       supportedRollOperations: [
@@ -661,6 +672,10 @@ export const mcpToolAnnotations = {
   resolve_solo_injury_action: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
+  get_session_history: READ_ONLY,
+  start_session: MODIFYING,
+  checkpoint_session: MODIFYING,
+  complete_session: MODIFYING,
   get_actor: READ_ONLY,
   get_combat_state: READ_ONLY,
   start_combat: MODIFYING,

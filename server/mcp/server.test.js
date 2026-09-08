@@ -346,15 +346,27 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-session-start', campaignRevision: 43 },
     })),
-    completeSession: vi.fn(async () => ({
+    checkpointSession: vi.fn(async () => ({
       data: {
         success: true,
         campaign_revision: 44,
+        event_ids: ['e62919b7-cd55-4f57-8568-22f88e21407c'],
+        summary: 'Session checkpoint saved at Old bridge.',
+        state_excerpt: {
+          checkpoint: { id: 'd50d59e5-61aa-4ad8-a483-0bca86986d6e', sessionId, campaignRevision: 44 },
+        },
+      },
+      meta: { requestId: 'request-session-checkpoint', campaignRevision: 44 },
+    })),
+    completeSession: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 45,
         event_ids: ['907f3c7a-4685-43ff-a882-d7dbb249f54c'],
         summary: 'Night of the Manticore completed and its campaign summary was saved.',
         state_excerpt: { session: { id: sessionId, status: 'completed' } },
       },
-      meta: { requestId: 'request-session-complete', campaignRevision: 44 },
+      meta: { requestId: 'request-session-complete', campaignRevision: 45 },
     })),
     getActor: vi.fn(async () => ({
       data: { id: actorId, name: 'Alaric', hp: { current: 14, max: 14 }, revision: 42 },
@@ -933,12 +945,37 @@ describe('Dragonbane MCP server', () => {
       state_excerpt: { session: { id: sessionId, status: 'active' } },
     });
 
+    const checkpointed = await client.callTool({
+      name: 'checkpoint_session',
+      arguments: {
+        campaign_id: campaignId,
+        session_id: sessionId,
+        expected_revision: 43,
+        idempotency_key: 'session-checkpoint-1',
+        summary: 'The heroes reached the gate mechanism.',
+        scene: {
+          location: 'Old bridge',
+          description: 'A sealed gate blocks the eastern road.',
+          activeObjects: [{ name: 'Gate mechanism', state: { combinedItemInserted: true } }],
+          exits: [{ name: 'West road', status: 'open' }],
+          dangers: [{ description: 'The delayed trap is armed.' }],
+        },
+        unresolved_threads: ['Who armed the delayed trap?'],
+        reason: 'Save an authoritative continuation point.',
+      },
+    });
+    expect(checkpointed.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 44,
+      state_excerpt: { checkpoint: { sessionId, campaignRevision: 44 } },
+    });
+
     const completed = await client.callTool({
       name: 'complete_session',
       arguments: {
         campaign_id: campaignId,
         session_id: sessionId,
-        expected_revision: 43,
+        expected_revision: 44,
         idempotency_key: 'session-complete-1',
         summary: 'The heroes drove off the manticore.',
         unresolved_threads: ['Who sent the beast?'],
@@ -948,11 +985,12 @@ describe('Dragonbane MCP server', () => {
     });
     expect(completed.structuredContent).toMatchObject({
       success: true,
-      campaign_revision: 44,
+      campaign_revision: 45,
       state_excerpt: { session: { id: sessionId, status: 'completed' } },
     });
     expect(api.getSessionHistory).toHaveBeenCalledTimes(1);
     expect(api.startSession).toHaveBeenCalledTimes(1);
+    expect(api.checkpointSession).toHaveBeenCalledTimes(1);
     expect(api.completeSession).toHaveBeenCalledTimes(1);
   });
 

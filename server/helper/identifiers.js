@@ -19,3 +19,10 @@ export function inventoryItemId(actorId, item, index) {
   return stableUuid('dragonbane-inventory', actorId, index, item?.name || '', item?.originalName || '');
 }
 
+export function equipmentItemId(actorId, slot, item, index = 0) {
+  if (typeof item?.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)) {
+    return item.id;
+  }
+  const name = typeof item === 'string' ? item : item?.name || item?.originalName || '';
+  return stableUuid('dragonbane-equipment', actorId, slot, index, name);
+}

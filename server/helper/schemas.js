@@ -526,13 +526,49 @@ export const getSessionHistoryInputSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();
 
+const sceneVisibilitySchema = z.enum(['players', 'gm']).default('players');
+
+const sceneObjectSchema = z.object({
+  id: z.string().trim().min(1).max(200).optional(),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2_000).optional(),
+  state: z.record(z.string(), z.unknown()).default({}),
+  visibility: sceneVisibilitySchema,
+}).strict();
+
+const sceneExitSchema = z.object({
+  id: z.string().trim().min(1).max(200).optional(),
+  name: z.string().trim().min(1).max(200),
+  destination: z.string().trim().max(500).optional(),
+  description: z.string().trim().max(2_000).optional(),
+  status: z.enum(['open', 'closed', 'blocked', 'unknown']).default('unknown'),
+  visibility: sceneVisibilitySchema,
+}).strict();
+
+const sceneDangerSchema = z.object({
+  id: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().min(1).max(2_000),
+  status: z.enum(['active', 'resolved', 'unknown']).default('active'),
+  visibility: sceneVisibilitySchema,
+}).strict();
+
+export const currentSceneSchema = z.object({
+  schemaVersion: z.literal('current-scene-v1').default('current-scene-v1'),
+  location: z.string().trim().max(500).default(''),
+  description: z.string().trim().max(5_000).default(''),
+  situation: z.string().trim().max(5_000).optional(),
+  activeObjects: z.array(sceneObjectSchema).max(100).default([]),
+  exits: z.array(sceneExitSchema).max(100).default([]),
+  dangers: z.array(sceneDangerSchema).max(100).default([]),
+}).strict();
+
 export const startSessionInputSchema = z.object({
   campaign_id: uuidSchema,
   expected_revision: revisionSchema,
   idempotency_key: idempotencyKeySchema,
   title: z.string().trim().min(1).max(200),
   gm_notes: z.string().trim().max(5_000).optional(),
-  opening_scene: z.record(z.string(), z.unknown()).optional(),
+  opening_scene: currentSceneSchema.optional(),
   reason: z.string().trim().min(1).max(500),
 }).strict();
 
@@ -546,11 +582,25 @@ export const completeSessionInputSchema = z.object({
   idempotency_key: idempotencyKeySchema,
   summary: z.string().trim().min(1).max(10_000),
   unresolved_threads: z.array(z.string().trim().min(1).max(500)).max(50),
-  ending_scene: z.record(z.string(), z.unknown()).optional(),
+  ending_scene: currentSceneSchema.optional(),
   reason: z.string().trim().min(1).max(500),
 }).strict();
 
 export const completeSessionBodySchema = completeSessionInputSchema
+  .omit({ campaign_id: true, session_id: true, expected_revision: true, idempotency_key: true });
+
+export const checkpointSessionInputSchema = z.object({
+  campaign_id: uuidSchema,
+  session_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  summary: z.string().trim().min(1).max(10_000),
+  scene: currentSceneSchema,
+  unresolved_threads: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const checkpointSessionBodySchema = checkpointSessionInputSchema
   .omit({ campaign_id: true, session_id: true, expected_revision: true, idempotency_key: true });
 
 const damageChangeSchema = z.object({

@@ -41,6 +41,21 @@ const STANDARD_CONDITION_KEYS = new Set([
 ]);
 const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
 
+function sceneForOutput(scene, { includeGm = false } = {}) {
+  const value = scene && typeof scene === 'object' && !Array.isArray(scene) ? scene : {};
+  const visible = (entries) => (Array.isArray(entries) ? entries : [])
+    .filter((entry) => includeGm || entry?.visibility !== 'gm');
+  return {
+    schemaVersion: value.schemaVersion || 'current-scene-v1',
+    location: value.location || '',
+    description: value.description || '',
+    ...(value.situation ? { situation: value.situation } : {}),
+    activeObjects: visible(value.activeObjects),
+    exits: visible(value.exits),
+    dangers: visible(value.dangers),
+  };
+}
+
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (!value || typeof value !== 'object') return value;
@@ -64,7 +79,9 @@ function campaignForOutput(campaign, role) {
     rulesVersion: campaign.rules_version,
     status: campaign.helper_status,
     activeSessionId: campaign.active_session_id,
-    currentScene: campaign.current_scene || {},
+    currentScene: sceneForOutput(campaign.current_scene, {
+      includeGm: role === 'owner' || role === 'gm',
+    }),
     gameTime: campaign.game_time || {},
     revision: Number(campaign.helper_revision || 0),
     role,
@@ -248,6 +265,20 @@ function sessionForOutput(row, { includeGm = false } = {}) {
   };
   if (includeGm) session.gmNotes = row.gm_notes;
   return session;
+}
+
+function checkpointForOutput(row, { includeGm = false } = {}) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    sessionId: row.session_id,
+    summary: row.summary,
+    scene: sceneForOutput(row.scene, { includeGm }),
+    campaignRevision: Number(row.campaign_revision),
+    createdAt: row.created_at,
+    ...(includeGm ? { unresolvedThreads: row.unresolved_threads || [] } : {}),
+  };
 }
 
 function soloStateForOutput(row) {
@@ -1541,9 +1572,9 @@ export async function getSoloState(user, campaignId) {
     playerCharacter,
     soloHeroicAbility,
     activeSessionId: access.campaign.active_session_id,
-    currentScene: access.campaign.current_scene || {},
+    currentScene: sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm }),
     journal: {
-      currentScene: access.campaign.current_scene || {},
+      currentScene: sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm }),
       openThreads: access.isGm ? access.campaign.open_threads || [] : [],
       sessions: journalSessionRows.map((session) => sessionForOutput(session, { includeGm: access.isGm })),
       recentEvents: journalEvents,
@@ -4669,6 +4700,117 @@ export async function startSession(user, input, { sourceClient } = {}) {
   });
 }
 
+export async function checkpointSession(user, input, { sourceClient } = {}) {
+  const operation = 'checkpoint_session';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client,
+      user,
+      input.campaign_id,
+      input.idempotency_key,
+      operation,
+      input,
+    );
+    if (idem.response) return idem.response;
+
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    if (access.campaign.active_session_id !== input.session_id) {
+      throw new HelperError(409, 'INACTIVE_SESSION', 'The requested session is not active for this campaign.');
+    }
+    const { rows: sessions } = await client.query(
+      `SELECT * FROM game_sessions
+       WHERE id = $1 AND campaign_id = $2
+       FOR UPDATE`,
+      [input.session_id, input.campaign_id],
+    );
+    const session = sessions[0];
+    if (!session || session.status !== 'active') {
+      throw new HelperError(409, 'INACTIVE_SESSION', 'The requested session is not active.');
+    }
+
+    const resultingRevision = previousRevision + 1;
+    const unresolvedThreads = input.unresolved_threads === undefined
+      ? access.campaign.open_threads || []
+      : input.unresolved_threads;
+    const { rows: checkpoints } = await client.query(
+      `INSERT INTO game_session_checkpoints (
+         campaign_id, session_id, summary, scene, unresolved_threads,
+         campaign_revision, created_by
+       ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+       RETURNING *`,
+      [
+        input.campaign_id,
+        input.session_id,
+        input.summary,
+        JSON.stringify(input.scene),
+        JSON.stringify(unresolvedThreads),
+        resultingRevision,
+        user.id,
+      ],
+    );
+    await client.query(
+      `UPDATE parties
+       SET current_scene = $1::jsonb,
+         open_threads = $2::jsonb,
+         helper_revision = $3
+       WHERE id = $4`,
+      [
+        JSON.stringify(input.scene),
+        JSON.stringify(unresolvedThreads),
+        resultingRevision,
+        input.campaign_id,
+      ],
+    );
+    const sequence = await nextEventSequence(client, input.campaign_id);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sessionId: input.session_id,
+      sequence,
+      type: 'session.checkpointed',
+      payload: {
+        checkpointId: checkpoints[0].id,
+        sessionId: input.session_id,
+        summary: input.summary,
+        scene: sceneForOutput(input.scene),
+        reason: input.reason,
+      },
+      visibility: 'players',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `Session checkpoint saved at ${input.scene.location || 'the current scene'}.`,
+      state_excerpt: {
+        checkpoint: checkpointForOutput(checkpoints[0], { includeGm: true }),
+        campaign: {
+          id: input.campaign_id,
+          activeSessionId: input.session_id,
+          currentScene: sceneForOutput(input.scene, { includeGm: true }),
+          openThreads: unresolvedThreads,
+        },
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
+    return response;
+  });
+}
+
 export async function completeSession(user, input, { sourceClient } = {}) {
   const operation = 'complete_session';
   return withTransaction(async (client) => {
@@ -5385,7 +5527,7 @@ export async function getCampaignState(user, campaignId, { recentEventLimit = 20
     activeSession: sessions[0]
       ? sessionForOutput(sessions[0], { includeGm: access.isGm })
       : null,
-    scene: access.campaign.current_scene || {},
+    scene: sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm }),
     actors: characters,
     combat,
     recentEvents,

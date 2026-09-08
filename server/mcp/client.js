@@ -389,6 +389,22 @@ export class HelperApiClient {
     });
   }
 
+  checkpointSession(input) {
+    const {
+      campaign_id,
+      session_id,
+      expected_revision,
+      idempotency_key,
+      ...body
+    } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/sessions/${session_id}/checkpoints`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   completeSession(input) {
     const {
       campaign_id,
