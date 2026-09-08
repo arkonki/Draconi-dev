@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
-import { pool, withTransaction } from '../db.js';
+import { pool, withReadSnapshot, withTransaction } from '../db.js';
 import {
+  advanceEquipmentTime,
   actorForOutput,
   combineConditions,
   loadActor,
+  normalizeCharacterEquipment,
   persistActor,
 } from './actors.js';
 import { requireCampaignAccess } from './auth.js';
@@ -40,6 +42,48 @@ const STANDARD_CONDITION_KEYS = new Set([
   'disheartened',
 ]);
 const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
+
+function gameTimeForOutput(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const elapsedSeconds = Number.isFinite(Number(source.elapsedSeconds))
+    ? Math.max(0, Math.floor(Number(source.elapsedSeconds)))
+    : 0;
+  return {
+    ...source,
+    schemaVersion: 'game-time-v1',
+    elapsedSeconds,
+    rounds: Math.floor(elapsedSeconds / 10),
+    stretches: Math.floor(elapsedSeconds / (15 * 60)),
+    shifts: Math.floor(elapsedSeconds / (6 * 60 * 60)),
+  };
+}
+
+function advanceGameTime(value, seconds, lastAdvance) {
+  const current = gameTimeForOutput(value);
+  return gameTimeForOutput({
+    ...current,
+    elapsedSeconds: current.elapsedSeconds + seconds,
+    lastAdvance: { ...lastAdvance, seconds, at: new Date().toISOString() },
+  });
+}
+
+async function advanceCampaignEquipmentTime(client, campaignId, elapsedSeconds) {
+  const { rows } = await client.query(
+    'SELECT id, equipment FROM characters WHERE party_id = $1 FOR UPDATE',
+    [campaignId],
+  );
+  const changes = [];
+  for (const row of rows) {
+    const result = advanceEquipmentTime(row.equipment || {}, elapsedSeconds);
+    if (result.changes.length === 0) continue;
+    await client.query(
+      'UPDATE characters SET equipment = $1::jsonb WHERE id = $2',
+      [JSON.stringify(result.document), row.id],
+    );
+    changes.push(...result.changes.map((change) => ({ characterId: row.id, ...change })));
+  }
+  return changes;
+}
 
 function sceneForOutput(scene, { includeGm = false } = {}) {
   const value = scene && typeof scene === 'object' && !Array.isArray(scene) ? scene : {};
@@ -82,7 +126,7 @@ function campaignForOutput(campaign, role) {
     currentScene: sceneForOutput(campaign.current_scene, {
       includeGm: role === 'owner' || role === 'gm',
     }),
-    gameTime: campaign.game_time || {},
+    gameTime: gameTimeForOutput(campaign.game_time),
     revision: Number(campaign.helper_revision || 0),
     role,
     createdAt: campaign.created_at,
@@ -818,18 +862,35 @@ export async function getRecentEvents(user, campaignId, filters = {}) {
 }
 
 export async function getSessionHistory(user, campaignId, { limit = 20 } = {}) {
-  const access = await requireCampaignAccess(pool, user, campaignId);
-  const { rows } = await pool.query(
-    `SELECT * FROM game_sessions
-     WHERE campaign_id = $1
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [campaignId, limit],
-  );
-  return {
-    campaignRevision: Number(access.campaign.helper_revision || 0),
-    sessions: rows.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
-  };
+  return withReadSnapshot(async (client) => {
+    const access = await requireCampaignAccess(client, user, campaignId);
+    const [{ rows }, { rows: checkpoints }] = await Promise.all([
+      client.query(
+        `SELECT * FROM game_sessions
+         WHERE campaign_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [campaignId, limit],
+      ),
+      client.query(
+        `SELECT * FROM game_session_checkpoints
+         WHERE campaign_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2`,
+        [campaignId, limit],
+      ),
+    ]);
+    const checkpointOutput = checkpoints.map((row) => checkpointForOutput(
+      row,
+      { includeGm: access.isGm },
+    ));
+    return {
+      campaignRevision: Number(access.campaign.helper_revision || 0),
+      sessions: rows.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
+      checkpoints: checkpointOutput,
+      latestCheckpoint: checkpointOutput[0] || null,
+    };
+  });
 }
 
 export async function createRollRequest(user, input, { sourceClient } = {}) {
@@ -1587,7 +1648,7 @@ export async function getSoloState(user, campaignId) {
     activeCombat: activeCombats[0]
       ? { id: activeCombats[0].id, name: activeCombats[0].name }
       : null,
-    gameTime: access.campaign.game_time || {},
+    gameTime: gameTimeForOutput(access.campaign.game_time),
     restState: soloRestStateForOutput(restState),
     activeInjuries: activeInjuries.map(characterInjuryForOutput),
     latestRolls: latestRolls.map(recordedRollForOutput),
@@ -3569,9 +3630,23 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         deathRolls: { passed: 0, failed: 0 },
       } : {}),
     };
+    const durationSeconds = SOLO_REST_SECONDS[input.rest_type];
+    const advancedEquipment = advanceEquipmentTime(
+      loadedActor.storage.equipmentDocument,
+      durationSeconds,
+    );
+    loadedActor.storage.equipmentDocument = advancedEquipment.document;
+    const normalizedEquipment = normalizeCharacterEquipment(
+      resultingActor.id,
+      advancedEquipment.document,
+      {
+        definitions: loadedActor.storage.definitions || [],
+        itemNotes: loadedActor.storage.row.item_notes || {},
+      },
+    );
+    resultingActor.inventory = normalizedEquipment.inventory;
     await persistActor(client, resultingActor, loadedActor.storage);
 
-    const durationSeconds = SOLO_REST_SECONDS[input.rest_type];
     const previousGameTime = access.campaign.game_time && typeof access.campaign.game_time === 'object'
       ? access.campaign.game_time
       : {};
@@ -3780,7 +3855,8 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       state_excerpt: {
         actor: actorForOutput(resultingActor),
         restState: soloRestStateForOutput(restRows[0]),
-        gameTime,
+        gameTime: gameTimeForOutput(gameTime),
+        itemDurationChanges: advancedEquipment.changes,
         roll: rollRow ? recordedRollForOutput(rollRow) : null,
         injuryRecovery: injuryChanges.map((change) => change.after),
         injuryShiftCount: characterRecoveryState ? Number(characterRecoveryState.shift_count) : null,
@@ -5537,6 +5613,184 @@ export async function getCampaignState(user, campaignId, { recentEventLimit = 20
   return result;
 }
 
+export async function getResumeState(user, campaignId, { actorId } = {}) {
+  return withReadSnapshot(async (client) => {
+    const access = await requireCampaignAccess(client, user, campaignId);
+    const campaignRevision = Number(access.campaign.helper_revision || 0);
+
+    const { rows: characterRows } = await client.query(
+      'SELECT id FROM characters WHERE party_id = $1 ORDER BY name, id',
+      [campaignId],
+    );
+    const characters = [];
+    for (const row of characterRows) {
+      const { actor } = await loadActor(client, campaignId, row.id);
+      characters.push(actorForOutput(actor, { includeGm: access.isGm }));
+    }
+
+    const soloState = await loadSoloState(client, campaignId);
+    const characterIds = new Set(characters.map((character) => character.id));
+    if (actorId && !characterIds.has(actorId)) {
+      throw new HelperError(404, 'NOT_FOUND', 'The requested focus character is not in this campaign.');
+    }
+    const focusCharacterId = actorId
+      || (characterIds.has(soloState?.player_character_id) ? soloState.player_character_id : null)
+      || (characters.length === 1 ? characters[0].id : null);
+    const focusCharacter = focusCharacterId
+      ? characters.find((character) => character.id === focusCharacterId) || null
+      : null;
+    const resumeCharacter = focusCharacter ? {
+      ...focusCharacter,
+      vitals: { hp: focusCharacter.hp, wp: focusCharacter.wp },
+    } : null;
+
+    const { rows: activeSessionRows } = access.campaign.active_session_id
+      ? await client.query(
+        'SELECT * FROM game_sessions WHERE id = $1 AND campaign_id = $2',
+        [access.campaign.active_session_id, campaignId],
+      )
+      : { rows: [] };
+    const { rows: checkpointRows } = await client.query(
+      `SELECT * FROM game_session_checkpoints
+       WHERE campaign_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [campaignId],
+    );
+
+    const combatContext = await loadCombatContext(client, campaignId, null);
+    const combat = combatContext
+      ? combatForOutput(access, combatContext.encounter, combatContext.rows)
+      : null;
+
+    let solo = null;
+    if (soloState?.enabled) {
+      let activeMission = null;
+      let waypoints = [];
+      let currentWaypoint = null;
+      let activeThreat = null;
+      let activeDangers = [];
+      if (soloState.current_mission_id) {
+        const { rows: missionRows } = await client.query(
+          'SELECT * FROM solo_missions WHERE id = $1 AND campaign_id = $2',
+          [soloState.current_mission_id, campaignId],
+        );
+        activeMission = missionRows[0] || null;
+        if (activeMission) {
+          const { rows: waypointRows } = await client.query(
+            `SELECT waypoint.*,
+               COALESCE(exploration.search_count, 0) AS search_count,
+               COALESCE(exploration.scavenge_count, 0) AS scavenge_count,
+               COALESCE(exploration.stretches_spent, 0) AS stretches_spent
+             FROM solo_waypoints waypoint
+             LEFT JOIN solo_waypoint_exploration exploration ON exploration.waypoint_id = waypoint.id
+             WHERE waypoint.mission_id = $1
+             ORDER BY waypoint.position`,
+            [activeMission.id],
+          );
+          waypoints = waypointRows.map(soloWaypointForOutput);
+          currentWaypoint = waypoints.find(
+            (waypoint) => waypoint.position === Number(activeMission.current_waypoint_index),
+          ) || waypoints.find((waypoint) => waypoint.status === 'active') || null;
+          if (activeMission.active_threat_id) {
+            const { rows: threatRows } = await client.query(
+              'SELECT * FROM solo_threats WHERE id = $1 AND mission_id = $2',
+              [activeMission.active_threat_id, activeMission.id],
+            );
+            activeThreat = soloThreatForOutput(threatRows[0] || null);
+          }
+          const { rows: dangerRows } = await client.query(
+            `SELECT id, mission_id, waypoint_id, description, status, source_roll_id,
+               created_at, updated_at
+             FROM solo_dangers
+             WHERE campaign_id = $1 AND mission_id = $2 AND status = 'active'
+             ORDER BY created_at`,
+            [campaignId, activeMission.id],
+          );
+          activeDangers = dangerRows.map((danger) => ({
+            id: danger.id,
+            missionId: danger.mission_id,
+            waypointId: danger.waypoint_id,
+            description: danger.description,
+            status: danger.status,
+            sourceRollId: danger.source_roll_id,
+            createdAt: danger.created_at,
+            updatedAt: danger.updated_at,
+          }));
+        }
+      }
+      solo = {
+        state: soloStateForOutput(soloState),
+        activeMission: soloMissionForOutput(activeMission),
+        waypoints,
+        currentWaypoint,
+        activeThreat,
+        activeDangers,
+      };
+    }
+
+    const rollValues = [campaignId];
+    const rollVisibility = [];
+    if (!access.isGm) {
+      rollValues.push(user.id);
+      rollVisibility.push(`(
+        request.visibility = 'players'
+        OR (request.visibility = 'assigned' AND request.assigned_user_id = $${rollValues.length})
+      )`);
+    }
+    rollValues.push(30);
+    const { rows: rollRows } = await client.query(
+      `SELECT request.*, result.resolution_source,
+         result.submitted_by AS result_submitted_by,
+         result.created_at AS result_created_at,
+         source_result.roll_id AS previous_roll_id,
+         CASE WHEN roll.id IS NULL THEN NULL ELSE to_jsonb(roll) END AS resolved_roll
+       FROM roll_requests request
+       LEFT JOIN roll_request_results result ON result.request_id = request.id
+       LEFT JOIN recorded_rolls roll ON roll.id = result.roll_id
+       LEFT JOIN roll_request_results source_result
+         ON source_result.request_id = request.pushed_from_request_id
+       WHERE request.campaign_id = $1
+         ${rollVisibility.length ? `AND ${rollVisibility.join(' AND ')}` : ''}
+       ORDER BY request.created_at DESC, request.id DESC
+       LIMIT $${rollValues.length}`,
+      rollValues,
+    );
+    const recentRolls = rollRows.map(rollRequestForOutput);
+
+    const checkpoint = checkpointForOutput(checkpointRows[0], { includeGm: access.isGm });
+    const resumeScene = sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm });
+    resumeScene.dangers = resumeScene.dangers.filter((danger) => danger.status !== 'resolved');
+    return {
+      schemaVersion: 'resume-state-v1',
+      campaignRevision,
+      campaign: campaignForOutput(access.campaign, access.role),
+      characters,
+      focusCharacterId,
+      character: resumeCharacter,
+      focusCharacter: resumeCharacter,
+      scene: resumeScene,
+      session: {
+        activeSession: activeSessionRows[0]
+          ? sessionForOutput(activeSessionRows[0], { includeGm: access.isGm })
+          : null,
+        lastCheckpoint: checkpoint,
+        unresolvedThreads: access.isGm
+          ? access.campaign.open_threads || checkpoint?.unresolvedThreads || []
+          : [],
+      },
+      combat,
+      solo,
+      rolls: {
+        pending: recentRolls.filter((request) => request.status === 'pending'),
+        recent: recentRolls,
+      },
+      gameTime: gameTimeForOutput(access.campaign.game_time),
+      ...(access.isGm ? { gmContext: access.campaign.gm_context || {} } : {}),
+    };
+  });
+}
+
 export async function applyActorChanges(user, input, { sourceClient } = {}) {
   const operation = 'apply_actor_changes';
   return withTransaction(async (client) => {
@@ -6071,6 +6325,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     const resultingRevision = previousRevision + 1;
     const resultingCombatRevision = Number(context.encounter.helper_revision || 0) + 1;
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    let itemDurationChanges = [];
+    let gameTime = gameTimeForOutput(access.campaign.game_time);
     if (startedNewRound) {
       await client.query(
         `UPDATE encounter_combatants
@@ -6078,6 +6334,12 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
          WHERE encounter_id = $1`,
         [input.combat_id, next.id],
       );
+      itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, 10);
+      gameTime = advanceGameTime(access.campaign.game_time, 10, {
+        kind: 'combat_round',
+        combatId: input.combat_id,
+        round,
+      });
     } else {
       if (active && active.current_hp <= 0 && !active.has_acted) {
         await client.query(
@@ -6109,8 +6371,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
       message: input.reason,
     });
     await client.query(
-      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
-      [resultingRevision, input.campaign_id],
+      'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
+      [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
     );
 
     const sequence = await nextEventSequence(client, input.campaign_id);
@@ -6127,6 +6389,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
         previousActorId: active ? participantActorId(active) : null,
         activeActorId: participantActorId(next),
         initiativeSlot: nextAction.slot,
+        gameTime,
+        itemDurationChanges,
         reason: input.reason,
       },
       visibility: 'players',
@@ -6148,7 +6412,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
       summary: startedNewRound
         ? `Round ${round} started. ${next.display_name} acts first.`
         : `The turn advanced to ${next.display_name}.`,
-      state_excerpt: { combat },
+      state_excerpt: { combat, gameTime, itemDurationChanges },
     };
     await storeIdempotentResult(client, {
       campaignId: input.campaign_id,

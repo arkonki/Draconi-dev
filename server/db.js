@@ -27,6 +27,21 @@ export async function withTransaction(callback) {
   }
 }
 
+export async function withReadSnapshot(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function waitForDatabase(attempts = 30) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

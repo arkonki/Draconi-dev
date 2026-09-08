@@ -19,6 +19,11 @@ export const getCampaignStateInputSchema = z.object({
   recent_event_limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();
 
+export const getResumeStateInputSchema = z.object({
+  campaign_id: uuidSchema,
+  actor_id: uuidSchema.optional(),
+}).strict();
+
 const trustedRollKindSchema = z.enum(['generic', 'check', 'damage', 'recovery', 'advancement']);
 const trustedRollModeSchema = z.enum(['player', 'server', 'mixed']);
 const trustedRollModifierSchema = z.enum(['normal', 'boon', 'bane']);
@@ -549,6 +554,9 @@ const sceneDangerSchema = z.object({
   id: z.string().trim().min(1).max(200).optional(),
   description: z.string().trim().min(1).max(2_000),
   status: z.enum(['active', 'resolved', 'unknown']).default('active'),
+  source: z.string().trim().max(500).optional(),
+  appliedAt: z.string().datetime({ offset: true }).optional(),
+  resolvedAt: z.string().datetime({ offset: true }).optional(),
   visibility: sceneVisibilitySchema,
 }).strict();
 

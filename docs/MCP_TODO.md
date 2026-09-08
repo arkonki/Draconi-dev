@@ -124,13 +124,8 @@ Solo foundation already delivered toward this phase:
 
 ## Phase 4 — Authoritative resume state and equipment
 
-The read path is not yet sufficient to resume play without reconstructing facts
-from event prose. The first delivery slice now normalizes the whole character
-equipment document for actor reads; the remaining work must persist runtime item
-placement/state, add an authoritative checkpoint, and expose one consistent
-aggregate snapshot. `current_scene` is authoritative but is updated only by the
-session start/completion commands, and structured dangers exist only inside an
-active Solo mission.
+Phase 4 is implemented. Its versioned contracts and migration behavior are
+documented in `MCP_PHASE4_RESUME.md`.
 
 ### P0 — Canonical equipment and item placement
 
@@ -152,14 +147,14 @@ active Solo mission.
   `carriedByActorId`, `locationId`, `containerId`, `equipped`, `heldByActorId`,
   and `temporarilyPlaced`. Do not derive current placement from campaign-event
   prose.
-- [ ] Define item runtime state separately from placement, including extensible
+- [x] Define item runtime state separately from placement, including extensible
   `state`, `isLit`, `remainingDuration`, and `charges` fields. Persist state that
   must survive a reconnect; use explicit `null` or `unknown` semantics for legacy
   records rather than inventing defaults.
 - [x] Preserve all equipment subdocuments during actor changes. Add regression
   coverage proving that an inventory quantity update cannot remove equipped
   weapons, armor, containers, money, or item notes.
-- [ ] Decide and document the canonical storage migration. Prefer instance-based
+- [x] Decide and document the canonical storage migration. Prefer instance-based
   equipment records (or a versioned equipment JSON schema with stable IDs) over
   matching equipped items by display name. Backfill legacy name-only equipment
   idempotently and report unresolved definitions instead of silently dropping
@@ -176,24 +171,24 @@ Acceptance criteria:
 
 ### P0 — Scene checkpoint and one-call resume
 
-- [ ] Define and validate a versioned `CurrentScene` contract instead of accepting
+- [x] Define and validate a versioned `CurrentScene` contract instead of accepting
   an unrestricted JSON object. It should cover `location`, `description`,
   `activeObjects`, `exits`, and `dangers`, with visibility rules for GM-only
   fields.
-- [ ] Add an idempotent, revision-checked `checkpoint_session` command for an
+- [x] Add an idempotent, revision-checked `checkpoint_session` command for an
   active session. In one transaction it must store the checkpoint summary,
   update `parties.current_scene`, replace the explicit unresolved threads when
   supplied, advance the campaign revision once, and append one audited campaign
   event. If a lightweight `update_current_scene` command is also added, it must
   use the same scene schema and audit path.
-- [ ] Keep `start_session.opening_scene` and `complete_session.ending_scene`, but
+- [x] Keep `start_session.opening_scene` and `complete_session.ending_scene`, but
   validate them with the same scene schema so all three write paths produce the
   same authoritative representation.
-- [ ] Add `get_resume_state` to REST and MCP. Build it in the Helper service layer
+- [x] Add `get_resume_state` to REST and MCP. Build it in the Helper service layer
   from one authorization context and a consistent database snapshot; do not have
   the MCP adapter stitch together several HTTP responses that can observe
   different campaign revisions.
-- [ ] Return at least the following stable top-level contract, with an explicit
+- [x] Return at least the following stable top-level contract, with an explicit
   `schemaVersion`, `campaignRevision`, and role-filtered visibility:
 
 ```json
@@ -227,14 +222,14 @@ Acceptance criteria:
 }
 ```
 
-- [ ] For campaigns with multiple player characters, return `characters[]` and
+- [x] For campaigns with multiple player characters, return `characters[]` and
   an explicit `focusCharacterId`; retain the singular `character` convenience
   field only when a solo hero or an unambiguous requested actor is selected.
-- [ ] Include active combat, active Solo mission/waypoint/threat, structured
+- [x] Include active combat, active Solo mission/waypoint/threat, structured
   dangers, and the latest checkpoint in the same snapshot. Hidden waypoint,
   danger, GM-context, and unresolved-thread data must retain current role-based
   filtering.
-- [ ] Update the published GM workflow and MCP server instructions to prefer
+- [x] Update the published GM workflow and MCP server instructions to prefer
   `get_resume_state` for reconnect/resume, while keeping the narrower reads for
   turn-by-turn or diagnostic use.
 
@@ -249,26 +244,26 @@ Acceptance criteria:
 
 ### P1 — Conditions, load, time, dangers, and roll hand-off
 
-- [ ] Normalize conditions into first-class records with `source`, `appliedAt`,
+- [x] Normalize conditions into first-class records with `source`, `appliedAt`,
   duration/expiry, description, and the affected checks or attributes. Preserve
   compatibility with the existing boolean condition map during migration.
-- [ ] Reuse one server-side encumbrance calculation for the web UI and Helper
+- [x] Reuse one server-side encumbrance calculation for web-facing Helper
   responses. Return per-item weight, total carried load, capacity, container
   loads, threshold, and `isEncumbered`; do not duplicate the current UI-only
   calculation in the MCP adapter.
-- [ ] Normalize `gameTime` into a versioned round/stretch/shift model and advance
+- [x] Normalize `gameTime` into a versioned round/stretch/shift model and advance
   finite item durations, including lit torches, through the same authoritative
   time service used by rests and combat.
-- [ ] Generalize structured scene dangers beyond `solo_dangers`, or introduce a
+- [x] Generalize structured scene dangers beyond `solo_dangers`, or introduce a
   common danger projection whose records can belong to either a campaign scene
   or a Solo waypoint. Add audited create/update/resolve operations and include
   only visible active dangers in resume state.
-- [ ] Keep physical/player dice outside MCP input. The existing authenticated
+- [x] Keep physical/player dice outside MCP input. The existing authenticated
   player REST submission remains the trust boundary; make pending requests and
   their submission status obvious in resume state and ensure accepted player
   results immediately appear in roll history. Do not add an MCP tool that lets a
   model submit user-reported die values.
-- [ ] When free exploration is not modeled as a full Solo mission, persist a
+- [x] When free exploration is not modeled as a full Solo mission, persist a
   lightweight scene route/checkpoint structure so current waypoint-like location
   and threat state are still resumable.
 

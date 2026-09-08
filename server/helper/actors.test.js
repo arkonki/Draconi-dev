@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {
+  advanceEquipmentTime,
   actorForOutput,
+  calculateEncumbrance,
   loadActor,
   normalizeCharacterEquipment,
   persistActor,
@@ -162,9 +164,91 @@ describe('Dragonbane Helper actor equipment', () => {
       equipmentDocument,
     });
 
-    const persisted = JSON.parse(client.query.mock.calls[0][1][5]);
+    const persisted = JSON.parse(client.query.mock.calls[0][1][6]);
     expect(persisted.equipped).toEqual(equipmentDocument.equipped);
     expect(persisted.money).toEqual(equipmentDocument.money);
     expect(persisted.inventory[0]).toMatchObject({ name: 'Torch', quantity: 2 });
+    expect(persisted.schemaVersion).toBe('equipment-v2');
+    expect(persisted.instanceIds).toBeTypeOf('object');
+  });
+
+  it('persists placement and runtime state for inventory items', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const normalized = normalizeCharacterEquipment(actorId, {
+      inventory: [{
+        name: 'Torch',
+        quantity: 1,
+        locationId: 'old-gate',
+        temporarilyPlaced: true,
+        state: { status: 'burning', isLit: true, remainingDuration: 600, charges: 1 },
+      }],
+      equipped: { weapons: [] },
+    });
+    await persistActor(client, {
+      id: actorId,
+      currentHp: 10,
+      maxHp: 10,
+      currentWp: 5,
+      maxWp: 5,
+      conditions: [],
+      inventory: normalized.inventory,
+      isRallied: false,
+      deathRolls: { passed: 0, failed: 0 },
+    }, {
+      type: 'character',
+      row: { conditions: {} },
+      equipmentDocument: normalized.document,
+    });
+    const persisted = JSON.parse(client.query.mock.calls[0][1][6]);
+    expect(persisted.inventory[0]).toMatchObject({
+      locationId: 'old-gate',
+      temporarilyPlaced: true,
+      state: { status: 'burning', isLit: true, remainingDuration: 600, charges: 1 },
+    });
+  });
+
+  it('calculates authoritative carried and container load', () => {
+    const equipment = normalizeCharacterEquipment(actorId, {
+      inventory: [
+        { name: 'Rations', quantity: 5, weight: 1 },
+        { name: 'Rope', quantity: 1, weight: 2, containerId: '11111111-1111-4111-8111-111111111111' },
+      ],
+      equipped: {
+        weapons: [],
+        containers: [{
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Backpack',
+          is_container: true,
+          container_capacity: 4,
+        }],
+      },
+    });
+    const result = calculateEncumbrance({
+      type: 'pc',
+      attributes: { STR: 10 },
+      inventory: equipment.inventory,
+      equipment: equipment.equipment,
+    });
+    expect(result).toMatchObject({
+      capacity: 5,
+      totalCarriedLoad: 2,
+      isEncumbered: false,
+      containerLoads: [{ load: 2, capacity: 4, isOverloaded: false }],
+    });
+  });
+
+  it('advances finite item duration and expires a lit item', () => {
+    const result = advanceEquipmentTime({
+      inventory: [{
+        name: 'Torch',
+        state: { status: 'burning', isLit: true, remainingDuration: 10 },
+      }],
+    }, 10);
+    expect(result.document.inventory[0].state).toEqual({
+      status: 'expired',
+      isLit: false,
+      remainingDuration: 0,
+    });
+    expect(result.changes).toHaveLength(1);
   });
 });

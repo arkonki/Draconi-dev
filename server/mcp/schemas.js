@@ -1,10 +1,94 @@
 import { z } from 'zod';
 import {
+  applyActorChangesInputSchema,
   idempotencyKeySchema,
+  resolveGameActionInputSchema,
   resolveSoloCheckConsequenceInputSchema,
   revisionSchema,
   uuidSchema,
 } from '../helper/schemas.js';
+
+const mcpActorChangeSchema = z.object({
+  type: z.enum([
+    'damage',
+    'heal',
+    'spend_wp',
+    'restore_wp',
+    'add_condition',
+    'remove_condition',
+    'adjust_inventory',
+  ]).describe('Mechanical change type. Supply only fields used by that type.'),
+  amount: z.number().int().min(0).optional().describe('Required for damage, heal, spend_wp, and restore_wp.'),
+  damage_type: z.string().trim().min(1).max(80).optional(),
+  key: z.string().trim().min(1).max(64).regex(/^[a-z][a-z0-9_-]*$/).optional(),
+  source: z.string().trim().min(1).max(200).optional(),
+  condition_id: uuidSchema.optional(),
+  item_id: uuidSchema.optional(),
+  quantity_delta: z.number().int().optional().describe('Required and non-zero for adjust_inventory.'),
+}).strict();
+
+export const applyActorChangesMcpInputSchema = z.object({
+  campaign_id: uuidSchema,
+  actor_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  reason: z.string().trim().min(1).max(500),
+  changes: z.array(mcpActorChangeSchema).min(1).max(20),
+}).strict();
+
+const mcpCombatActionEffectSchema = z.object({
+  actor_id: uuidSchema,
+  changes: z.array(mcpActorChangeSchema).min(1).max(20),
+}).strict();
+
+export const resolveGameActionMcpInputSchema = z.object({
+  campaign_id: uuidSchema,
+  combat_id: uuidSchema,
+  actor_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  action: z.string().trim().min(1).max(200),
+  outcome: z.enum(['success', 'failure', 'critical', 'fumble', 'automatic', 'not_applicable']),
+  effects: z.array(mcpCombatActionEffectSchema).max(20).default([]),
+  consume_turn: z.boolean().default(true),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+function actorChangeForService(change) {
+  switch (change.type) {
+    case 'damage':
+      return { type: change.type, amount: change.amount, damage_type: change.damage_type };
+    case 'heal':
+    case 'spend_wp':
+    case 'restore_wp':
+      return { type: change.type, amount: change.amount };
+    case 'add_condition':
+      return { type: change.type, key: change.key, source: change.source };
+    case 'remove_condition':
+      return { type: change.type, condition_id: change.condition_id };
+    case 'adjust_inventory':
+      return { type: change.type, item_id: change.item_id, quantity_delta: change.quantity_delta };
+    default:
+      throw new Error(`Unsupported actor change type: ${change.type}`);
+  }
+}
+
+export function actorChangesServiceInput(input) {
+  return applyActorChangesInputSchema.parse({
+    ...input,
+    changes: input.changes.map(actorChangeForService),
+  });
+}
+
+export function gameActionServiceInput(input) {
+  return resolveGameActionInputSchema.parse({
+    ...input,
+    effects: input.effects.map((effect) => ({
+      actor_id: effect.actor_id,
+      changes: effect.changes.map(actorChangeForService),
+    })),
+  });
+}
 
 const consequenceEffectTypeSchema = z.enum([
   'story_event',

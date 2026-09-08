@@ -5,7 +5,6 @@ import {
   advanceThreatInputSchema,
   askFortuneInputSchema,
   appendCampaignEventInputSchema,
-  applyActorChangesInputSchema,
   checkpointSessionInputSchema,
   completeSoloMissionInputSchema,
   completeSessionInputSchema,
@@ -21,6 +20,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getResumeStateInputSchema,
   getRollHistoryInputSchema,
   getRollRequestInputSchema,
   getSessionHistoryInputSchema,
@@ -30,7 +30,6 @@ import {
   mcpReadResultSchema,
   mcpWriteResultSchema,
   pushRollRequestInputSchema,
-  resolveGameActionInputSchema,
   resolveRollRequestServerInputSchema,
   resolveSoloCheckInputSchema,
   resolveSoloDyingActionInputSchema,
@@ -47,6 +46,10 @@ import {
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
 import {
+  actorChangesServiceInput,
+  applyActorChangesMcpInputSchema,
+  gameActionServiceInput,
+  resolveGameActionMcpInputSchema,
   resolveSoloCheckConsequenceMcpInputSchema,
   soloCheckConsequenceServiceInput,
 } from './schemas.js';
@@ -145,10 +148,10 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.16.1' },
+    { name: 'dragonbane-helper', version: '1.17.0' },
     {
       instructions: [
-        'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
+        'Dragonbane Helper is authoritative. Before continuing a campaign, call get_resume_state for one consistent continuation snapshot.',
         `Use the ${GM_WORKFLOW_URI} resource or a published Dragonbane workflow prompt for the complete session, recovery, and privacy procedures.`,
         'Before every write use the latest campaign revision and a unique idempotency key.',
         'On REVISION_CONFLICT, read state again and reassess; never repeat stale arguments.',
@@ -189,6 +192,14 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
   }, safe(async (input) => readResult(await apiClient.getCampaignState(input))));
+
+  server.registerTool('get_resume_state', {
+    title: 'Resume a Dragonbane campaign',
+    description: 'Preferred continuation read. Returns one revision-consistent snapshot containing every campaign character, focus character, scene, latest checkpoint, active combat, Solo progress, pending roll handoffs, and game time.',
+    inputSchema: getResumeStateInputSchema,
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getResumeState(input))));
 
   server.registerTool('request_roll', {
     title: 'Request a trusted campaign roll',
@@ -475,10 +486,12 @@ export function createDragonbaneMcpServer(apiClient) {
   server.registerTool('resolve_game_action', {
     title: 'Resolve the active combat actor action',
     description: 'GM-only. Atomically record the active actor action and apply validated HP, WP, condition, or inventory effects to combat participants. Use only user/app-supplied roll outcomes; this tool does not roll dice. A turn-consuming action must be followed by advance_combat_turn.',
-    inputSchema: resolveGameActionInputSchema,
+    inputSchema: resolveGameActionMcpInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
-  }, safe(async (input) => writeResult(await apiClient.resolveGameAction(input))));
+  }, safe(async (input) => writeResult(await apiClient.resolveGameAction(
+    gameActionServiceInput(input),
+  ))));
 
   server.registerTool('advance_combat_turn', {
     title: 'Advance the combat turn',
@@ -507,10 +520,12 @@ export function createDragonbaneMcpServer(apiClient) {
   server.registerTool('apply_actor_changes', {
     title: 'Apply actor changes',
     description: 'Use only after reading the latest campaign revision to atomically apply HP, WP, condition, or existing inventory quantity changes. Explain the intended mechanical effect to the user before calling.',
-    inputSchema: applyActorChangesInputSchema,
+    inputSchema: applyActorChangesMcpInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
-  }, safe(async (input) => writeResult(await apiClient.applyActorChanges(input))));
+  }, safe(async (input) => writeResult(await apiClient.applyActorChanges(
+    actorChangesServiceInput(input),
+  ))));
 
   server.registerTool('append_campaign_event', {
     title: 'Append campaign event',
@@ -527,6 +542,16 @@ export function createDragonbaneMcpServer(apiClient) {
     safeResource(async (uri, { campaignId }) => jsonResource(
       uri,
       (await apiClient.getCampaignState({ campaign_id: campaignId, recent_event_limit: 20 })).data,
+    )),
+  );
+
+  server.registerResource(
+    'campaign-resume-state',
+    new ResourceTemplate('dragonbane://campaigns/{campaignId}/resume-state', { list: undefined }),
+    { title: 'Campaign resume state', description: 'Revision-consistent authoritative continuation snapshot', mimeType: 'application/json' },
+    safeResource(async (uri, { campaignId }) => jsonResource(
+      uri,
+      (await apiClient.getResumeState({ campaign_id: campaignId })).data,
     )),
   );
 
@@ -570,6 +595,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'end_combat',
       ],
       supportedSessionOperations: [
+        'get_resume_state',
         'get_session_history',
         'start_session',
         'checkpoint_session',
@@ -648,6 +674,7 @@ export function createDragonbaneMcpServer(apiClient) {
 export const mcpToolAnnotations = {
   list_campaigns: READ_ONLY,
   get_campaign_state: READ_ONLY,
+  get_resume_state: READ_ONLY,
   request_roll: MODIFYING,
   get_roll_request: READ_ONLY,
   get_roll_history: READ_ONLY,

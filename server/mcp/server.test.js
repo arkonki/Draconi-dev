@@ -33,6 +33,17 @@ beforeEach(async () => {
       data: { campaign: { id: campaignId, revision: 42 }, actors: [] },
       meta: { requestId: 'request-2', campaignRevision: 42 },
     })),
+    getResumeState: vi.fn(async () => ({
+      data: {
+        schemaVersion: 'resume-state-v1',
+        campaignRevision: 42,
+        campaign: { id: campaignId, revision: 42 },
+        characters: [],
+        focusCharacterId: null,
+        combat: null,
+      },
+      meta: { requestId: 'request-resume', campaignRevision: 42 },
+    })),
     createRollRequest: vi.fn(async () => ({
       data: {
         success: true,
@@ -528,6 +539,30 @@ describe('Dragonbane MCP server', () => {
     });
   });
 
+  it('publishes only ChatGPT-compatible MCP tool schemas', async () => {
+    const listed = await client.listTools();
+    for (const tool of listed.tools) {
+      const schemaText = JSON.stringify(tool.inputSchema);
+      expect(schemaText, `${tool.name} must not contain JSON Schema unions`)
+        .not.toMatch(/"(?:oneOf|anyOf|allOf)":/);
+      expect(schemaText, `${tool.name} must not contain tuple-style items`)
+        .not.toMatch(/"items":\[/);
+    }
+  });
+
+  it('returns the authoritative resume snapshot', async () => {
+    const result = await client.callTool({
+      name: 'get_resume_state',
+      arguments: { campaign_id: campaignId },
+    });
+    expect(api.getResumeState).toHaveBeenCalledWith({ campaign_id: campaignId });
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      campaign_revision: 42,
+      data: { schemaVersion: 'resume-state-v1', campaignRevision: 42 },
+    });
+  });
+
   it('publishes state-first GM workflow prompts and recovery guidance', async () => {
     const listedPrompts = await client.listPrompts();
     expect(listedPrompts.prompts.map(({ name }) => name)).toEqual(expect.arrayContaining([
@@ -545,8 +580,8 @@ describe('Dragonbane MCP server', () => {
       },
     });
     expect(runPrompt.messages[0].content).toMatchObject({ type: 'text' });
-    expect(runPrompt.messages[0].content.text).toMatch(/call get_campaign_state/i);
-    expect(runPrompt.messages[0].content.text).toMatch(/call get_solo_state/i);
+    expect(runPrompt.messages[0].content.text).toMatch(/call get_resume_state/i);
+    expect(runPrompt.messages[0].content.text).toMatch(/Solo state included/i);
     expect(runPrompt.messages[0].content.text).toContain(campaignId);
     expect(runPrompt.messages[0].content.text).toMatch(/GM-only information/i);
 
@@ -578,7 +613,7 @@ describe('Dragonbane MCP server', () => {
     const resource = await client.readResource({ uri: 'dragonbane://workflows/gm-session' });
     const workflow = JSON.parse(resource.contents[0].text);
     expect(workflow).toMatchObject({
-      version: 'draconi-gm-v1',
+      version: 'draconi-gm-v2',
       workflows: {
         sessionStart: expect.any(Array),
         scene: expect.any(Array),

@@ -160,7 +160,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.16.0',
+    version: '1.17.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -226,6 +226,23 @@ export const openApiDocument = {
         ],
         responses: {
           200: { description: 'Campaign snapshot', content: { 'application/json': { schema: successEnvelope() } } },
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/resume-state': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'Get one revision-consistent continuation snapshot',
+        description: 'Preferred reconnect read. Returns all campaign characters, an explicit focus character, scene and checkpoint state, active combat, Solo progress, visible roll handoffs, and normalized game time from one database snapshot.',
+        parameters: [
+          campaignParameter,
+          { name: 'actorId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: { description: 'Authoritative resume snapshot', content: { 'application/json': { schema: successEnvelope() } } },
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,

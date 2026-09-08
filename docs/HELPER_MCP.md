@@ -99,6 +99,7 @@ Read-only:
 
 - `list_campaigns`
 - `get_campaign_state`
+- `get_resume_state` (preferred reconnect/continuation read)
 - `get_actor`
 - `get_combat_state`
 - `get_encounter_setup_options`
@@ -121,6 +122,7 @@ Modifying:
 - `advance_combat_turn`
 - `end_combat`
 - `start_session`
+- `checkpoint_session`
 - `complete_session`
 - `request_roll`
 - `push_roll`

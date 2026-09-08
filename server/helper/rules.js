@@ -81,9 +81,12 @@ export function addCondition(actor, key, source, makeConditionId) {
     id: makeConditionId(actor.id, key),
     key,
     name: key.replaceAll('_', ' '),
+    description: null,
     source: source || null,
     duration: { type: 'indefinite', remaining: null },
     appliedAt: new Date().toISOString(),
+    expiresAt: null,
+    affects: { checks: [], attributes: [] },
   };
   return {
     actor: { ...actor, conditions: [...actor.conditions, condition] },
@@ -184,4 +187,3 @@ export function applyActorChangeSet(actor, changes, makeConditionId) {
     explanation: explanations.join(' '),
   };
 }
-

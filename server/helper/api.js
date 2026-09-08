@@ -46,6 +46,7 @@ import {
   getCombatStateInputSchema,
   getEncounterSetupOptionsInputSchema,
   getRecentEventsInputSchema,
+  getResumeStateInputSchema,
   getRollHistoryInputSchema,
   getRollRequestInputSchema,
   getSessionHistoryInputSchema,
@@ -115,6 +116,7 @@ import {
   getCombatState,
   getEncounterSetupOptions,
   getRecentEvents,
+  getResumeState,
   getRollHistory,
   getRollRequest,
   getSessionHistory,
@@ -296,6 +298,20 @@ export async function handleHelperApiRequest(request, response) {
         recentEventLimit: input.recent_event_limit,
       });
       resultingRevision = data.campaign.revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const resumeStateMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/resume-state$/);
+    if (resumeStateMatch && request.method === 'GET') {
+      operation = 'get_resume_state';
+      const input = parseSchema(getResumeStateInputSchema, {
+        campaign_id: resumeStateMatch[0],
+        actor_id: url.searchParams.get('actorId') || undefined,
+      });
+      campaignId = input.campaign_id;
+      const data = await getResumeState(user, campaignId, { actorId: input.actor_id });
+      resultingRevision = data.campaignRevision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
     }

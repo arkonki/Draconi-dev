@@ -123,6 +123,11 @@ try {
   assert(state.response.status === 200, `Campaign state failed: ${JSON.stringify(state.payload)}`);
   const originalRevision = state.payload.data.campaign.revision;
   assert(Number.isInteger(originalRevision), 'Campaign state did not contain an integer revision.');
+  const resumeState = await api(`/api/v1/campaigns/${campaignId}/resume-state?actorId=${actorId}`);
+  assert(resumeState.response.status === 200, `Resume state failed: ${JSON.stringify(resumeState.payload)}`);
+  assert(resumeState.payload.data.schemaVersion === 'resume-state-v1', 'Resume state version is missing.');
+  assert(resumeState.payload.data.campaignRevision === originalRevision, 'Resume state revision is inconsistent.');
+  assert(resumeState.payload.data.focusCharacterId === actorId, 'Resume state lost the requested focus character.');
 
   const invalidRollRequest = await api(
     `/api/v1/campaigns/${campaignId}/roll-requests`,
@@ -1970,6 +1975,7 @@ try {
     await mcpClient.connect(transport);
     const tools = await mcpClient.listTools();
     for (const name of [
+      'get_resume_state',
       'apply_actor_changes',
       'get_encounter_setup_options',
       'create_encounter',
@@ -1977,6 +1983,7 @@ try {
       'remove_encounter_participant',
       'get_session_history',
       'start_session',
+      'checkpoint_session',
       'complete_session',
       'request_roll',
       'get_roll_request',
@@ -2009,6 +2016,11 @@ try {
     ]) {
       assert(tools.tools.some((tool) => tool.name === name), `MCP tool is missing: ${name}`);
     }
+    for (const tool of tools.tools) {
+      const schemaText = JSON.stringify(tool.inputSchema);
+      assert(!/"(?:oneOf|anyOf|allOf)":/.test(schemaText), `${tool.name} exposes an unsupported schema union.`);
+      assert(!/"items":\[/.test(schemaText), `${tool.name} exposes tuple-style array items.`);
+    }
     assert(
       !tools.tools.some((tool) => tool.name === 'submit_manual_roll_result'),
       'MCP must not expose a tool that lets the model supply physical dice.',
@@ -2031,7 +2043,7 @@ try {
     });
     assert(
       runSessionPrompt.messages[0]?.content?.type === 'text'
-        && /get_campaign_state/i.test(runSessionPrompt.messages[0].content.text),
+        && /get_resume_state/i.test(runSessionPrompt.messages[0].content.text),
       'MCP run-session prompt does not require authoritative state.',
     );
     const workflowResources = await mcpClient.listResources();
@@ -2044,7 +2056,7 @@ try {
     });
     const workflowGuide = JSON.parse(workflowResource.contents[0].text);
     assert(
-      workflowGuide.version === 'draconi-gm-v1'
+      workflowGuide.version === 'draconi-gm-v2'
         && workflowGuide.recovery?.revisionConflict
         && workflowGuide.privacy?.gmPrivate,
       'MCP GM workflow resource is incomplete.',
@@ -2054,6 +2066,14 @@ try {
       arguments: { campaign_id: campaignId },
     });
     assert(mcpState.structuredContent?.success === true, 'MCP campaign state call was not structured.');
+    const mcpResume = await mcpClient.callTool({
+      name: 'get_resume_state',
+      arguments: { campaign_id: campaignId, actor_id: actorId },
+    });
+    assert(
+      mcpResume.structuredContent?.data?.focusCharacterId === actorId,
+      'MCP resume state did not return the requested focus character.',
+    );
     const mcpSoloState = await mcpClient.callTool({
       name: 'get_solo_state',
       arguments: { campaign_id: campaignId },
@@ -2133,11 +2153,42 @@ try {
       },
     });
     assert(mcpSessionStarted.structuredContent?.success === true, 'MCP session start failed.');
+    const mcpCheckpoint = await mcpClient.callTool({
+      name: 'checkpoint_session',
+      arguments: {
+        campaign_id: campaignId,
+        session_id: mcpSessionStarted.structuredContent.state_excerpt.session.id,
+        expected_revision: mcpSessionStarted.structuredContent.campaign_revision,
+        idempotency_key: `smoke-mcp-checkpoint-${randomUUID()}`,
+        summary: 'The MCP smoke party reached the bridge gate.',
+        scene: {
+          location: 'MCP smoke bridge',
+          description: 'A sealed gate blocks the road.',
+          dangers: [{ id: 'smoke-trap', description: 'A trap is armed.', status: 'active' }],
+        },
+        unresolved_threads: ['Who armed the smoke trap?'],
+        reason: 'Verify durable checkpoint and scene state through MCP.',
+      },
+    });
+    assert(mcpCheckpoint.structuredContent?.success === true, 'MCP session checkpoint failed.');
+    const resumedCheckpoint = await mcpClient.callTool({
+      name: 'get_resume_state',
+      arguments: { campaign_id: campaignId, actor_id: actorId },
+    });
+    assert(
+      resumedCheckpoint.structuredContent?.data?.session?.lastCheckpoint?.id
+        === mcpCheckpoint.structuredContent.state_excerpt.checkpoint.id,
+      'MCP resume state did not return the latest checkpoint.',
+    );
+    assert(
+      resumedCheckpoint.structuredContent?.data?.scene?.dangers?.[0]?.id === 'smoke-trap',
+      'MCP resume state did not return the active scene danger.',
+    );
     const mcpCreated = await mcpClient.callTool({
       name: 'create_encounter',
       arguments: {
         campaign_id: campaignId,
-        expected_revision: mcpSessionStarted.structuredContent.campaign_revision,
+        expected_revision: mcpCheckpoint.structuredContent.campaign_revision,
         idempotency_key: `smoke-mcp-create-${randomUUID()}`,
         name: 'MCP prepared smoke combat',
         reason: 'Verify encounter creation through the MCP transport.',
@@ -2197,6 +2248,12 @@ try {
           && status === 'completed',
       ),
       'MCP session history did not return the completed session.',
+    );
+    assert(
+      mcpHistory.structuredContent?.data?.checkpoints?.some(
+        ({ id }) => id === mcpCheckpoint.structuredContent.state_excerpt.checkpoint.id,
+      ),
+      'MCP session history did not return the durable checkpoint.',
     );
   }
 

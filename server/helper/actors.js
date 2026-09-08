@@ -1,38 +1,37 @@
 import { conditionId, equipmentItemId, inventoryItemId } from './identifiers.js';
 import { HelperError } from './errors.js';
 
-function activeConditionEntries(actorId, value) {
+function conditionRecord(actorId, key, entry = {}) {
+  return {
+    id: conditionId(actorId, key),
+    key,
+    name: entry.name ? String(entry.name) : key.replaceAll('_', ' '),
+    description: entry.description || null,
+    source: entry.source || null,
+    duration: entry.duration || { type: 'indefinite', remaining: null },
+    appliedAt: entry.applied_at || entry.appliedAt || null,
+    expiresAt: entry.expires_at || entry.expiresAt || null,
+    affects: {
+      checks: Array.isArray(entry.affects?.checks) ? entry.affects.checks : [],
+      attributes: Array.isArray(entry.affects?.attributes) ? entry.affects.attributes : [],
+    },
+  };
+}
+
+function activeConditionEntries(actorId, value, details = {}) {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => {
       const key = typeof entry === 'string'
         ? entry.trim().toLowerCase().replaceAll(' ', '_')
         : String(entry?.key || entry?.name || '').trim().toLowerCase().replaceAll(' ', '_');
       if (!key) return [];
-      return [{
-        id: conditionId(actorId, key),
-        key,
-        name: typeof entry === 'object' && entry?.name ? String(entry.name) : key.replaceAll('_', ' '),
-        description: typeof entry === 'object' ? entry?.description || null : null,
-        source: typeof entry === 'object' ? entry?.source || null : null,
-        duration: typeof entry === 'object' && entry?.duration
-          ? entry.duration
-          : { type: 'indefinite', remaining: null },
-        appliedAt: typeof entry === 'object' ? entry?.applied_at || entry?.appliedAt || null : null,
-      }];
+      return [conditionRecord(actorId, key, typeof entry === 'object' ? entry : {})];
     });
   }
   if (!value || typeof value !== 'object') return [];
   return Object.entries(value)
     .filter(([, active]) => Boolean(active))
-    .map(([key]) => ({
-      id: conditionId(actorId, key),
-      key,
-      name: key.replaceAll('_', ' '),
-      description: null,
-      source: null,
-      duration: { type: 'indefinite', remaining: null },
-      appliedAt: null,
-    }));
+    .map(([key]) => conditionRecord(actorId, key, details?.[key] || {}));
 }
 
 function storedItemObject(value) {
@@ -71,19 +70,26 @@ function normalizedItem(actorId, value, index, {
   held = false,
   definitionsByName = new Map(),
   itemNotes = {},
+  instanceIds = {},
+  identityKey,
 } = {}) {
   const item = storedItemObject(value);
   const definition = definitionForItem(item, definitionsByName);
   const definitionId = nullableString(item.definitionId || item.definition_id) || definition?.id || null;
   const notes = definitionId ? itemNotes?.[definitionId] || null : null;
   const placement = itemPlacement(actorId, item, { equipped, held });
+  const itemWithCanonicalId = item.id || !identityKey || !instanceIds[identityKey]
+    ? item
+    : { ...item, id: instanceIds[identityKey] };
   const id = slot === 'inventory'
-    ? inventoryItemId(actorId, item, index)
-    : equipmentItemId(actorId, slot, item, index);
+    ? inventoryItemId(actorId, itemWithCanonicalId, index)
+    : equipmentItemId(actorId, slot, itemWithCanonicalId, index);
+  if (identityKey) instanceIds[identityKey] = id;
   return {
     id,
     slot,
     definitionId,
+    unresolvedDefinition: !definitionId,
     name: String(item.name || item.originalName || definition?.name || 'Unnamed item'),
     description: item.description ?? definition?.description ?? null,
     category: item.category ?? definition?.category ?? null,
@@ -115,6 +121,9 @@ function normalizedItem(actorId, value, index, {
       category: item.category ?? definition?.category ?? null,
       cost: item.cost ?? definition?.cost ?? null,
       unit: item.unit ?? null,
+      isContainer: Boolean(item.is_container ?? definition?.is_container),
+      containerCapacity: item.container_capacity ?? definition?.container_capacity ?? null,
+      encumbranceModifier: item.encumbrance_modifier ?? definition?.encumbrance_modifier ?? null,
     },
     _stored: value,
   };
@@ -140,12 +149,20 @@ export function normalizeCharacterEquipment(actorId, equipment, {
   const definitionsByName = new Map(definitions.flatMap((definition) => (
     nullableString(definition?.name) ? [[definition.name.trim().toLowerCase(), definition]] : []
   )));
-  const options = { definitionsByName, itemNotes };
+  const instanceIds = document.instanceIds && typeof document.instanceIds === 'object'
+    ? { ...document.instanceIds }
+    : {};
+  const identityKey = (slot, item, index) => {
+    const stored = storedItemObject(item);
+    const name = String(stored.name || stored.originalName || '').trim().toLowerCase();
+    return `${slot}:${name}:${index}`;
+  };
+  const options = { definitionsByName, itemNotes, instanceIds };
   const normalizedInventory = inventory.map((item, index) => normalizedItem(
     actorId,
     item,
     index,
-    { ...options, slot: 'inventory' },
+    { ...options, slot: 'inventory', identityKey: identityKey('inventory', item, index) },
   ));
   const weapons = (Array.isArray(equipped.weapons) ? equipped.weapons : []).map((item, index) => (
     normalizedItem(actorId, item, index, {
@@ -153,6 +170,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       slot: 'weapon',
       equipped: true,
       held: true,
+      identityKey: identityKey('weapon', item, index),
     })
   ));
   const defensiveItem = (slot, item, { held = false } = {}) => (
@@ -163,6 +181,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
         slot,
         equipped: true,
         held,
+        identityKey: identityKey(slot, item, 0),
       })
   );
   const bodyArmor = defensiveItem('armor', equipped.armor);
@@ -174,6 +193,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'worn-clothes',
       equipped: true,
+      identityKey: identityKey('worn-clothes', item, index),
     }),
   );
   const containers = (Array.isArray(equipped.containers) ? equipped.containers : []).map(
@@ -181,6 +201,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'container',
       equipped: true,
+      identityKey: identityKey('container', item, index),
     }),
   );
   const animals = (Array.isArray(equipped.animals) ? equipped.animals : []).map(
@@ -188,6 +209,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'animal',
       equipped: true,
+      identityKey: identityKey('animal', item, index),
     }),
   );
   const allEquipment = uniqueItems([
@@ -201,7 +223,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
   ]);
   const specialCategories = new Set(['SPECIAL', 'MAGIC', 'QUEST', 'MEMENTO', 'ARTIFACT']);
   return {
-    document,
+    document: { ...document, schemaVersion: 'equipment-v2', instanceIds },
     inventory: normalizedInventory,
     weapons,
     armor,
@@ -215,7 +237,105 @@ export function normalizeCharacterEquipment(actorId, equipment, {
     specialItems: allEquipment.filter((item) => specialCategories.has(String(item.category || '').toUpperCase())),
     heldItems: allEquipment.filter((item) => item.placement.heldByActorId === actorId),
     armorStatus: bodyArmor || helmet ? 'equipped' : 'none',
+    unresolvedDefinitions: allEquipment
+      .filter((item) => item.unresolvedDefinition)
+      .map((item) => ({ id: item.id, name: item.name, slot: item.slot })),
   };
+}
+
+export function calculateEncumbrance(actor) {
+  const strength = Number(actor?.attributes?.STR ?? actor?.attributes?.str);
+  if (!Number.isFinite(strength)) return null;
+  const equipment = Array.isArray(actor.equipment) ? actor.equipment : [];
+  const inventory = Array.isArray(actor.inventory) ? actor.inventory : [];
+  let capacity = Math.ceil(strength / 2);
+  for (const item of equipment) {
+    if (item.equipped && !item.properties?.isContainer) {
+      const modifier = Number(item.properties?.encumbranceModifier);
+      if (Number.isFinite(modifier)) capacity += modifier;
+    }
+  }
+  const storageProviders = equipment.filter((item) => (
+    item.properties?.isContainer && ['container', 'animal'].includes(item.slot)
+  ));
+  const containerLoads = Object.fromEntries(storageProviders.map((item) => [item.id, {
+    id: item.id,
+    name: item.name,
+    load: 0,
+    capacity: Number.isFinite(Number(item.properties.containerCapacity))
+      ? Number(item.properties.containerCapacity)
+      : 10,
+    isOverloaded: false,
+  }]));
+  let totalCarriedLoad = 0;
+  let rationCount = 0;
+  const unknownWeightItemIds = [];
+  for (const item of inventory) {
+    const quantity = Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1;
+    const explicitWeight = Number(item.weight);
+    const weight = item.name.toLowerCase().includes('ration')
+      ? 0.25
+      : Number.isFinite(explicitWeight) ? explicitWeight : 1;
+    if (item.weight === null || item.weight === undefined || item.weight === '') {
+      unknownWeightItemIds.push(item.id);
+    }
+    const load = weight * quantity;
+    const container = item.placement?.containerId
+      ? containerLoads[item.placement.containerId]
+      : null;
+    if (container) container.load += load;
+    else if (item.name.toLowerCase().includes('ration')) rationCount += quantity;
+    else totalCarriedLoad += load;
+  }
+  totalCarriedLoad += Math.ceil(rationCount / 4);
+  for (const container of Object.values(containerLoads)) {
+    container.load = Math.ceil(container.load * 10) / 10;
+    container.isOverloaded = container.load > container.capacity;
+  }
+  return {
+    schemaVersion: 'encumbrance-v1',
+    capacity,
+    totalCarriedLoad,
+    threshold: capacity,
+    isEncumbered: totalCarriedLoad > capacity,
+    containerLoads: Object.values(containerLoads),
+    unknownWeightItemIds,
+  };
+}
+
+export function advanceEquipmentTime(equipment, elapsedSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(elapsedSeconds) || 0));
+  const changes = [];
+  const visit = (value, path = []) => {
+    if (Array.isArray(value)) return value.map((entry, index) => visit(entry, [...path, index]));
+    if (!value || typeof value !== 'object') return value;
+    const next = Object.fromEntries(Object.entries(value).map(([key, entry]) => (
+      key === 'state' && entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? [key, { ...entry }]
+        : [key, visit(entry, [...path, key])]
+    )));
+    const state = next.state && typeof next.state === 'object' && !Array.isArray(next.state)
+      ? { ...next.state }
+      : null;
+    const remaining = Number(state?.remainingDuration ?? next.remainingDuration);
+    if (Number.isFinite(remaining) && remaining > 0 && seconds > 0) {
+      const updated = Math.max(0, remaining - seconds);
+      if (state) {
+        state.remainingDuration = updated;
+        if (updated === 0) {
+          state.isLit = false;
+          state.status = 'expired';
+        }
+        next.state = state;
+      } else {
+        next.remainingDuration = updated;
+        if (updated === 0 && typeof next.isLit === 'boolean') next.isLit = false;
+      }
+      changes.push({ path: path.join('.'), previous: remaining, remainingDuration: updated });
+    }
+    return next;
+  };
+  return { document: visit(equipment), changes };
 }
 
 function publicInventory(inventory) {
@@ -233,9 +353,9 @@ function publicItem(entry) {
   return item;
 }
 
-export function combineConditions(actorId, characterConditions, combatantEffects) {
+export function combineConditions(actorId, characterConditions, combatantEffects, conditionDetails = {}) {
   const byKey = new Map();
-  for (const condition of activeConditionEntries(actorId, characterConditions)) byKey.set(condition.key, condition);
+  for (const condition of activeConditionEntries(actorId, characterConditions, conditionDetails)) byKey.set(condition.key, condition);
   for (const condition of activeConditionEntries(actorId, combatantEffects)) byKey.set(condition.key, condition);
   return [...byKey.values()];
 }
@@ -263,7 +383,12 @@ function characterActor(row, combatant, definitions = []) {
       maxHp,
       currentWp,
       maxWp,
-      conditions: combineConditions(row.id, row.conditions, combatant?.status_effects),
+      conditions: combineConditions(
+        row.id,
+        row.conditions,
+        combatant?.status_effects,
+        row.condition_details || {},
+      ),
       isRallied: Boolean(row.is_rallied),
       deathRolls: {
         passed: Number(row.death_rolls_passed || 0),
@@ -286,6 +411,7 @@ function characterActor(row, combatant, definitions = []) {
       specialItems: equipment.specialItems,
       heldItems: equipment.heldItems,
       equipment: equipment.equipment,
+      unresolvedEquipmentDefinitions: equipment.unresolvedDefinitions,
       notes: row.notes || null,
       tags: [row.kin, row.profession].filter(Boolean),
       isAlive: currentHp > 0 && Number(row.death_rolls_failed || 0) < 3,
@@ -298,6 +424,7 @@ function characterActor(row, combatant, definitions = []) {
       row,
       combatant,
       equipmentDocument: equipment.document,
+      definitions,
     },
   };
 }
@@ -377,6 +504,7 @@ export function actorForOutput(actor, { includeGm = true } = {}) {
     specialItems: publicInventory(specialItems),
     heldItems: publicInventory(heldItems),
     equipment: publicInventory(equipment),
+    encumbrance: actor.type === 'pc' ? calculateEncumbrance(actor) : null,
   };
   if (!includeGm && output.type !== 'pc') {
     output.attributes = {};
@@ -475,29 +603,54 @@ function storedInventory(actor) {
     description: entry.description ?? undefined,
     quantity: entry.quantity,
     weight: entry.weight ?? undefined,
-    containerId: entry.location ?? undefined,
+    ownerId: entry.placement?.ownerId ?? undefined,
+    carriedByActorId: entry.placement?.carriedByActorId ?? undefined,
+    locationId: entry.placement?.locationId ?? undefined,
+    containerId: entry.placement?.containerId ?? undefined,
+    equipped: entry.placement?.equipped ?? false,
+    heldByActorId: entry.placement?.heldByActorId ?? undefined,
+    temporarilyPlaced: entry.placement?.temporarilyPlaced ?? false,
+    state: entry.state || undefined,
   }));
+}
+
+function storedConditionDetails(conditions) {
+  return Object.fromEntries(conditions.map((condition) => [condition.key, {
+    name: condition.name,
+    description: condition.description,
+    source: condition.source,
+    duration: condition.duration,
+    appliedAt: condition.appliedAt,
+    expiresAt: condition.expiresAt,
+    affects: condition.affects || { checks: [], attributes: [] },
+  }]));
 }
 
 export async function persistActor(client, actor, storage) {
   if (storage.type === 'character') {
     const conditions = storedConditionObject(storage.row.conditions, actor.conditions);
+    const conditionDetails = storedConditionDetails(actor.conditions);
+    const canonicalDocument = normalizeCharacterEquipment(actor.id, storage.equipmentDocument, {
+      definitions: storage.definitions || [],
+      itemNotes: storage.row.item_notes || {},
+    }).document;
     const equipment = {
-      ...storage.equipmentDocument,
+      ...canonicalDocument,
       inventory: storedInventory(actor),
     };
     await client.query(
       `UPDATE characters
        SET current_hp = $1, max_hp = $2, current_wp = $3, max_wp = $4,
-         conditions = $5::jsonb, equipment = $6::jsonb,
-         is_rallied = $7, death_rolls_passed = $8, death_rolls_failed = $9
-       WHERE id = $10`,
+         conditions = $5::jsonb, condition_details = $6::jsonb, equipment = $7::jsonb,
+         is_rallied = $8, death_rolls_passed = $9, death_rolls_failed = $10
+       WHERE id = $11`,
       [
         actor.currentHp,
         actor.maxHp,
         actor.currentWp,
         actor.maxWp,
         JSON.stringify(conditions),
+        JSON.stringify(conditionDetails),
         JSON.stringify(equipment),
         Boolean(actor.isRallied),
         Number(actor.deathRolls?.passed || 0),
@@ -525,6 +678,8 @@ export async function persistActor(client, actor, storage) {
     source: condition.source,
     duration: condition.duration,
     applied_at: condition.appliedAt,
+    expires_at: condition.expiresAt,
+    affects: condition.affects || { checks: [], attributes: [] },
   }));
   await client.query(
     `UPDATE encounter_combatants

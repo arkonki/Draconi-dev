@@ -16,12 +16,15 @@ The MCP server publishes this guidance as the static resource
 ## Normal session flow
 
 1. If the campaign ID is unknown, call `list_campaigns`; never guess an ID.
-2. Call `get_campaign_state`. During Solo play, also call `get_solo_state`.
+2. Call `get_resume_state`. It returns scene, checkpoint, all characters, focus
+   character, active combat, Solo progress, roll handoffs, and game time from
+   one database snapshot.
 3. Resume the returned active session. If none exists and sustained play is
    beginning, call `start_session` with the latest revision.
 4. Narrate only from current state and player-visible information. Ask what the
    players do. Save only important durable developments with
-   `append_campaign_event`.
+   `append_campaign_event`. After meaningful scene transitions, use
+   `checkpoint_session` to persist the structured scene and continuation state.
 5. Resolve stored mechanical changes with the relevant tool and the latest
    revision. Read state again when another user, the web app, or an earlier tool
    may have changed it.
@@ -29,8 +32,8 @@ The MCP server publishes this guidance as the static resource
    a player-safe summary and explicit unresolved threads.
 
 `append_campaign_event` records a durable event. It does not update the
-campaign's `current_scene`; opening and ending scene state is stored through the
-session lifecycle tools.
+campaign's `current_scene`; opening, checkpoint, and ending scene state is
+stored through the session lifecycle tools.
 
 ## Trusted roll flow
 
@@ -61,12 +64,13 @@ flow instead.
 
 ## Recovery rules
 
-- On `REVISION_CONFLICT`, reread campaign state and reassess. Do not replay
+- On `REVISION_CONFLICT`, call `get_resume_state` and reassess. Do not replay
   stale arguments. A newly assessed action gets a new idempotency key.
 - If a response was lost and a write might have succeeded, reread state and
   recent events first. Retry with the same key only when sending the exact same
   uncertain request.
-- After conversation loss or reconnect, read state and recent events. Resume
+- After conversation loss or reconnect, call `get_resume_state`; read recent
+  events only when history beyond its checkpoint is needed. Resume
   the active session and active combat turn; never recreate them.
 - Rediscover missing campaign, actor, session, encounter, and combat IDs through
   read tools. Never infer IDs from names.

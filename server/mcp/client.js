@@ -57,6 +57,12 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/state?${query}`);
   }
 
+  getResumeState({ campaign_id, actor_id }) {
+    const query = new URLSearchParams();
+    if (actor_id) query.set('actorId', actor_id);
+    return this.request(`/api/v1/campaigns/${campaign_id}/resume-state?${query}`);
+  }
+
   createRollRequest(input) {
     const { campaign_id, expected_revision, idempotency_key, ...body } = input;
     return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests`, {
