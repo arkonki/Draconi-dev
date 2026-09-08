@@ -227,6 +227,9 @@ When a check returns `requiresFailForward`, resolve it exactly once with
 accepted by the player. A rolled resolution accepts two contextual alternatives,
 rolls an authoritative D6, and selects the first on 1-3 or the second on 4-6.
 Both modes require explicit user confirmation before the command is submitted.
+The MCP input uses one uniform `resolution.consequences` array: `manual` requires
+exactly one entry and `roll_choice` requires exactly two. The MCP adapter converts
+that scanner-compatible shape into the stricter internal REST representation.
 The resolution is linked to its immutable source roll. Its explicit effect can
 record a story event, advance the current threat, damage the hero, add a
 condition, expend an existing item, add a structured danger to the current

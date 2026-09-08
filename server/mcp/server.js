@@ -32,7 +32,6 @@ import {
   resolveGameActionInputSchema,
   resolveRollRequestServerInputSchema,
   resolveSoloCheckInputSchema,
-  resolveSoloCheckConsequenceInputSchema,
   resolveSoloDyingActionInputSchema,
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageInputSchema,
@@ -46,6 +45,10 @@ import {
   takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
+import {
+  resolveSoloCheckConsequenceMcpInputSchema,
+  soloCheckConsequenceServiceInput,
+} from './schemas.js';
 import {
   GM_WORKFLOW_URI,
   gmWorkflowGuide,
@@ -141,7 +144,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.16.0' },
+    { name: 'dragonbane-helper', version: '1.16.1' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_campaign_state.',
@@ -292,10 +295,12 @@ export function createDragonbaneMcpServer(apiClient) {
   server.registerTool('resolve_solo_check_consequence', {
     title: 'Resolve a failed Solo check consequence',
     description: 'GM-only. After explicit user confirmation, resolve fail-forward exactly once for a failed or Demon Solo check. Record one accepted consequence or provide two contextual alternatives for an authoritative 1D6 selection, then atomically apply the selected guarded effect.',
-    inputSchema: resolveSoloCheckConsequenceInputSchema,
+    inputSchema: resolveSoloCheckConsequenceMcpInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
-  }, safe(async (input) => writeResult(await apiClient.resolveSoloCheckConsequence(input))));
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloCheckConsequence(
+    soloCheckConsequenceServiceInput(input),
+  ))));
 
   server.registerTool('start_solo_mission', {
     title: 'Start a custom solo mission',

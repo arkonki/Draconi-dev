@@ -495,6 +495,27 @@ describe('Dragonbane MCP server', () => {
     expect(writeTool.description).toMatch(/latest campaign revision/i);
   });
 
+  it('publishes a ChatGPT-compatible Solo consequence tool schema', async () => {
+    const listed = await client.listTools();
+    const consequenceTool = listed.tools.find(({ name }) => name === 'resolve_solo_check_consequence');
+    const schemaText = JSON.stringify(consequenceTool.inputSchema);
+
+    expect(schemaText).not.toMatch(/"(?:oneOf|anyOf|allOf)":/);
+    expect(schemaText).not.toMatch(/"items":\[/);
+    expect(consequenceTool.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        resolution: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['manual', 'roll_choice'] },
+            consequences: { type: 'array', minItems: 1, maxItems: 2 },
+          },
+        },
+      },
+    });
+  });
+
   it('publishes state-first GM workflow prompts and recovery guidance', async () => {
     const listedPrompts = await client.listPrompts();
     expect(listedPrompts.prompts.map(({ name }) => name)).toEqual(expect.arrayContaining([
@@ -1033,10 +1054,10 @@ describe('Dragonbane MCP server', () => {
         idempotency_key: 'solo-consequence-1',
         resolution: {
           mode: 'manual',
-          consequence: {
+          consequences: [{
             description: 'The attempt succeeds slowly, and the patrol draws closer.',
             effect: { type: 'story_event' },
-          },
+          }],
         },
         confirmed_by_user: true,
         reason: 'The player accepts the fail-forward consequence.',
@@ -1047,6 +1068,16 @@ describe('Dragonbane MCP server', () => {
       campaign_revision: 48,
       state_excerpt: { consequence: { resolutionMode: 'manual' } },
     });
+    expect(api.resolveSoloCheckConsequence).toHaveBeenCalledWith(expect.objectContaining({
+      resolution: {
+        mode: 'manual',
+        consequence: {
+          description: 'The attempt succeeds slowly, and the patrol draws closer.',
+          effect: { type: 'story_event' },
+        },
+      },
+      confirmed_by_user: true,
+    }));
 
     const mission = await client.callTool({
       name: 'start_solo_mission',
