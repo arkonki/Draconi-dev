@@ -43,6 +43,12 @@ function nullableString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function definitionForItem(item, definitionsByName) {
   const name = nullableString(item.name || item.originalName);
   return name ? definitionsByName.get(name.toLowerCase()) || null : null;
@@ -71,20 +77,23 @@ function normalizedItem(actorId, value, index, {
   definitionsByName = new Map(),
   itemNotes = {},
   instanceIds = {},
-  identityKey,
+  identityKeys = [],
 } = {}) {
   const item = storedItemObject(value);
   const definition = definitionForItem(item, definitionsByName);
   const definitionId = nullableString(item.definitionId || item.definition_id) || definition?.id || null;
   const notes = definitionId ? itemNotes?.[definitionId] || null : null;
   const placement = itemPlacement(actorId, item, { equipped, held });
-  const itemWithCanonicalId = item.id || !identityKey || !instanceIds[identityKey]
+  const storedInstanceId = identityKeys
+    .map((key) => instanceIds[key])
+    .find(Boolean);
+  const itemWithCanonicalId = item.id || !storedInstanceId
     ? item
-    : { ...item, id: instanceIds[identityKey] };
+    : { ...item, id: storedInstanceId };
   const id = slot === 'inventory'
     ? inventoryItemId(actorId, itemWithCanonicalId, index)
     : equipmentItemId(actorId, slot, itemWithCanonicalId, index);
-  if (identityKey) instanceIds[identityKey] = id;
+  if (identityKeys[0]) instanceIds[identityKeys[0]] = id;
   return {
     id,
     slot,
@@ -93,7 +102,7 @@ function normalizedItem(actorId, value, index, {
     name: String(item.name || item.originalName || definition?.name || 'Unnamed item'),
     description: item.description ?? definition?.description ?? null,
     category: item.category ?? definition?.category ?? null,
-    quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1,
+    quantity: finiteNumber(item.quantity) ?? 1,
     weight: item.weight ?? definition?.weight ?? null,
     damage: item.damage ?? definition?.damage ?? null,
     range: item.range ?? definition?.range ?? null,
@@ -152,17 +161,24 @@ export function normalizeCharacterEquipment(actorId, equipment, {
   const instanceIds = document.instanceIds && typeof document.instanceIds === 'object'
     ? { ...document.instanceIds }
     : {};
-  const identityKey = (slot, item, index) => {
+  const identityOccurrences = new Map();
+  const identityKeys = (slot, item, index) => {
     const stored = storedItemObject(item);
     const name = String(stored.name || stored.originalName || '').trim().toLowerCase();
-    return `${slot}:${name}:${index}`;
+    const occurrenceKey = `${slot}:${name}`;
+    const occurrence = identityOccurrences.get(occurrenceKey) || 0;
+    identityOccurrences.set(occurrenceKey, occurrence + 1);
+    return [
+      `instance:${slot}:${name}:${occurrence}`,
+      `${slot}:${name}:${index}`,
+    ];
   };
   const options = { definitionsByName, itemNotes, instanceIds };
   const normalizedInventory = inventory.map((item, index) => normalizedItem(
     actorId,
     item,
     index,
-    { ...options, slot: 'inventory', identityKey: identityKey('inventory', item, index) },
+    { ...options, slot: 'inventory', identityKeys: identityKeys('inventory', item, index) },
   ));
   const weapons = (Array.isArray(equipped.weapons) ? equipped.weapons : []).map((item, index) => (
     normalizedItem(actorId, item, index, {
@@ -170,7 +186,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       slot: 'weapon',
       equipped: true,
       held: true,
-      identityKey: identityKey('weapon', item, index),
+      identityKeys: identityKeys('weapon', item, index),
     })
   ));
   const defensiveItem = (slot, item, { held = false } = {}) => (
@@ -181,7 +197,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
         slot,
         equipped: true,
         held,
-        identityKey: identityKey(slot, item, 0),
+        identityKeys: identityKeys(slot, item, 0),
       })
   );
   const bodyArmor = defensiveItem('armor', equipped.armor);
@@ -193,7 +209,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'worn-clothes',
       equipped: true,
-      identityKey: identityKey('worn-clothes', item, index),
+      identityKeys: identityKeys('worn-clothes', item, index),
     }),
   );
   const containers = (Array.isArray(equipped.containers) ? equipped.containers : []).map(
@@ -201,7 +217,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'container',
       equipped: true,
-      identityKey: identityKey('container', item, index),
+      identityKeys: identityKeys('container', item, index),
     }),
   );
   const animals = (Array.isArray(equipped.animals) ? equipped.animals : []).map(
@@ -209,7 +225,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       ...options,
       slot: 'animal',
       equipped: true,
-      identityKey: identityKey('animal', item, index),
+      identityKeys: identityKeys('animal', item, index),
     }),
   );
   const allEquipment = uniqueItems([
@@ -244,8 +260,8 @@ export function normalizeCharacterEquipment(actorId, equipment, {
 }
 
 export function calculateEncumbrance(actor) {
-  const strength = Number(actor?.attributes?.STR ?? actor?.attributes?.str);
-  if (!Number.isFinite(strength)) return null;
+  const strength = finiteNumber(actor?.attributes?.STR ?? actor?.attributes?.str);
+  if (strength === null) return null;
   const equipment = Array.isArray(actor.equipment) ? actor.equipment : [];
   const inventory = Array.isArray(actor.inventory) ? actor.inventory : [];
   let capacity = Math.ceil(strength / 2);
@@ -262,20 +278,18 @@ export function calculateEncumbrance(actor) {
     id: item.id,
     name: item.name,
     load: 0,
-    capacity: Number.isFinite(Number(item.properties.containerCapacity))
-      ? Number(item.properties.containerCapacity)
-      : 10,
+    capacity: finiteNumber(item.properties.containerCapacity) ?? 10,
     isOverloaded: false,
   }]));
   let totalCarriedLoad = 0;
   let rationCount = 0;
   const unknownWeightItemIds = [];
   for (const item of inventory) {
-    const quantity = Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1;
-    const explicitWeight = Number(item.weight);
+    const quantity = finiteNumber(item.quantity) ?? 1;
+    const explicitWeight = finiteNumber(item.weight);
     const weight = item.name.toLowerCase().includes('ration')
       ? 0.25
-      : Number.isFinite(explicitWeight) ? explicitWeight : 1;
+      : explicitWeight ?? 1;
     if (item.weight === null || item.weight === undefined || item.weight === '') {
       unknownWeightItemIds.push(item.id);
     }

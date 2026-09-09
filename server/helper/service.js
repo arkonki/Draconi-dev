@@ -5077,6 +5077,7 @@ function combatForOutput(access, encounter, rows) {
           participantActorId(row),
           row.character_conditions,
           row.status_effects,
+          row.character_condition_details || {},
         )
         : [],
       hasActed: row.has_acted,
@@ -5106,6 +5107,7 @@ async function loadCombatContext(client, campaignId, combatId, { forUpdate = fal
   const { rows } = await client.query(
     `SELECT ec.*,
        c.conditions AS character_conditions,
+       c.condition_details AS character_condition_details,
        c.current_hp AS character_current_hp,
        c.max_hp AS character_max_hp,
        c.current_wp AS character_current_wp,

@@ -29,6 +29,7 @@ export interface InventoryItem {
 }
 
 export interface WeaponEntry {
+  id?: string;
   name: string;
   damage?: string;
   grip?: string;
@@ -48,6 +49,8 @@ export interface EquippedItems {
 }
 
 export interface Equipment {
+  schemaVersion?: string;
+  instanceIds?: Record<string, string>;
   inventory: InventoryItem[];
   equipped: EquippedItems;
   money: Money;

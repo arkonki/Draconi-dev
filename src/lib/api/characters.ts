@@ -118,6 +118,8 @@ export const mapCharacterData = (char: unknown): Character => {
     prepared_spells: row.prepared_spells || [],
     heroic_abilities: row.heroic_ability || [],
     equipment: {
+      schemaVersion: equipmentData.schemaVersion,
+      instanceIds: equipmentData.instanceIds,
       inventory: equipmentData.inventory || [],
       equipped: equipmentData.equipped || { weapons: [] },
       money: equipmentData.money || { gold: 0, silver: 0, copper: 0 },

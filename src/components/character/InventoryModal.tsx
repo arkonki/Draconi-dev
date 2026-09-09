@@ -561,6 +561,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                     return;
                 }
                 newEquipment.equipped.weapons.push({
+                    id: itemToMove.id || generateId(),
                     name: itemDetails.name,
                     grip: itemDetails.grip,
                     range: itemDetails.range,

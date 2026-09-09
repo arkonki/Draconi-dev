@@ -76,6 +76,23 @@ describe('Dragonbane Helper actor equipment', () => {
     });
   });
 
+  it('keeps a legacy item UUID stable when unrelated items are inserted before it', () => {
+    const torchId = '077630e9-f4fb-58c2-9612-5b139f807bd1';
+    const initial = normalizeCharacterEquipment(actorId, {
+      inventory: [{ name: 'Torch', quantity: 1 }],
+      equipped: { weapons: [] },
+      instanceIds: { 'inventory:torch:0': torchId },
+    });
+    const reordered = normalizeCharacterEquipment(actorId, {
+      ...initial.document,
+      inventory: [{ name: 'Rope', quantity: 1 }, { name: 'Torch', quantity: 1 }],
+    });
+
+    expect(initial.inventory[0].id).toBe(torchId);
+    expect(reordered.inventory[1].id).toBe(torchId);
+    expect(reordered.document.instanceIds['instance:inventory:torch:0']).toBe(torchId);
+  });
+
   it('returns all equipment views from a loaded player character', async () => {
     const row = {
       id: actorId,
@@ -234,6 +251,33 @@ describe('Dragonbane Helper actor equipment', () => {
       totalCarriedLoad: 2,
       isEncumbered: false,
       containerLoads: [{ load: 2, capacity: 4, isOverloaded: false }],
+    });
+  });
+
+  it('uses documented fallbacks for unknown item weight and container capacity', () => {
+    const equipment = normalizeCharacterEquipment(actorId, {
+      inventory: [{ name: 'Rope', quantity: 1 }],
+      equipped: {
+        weapons: [],
+        containers: [{
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Backpack',
+          is_container: true,
+        }],
+      },
+    });
+    const result = calculateEncumbrance({
+      type: 'pc',
+      attributes: { STR: 2 },
+      inventory: equipment.inventory,
+      equipment: equipment.equipment,
+    });
+
+    expect(result).toMatchObject({
+      totalCarriedLoad: 1,
+      isEncumbered: false,
+      containerLoads: [{ capacity: 10, isOverloaded: false }],
+      unknownWeightItemIds: [equipment.inventory[0].id],
     });
   });
 
