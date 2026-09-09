@@ -50,7 +50,7 @@ export function DiceProvider({ children }: { children: React.ReactNode }) {
         setDicePool(initialPool);
         
         setIsBoonActive(false);
-        setIsBaneActive(config?.requiresBane || config?.rollMode === 'rallyRoll' || false);
+        setIsBaneActive(Boolean(config?.requiresBane));
 
       } else {
          setCurrentConfig(null);

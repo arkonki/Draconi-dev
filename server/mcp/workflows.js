@@ -47,6 +47,7 @@ export const gmWorkflowGuide = {
     combatTurn: [
       'Call get_combat_state before resolving each turn and use its active actor and initiative slot.',
       'Resolve only the active actor. Obtain any required roll through the trusted roll workflow.',
+      'A rallied solo hero at 0 HP may take one normal action. resolve_game_action consumes the rallied state automatically; do not clear it separately.',
       'Call resolve_game_action with validated effects and the latest revision.',
       'After a turn-consuming action, call advance_combat_turn and use the returned active actor for the next turn.',
       'Call end_combat only when combat is actually over and save a durable, player-safe outcome summary.',

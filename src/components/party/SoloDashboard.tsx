@@ -43,6 +43,7 @@ import {
   searchSoloWaypoint,
   SoloApiError,
   SoloRecordedRoll,
+  SoloState,
   SoloWaypoint,
   startSoloMission,
   resolveSoloDyingAction,
@@ -310,6 +311,7 @@ function ActionModal({
 function SoloCharacterSheetModal({
   isOpen,
   title,
+  soloState,
   isLoading,
   isReady,
   error,
@@ -318,6 +320,7 @@ function SoloCharacterSheetModal({
 }: {
   isOpen: boolean;
   title: string;
+  soloState: SoloState;
   isLoading: boolean;
   isReady: boolean;
   error: string | null;
@@ -353,7 +356,7 @@ function SoloCharacterSheetModal({
               <span className="font-medium">Loading character sheet...</span>
             </div>
           ) : (
-            <CharacterSheet />
+            <CharacterSheet soloState={soloState} />
           )}
         </div>
       </div>
@@ -413,6 +416,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [revealDescription, setRevealDescription] = useState('');
   const [searchContext, setSearchContext] = useState('');
   const [knownSearchLocation, setKnownSearchLocation] = useState(false);
+  const [knownSearchNature, setKnownSearchNature] = useState(false);
   const [scavengeContext, setScavengeContext] = useState('');
   const [scavengeStretch, setScavengeStretch] = useState(false);
   const [restType, setRestType] = useState<'round' | 'stretch' | 'shift'>('round');
@@ -616,6 +620,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           if (!state.currentWaypoint) throw new Error('There is no active waypoint to search.');
           return searchSoloWaypoint(partyId, state.currentWaypoint.id, revision, {
             knownLocation: knownSearchLocation,
+            knownNature: knownSearchNature,
             context: searchContext.trim(),
           });
         case 'scavenge':
@@ -713,6 +718,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     if (action === 'search') {
       setSearchContext('');
       setKnownSearchLocation(false);
+      setKnownSearchNature(false);
     }
     if (action === 'scavenge') {
       setScavengeContext('');
@@ -1363,6 +1369,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       <SoloCharacterSheetModal
         isOpen={isCharacterSheetOpen}
         title={state.playerCharacter?.name || 'Solo hero'}
+        soloState={state}
         isLoading={isCharacterSheetLoading}
         isReady={isSoloCharacterSheetReady}
         error={characterSheetError}
@@ -1589,7 +1596,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <label className="block text-sm font-bold text-stone-700">Context <span className="font-normal text-stone-400">(optional)</span>
                   <textarea value={inspirationContext} onChange={(event) => setInspirationContext(event.target.value)} maxLength={5000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="What are you trying to discover or create?" />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">This currently uses the clearly labelled generic Draconi table. Official table data requires an authorized data pack.</div>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">This uses the installed versioned Solo inspiration table.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={selectedColumns.length === 0} icon={Wand2}>Draw Inspiration</Button>
               </>
             )}
@@ -1654,13 +1661,19 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
                 <p className="text-sm text-stone-600">The server rolls Spot Hidden and records every die. A Dragon produces two possible finds; choose the one that best fits the fiction.</p>
                 <label htmlFor="solo-known-search-location" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
-                  <input id="solo-known-search-location" type="checkbox" checked={knownSearchLocation} onChange={(event) => setKnownSearchLocation(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                  <input id="solo-known-search-location" type="checkbox" checked={knownSearchLocation} onChange={(event) => { setKnownSearchLocation(event.target.checked); if (!event.target.checked) setKnownSearchNature(false); }} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
                   <span className="font-bold">Specific known hiding place<span className="mt-0.5 block text-xs font-normal text-stone-500">Skip Spot Hidden because the hero already knows exactly where to look.</span></span>
                 </label>
+                {knownSearchLocation && (
+                  <label htmlFor="solo-known-search-nature" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                    <input id="solo-known-search-nature" type="checkbox" checked={knownSearchNature} onChange={(event) => setKnownSearchNature(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                    <span className="font-bold">Nature of the hidden item is known<span className="mt-0.5 block text-xs font-normal text-stone-500">Skip the Search table as well; the known item is simply found.</span></span>
+                  </label>
+                )}
                 <label className="block text-sm font-bold text-stone-700">What is being searched? <span className="font-normal text-stone-400">(optional)</span>
                   <textarea value={searchContext} onChange={(event) => setSearchContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The carved desk and the loose stones behind it" />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">Find categories come from the clearly labelled generic Draconi exploration table, not an official adventure table. Interpret the abstract result in the current scene.</div>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server uses the Solo v1.2 Search table. Traps, secret paths, location details, and treasure are returned as explicit follow-ups; no effect is applied silently.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Search}>Search · spend 1 stretch</Button>
               </>
             )}
@@ -1681,7 +1694,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     <span className="font-bold">Take a full stretch<span className="mt-0.5 block text-xs font-normal text-stone-500">Advances the active threat by 1. Choose this when the fiction makes the scavenging prolonged.</span></span>
                   </label>
                 )}
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server records a d10 result from the generic Draconi exploration table. Findings are abstract prompts; no item is silently added to inventory.</div>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server records the Solo v1.2 D10 result and any required D4/D6 subroll. No item is silently added to inventory.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={PackageSearch}>
                   Scavenge{state.currentWaypoint.exploration.scavengeCount > 0 || scavengeStretch ? ' · spend 1 stretch' : ' · quick pass'}
                 </Button>

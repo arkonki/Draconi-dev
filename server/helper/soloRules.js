@@ -336,30 +336,114 @@ export function resolveNarrativeDamage({ severity, entries }, rollDie = secureRo
   };
 }
 
-export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5) {
-  if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
+function explorationEntry(entry, roll) {
+  if (typeof entry === 'string') {
+    return { roll, key: entry.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), label: entry };
+  }
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`Exploration table has an invalid result for ${roll}.`);
+  }
+  return {
+    roll,
+    key: entry.key || String(entry.label || `result_${roll}`).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+    label: entry.label || entry.keyword || entry.key || `Result ${roll}`,
+  };
+}
+
+function recordTableRoll(table, rollDie, dice, dieSides) {
+  if (!table || !Number.isInteger(table.dieSides) || !Array.isArray(table.entries)) {
+    throw new Error('Linked exploration table is unavailable or invalid.');
+  }
+  const roll = rollDie(table.dieSides);
+  dice.push(roll);
+  dieSides.push(table.dieSides);
+  return {
+    ...explorationEntry(findTableEntry(table.entries, roll), roll),
+    tableKey: table.tableKey,
+    tableVersion: table.version,
+  };
+}
+
+function explorationDiceExpression(dieSides) {
+  const counts = new Map();
+  for (const sides of dieSides) counts.set(sides, (counts.get(sides) || 0) + 1);
+  return [...counts.entries()].map(([sides, count]) => `${count}d${sides}`).join(' + ');
+}
+
+export function resolveLocationDetails(tables, rollDie = secureRollDie) {
   const dice = [];
+  const dieSides = [];
+  const categoryTable = tables?.solo_location_detail;
+  if (!categoryTable) throw new Error('Solo location-detail table is unavailable.');
+  const detailCount = rollDie(4);
+  dice.push(detailCount);
+  dieSides.push(4);
+  const details = [];
+  for (let index = 0; index < detailCount; index += 1) {
+    const category = recordTableRoll(categoryTable, rollDie, dice, dieSides);
+    const categoryEntry = findTableEntry(categoryTable.entries, category.roll);
+    const subtableKey = categoryEntry?.subtable_key;
+    const detailTable = subtableKey ? tables?.[subtableKey] : null;
+    if (!detailTable) throw new Error(`Solo location subtable ${subtableKey || 'unknown'} is unavailable.`);
+    details.push({ category, detail: recordTableRoll(detailTable, rollDie, dice, dieSides) });
+  }
+  return {
+    expression: explorationDiceExpression(dieSides),
+    dice,
+    dieSides,
+    detailCount,
+    details,
+  };
+}
+
+export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5, options = {}) {
+  if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
+  const mainDieSides = Number.isInteger(options.dieSides) ? options.dieSides : 10;
+  const dice = [];
+  const dieSides = [];
   const results = [];
   let reroll = true;
-  while (reroll && dice.length < maxRolls) {
-    const roll = rollDie(10);
-    const entry = findTableEntry(entries, roll);
-    if (!entry || typeof entry !== 'object' || typeof entry.key !== 'string') {
-      throw new Error(`Exploration table has an invalid result for ${roll}.`);
-    }
+  let mainRollCount = 0;
+  while (reroll && mainRollCount < maxRolls) {
+    const roll = rollDie(mainDieSides);
+    mainRollCount += 1;
     dice.push(roll);
-    results.push({
-      roll,
-      key: entry.key,
-      label: entry.label || entry.key,
+    dieSides.push(mainDieSides);
+    const entry = findTableEntry(entries, roll);
+    const result = {
+      ...explorationEntry(entry, roll),
       kind: entry.kind || null,
       reroll: Boolean(entry.reroll),
-    });
+      rerollAfterResolution: Boolean(entry.reroll_after_resolution),
+      boonOnFirstAction: Boolean(entry.boon_on_first_action),
+      requiredCheck: entry.required_check || null,
+      treasureCards: Number(entry.treasure_cards || 0),
+    };
+    if (entry.subtable_key) {
+      const table = options.tables?.[entry.subtable_key];
+      result.subtable = recordTableRoll(table, rollDie, dice, dieSides);
+    }
+    if (entry.waypoint_count_die) {
+      const sides = Number(entry.waypoint_count_die.sides);
+      if (!Number.isInteger(sides) || sides < 2) throw new Error('Exploration waypoint-count die is invalid.');
+      const waypointCount = rollDie(sides);
+      dice.push(waypointCount);
+      dieSides.push(sides);
+      result.waypointCount = waypointCount;
+    }
+    if (entry.location_details) {
+      const locationDetails = resolveLocationDetails(options.tables, rollDie);
+      dice.push(...locationDetails.dice);
+      dieSides.push(...locationDetails.dieSides);
+      result.locationDetails = locationDetails;
+    }
+    results.push(result);
     reroll = Boolean(entry.reroll);
   }
   return {
-    expression: `${dice.length}d10`,
+    expression: explorationDiceExpression(dieSides),
     dice,
+    dieSides,
     keptIndices: dice.map((_, index) => index),
     keptValues: [...dice],
     results,

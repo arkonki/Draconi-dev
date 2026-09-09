@@ -522,7 +522,7 @@ export async function searchSoloWaypoint(
   partyId: string,
   waypointId: string,
   revision: number,
-  input: { knownLocation: boolean; context?: string },
+  input: { knownLocation: boolean; knownNature?: boolean; context?: string },
 ): Promise<SoloWriteResult> {
   const response = await authenticatedApiFetch(
     `/v1/campaigns/${partyId}/solo/waypoints/${waypointId}/search`,
@@ -531,6 +531,7 @@ export async function searchSoloWaypoint(
       headers: writeHeaders(revision),
       body: JSON.stringify({
         known_location: input.knownLocation,
+        known_nature: Boolean(input.knownNature),
         context: input.context || undefined,
         reason: input.knownLocation
           ? 'The solo hero searched a specific known hiding place.'

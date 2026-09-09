@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adjustInventory,
   applyDamage,
+  consumeRalliedAction,
   healActor,
   removeCondition,
   spendWillpower,
@@ -61,5 +62,32 @@ describe('Dragonbane Helper rules', () => {
   it('does not allow a defeated actor to perform a normal action', () => {
     expect(() => validateActorCanAct(actor({ currentHp: 0, isAlive: false }))).toThrow(/defeated/i);
   });
-});
 
+  it('allows exactly the pending rallied action at zero HP', () => {
+    expect(validateActorCanAct(actor({
+      currentHp: 0,
+      isAlive: false,
+      isRallied: true,
+      lifeStatus: 'dying',
+      deathRolls: { passed: 0, failed: 1 },
+    }))).toMatchObject({
+      valid: true,
+      warnings: [expect.stringMatching(/consumes/i)],
+    });
+    expect(() => validateActorCanAct(actor({
+      currentHp: 0,
+      isAlive: false,
+      isRallied: true,
+      lifeStatus: 'dead',
+      deathRolls: { passed: 0, failed: 3 },
+    }))).toThrow(/defeated/i);
+  });
+
+  it('consumes the rallied state after the permitted action', () => {
+    expect(consumeRalliedAction(actor({ currentHp: 0, isAlive: false, isRallied: true }))).toMatchObject({
+      actor: { currentHp: 0, isRallied: false },
+      event: { type: 'actor.rally_consumed' },
+    });
+    expect(() => consumeRalliedAction(actor({ isRallied: false }))).toThrow(/no rallied action/i);
+  });
+});

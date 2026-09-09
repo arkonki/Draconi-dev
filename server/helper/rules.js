@@ -144,15 +144,34 @@ export function adjustInventory(actor, itemId, quantityDelta) {
 }
 
 export function validateActorCanAct(actor) {
-  if (!actor.isAlive || actor.currentHp <= 0) {
+  const dead = actor.lifeStatus === 'dead' || Number(actor.deathRolls?.failed || 0) >= 3;
+  const ralliedAtZero = actor.currentHp === 0 && actor.isRallied && !dead;
+  if ((!actor.isAlive || actor.currentHp <= 0) && !ralliedAtZero) {
     throw new HelperError(409, 'ACTOR_DEFEATED', `${actor.name} cannot perform a normal action while defeated.`);
   }
   return {
     valid: true,
     result: actor,
     events: [],
-    warnings: [],
-    explanation: `${actor.name} can act.`,
+    warnings: ralliedAtZero ? ['This action consumes the actor’s rallied state.'] : [],
+    explanation: ralliedAtZero
+      ? `${actor.name} can take one rallied action at 0 HP.`
+      : `${actor.name} can act.`,
+  };
+}
+
+export function consumeRalliedAction(actor) {
+  if (!actor.isRallied) {
+    throw new HelperError(409, 'INVALID_STATE', `${actor.name} has no rallied action to consume.`);
+  }
+  return {
+    actor: { ...actor, isRallied: false },
+    event: {
+      type: 'actor.rally_consumed',
+      payload: { before: true, after: false },
+    },
+    warnings: ['The actor must rally again before taking another action at 0 HP.'],
+    explanation: `${actor.name}'s rallied action was consumed.`,
   };
 }
 

@@ -333,7 +333,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('search_waypoint', {
     title: 'Search the current solo waypoint',
-    description: 'GM-only. Perform a thorough Search at the active waypoint. The server resolves Spot Hidden unless a specific known hiding place is supplied, records every die, consumes one stretch, advances the active threat by 1, and returns abstract Draconi-generic findings.',
+    description: 'GM-only. Perform a Solo v1.2 Search at the active waypoint. The server resolves Spot Hidden unless a specific hiding place is known; if both its location and nature are known, no table roll is made. It records all table and subtable dice, consumes one stretch, advances time and the active threat, marks critical Spot Hidden rolls, and returns explicit trap, path, location, and treasure follow-ups.',
     inputSchema: searchWaypointInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
@@ -341,7 +341,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('scavenge_waypoint', {
     title: 'Scavenge the current solo waypoint',
-    description: 'GM-only. Make a quick Draconi-generic d10 exploration find at the active waypoint. The first quick pass takes no stretch; repeat attempts or an explicitly thorough pass consume one stretch and advance the active threat by 1. All dice are recorded.',
+    description: 'GM-only. Roll on the Solo v1.2 Scavenge table and any required danger, supply, or interesting-item subtable. A first quick pass advances time by two minutes without advancing threat; repeat attempts or an explicitly prolonged pass consume one stretch, advance time by 15 minutes, and advance the threat by 1. Findings are recorded but not silently added to inventory.',
     inputSchema: scavengeWaypointInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,

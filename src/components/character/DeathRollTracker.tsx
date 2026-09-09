@@ -5,16 +5,23 @@ import { useDice } from '../dice/useDice';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { Skull, HeartPulse, ShieldQuestion, CheckCircle, XCircle, Zap, Info, Plus, Minus, Check } from 'lucide-react';
 import { Button } from '../shared/Button';
+import { useQueryClient } from '@tanstack/react-query';
+import { resolveSoloDyingAction, type SoloState } from '../../lib/api/solo';
 
 interface DeathRollTrackerProps {
   character: Character;
+  soloMode?: boolean;
+  soloState?: SoloState;
 }
 
-export function DeathRollTracker({ character }: DeathRollTrackerProps) {
+export function DeathRollTracker({ character, soloMode = false, soloState }: DeathRollTrackerProps) {
+  const queryClient = useQueryClient();
   const { toggleDiceRoller } = useDice();
   const {
     setDeathRollState,
     adjustStat,
+    fetchCharacter,
+    setActiveStatusMessage,
     isSaving,
   } = useCharacterSheetStore();
 
@@ -35,6 +42,10 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
   const attributes = typeof character.attributes === 'string' ? JSON.parse(character.attributes) : character.attributes;
   const conTarget = attributes?.CON ?? 10;
   const wilTarget = attributes?.WIL ?? 10;
+  const persuasionTarget = Number(Object.entries(character.skill_levels || {}).find(
+    ([name]) => name.trim().toLowerCase().replaceAll('_', ' ') === 'persuasion',
+  )?.[1] ?? 10);
+  const rallyTarget = soloMode ? persuasionTarget : wilTarget;
 
   const isRecovering = deathRollSuccesses >= 3;
   const isDead = deathRollFailures >= 3;
@@ -125,9 +136,41 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
     setDeathRollState(deathRollSuccesses, deathRollFailures, !isRallied);
   };
 
+  const performAuthoritativeSoloAction = async (
+    action: 'death_roll' | 'self_rally' | 'recover_stabilized',
+  ) => {
+    if (!soloState || !character.party_id) return false;
+    setIsRolling(true);
+    setLastRollResult(null);
+    try {
+      const result = await resolveSoloDyingAction(character.party_id, soloState.campaignRevision, {
+        action,
+        context: 'Dying action resolved from the solo hero character sheet.',
+      });
+      setLastRollResult({ msg: result.summary, type: result.summary.toLowerCase().includes('failed') ? 'failure' : 'success' });
+      setActiveStatusMessage(result.summary, 5000);
+      await Promise.all([
+        fetchCharacter(character.id, character.user_id),
+        queryClient.invalidateQueries({ queryKey: ['solo-state', character.party_id] }),
+        queryClient.invalidateQueries({ queryKey: ['character-injuries', character.party_id, character.id] }),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not resolve the Solo dying action.';
+      setLastRollResult({ msg: message, type: 'failure' });
+      setActiveStatusMessage(message, 5000);
+    } finally {
+      setIsRolling(false);
+    }
+    return true;
+  };
+
   // --- Actions ---
 
   const performDeathRoll = () => {
+    if (soloMode && soloState) {
+      void performAuthoritativeSoloAction('death_roll');
+      return;
+    }
     setIsRolling(true);
     setLastRollResult(null);
     toggleDiceRoller({
@@ -139,18 +182,28 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
   };
 
   const performRallyRoll = () => {
+    if (soloMode && soloState) {
+      void performAuthoritativeSoloAction('self_rally');
+      return;
+    }
     setIsRolling(true);
     setLastRollResult(null);
     toggleDiceRoller({
       rollMode: 'rallyRoll',
-      targetValue: wilTarget,
-      requiresBane: true,
-      description: `Rally (D20 vs WIL ${wilTarget} w/ Bane)`,
+      targetValue: rallyTarget,
+      requiresBane: !soloMode,
+      description: soloMode
+        ? `Solo Self-Rally (D20 vs Persuasion ${rallyTarget})`
+        : `Rally (D20 vs WIL ${rallyTarget} w/ Bane)`,
       onRollComplete: handleRallyRollComplete,
     });
   };
 
   const performRecoveryRoll = () => {
+    if (soloMode && soloState) {
+      void performAuthoritativeSoloAction('recover_stabilized');
+      return;
+    }
     setIsRolling(true);
     setLastRollResult(null);
     toggleDiceRoller({
@@ -367,7 +420,7 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
                 </Button>
                 
                 {/* Manual Rally Toggle for GM Overrides */}
-                {!isRallied && (
+                {!soloMode && !isRallied && (
                    <button 
                      onClick={toggleRallyState}
                      className="p-3 min-h-[44px] min-w-[44px] bg-stone-100 border border-stone-300 rounded hover:bg-stone-200 text-stone-500 touch-manipulation"
@@ -379,7 +432,9 @@ export function DeathRollTracker({ character }: DeathRollTrackerProps) {
             </div>
              {/* Rally Tooltip for Manual Players */}
              <div className="text-[9px] text-center text-stone-400">
-                Manual Rally: <strong>≤ {wilTarget}</strong> (WIL) w/ Bane
+                {soloMode
+                  ? <>Solo Self-Rally: <strong>≤ {rallyTarget}</strong> (Persuasion), no bane</>
+                  : <>Manual Rally: <strong>≤ {rallyTarget}</strong> (WIL) w/ Bane</>}
             </div>
           </>
         )}

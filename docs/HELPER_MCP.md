@@ -217,7 +217,7 @@ a skill or attribute and whether the fiction supplies a normal roll, boon, or
 bane; the server reads the actual target from the configured hero and rolls the
 D20s. Boons retain the lower result and banes retain the higher. Dragon and Demon
 results on skills add that skill to the character's existing advancement marks
-only once. They also roll a versioned `draconi-generic-v1` critical-effect prompt,
+only once. They also roll a versioned `user-solo-v1` critical-effect prompt,
 which is advisory until the player or AI interprets it in the current fiction.
 Failures and Demons explicitly require fail-forward narration but do not silently
 change threat, HP, conditions, or inventory. Any such mechanical consequence must
@@ -252,11 +252,10 @@ revision in the immutable `recorded_rolls` table. The same transaction advances
 the campaign revision and appends a campaign event. Idempotent replay returns the
 original roll instead of rolling again.
 
-The Fortune table implements the Solo v1.2 category and tilt mechanics. Until an
-authorized official data pack is installed, Inspiration uses the separately
-versioned `draconi-generic-v1` table and is explicitly identified as non-official
-in API responses. Deepfall Breach remains unavailable rather than exposing or
-inventing protected module content.
+The Fortune table implements the Solo v1.2 category and tilt mechanics.
+Inspiration and critical effects use the separately versioned `user-solo-v1`
+data pack installed through the database migrations. Deepfall Breach remains
+unavailable rather than exposing or inventing protected module content.
 
 Custom missions persist an objective, ordered waypoints, and one active threat.
 Unknown waypoint payloads are stored separately from public waypoint rows and
@@ -268,12 +267,14 @@ completed from its final objective waypoint.
 The active waypoint also tracks Search and Scavenge usage. A thorough
 `search_waypoint` resolves the solo hero's stored Spot Hidden value (unless the
 hero already knows the exact hiding place), records the skill die and any find
-dice, consumes one stretch, and advances the threat by 1. A Dragon offers two
-find groups to choose between; failure finds nothing; a Demon reveals a new
-danger. The first quick `scavenge_waypoint` attempt at a location does not
-consume a stretch, while repeat attempts and explicitly prolonged scavenging
-consume one stretch and advance the threat by 1. Both tools use the clearly
-labelled `draconi-generic-v1` exploration table. Their abstract findings are
+dice, consumes one stretch, advances campaign time, and advances the threat by
+1. If both the exact location and nature of the hidden item are known, neither
+Spot Hidden nor the Search table is rolled. A Dragon offers two find groups to
+choose between; failure finds nothing; a Demon reveals a new danger. The first
+quick `scavenge_waypoint` attempt advances time by two minutes without consuming
+a stretch, while repeat attempts and explicitly prolonged scavenging consume one
+stretch and advance the threat by 1. Both tools use the versioned
+`user-solo-v1` Search, Scavenge, and linked sub-tables. Structured findings are
 prompts and never silently add an item to character inventory.
 
 `take_solo_rest` resolves recovery as an authoritative Solo action. A round
@@ -287,6 +288,8 @@ six standard conditions. It begins a new shift and resets the round/stretch
 limits. Stretch and shift rests advance an active mission threat by 1. Poison,
 fear effects, and custom statuses are deliberately preserved. Every recovery
 roll, state change, game-time advance, and threat consequence is recorded.
+The character sheet detects the configured solo hero and calls this same
+authoritative operation instead of applying local recovery values.
 
 At 0 HP, `resolve_solo_dying_action` owns the authoritative dying flow. A death
 roll tests CON; ordinary outcomes add one success or failure, while Dragon and

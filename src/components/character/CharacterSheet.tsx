@@ -25,6 +25,7 @@ import { Button } from '../shared/Button';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PdfExportButton } from './PdfExportButton'; 
 import { advanceCharacterInjuryRecovery, fetchCharacterInjuries } from '../../lib/api/injuries';
+import { fetchSoloState, takeSoloRest, type SoloState } from '../../lib/api/solo';
 
 // --- HELPER COMPONENTS ---
 
@@ -604,7 +605,7 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 
 // --- MAIN SHEET COMPONENT ---
 
-export function CharacterSheet() {
+export function CharacterSheet({ soloState: providedSoloState }: { soloState?: SoloState } = {}) {
   const queryClient = useQueryClient();
   const { character, fetchCharacter, adjustStat, toggleCondition, performRest, isLoading, error, isSaving, saveError, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
 
@@ -618,6 +619,9 @@ export function CharacterSheet() {
   const [showSevereInjuriesModal, setShowSevereInjuriesModal] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<{name: AttributeName, value: number} | null>(null);
   const [healerPresent, setHealerPresent] = useState(false);
+  const [soloRestCondition, setSoloRestCondition] = useState('');
+  const [soloSafeLocation, setSoloSafeLocation] = useState(false);
+  const [isSoloRestSaving, setIsSoloRestSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'equipment' | 'abilities' | 'notes'>('equipment');
 
   const characterInjuriesQuery = useQuery({
@@ -631,6 +635,19 @@ export function CharacterSheet() {
     enabled: Boolean(character?.party_id && character?.id),
     staleTime: 0,
   });
+  const detectedSoloStateQuery = useQuery({
+    queryKey: ['solo-state', character?.party_id],
+    queryFn: () => fetchSoloState(character!.party_id!),
+    enabled: Boolean(!providedSoloState && character?.party_id),
+    staleTime: 0,
+    retry: false,
+  });
+  const soloState = providedSoloState || detectedSoloStateQuery.data;
+  const isSoloHero = Boolean(
+    soloState?.solo.enabled
+    && character?.id
+    && (soloState.solo.playerCharacterId === character.id || soloState.playerCharacter?.id === character.id),
+  );
   const hasActiveSevereInjuries = Boolean(characterInjuriesQuery.data?.activeInjuries.length);
   const showSevereInjuriesShortcut = Boolean(
     character?.party_id && !characterInjuriesQuery.isLoading && !hasActiveSevereInjuries,
@@ -653,8 +670,39 @@ export function CharacterSheet() {
   if (error) return <div className="p-4 text-center text-red-500 font-serif">Error loading scroll: {error}</div>;
   if (!character) return <div className="p-4 text-center">Character data not available.</div>;
 
+  const activeStandardConditions = Object.entries(character.conditions || {})
+    .filter(([key, active]) => active && ['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened'].includes(key))
+    .map(([key]) => key);
   const handleConditionToggle = (condition: keyof Character['conditions']) => { toggleCondition(condition); };
   const handleRest = async (type: 'round' | 'stretch' | 'shift') => {
+    if (isSoloHero && soloState && character.party_id) {
+      setIsSoloRestSaving(true);
+      try {
+        const result = await takeSoloRest(character.party_id, soloState.campaignRevision, {
+          restType: type,
+          useHealing: type === 'stretch' && healerPresent,
+          conditionToClear: type === 'stretch' ? soloRestCondition || undefined : undefined,
+          safeLocation: type === 'shift' && soloSafeLocation,
+          context: 'Rest taken from the solo hero character sheet.',
+        });
+        setShowRestOptionsModal(false);
+        setHealerPresent(false);
+        setSoloRestCondition('');
+        setSoloSafeLocation(false);
+        setActiveStatusMessage(result.summary, 5000);
+        await Promise.all([
+          fetchCharacter(character.id, character.user_id),
+          queryClient.invalidateQueries({ queryKey: ['solo-state', character.party_id] }),
+          queryClient.invalidateQueries({ queryKey: ['character-injuries', character.party_id, character.id] }),
+          queryClient.invalidateQueries({ queryKey: ['party', character.party_id] }),
+        ]);
+      } catch (restError) {
+        setActiveStatusMessage(restError instanceof Error ? restError.message : 'Could not resolve the solo rest.', 5000);
+      } finally {
+        setIsSoloRestSaving(false);
+      }
+      return;
+    }
     setShowRestOptionsModal(false);
     await performRest(type, type === 'stretch' ? healerPresent : undefined);
     setHealerPresent(false);
@@ -715,31 +763,53 @@ export function CharacterSheet() {
 
   const renderRestModal = () => {
     if(!showRestOptionsModal) return null;
+    const roundAvailable = !isSoloHero || Boolean(soloState?.restState.available.round);
+    const stretchAvailable = !isSoloHero || Boolean(soloState?.restState.available.stretch);
+    const stretchReady = stretchAvailable && (!isSoloHero || activeStandardConditions.length === 0 || Boolean(soloRestCondition));
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
          <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
             <h3 className="text-2xl font-serif font-bold text-[#1a472a] mb-4 border-b-2 border-stone-200 pb-2">Take a Rest</h3>
             <div className="space-y-3 font-serif">
-              <button onClick={() => handleRest('round')} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation">
+              {isSoloHero && (
+                <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                  Solo rest is resolved by the campaign rules engine. Recovery, rest availability, threat, time, equipment durations, and injuries update together.
+                </div>
+              )}
+              <button type="button" onClick={() => handleRest('round')} disabled={!roundAvailable || isSoloRestSaving} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation disabled:cursor-not-allowed disabled:opacity-50">
                 <div className="font-bold text-[#1a472a]">Round Rest (Action)</div>
-                <div className="text-sm text-stone-600">Recover 1d6 WP. No HP.</div>
+                <div className="text-sm text-stone-600">Recover 1d6 WP. No HP.{isSoloHero && !roundAvailable ? ' Already used this shift.' : ''}</div>
               </button>
               <div className="p-3 border border-stone-300 rounded group disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                <button onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0} className="w-full text-left min-h-[48px] hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation">
+                <button type="button" onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0 || !stretchReady || isSoloRestSaving} className="w-full text-left min-h-[48px] hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation">
                   <div className="font-bold text-[#1a472a]">Stretch Rest (15 min)</div>
-                  <div className="text-sm text-stone-600">Heal 1d6 HP (2d6 w/ Healer), 1d6 WP. Cure 1 Condition.</div>
+                  <div className="text-sm text-stone-600">Heal 1d6 HP, recover 1d6 WP, and clear one condition.{isSoloHero && !stretchAvailable ? ' Already used this shift.' : ''}</div>
                 </button>
                 <label className="flex items-center gap-2 mt-2 text-sm pointer-events-auto min-h-[40px]">
                   <input type="checkbox" className="accent-[#1a472a] w-5 h-5" checked={healerPresent} onChange={e => setHealerPresent(e.target.checked)} />
-                  Healer Present?
+                  {isSoloHero ? 'Use Healing skill (success heals 2d6 HP)' : 'Healer Present?'}
                 </label>
+                {isSoloHero && activeStandardConditions.length > 0 && (
+                  <label className="mt-2 block text-sm font-bold text-stone-700">Condition to clear
+                    <select value={soloRestCondition} onChange={(event) => setSoloRestCondition(event.target.value)} className="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 font-normal">
+                      <option value="">Choose an active condition...</option>
+                      {activeStandardConditions.map((condition) => <option key={condition} value={condition}>{condition.replaceAll('_', ' ')}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
-              <button onClick={() => handleRest('shift')} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation">
+              {isSoloHero && (
+                <div className="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  <input id="character-sheet-solo-safe-location" aria-label="Confirm safe location for Solo Shift Rest" type="checkbox" checked={soloSafeLocation} onChange={(event) => setSoloSafeLocation(event.target.checked)} className="mt-0.5 h-5 w-5 accent-[#1a472a]" />
+                  <span><strong>Safe location confirmed</strong><span className="block text-xs">Required before taking a Shift Rest.</span></span>
+                </div>
+              )}
+              <button type="button" onClick={() => handleRest('shift')} disabled={(isSoloHero && !soloSafeLocation) || isSoloRestSaving} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation disabled:cursor-not-allowed disabled:opacity-50">
                 <div className="font-bold text-[#1a472a]">Shift Rest (6 hours)</div>
                 <div className="text-sm text-stone-600">Full HP/WP and conditions. Advances temporary severe injuries by one shift.</div>
               </button>
             </div>
-            <button onClick={() => setShowRestOptionsModal(false)} className="mt-4 w-full py-3 text-stone-500 hover:text-stone-800 font-bold uppercase text-xs tracking-widest">Cancel</button>
+            <button type="button" onClick={() => setShowRestOptionsModal(false)} disabled={isSoloRestSaving} className="mt-4 w-full py-3 text-stone-500 hover:text-stone-800 font-bold uppercase text-xs tracking-widest disabled:opacity-50">Cancel</button>
          </div>
       </div>
     );
@@ -869,7 +939,7 @@ export function CharacterSheet() {
                           onModify={handleStatModify}
                         />
                     ) : (
-                        <DeathRollTracker character={character} />
+                        <DeathRollTracker character={character} soloMode={isSoloHero} soloState={isSoloHero ? soloState : undefined} />
                     )}
                     
                     {/* UPDATED: StatTracker for WP */}

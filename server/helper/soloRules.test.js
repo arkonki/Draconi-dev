@@ -6,6 +6,7 @@ import {
   findTableEntry,
   resolveFortune,
   resolveExplorationFind,
+  resolveLocationDetails,
   resolveInspiration,
   resolveNarrativeDamage,
   resolveSevereInjury,
@@ -284,6 +285,82 @@ describe('Solo rule resolution', () => {
     expect(resolveExplorationFind(entries, fixedRolls(10, 10, 10), 3)).toMatchObject({
       dice: [10, 10, 10],
       rerollLimitReached: true,
+    });
+  });
+
+  it('resolves the exact scavenge subtables and preserves every die', () => {
+    const entries = [
+      { min: 1, max: 1, key: 'danger', label: 'Unexpected danger', subtable_key: 'danger' },
+      { min: 2, max: 4, key: 'nothing', label: 'Nothing' },
+      { min: 5, max: 5, key: 'supplies', label: 'Supplies', subtable_key: 'supplies' },
+      { min: 6, max: 6, key: 'item', label: 'Item', subtable_key: 'items' },
+      { min: 7, max: 9, key: 'treasure', label: 'Treasure', treasure_cards: 1 },
+      { min: 10, max: 10, key: 'treasure_again', label: 'Treasure and roll again', treasure_cards: 1, reroll: true },
+    ];
+    const tables = {
+      danger: { tableKey: 'danger', version: 'v1', dieSides: 4, entries: ['Creature', 'Cursed item', 'Noxious spores', 'Trap'] },
+      supplies: { tableKey: 'supplies', version: 'v1', dieSides: 6, entries: ['Bandages', 'Field ration', 'Fine clothes', 'Lockpicks', 'Quiver of arrows', 'Torch'] },
+      items: { tableKey: 'items', version: 'v1', dieSides: 4, entries: ['Key', 'Map', 'Strange device', 'Written message'] },
+    };
+    expect(resolveExplorationFind(entries, fixedRolls(1, 4), 5, { tables })).toMatchObject({
+      expression: '1d10 + 1d4',
+      dice: [1, 4],
+      dieSides: [10, 4],
+      results: [{ key: 'danger', subtable: { roll: 4, label: 'Trap', tableKey: 'danger' } }],
+    });
+    expect(resolveExplorationFind(entries, fixedRolls(10, 6, 4), 5, { tables })).toMatchObject({
+      expression: '2d10 + 1d4',
+      dice: [10, 6, 4],
+      results: [
+        { key: 'treasure_again', treasureCards: 1, reroll: true },
+        { key: 'item', treasureCards: 0, reroll: false, subtable: { label: 'Written message' } },
+      ],
+    });
+  });
+
+  it('rolls location detail categories and their linked d20 results', () => {
+    const tables = {
+      solo_location_detail: {
+        tableKey: 'solo_location_detail', version: 'v1', dieSides: 4,
+        entries: [
+          { key: 'contents', label: 'Contents', subtable_key: 'contents' },
+          { key: 'environment', label: 'Environment', subtable_key: 'environment' },
+          { key: 'oddity', label: 'Oddity', subtable_key: 'oddity' },
+          { key: 'danger', label: 'Danger', subtable_key: 'danger' },
+        ],
+      },
+      contents: { tableKey: 'contents', version: 'v1', dieSides: 20, entries: Array(20).fill('Abandoned supplies') },
+      environment: { tableKey: 'environment', version: 'v1', dieSides: 20, entries: Array(20).fill('Chilling cold') },
+      oddity: { tableKey: 'oddity', version: 'v1', dieSides: 20, entries: Array(20).fill('Arcane symbols') },
+      danger: { tableKey: 'danger', version: 'v1', dieSides: 20, entries: Array(20).fill('Hidden trap') },
+    };
+    expect(resolveLocationDetails(tables, fixedRolls(2, 1, 7, 4, 11))).toMatchObject({
+      expression: '3d4 + 2d20',
+      dice: [2, 1, 7, 4, 11],
+      detailCount: 2,
+      details: [
+        { category: { key: 'contents' }, detail: { roll: 7, label: 'Abandoned supplies' } },
+        { category: { key: 'danger' }, detail: { roll: 11, label: 'Hidden trap' } },
+      ],
+    });
+  });
+
+  it('returns structured search follow-ups for traps, paths, and treasure', () => {
+    const entries = [
+      { min: 1, max: 1, key: 'foe', label: 'Foe', boon_on_first_action: true },
+      { min: 2, max: 2, key: 'trap', label: 'Trap', required_check: { skill: 'Sleight of Hand', modifier: 'boon' }, reroll_after_resolution: true },
+      { min: 3, max: 3, key: 'path', label: 'Path', waypoint_count_die: { count: 1, sides: 4 } },
+      { min: 4, max: 8, key: 'treasure', label: 'Treasure', treasure_cards: 1 },
+      { min: 9, max: 10, key: 'vault', label: 'Vault', treasure_cards: 2, reroll: true },
+    ];
+    expect(resolveExplorationFind(entries, fixedRolls(2))).toMatchObject({
+      results: [{ key: 'trap', rerollAfterResolution: true, requiredCheck: { skill: 'Sleight of Hand', modifier: 'boon' } }],
+    });
+    expect(resolveExplorationFind(entries, fixedRolls(3, 4))).toMatchObject({
+      expression: '1d10 + 1d4', dice: [3, 4], results: [{ key: 'path', waypointCount: 4 }],
+    });
+    expect(resolveExplorationFind(entries, fixedRolls(9, 6))).toMatchObject({
+      dice: [9, 6], results: [{ key: 'vault', treasureCards: 2 }, { key: 'treasure', treasureCards: 1 }],
     });
   });
 

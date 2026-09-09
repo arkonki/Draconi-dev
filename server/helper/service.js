@@ -11,7 +11,7 @@ import {
 import { requireCampaignAccess } from './auth.js';
 import { HelperError } from './errors.js';
 import { conditionId } from './identifiers.js';
-import { applyActorChangeSet, validateActorCanAct } from './rules.js';
+import { applyActorChangeSet, consumeRalliedAction, validateActorCanAct } from './rules.js';
 import {
   parseTrustedDiceExpression,
   resolveTrustedManualRoll,
@@ -42,6 +42,15 @@ const STANDARD_CONDITION_KEYS = new Set([
   'disheartened',
 ]);
 const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
+const ACTIVE_SOLO_PROMPT_TABLE_VERSION = 'user-solo-v1';
+const ACTIVE_SOLO_EXPLORATION_TABLE_VERSION = 'user-solo-v1';
+const SOLO_LOCATION_TABLE_KEYS = [
+  'solo_location_detail',
+  'solo_location_contents',
+  'solo_location_environment',
+  'solo_location_oddity',
+  'solo_location_danger',
+];
 
 function gameTimeForOutput(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -2131,7 +2140,7 @@ export async function drawInspiration(user, input, { sourceClient } = {}) {
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
     const tableList = await Promise.all(input.columns.map((column) => (
-      loadSoloRuleTable(client, `inspiration_${column}`, 'draconi-generic-v1')
+      loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
     )));
     const tables = Object.fromEntries(tableList.map((table, index) => [input.columns[index], table]));
     const resolution = resolveInspiration({ columns: input.columns, tables });
@@ -2147,7 +2156,7 @@ export async function drawInspiration(user, input, { sourceClient } = {}) {
       keptIndices: resolution.keptIndices,
       keptValues: resolution.keptValues,
       tableKey: 'inspiration',
-      tableVersion: 'draconi-generic-v1',
+      tableVersion: ACTIVE_SOLO_PROMPT_TABLE_VERSION,
       result: {
         columns: input.columns,
         results: resolution.results,
@@ -2191,7 +2200,7 @@ export async function drawInspiration(user, input, { sourceClient } = {}) {
       summary: `Inspiration: ${resolution.phrase} (${resolution.dice.join(', ')}).`,
       state_excerpt: {
         roll: recordedRollForOutput(rollRow),
-        notice: 'This result uses the generic Draconi inspiration table, not the official adventure table.',
+        notice: 'This result uses the installed custom Solo inspiration table.',
       },
     };
     await storeIdempotentResult(client, {
@@ -2248,22 +2257,14 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
       criticalTable = await loadSoloRuleTable(
         client,
         `solo_${check.outcome}_effect`,
-        'draconi-generic-v1',
+        ACTIVE_SOLO_PROMPT_TABLE_VERSION,
       );
       criticalEffect = resolveSoloCriticalEffect(criticalTable.entries);
     }
 
-    const priorMarks = Array.isArray(loadedActor.storage.row.marked_skills)
-      ? loadedActor.storage.row.marked_skills
-      : [];
-    const markEligible = input.check_type === 'skill' && ['dragon', 'demon'].includes(check.outcome);
-    const alreadyMarked = priorMarks.some((name) => normalizedSkillName(name) === normalizedSkillName(selected.name));
-    const advancementMarked = markEligible && !alreadyMarked;
-    const resultingMarks = advancementMarked ? [...priorMarks, selected.name] : priorMarks;
-    if (advancementMarked) {
-      await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
-      await client.query('UPDATE characters SET marked_skills = $1 WHERE id = $2', [resultingMarks, state.player_character_id]);
-    }
+    const advancementMark = input.check_type === 'skill'
+      ? await markSkillAdvancement(client, loadedActor, selected.name, check)
+      : { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: loadedActor.actor.markedSkills || [] };
 
     const resultingRevision = previousRevision + 1;
     const allDice = [...check.dice, ...(criticalEffect?.dice || [])];
@@ -2299,9 +2300,9 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
           advisory: true,
         } : null,
         advancementMark: {
-          eligible: markEligible,
-          added: advancementMarked,
-          alreadyMarked: markEligible && alreadyMarked,
+          eligible: advancementMark.eligible,
+          added: advancementMark.added,
+          alreadyMarked: advancementMark.alreadyMarked,
         },
         requiresFailForward: check.outcome === 'failure' || check.outcome === 'demon',
         context: input.context || null,
@@ -2334,7 +2335,7 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
           label: criticalEffect.label,
           advisory: true,
         } : null,
-        advancementMarkAdded: advancementMarked,
+        advancementMarkAdded: advancementMark.added,
         requiresFailForward: check.outcome === 'failure' || check.outcome === 'demon',
         context: input.context || null,
         reason: input.reason,
@@ -2347,7 +2348,7 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
     });
 
     const effectSummary = criticalEffect ? ` ${criticalEffect.label}.` : '';
-    const markSummary = advancementMarked ? ` ${selected.name} was marked for advancement.` : '';
+    const markSummary = advancementMark.added ? ` ${selected.name} was marked for advancement.` : '';
     const failureSummary = check.outcome === 'failure' || check.outcome === 'demon'
       ? ' Continue with a complication instead of blocking the story.'
       : '';
@@ -2363,14 +2364,9 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
           ...criticalEffect,
           tableKey: criticalTable.tableKey,
           tableVersion: criticalTable.version,
-          notice: 'This is a generic Solo prompt. Confirm its fictional meaning before applying another state change.',
+          notice: 'This is an advisory Solo table result. Confirm its fictional meaning before applying another state change.',
         } : null,
-        advancementMark: {
-          skill: input.check_type === 'skill' ? selected.name : null,
-          added: advancementMarked,
-          alreadyMarked: markEligible && alreadyMarked,
-          markedSkills: resultingMarks,
-        },
+        advancementMark,
         requiresFailForward: check.outcome === 'failure' || check.outcome === 'demon',
       },
     };
@@ -3126,11 +3122,13 @@ function normalizedSkillName(value) {
     .replace(/\s+/g, ' ');
 }
 
-function actorSkillTarget(actor, skillName) {
+function actorSkill(actor, skillName) {
   const targetName = normalizedSkillName(skillName);
   const match = Object.entries(actor.skills || {}).find(([name]) => normalizedSkillName(name) === targetName);
   const target = Number(match?.[1]);
-  return Number.isInteger(target) && target >= 1 && target <= 20 ? target : null;
+  return Number.isInteger(target) && target >= 1 && target <= 20
+    ? { name: match[0], target }
+    : null;
 }
 
 function actorCheckTarget(actor, checkType, checkName) {
@@ -3153,6 +3151,28 @@ function actorCheckTarget(actor, checkType, checkName) {
     throw new HelperError(409, 'INVALID_STATE', `The solo hero has no usable ${checkName} skill value.`);
   }
   return { name: match[0], target };
+}
+
+async function markSkillAdvancement(client, loadedActor, skillName, check) {
+  const priorMarks = Array.isArray(loadedActor.storage?.row?.marked_skills)
+    ? loadedActor.storage.row.marked_skills
+    : Array.isArray(loadedActor.actor?.markedSkills) ? loadedActor.actor.markedSkills : [];
+  const eligible = ['dragon', 'demon'].includes(check?.outcome);
+  const alreadyMarked = eligible && priorMarks.some(
+    (name) => normalizedSkillName(name) === normalizedSkillName(skillName),
+  );
+  const added = eligible && !alreadyMarked;
+  const markedSkills = added ? [...priorMarks, skillName] : priorMarks;
+  if (added) {
+    if (loadedActor.storage?.type !== 'character') {
+      throw new HelperError(409, 'INVALID_STATE', 'Only a player-character skill can be marked for advancement.');
+    }
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query('UPDATE characters SET marked_skills = $1 WHERE id = $2', [markedSkills, loadedActor.actor.id]);
+    loadedActor.storage.row.marked_skills = markedSkills;
+    loadedActor.actor.markedSkills = markedSkills;
+  }
+  return { skill: skillName, eligible, added, alreadyMarked, markedSkills };
 }
 
 async function loadExplorationContext(client, campaignId, waypointId, state) {
@@ -3221,8 +3241,28 @@ async function updateExplorationThreat(client, threat, amount) {
 }
 
 function explorationFindingSummary(groups) {
-  const labels = groups.flatMap((group) => group.results.map((result) => result.label));
+  const labels = groups.flatMap((group) => group.results.map((result) => {
+    const additions = [];
+    if (result.subtable?.label) additions.push(result.subtable.label);
+    if (result.waypointCount) additions.push(`${result.waypointCount} new waypoint${result.waypointCount === 1 ? '' : 's'}`);
+    if (result.locationDetails?.details?.length) {
+      additions.push(result.locationDetails.details.map(
+        ({ category, detail }) => `${category.label}: ${detail.label}`,
+      ).join('; '));
+    }
+    if (result.rerollAfterResolution && result.requiredCheck) {
+      additions.push(`${result.requiredCheck.skill} with a ${result.requiredCheck.modifier}, then reroll`);
+    }
+    return additions.length ? `${result.label} (${additions.join('; ')})` : result.label;
+  }));
   return labels.length > 0 ? labels.join(' + ') : 'Nothing useful';
+}
+
+async function loadExplorationTables(client, keys) {
+  const tables = await Promise.all(keys.map((key) => (
+    loadSoloRuleTable(client, key, ACTIVE_SOLO_EXPLORATION_TABLE_VERSION)
+  )));
+  return Object.fromEntries(tables.map((table) => [table.tableKey, table]));
 }
 
 export async function searchWaypoint(user, input, { sourceClient } = {}) {
@@ -3244,26 +3284,54 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
     const context = await loadExplorationContext(client, input.campaign_id, input.waypoint_id, state);
     const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
-    const table = await loadSoloRuleTable(client, 'exploration_find', 'draconi-generic-v1');
+    const tables = await loadExplorationTables(client, ['solo_search', ...SOLO_LOCATION_TABLE_KEYS]);
+    const table = tables.solo_search;
 
     let check = null;
+    let checkedSkillName = null;
     let findingGroups = [];
-    if (input.known_location) {
-      findingGroups = [resolveExplorationFind(table.entries)];
+    if (input.known_nature) {
+      findingGroups = [{
+        expression: null,
+        dice: [],
+        dieSides: [],
+        keptIndices: [],
+        keptValues: [],
+        rerollLimitReached: false,
+        results: [{
+          roll: null,
+          key: 'known_item',
+          label: 'The known hidden item is found without a table roll',
+          kind: 'known',
+          reroll: false,
+        }],
+      }];
+    } else if (input.known_location) {
+      findingGroups = [resolveExplorationFind(table.entries, secureRollDie, 5, {
+        dieSides: table.dieSides,
+        tables,
+      })];
     } else {
-      const target = actorSkillTarget(loadedActor.actor, 'Spot Hidden');
-      if (target === null) {
+      const selectedSkill = actorSkill(loadedActor.actor, 'Spot Hidden');
+      if (!selectedSkill) {
         throw new HelperError(
           409,
           'INVALID_STATE',
           'The solo character has no usable Spot Hidden skill value.',
         );
       }
-      check = resolveSoloSkillCheck({ target });
+      checkedSkillName = selectedSkill.name;
+      check = resolveSoloSkillCheck({ target: selectedSkill.target });
       if (check.outcome === 'dragon') {
-        findingGroups = [resolveExplorationFind(table.entries), resolveExplorationFind(table.entries)];
+        findingGroups = [
+          resolveExplorationFind(table.entries, secureRollDie, 5, { dieSides: table.dieSides, tables }),
+          resolveExplorationFind(table.entries, secureRollDie, 5, { dieSides: table.dieSides, tables }),
+        ];
       } else if (check.outcome === 'success') {
-        findingGroups = [resolveExplorationFind(table.entries)];
+        findingGroups = [resolveExplorationFind(table.entries, secureRollDie, 5, {
+          dieSides: table.dieSides,
+          tables,
+        })];
       } else if (check.outcome === 'demon') {
         findingGroups = [{
           expression: null,
@@ -3282,6 +3350,10 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       }
     }
 
+    const advancementMark = check
+      ? await markSkillAdvancement(client, loadedActor, checkedSkillName, check)
+      : { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: loadedActor.actor.markedSkills || [] };
+
     const threatResult = await updateExplorationThreat(client, context.threat, 1);
     const { rows: explorationRows } = await client.query(
       `UPDATE solo_waypoint_exploration
@@ -3292,30 +3364,45 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       [context.waypoint.id],
     );
     const resultingRevision = previousRevision + 1;
-    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const durationSeconds = SOLO_REST_SECONDS.stretch;
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, durationSeconds);
+    const gameTime = advanceGameTime(access.campaign.game_time, durationSeconds, {
+      kind: 'solo_search',
+      waypointId: context.waypoint.id,
+    });
+    await client.query(
+      'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
+      [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
+    );
 
     const tableDice = findingGroups.flatMap((group) => group.dice);
     const dice = [...(check?.dice || []), ...tableDice];
-    const expressionParts = [check?.expression, tableDice.length > 0 ? `${tableDice.length}d10` : null].filter(Boolean);
+    const expressionParts = [check?.expression, ...findingGroups.map((group) => group.expression)].filter(Boolean);
     const rollRow = await insertRecordedRoll(client, {
       campaignId: input.campaign_id,
       sessionId: access.campaign.active_session_id,
       actorId: state.player_character_id,
       userId: user.id,
       purpose: `Search: ${context.waypoint.title || `waypoint ${context.waypoint.position + 1}`}`,
-      expression: expressionParts.join(' + ') || '1d20',
+      expression: expressionParts.join(' + ') || 'no roll',
       dice,
       keptIndices: dice.map((_, index) => index),
       keptValues: [...dice],
-      tableKey: table.tableKey,
-      tableVersion: table.version,
+      tableKey: input.known_nature ? null : table.tableKey,
+      tableVersion: input.known_nature ? state.ruleset_version : table.version,
       result: {
         action: 'search',
         knownLocation: input.known_location,
-        skill: input.known_location ? null : 'Spot Hidden',
+        knownNature: input.known_nature,
+        skill: checkedSkillName,
         check,
+        advancementMark,
         findingChoices: findingGroups.map((group) => group.results),
         requiresChoice: check?.outcome === 'dragon',
+        durationSeconds,
+        gameTime,
+        itemDurationChanges,
         context: input.context || null,
         sourceKind: table.sourceKind,
       },
@@ -3334,11 +3421,16 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
         waypointId: context.waypoint.id,
         rollId: rollRow.id,
         knownLocation: input.known_location,
+        knownNature: input.known_nature,
         check,
+        advancementMark,
         findingChoices: findingGroups.map((group) => group.results),
         requiresChoice: check?.outcome === 'dragon',
         searchCount: Number(explorationRows[0].search_count),
         stretchesSpent: Number(explorationRows[0].stretches_spent),
+        durationSeconds,
+        gameTime,
+        itemDurationChanges,
         context: input.context || null,
         reason: input.reason,
       },
@@ -3371,7 +3463,7 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       resultingRevision,
     });
 
-    const outcome = input.known_location ? 'known location' : check.outcome;
+    const outcome = input.known_nature ? 'known nature' : input.known_location ? 'known location' : check.outcome;
     const response = {
       success: true,
       campaign_revision: resultingRevision,
@@ -3381,7 +3473,10 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
         roll: recordedRollForOutput(rollRow),
         waypoint: soloWaypointForOutput({ ...context.waypoint, ...explorationRows[0] }),
         threat: soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered }),
-        notice: 'Findings use the generic Draconi exploration table, not an official adventure table.',
+        advancementMark,
+        gameTime,
+        itemDurationChanges,
+        notice: 'Search uses the installed Solo v1.2 table. Structured follow-ups must be resolved before applying their effects.',
       },
     };
     await storeIdempotentResult(client, {
@@ -3414,8 +3509,17 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
     const context = await loadExplorationContext(client, input.campaign_id, input.waypoint_id, state);
-    const table = await loadSoloRuleTable(client, 'exploration_find', 'draconi-generic-v1');
-    const finding = resolveExplorationFind(table.entries);
+    const tables = await loadExplorationTables(client, [
+      'solo_scavenge',
+      'solo_scavenge_danger',
+      'solo_scavenge_supplies',
+      'solo_scavenge_interesting_item',
+    ]);
+    const table = tables.solo_scavenge;
+    const finding = resolveExplorationFind(table.entries, secureRollDie, 5, {
+      dieSides: table.dieSides,
+      tables,
+    });
     const spendsStretch = input.spend_stretch || Number(context.exploration.scavenge_count) >= 1;
     const threatResult = spendsStretch
       ? await updateExplorationThreat(client, context.threat, 1)
@@ -3429,7 +3533,18 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
       [context.waypoint.id, spendsStretch ? 1 : 0],
     );
     const resultingRevision = previousRevision + 1;
-    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const durationSeconds = spendsStretch ? SOLO_REST_SECONDS.stretch : 2 * 60;
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, durationSeconds);
+    const gameTime = advanceGameTime(access.campaign.game_time, durationSeconds, {
+      kind: 'solo_scavenge',
+      waypointId: context.waypoint.id,
+      spentStretch: spendsStretch,
+    });
+    await client.query(
+      'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
+      [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
+    );
     const rollRow = await insertRecordedRoll(client, {
       campaignId: input.campaign_id,
       sessionId: access.campaign.active_session_id,
@@ -3447,6 +3562,9 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
         findings: finding.results,
         rerollLimitReached: finding.rerollLimitReached,
         spentStretch: spendsStretch,
+        durationSeconds,
+        gameTime,
+        itemDurationChanges,
         context: input.context || null,
         sourceKind: table.sourceKind,
       },
@@ -3467,6 +3585,9 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
         spentStretch: spendsStretch,
         scavengeCount: Number(explorationRows[0].scavenge_count),
         stretchesSpent: Number(explorationRows[0].stretches_spent),
+        durationSeconds,
+        gameTime,
+        itemDurationChanges,
         context: input.context || null,
         reason: input.reason,
       },
@@ -3513,7 +3634,9 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
         threat: threatResult
           ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
           : soloThreatForOutput(context.threat),
-        notice: 'Findings use the generic Draconi exploration table, not an official adventure table.',
+        gameTime,
+        itemDurationChanges,
+        notice: 'Scavenge uses the installed Solo v1.2 table. Findings remain prompts until their inventory or story effects are confirmed.',
       },
     };
     await storeIdempotentResult(client, {
@@ -3592,8 +3715,9 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       throw new HelperError(400, 'VALIDATION_ERROR', 'The chosen condition is not active on the solo hero.');
     }
 
-    const healingTarget = input.use_healing ? actorSkillTarget(actor, 'Healing') : null;
-    if (input.use_healing && healingTarget === null) {
+    const healingSkill = input.use_healing ? actorSkill(actor, 'Healing') : null;
+    const healingTarget = healingSkill?.target ?? null;
+    if (input.use_healing && !healingSkill) {
       throw new HelperError(409, 'INVALID_STATE', 'The solo hero has no usable Healing skill value.');
     }
     const resolution = resolveSoloRest({
@@ -3601,6 +3725,9 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
       useHealing: input.use_healing,
       healingTarget,
     });
+    const advancementMark = resolution.healingCheck
+      ? await markSkillAdvancement(client, loadedActor, healingSkill.name, resolution.healingCheck)
+      : { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: actor.markedSkills || [] };
     const before = {
       hp: { current: actor.currentHp, max: actor.maxHp },
       wp: { current: actor.currentWp, max: actor.maxWp },
@@ -3742,6 +3869,7 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         action: 'solo_rest',
         restType: input.rest_type,
         healingCheck: resolution.healingCheck,
+        advancementMark,
         hpRecoveryRolled: resolution.hpRecovery,
         hpRecoveryApplied: hpApplied,
         wpRecoveryRolled: resolution.wpRecovery,
@@ -3765,6 +3893,7 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         durationSeconds,
         rollId: rollRow?.id || null,
         healingCheck: resolution.healingCheck,
+        advancementMark,
         before,
         after: {
           hp: { current: nextHp, max: actor.maxHp },
@@ -3858,6 +3987,7 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         gameTime: gameTimeForOutput(gameTime),
         itemDurationChanges: advancedEquipment.changes,
         roll: rollRow ? recordedRollForOutput(rollRow) : null,
+        advancementMark,
         injuryRecovery: injuryChanges.map((change) => change.after),
         injuryShiftCount: characterRecoveryState ? Number(characterRecoveryState.shift_count) : null,
         threat: threatResult
@@ -3912,11 +4042,13 @@ export async function resolveSoloDyingAction(user, input, { sourceClient } = {})
       target = Number(actor.attributes?.CON);
       skill = 'CON';
     } else if (input.action === 'self_rally') {
-      target = actorSkillTarget(actor, 'Persuasion');
-      skill = 'Persuasion';
+      const selectedSkill = actorSkill(actor, 'Persuasion');
+      target = selectedSkill?.target ?? null;
+      skill = selectedSkill?.name || 'Persuasion';
     } else if (input.action === 'life_saving_healing') {
-      target = actorSkillTarget(actor, 'Healing');
-      skill = 'Healing';
+      const selectedSkill = actorSkill(actor, 'Healing');
+      target = selectedSkill?.target ?? null;
+      skill = selectedSkill?.name || 'Healing';
     }
     if (input.action !== 'recover_stabilized'
       && (!Number.isInteger(target) || target < 1 || target > 20)) {
@@ -3931,6 +4063,9 @@ export async function resolveSoloDyingAction(user, input, { sourceClient } = {})
       failed: Number(actor.deathRolls?.failed || 0),
       injuryEntries: injuryTable.entries,
     });
+    const advancementMark = ['self_rally', 'life_saving_healing'].includes(input.action)
+      ? await markSkillAdvancement(client, loadedActor, skill, resolution.check)
+      : { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: actor.markedSkills || [] };
     const recovered = resolution.recoveredHp > 0;
     const nextDeathRolls = recovered
       ? { passed: 0, failed: 0 }
@@ -3972,6 +4107,7 @@ export async function resolveSoloDyingAction(user, input, { sourceClient } = {})
         action: input.action,
         skill,
         check: resolution.check,
+        advancementMark,
         deathRollsBefore: actor.deathRolls,
         deathRollsAfter: nextDeathRolls,
         rallied: resultingActor.isRallied,
@@ -4004,6 +4140,7 @@ export async function resolveSoloDyingAction(user, input, { sourceClient } = {})
         rollId: rollRow.id,
         skill,
         check: resolution.check,
+        advancementMark,
         before: {
           hp: actor.currentHp,
           deathRolls: actor.deathRolls,
@@ -4049,6 +4186,7 @@ export async function resolveSoloDyingAction(user, input, { sourceClient } = {})
       state_excerpt: {
         actor: actorForOutput(resultingActor),
         roll: recordedRollForOutput(rollRow),
+        advancementMark,
         injury: injuryRow ? characterInjuryForOutput(injuryRow) : null,
       },
     };
@@ -4415,6 +4553,7 @@ async function resolveCharacterInjuryActionInternal(user, input, { sourceClient,
     let resolution = null;
     let rollRow = null;
     let updatedInjury;
+    let advancementMark = { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: loadedActor.actor.markedSkills || [] };
     if (input.action === 'medical_care') {
       if (injury.permanent || injury.remaining_healing_shifts === null) {
         throw new HelperError(409, 'INVALID_STATE', 'Medical care cannot remove a permanent injury.');
@@ -4439,14 +4578,15 @@ async function resolveCharacterInjuryActionInternal(user, input, { sourceClient,
       if (injury.last_treatment_shift !== null && Number(injury.last_treatment_shift) === currentShift) {
         throw new HelperError(409, 'INVALID_STATE', 'Medical care has already been attempted for this injury during the current shift.');
       }
-      const healingTarget = actorSkillTarget(loadedActor.actor, 'Healing');
-      if (healingTarget === null) {
+      const healingSkill = actorSkill(loadedActor.actor, 'Healing');
+      if (!healingSkill) {
         throw new HelperError(409, 'INVALID_STATE', 'The character has no usable Healing skill value.');
       }
       resolution = resolveSoloInjuryTreatment({
-        healingTarget,
+        healingTarget: healingSkill.target,
         remainingHealingShifts: Number(injury.remaining_healing_shifts),
       });
+      advancementMark = await markSkillAdvancement(client, loadedActor, healingSkill.name, resolution.check);
       const { rows } = await client.query(
         `UPDATE character_injuries SET
            remaining_healing_shifts = $2,
@@ -4490,6 +4630,7 @@ async function resolveCharacterInjuryActionInternal(user, input, { sourceClient,
           action: 'medical_care',
           injuryId: injury.id,
           check: resolution.check,
+          advancementMark,
           succeeded: resolution.succeeded,
           previousRemainingHealingShifts: resolution.previousRemainingHealingShifts,
           remainingHealingShifts: resolution.remainingHealingShifts,
@@ -4513,6 +4654,7 @@ async function resolveCharacterInjuryActionInternal(user, input, { sourceClient,
         injuryId: injury.id,
         rollId: rollRow?.id || null,
         check: resolution?.check || null,
+        advancementMark,
         succeeded: resolution?.succeeded ?? true,
         before: characterInjuryForOutput(injury),
         after: characterInjuryForOutput(updatedInjury),
@@ -4539,6 +4681,7 @@ async function resolveCharacterInjuryActionInternal(user, input, { sourceClient,
       state_excerpt: {
         injury: characterInjuryForOutput(updatedInjury),
         roll: rollRow ? recordedRollForOutput(rollRow) : null,
+        advancementMark,
       },
     };
     await storeIdempotentResult(client, {
@@ -5007,9 +5150,18 @@ function completedInitiativeSlotsFor(row) {
     : [];
 }
 
+function combatantCanAct(row) {
+  return row.current_hp > 0 || (
+    row.is_player_character
+    && row.current_hp === 0
+    && Boolean(row.character_is_rallied)
+    && Number(row.character_death_rolls_failed || 0) < 3
+  );
+}
+
 function pendingInitiativeActions(rows) {
   return rows.flatMap((row) => {
-    if (row.has_acted || row.current_hp <= 0) return [];
+    if (row.has_acted || !combatantCanAct(row)) return [];
     const completed = new Set(completedInitiativeSlotsFor(row));
     return initiativeSlotsFor(row)
       .filter((slot) => slot === null || !completed.has(slot))
@@ -5083,6 +5235,8 @@ function combatForOutput(access, encounter, rows) {
       hasActed: row.has_acted,
       isActiveTurn: row.is_active_turn || row.id === encounter.active_combatant_id,
       defeated: row.current_hp <= 0,
+      rallied: Boolean(row.character_is_rallied),
+      canAct: combatantCanAct(row),
     })),
   };
 }
@@ -5111,8 +5265,10 @@ async function loadCombatContext(client, campaignId, combatId, { forUpdate = fal
        c.current_hp AS character_current_hp,
        c.max_hp AS character_max_hp,
        c.current_wp AS character_current_wp,
-       c.max_wp AS character_max_wp
-       , c.heroic_ability AS character_heroic_ability
+       c.max_wp AS character_max_wp,
+       c.heroic_ability AS character_heroic_ability,
+       c.is_rallied AS character_is_rallied,
+       c.death_rolls_failed AS character_death_rolls_failed
      FROM encounter_combatants ec
      LEFT JOIN characters c ON c.id = ec.character_id
      WHERE ec.encounter_id = $1
@@ -6130,7 +6286,8 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       forUpdate: true,
       combatId: input.combat_id,
     });
-    validateActorCanAct(acting.actor);
+    const actionValidation = validateActorCanAct(acting.actor);
+    const consumesRalliedAction = acting.actor.currentHp === 0 && Boolean(acting.actor.isRallied);
     loadedActors.set(input.actor_id, acting);
     const resolutions = [];
     for (const effect of input.effects) {
@@ -6143,6 +6300,31 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       const resolution = applyActorChangeSet(loaded.actor, effect.changes, conditionId);
       resolutions.push({ actorId: effect.actor_id, storage: loaded.storage, resolution });
       loadedActors.set(effect.actor_id, { actor: resolution.result, storage: loaded.storage });
+    }
+    if (consumesRalliedAction) {
+      const currentActing = loadedActors.get(input.actor_id);
+      const rallyConsumption = consumeRalliedAction(currentActing.actor);
+      const existing = [...resolutions].reverse().find((item) => item.actorId === input.actor_id);
+      if (existing) {
+        existing.resolution.result = rallyConsumption.actor;
+        existing.resolution.events.push(rallyConsumption.event);
+        existing.resolution.warnings.push(...actionValidation.warnings, ...rallyConsumption.warnings);
+        existing.resolution.explanation = `${existing.resolution.explanation} ${rallyConsumption.explanation}`.trim();
+        loadedActors.set(input.actor_id, { actor: existing.resolution.result, storage: existing.storage });
+      } else {
+        resolutions.push({
+          actorId: input.actor_id,
+          storage: currentActing.storage,
+          resolution: {
+            valid: true,
+            result: rallyConsumption.actor,
+            events: [rallyConsumption.event],
+            warnings: [...actionValidation.warnings, ...rallyConsumption.warnings],
+            explanation: rallyConsumption.explanation,
+          },
+        });
+        loadedActors.set(input.actor_id, { actor: rallyConsumption.actor, storage: currentActing.storage });
+      }
     }
 
     const resultingRevision = previousRevision + 1;
@@ -6222,6 +6404,7 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
         action: input.action,
         outcome: input.outcome,
         consumeTurn: input.consume_turn,
+        ralliedActionConsumed: consumesRalliedAction,
         affectedActorIds: resolutions.map((item) => item.actorId),
         reason: input.reason,
       },
@@ -6250,6 +6433,7 @@ export async function resolveGameAction(user, input, { sourceClient } = {}) {
       state_excerpt: {
         combat,
         warnings: resolutions.flatMap((item) => item.resolution.warnings),
+        ralliedActionConsumed: consumesRalliedAction,
       },
     };
     await storeIdempotentResult(client, {
@@ -6291,7 +6475,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     const activeAction = currentInitiativeAction(context.encounter, context.rows);
     const active = activeAction?.row || null;
     const activeCompleted = !active
-      || active.current_hp <= 0
+      || !combatantCanAct(active)
       || active.has_acted
       || (activeAction.slot !== null && activeAction.slot !== undefined
         && completedInitiativeSlotsFor(active).includes(activeAction.slot));
@@ -6305,7 +6489,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     }
 
     const afterCurrent = context.rows.map((row) => (
-      active && row.id === active.id && row.current_hp <= 0
+      active && row.id === active.id && !combatantCanAct(row)
         ? { ...row, has_acted: true, completed_initiative_slots: initiativeSlotsFor(row).filter((slot) => slot !== null) }
         : row
     ));
@@ -6313,7 +6497,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     let nextAction = pendingInitiativeActions(afterCurrent)[0];
     let startedNewRound = false;
     if (!nextAction) {
-      const living = orderedCombatants(afterCurrent).filter((row) => row.current_hp > 0);
+      const living = orderedCombatants(afterCurrent).filter(combatantCanAct);
       if (living.length === 0) {
         throw new HelperError(409, 'INVALID_STATE', 'No living combatant remains. End the combat instead.');
       }
@@ -6343,7 +6527,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
         round,
       });
     } else {
-      if (active && active.current_hp <= 0 && !active.has_acted) {
+      if (active && !combatantCanAct(active) && !active.has_acted) {
         await client.query(
           'UPDATE encounter_combatants SET has_acted = true, completed_initiative_slots = initiative_slots WHERE id = $1',
           [active.id],
