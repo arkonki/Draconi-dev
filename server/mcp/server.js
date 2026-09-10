@@ -1,5 +1,8 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
+  addSoloWaypointsInputSchema,
+  beginSoloReturnInputSchema,
+  claimSoloAdvancementAbilityInputSchema,
   addEncounterParticipantsInputSchema,
   advanceCombatTurnInputSchema,
   advanceThreatInputSchema,
@@ -30,11 +33,14 @@ import {
   mcpReadResultSchema,
   mcpWriteResultSchema,
   pushRollRequestInputSchema,
+  pushSoloCheckInputSchema,
   resolveRollRequestServerInputSchema,
   resolveSoloCheckInputSchema,
   resolveSoloDyingActionInputSchema,
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageInputSchema,
+  resolveSoloAdvancementInputSchema,
+  resolveThreatInputSchema,
   removeEncounterParticipantInputSchema,
   revealWaypointInputSchema,
   scavengeWaypointInputSchema,
@@ -42,6 +48,9 @@ import {
   startCombatInputSchema,
   startSessionInputSchema,
   startSoloMissionInputSchema,
+  replaceSoloHeroicAbilityInputSchema,
+  selectSoloMissionMarksInputSchema,
+  setSoloThreatInputSchema,
   takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
@@ -148,7 +157,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.17.0' },
+    { name: 'dragonbane-helper', version: '1.18.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_resume_state for one consistent continuation snapshot.',
@@ -164,14 +173,16 @@ export function createDragonbaneMcpServer(apiClient) {
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
         'For a trusted general roll, use request_roll first. Use resolve_roll_server only when the request mode permits server dice, then read the immutable result with get_roll_request. An ordinary failed check may use push_roll once, but only after the user chooses an inactive condition and describes how it applies; resolve the returned request according to its mode. Never supply physical dice through MCP or replace a returned result.',
         'For solo play, call get_solo_state before narrating. Fortune, Inspiration, and skill-check results are authoritative only when returned by their tools.',
-        'Use resolve_solo_check for skill or attribute tests outside combat. The server reads the hero target, resolves normal/boon/bane dice, marks a skill on Dragon or Demon, and returns a generic critical prompt.',
+        'Use resolve_solo_check for skill or attribute tests outside combat. An ordinary failure may be pushed exactly once with push_solo_check after the player explains the push and chooses either an inactive condition or the 3 WP Sole Survivor cost. Never push a Demon or an already-pushed result.',
         'When a Solo check returns requiresFailForward, use resolve_solo_check_consequence exactly once for that roll. Ask the user to accept one explicit consequence or offer two contextual consequences for the server to choose with 1D6. Never claim a mechanical consequence before the tool applies it.',
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
         'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
         'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
         'Use resolve_solo_injury_action only after the user explicitly chooses medical care or explicitly confirms a manual healed override. Medical care uses the stored Healing skill, successful care halves remaining recovery, failed care cannot be retried until the next shift, and shift rests advance temporary recovery automatically.',
         'Use resolve_solo_narrative_damage only after the user confirms that narrative damage applies and whether severity is known. During active combat, use resolve_game_action instead.',
-        'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state.',
+        'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state. Use add_solo_waypoints for diversions and begin_solo_return for cleared, dangerous, or impossible return routes.',
+        'When a threat reaches 6, narrate and resolve its event with resolve_solo_threat. A recurring threat resets to 1 only after resolution; replace a removed non-recurring threat with set_solo_threat while delving.',
+        'After a successful Solo mission, complete the authoritative between-mission sequence before starting another: select exactly five new marks, resolve all marked skills with D20 greater than skill and maximum 18, then claim any heroic ability rewards returned for skills reaching 18.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
     },
@@ -281,6 +292,14 @@ export function createDragonbaneMcpServer(apiClient) {
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.selectSoloHeroicAbility(input))));
 
+  server.registerTool('replace_solo_heroic_ability', {
+    title: 'Replace an unsuitable Solo heroic ability',
+    description: 'GM-only. Between missions and after explicit user confirmation, replace one existing unsuitable heroic ability one-for-one with an ability the Solo hero does not already know. This does not replace the additional Solo setup ability.',
+    inputSchema: replaceSoloHeroicAbilityInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.replaceSoloHeroicAbility(input))));
+
   server.registerTool('ask_fortune', {
     title: 'Ask the solo Fortune oracle',
     description: 'GM-only. Resolve a genuinely uncertain solo question with an authoritative server roll, retaining every die, the kept result, table version, and campaign event.',
@@ -305,6 +324,14 @@ export function createDragonbaneMcpServer(apiClient) {
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.resolveSoloCheck(input))));
 
+  server.registerTool('push_solo_check', {
+    title: 'Push one failed Solo check',
+    description: 'GM-only. Push an ordinary failed direct Solo check exactly once after the player explains how the push applies. Atomically take one inactive standard condition, or spend 3 WP when the hero knows Sole Survivor, then record the linked authoritative reroll. Demons and pushed rolls are rejected.',
+    inputSchema: pushSoloCheckInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.pushSoloCheck(input))));
+
   server.registerTool('resolve_solo_check_consequence', {
     title: 'Resolve a failed Solo check consequence',
     description: 'GM-only. After explicit user confirmation, resolve fail-forward exactly once for a failed or Demon Solo check. Record one accepted consequence or provide two contextual alternatives for an authoritative 1D6 selection, then atomically apply the selected guarded effect.',
@@ -322,6 +349,22 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.startSoloMission(input))));
+
+  server.registerTool('add_solo_waypoints', {
+    title: 'Add Solo route waypoints',
+    description: 'GM-only. Insert one to six hidden unknown or diversion waypoints immediately after the current waypoint. Optionally generate each location from the installed Solo area and location tables with immutable server dice.',
+    inputSchema: addSoloWaypointsInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.addSoloWaypoints(input))));
+
+  server.registerTool('begin_solo_return', {
+    title: 'Begin the Solo return journey',
+    description: 'GM-only. After reaching the objective, begin a cleared return without incident, test Awareness or Sneaking for a dangerous route, or generate D4+2 hidden return waypoints when the direct route is impossible.',
+    inputSchema: beginSoloReturnInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.beginSoloReturn(input))));
 
   server.registerTool('reveal_waypoint', {
     title: 'Reveal the next solo waypoint',
@@ -381,11 +424,27 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('advance_threat', {
     title: 'Advance the active solo threat',
-    description: 'GM-only. Advance the current mission threat by 1 or 2 for the supplied reason. At 6, reveal and record its trigger effect; recurring threats reset to 1.',
+    description: 'GM-only. Advance the current mission threat by 1 or 2 for the supplied reason. At 6, reveal and record its trigger effect and leave it triggered until resolved.',
     inputSchema: advanceThreatInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.advanceThreat(input))));
+
+  server.registerTool('resolve_solo_threat', {
+    title: 'Resolve a triggered Solo threat',
+    description: 'GM-only. Record how a threat event at 6 was resolved. A recurring inherent threat resets to 1; a non-recurring threat is removed from the active mission and must be replaced while delving.',
+    inputSchema: resolveThreatInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveThreat(input))));
+
+  server.registerTool('set_solo_threat', {
+    title: 'Set the current Solo threat',
+    description: 'GM-only. Create and activate a replacement mission threat at counter 1, optionally removing the existing active or triggered threat.',
+    inputSchema: setSoloThreatInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.setSoloThreat(input))));
 
   server.registerTool('complete_solo_mission', {
     title: 'Complete the current solo mission',
@@ -394,6 +453,30 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.completeSoloMission(input))));
+
+  server.registerTool('select_solo_mission_marks', {
+    title: 'Select five Solo mission advancement marks',
+    description: 'GM-only. After mission success and between missions, apply exactly five player-selected new skill marks. Each selected skill must exist and not already be marked.',
+    inputSchema: selectSoloMissionMarksInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.selectSoloMissionMarks(input))));
+
+  server.registerTool('resolve_solo_advancement', {
+    title: 'Resolve Solo between-mission advancement',
+    description: 'GM-only. Roll one authoritative D20 for every marked skill; rolls greater than the current value improve it by one to a maximum of 18. Clears marks and returns one heroic ability reward for each skill that reaches 18.',
+    inputSchema: resolveSoloAdvancementInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloAdvancement(input))));
+
+  server.registerTool('claim_solo_advancement_ability', {
+    title: 'Claim a Solo advancement heroic ability',
+    description: 'GM-only. Claim one pending heroic ability reward after a marked skill reaches 18. The ability must exist and must not already be known.',
+    inputSchema: claimSoloAdvancementAbilityInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.claimSoloAdvancementAbility(input))));
 
   server.registerTool('get_session_history', {
     title: 'Get game session history',

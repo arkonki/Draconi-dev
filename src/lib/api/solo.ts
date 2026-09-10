@@ -73,6 +73,8 @@ export interface SoloMission {
   status: 'briefing' | 'active' | 'returning' | 'success' | 'failure' | 'abandoned';
   currentWaypointIndex: number;
   activeThreatId?: string | null;
+  objectiveWaypointId?: string | null;
+  returnMode?: 'cleared' | 'dangerous' | 'alternative' | null;
   discoveredClues: string[];
   storyFlags: Record<string, boolean | string | number>;
   startedAt?: string | null;
@@ -118,6 +120,7 @@ export interface SoloRecordedRoll {
   tableKey?: string | null;
   tableVersion?: string | null;
   result: Record<string, unknown>;
+  previousRollId?: string | null;
   consequence?: {
     id: string;
     resolutionMode: 'manual' | 'roll_choice';
@@ -195,6 +198,28 @@ export interface SoloHeroicAbilityOption {
   ruleKey?: string | null;
   activationType?: 'manual' | 'passive' | 'contextual' | null;
   selected: boolean;
+  knownByCharacterIds?: string[];
+  soloCompatible?: boolean;
+  compatibilityWarning?: string | null;
+}
+
+export interface SoloMissionAdvancement {
+  id: string;
+  missionId: string;
+  characterId: string;
+  marksRequired: 5;
+  selectedSkills: string[];
+  rollResults: Array<{
+    name: string;
+    roll: number;
+    previousLevel: number;
+    resultingLevel: number;
+    improved: boolean;
+    reachedEighteen: boolean;
+  }>;
+  pendingHeroicAbilities: number;
+  claimedHeroicAbilityIds: string[];
+  status: 'selecting_marks' | 'ready_to_roll' | 'claiming_abilities' | 'complete';
 }
 
 export interface SoloOptions {
@@ -223,6 +248,7 @@ export interface SoloState {
   waypoints: SoloWaypoint[];
   currentWaypoint?: SoloWaypoint | null;
   activeThreat?: SoloThreat | null;
+  pendingAdvancement?: SoloMissionAdvancement | null;
   activeDangers: SoloDanger[];
   activeCombat?: { id: string; name: string } | null;
   gameTime: Record<string, unknown>;
@@ -344,6 +370,24 @@ export async function selectSoloHeroicAbility(
   return parseResponse<SoloWriteResult>(response, 'Could not update the solo heroic ability.');
 }
 
+export async function replaceSoloHeroicAbility(
+  partyId: string,
+  revision: number,
+  input: { removedAbilityName: string; replacementAbilityId: string },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/heroic-ability/replace`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      removed_ability_name: input.removedAbilityName,
+      replacement_ability_id: input.replacementAbilityId,
+      confirmed_by_user: true,
+      reason: 'The player confirmed a one-for-one replacement of an unsuitable Solo heroic ability.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not replace the unsuitable heroic ability.');
+}
+
 export async function disableSoloMode(partyId: string, revision: number): Promise<SoloWriteResult> {
   const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo`, {
     method: 'DELETE',
@@ -435,6 +479,25 @@ export async function resolveSoloCheck(
   return parseResponse<SoloWriteResult>(response, 'Could not resolve the Solo check.');
 }
 
+export async function pushSoloCheck(
+  partyId: string,
+  rollId: string,
+  revision: number,
+  input: { cost: 'condition' | 'sole_survivor'; condition?: string; explanation: string },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/checks/${rollId}/push`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      cost: input.cost,
+      condition: input.condition || undefined,
+      explanation: input.explanation,
+      reason: 'The player explicitly chose to push this failed Solo check.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not push the Solo check.');
+}
+
 export async function resolveSoloCheckConsequence(
   partyId: string,
   rollId: string,
@@ -465,6 +528,8 @@ export async function startSoloMission(
     title: string;
     objective: string;
     waypointCount: number;
+    unknownWaypointCount?: number;
+    foreseenWaypoints?: Array<{ title: string; description: string }>;
     openingTitle: string;
     openingDescription: string;
     threatDescription: string;
@@ -479,6 +544,8 @@ export async function startSoloMission(
       title: input.title,
       objective: input.objective,
       waypoint_count: input.waypointCount,
+      unknown_waypoint_count: input.unknownWaypointCount,
+      foreseen_waypoints: input.foreseenWaypoints || [],
       opening_waypoint: {
         title: input.openingTitle,
         description: input.openingDescription,
@@ -670,6 +737,83 @@ export async function advanceSoloThreat(
     },
   );
   return parseResponse<SoloWriteResult>(response, 'Could not advance the threat.');
+}
+
+export async function resolveSoloThreat(
+  partyId: string,
+  threatId: string,
+  revision: number,
+  resolution: string,
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/threats/${threatId}/resolve`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ resolution, reason: 'The triggered threat event was resolved in the fiction.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the triggered threat.');
+}
+
+export async function setSoloThreat(
+  partyId: string,
+  revision: number,
+  input: { description: string; recurring: boolean; triggerEffect?: string },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/threats`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({
+      description: input.description, recurring: input.recurring,
+      trigger_effect: input.triggerEffect ? { description: input.triggerEffect } : {},
+      replace_existing: true, reason: 'A new active threat was established for the ongoing delve.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not set the mission threat.');
+}
+
+export async function addSoloWaypoints(
+  partyId: string,
+  revision: number,
+  input: { count: number; kind: 'unknown' | 'diversion'; generateLocations?: boolean },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/waypoints`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ count: input.count, kind: input.kind, generate_locations: input.generateLocations ?? true, reason: 'The route changed and requires additional Solo waypoints.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not add route waypoints.');
+}
+
+export async function beginSoloReturn(
+  partyId: string,
+  revision: number,
+  input: { routeType: 'cleared' | 'dangerous' | 'alternative'; checkSkill?: 'Awareness' | 'Sneaking' },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/return`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ route_type: input.routeType, check_skill: input.checkSkill, reason: 'The hero began the rules-defined journey out of the adventure site.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not begin the return journey.');
+}
+
+export async function selectSoloMissionMarks(partyId: string, revision: number, skills: string[]): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/advancement/marks`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ skills, reason: 'The player selected exactly five mission-success advancement marks.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not select mission advancement marks.');
+}
+
+export async function resolveSoloAdvancement(partyId: string, revision: number): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/advancement/resolve`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ reason: 'The player resolved between-mission advancement.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve Solo advancement.');
+}
+
+export async function claimSoloAdvancementAbility(partyId: string, revision: number, abilityId: string): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/advancement/heroic-ability`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({ ability_id: abilityId, reason: 'The player claimed a heroic ability for a skill reaching 18.' }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not claim the advancement heroic ability.');
 }
 
 export async function completeSoloMission(

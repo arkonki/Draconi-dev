@@ -165,6 +165,22 @@ export const selectSoloHeroicAbilityInputSchema = z.object({
 export const selectSoloHeroicAbilityBodySchema = selectSoloHeroicAbilityInputSchema
   .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
 
+const replaceSoloHeroicAbilityFields = {
+  removed_ability_name: z.string().trim().min(1).max(200),
+  replacement_ability_id: uuidSchema,
+  confirmed_by_user: z.literal(true),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const replaceSoloHeroicAbilityInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...replaceSoloHeroicAbilityFields,
+}).strict();
+
+export const replaceSoloHeroicAbilityBodySchema = z.object(replaceSoloHeroicAbilityFields).strict();
+
 export const askFortuneInputSchema = z.object({
   campaign_id: uuidSchema,
   expected_revision: revisionSchema,
@@ -219,6 +235,42 @@ export const resolveSoloCheckInputSchema = z.object({
 }).strict();
 
 export const resolveSoloCheckBodySchema = z.object(soloCheckFields).strict();
+
+const pushSoloCheckFields = {
+  cost: z.enum(['condition', 'sole_survivor']),
+  condition: pushRollConditionSchema.optional(),
+  explanation: z.string().trim().min(1).max(1_000),
+  reason: z.string().trim().min(1).max(500),
+};
+
+function validatePushSoloCheck(value, context) {
+  if (value.cost === 'condition' && !value.condition) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['condition'],
+      message: 'A condition is required when pushing a Solo check with a condition.',
+    });
+  }
+  if (value.cost === 'sole_survivor' && value.condition) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['condition'],
+      message: 'Do not supply a condition when using Sole Survivor.',
+    });
+  }
+}
+
+export const pushSoloCheckInputSchema = z.object({
+  campaign_id: uuidSchema,
+  source_roll_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...pushSoloCheckFields,
+}).strict();
+
+export const pushSoloCheckBodySchema = z.object(pushSoloCheckFields)
+  .strict()
+  .superRefine(validatePushSoloCheck);
 
 const soloConsequenceEffectSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('story_event') }).strict(),
@@ -296,20 +348,41 @@ const missionThreatSchema = z.object({
   trigger_effect: z.record(z.string(), z.unknown()).default({}),
 }).strict();
 
-export const startSoloMissionInputSchema = z.object({
+const foreseenWaypointSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().min(1).max(2_000),
+}).strict();
+
+const startSoloMissionSchema = z.object({
   campaign_id: uuidSchema,
   expected_revision: revisionSchema,
   idempotency_key: idempotencyKeySchema,
   title: z.string().trim().min(1).max(200),
   objective: z.string().trim().min(1).max(2_000),
   waypoint_count: z.number().int().min(2).max(12).default(3),
+  unknown_waypoint_count: z.number().int().min(0).max(10).optional(),
+  foreseen_waypoints: z.array(foreseenWaypointSchema).max(8).default([]),
   opening_waypoint: openingWaypointSchema,
   threat: missionThreatSchema,
   reason: z.string().trim().min(1).max(500),
 }).strict();
 
-export const startSoloMissionBodySchema = startSoloMissionInputSchema
-  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+function validateMissionRoute(value, context) {
+  if (value.unknown_waypoint_count !== undefined
+    && value.foreseen_waypoints.length + value.unknown_waypoint_count + 2 > 12) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['unknown_waypoint_count'],
+      message: 'Opening, objective, foreseen, and unknown waypoints may total at most 12.',
+    });
+  }
+}
+
+export const startSoloMissionInputSchema = startSoloMissionSchema;
+
+export const startSoloMissionBodySchema = startSoloMissionSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true })
+  .superRefine(validateMissionRoute);
 
 export const advanceThreatInputSchema = z.object({
   campaign_id: uuidSchema,
@@ -322,6 +395,66 @@ export const advanceThreatInputSchema = z.object({
 
 export const advanceThreatBodySchema = advanceThreatInputSchema
   .omit({ campaign_id: true, threat_id: true, expected_revision: true, idempotency_key: true });
+
+export const resolveThreatInputSchema = z.object({
+  campaign_id: uuidSchema,
+  threat_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  resolution: z.string().trim().min(1).max(2_000),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const resolveThreatBodySchema = resolveThreatInputSchema
+  .omit({ campaign_id: true, threat_id: true, expected_revision: true, idempotency_key: true });
+
+export const setSoloThreatInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  description: z.string().trim().min(1).max(2_000),
+  recurring: z.boolean().default(false),
+  trigger_effect: z.record(z.string(), z.unknown()).default({}),
+  replace_existing: z.boolean().default(true),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const setSoloThreatBodySchema = setSoloThreatInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const addSoloWaypointsInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  count: z.number().int().min(1).max(6),
+  kind: z.enum(['unknown', 'diversion']).default('diversion'),
+  generate_locations: z.boolean().default(true),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const addSoloWaypointsBodySchema = addSoloWaypointsInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+const beginSoloReturnSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  route_type: z.enum(['cleared', 'dangerous', 'alternative']),
+  check_skill: z.enum(['Awareness', 'Sneaking']).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+function validateSoloReturn(value, context) {
+  if (value.route_type === 'dangerous' && !value.check_skill) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['check_skill'], message: 'Dangerous return routes require Awareness or Sneaking.' });
+  }
+}
+
+export const beginSoloReturnInputSchema = beginSoloReturnSchema;
+
+export const beginSoloReturnBodySchema = beginSoloReturnSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true })
+  .superRefine(validateSoloReturn);
 
 const searchWaypointFields = {
   known_location: z.boolean().default(false),
@@ -515,6 +648,44 @@ export const completeSoloMissionInputSchema = z.object({
 
 export const completeSoloMissionBodySchema = completeSoloMissionInputSchema
   .omit({ campaign_id: true, mission_id: true, expected_revision: true, idempotency_key: true });
+
+export const selectSoloMissionMarksInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  skills: z.array(z.string().trim().min(1).max(100)).length(5),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const selectSoloMissionMarksBodySchema = z.object({
+  skills: z.array(z.string().trim().min(1).max(100)).length(5),
+  reason: z.string().trim().min(1).max(500),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.skills.map((skill) => skill.toLocaleLowerCase())).size !== 5) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['skills'], message: 'Choose exactly five different skills.' });
+  }
+});
+
+export const resolveSoloAdvancementInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const resolveSoloAdvancementBodySchema = resolveSoloAdvancementInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const claimSoloAdvancementAbilityInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ability_id: uuidSchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const claimSoloAdvancementAbilityBodySchema = claimSoloAdvancementAbilityInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
 
 export const getActorInputSchema = z.object({
   campaign_id: uuidSchema,

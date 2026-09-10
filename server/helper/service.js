@@ -21,14 +21,17 @@ import {
   advanceSoloInjuryRecovery,
   advanceThreatState,
   resolveExplorationFind,
+  resolveAlternativeReturnRoute,
   resolveFortune,
   resolveInspiration,
   resolveNarrativeDamage,
+  resolveRandomLocation,
   resolveSevereInjury,
   resolveSoloCriticalEffect,
   resolveSoloDyingAction as resolveSoloDyingActionRoll,
   resolveSoloInjuryTreatment,
   resolveSoloRest,
+  resolveSoloAdvancement as resolveSoloAdvancementRoll,
   resolveSoloSkillCheck,
   secureRollDie,
 } from './soloRules.js';
@@ -374,9 +377,29 @@ function soloMissionForOutput(row) {
     status: row.status,
     currentWaypointIndex: Number(row.current_waypoint_index),
     activeThreatId: row.active_threat_id,
+    objectiveWaypointId: row.objective_waypoint_id || null,
+    returnMode: row.return_mode || null,
     discoveredClues: row.discovered_clues || [],
     storyFlags: row.story_flags || {},
     startedAt: row.started_at,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function soloAdvancementForOutput(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    missionId: row.mission_id,
+    characterId: row.character_id,
+    marksRequired: Number(row.marks_required),
+    selectedSkills: row.selected_skills || [],
+    rollResults: row.roll_results || [],
+    pendingHeroicAbilities: Number(row.pending_heroic_abilities || 0),
+    claimedHeroicAbilityIds: row.claimed_heroic_ability_ids || [],
+    status: row.status,
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1443,16 +1466,32 @@ export async function getSoloOptions(user, campaignId) {
       profession: character.profession,
       heroicAbilities: character.heroic_ability || [],
     })),
-    heroicAbilities: abilities.map((ability) => ({
-      id: ability.id,
-      name: ability.name,
-      description: ability.description,
-      willpowerCost: ability.willpower_cost,
-      requirement: ability.requirement,
-      ruleKey: ability.rule_key,
-      activationType: ability.activation_type,
-      selected: soloState?.solo_heroic_ability_id === ability.id,
-    })),
+    heroicAbilities: abilities.map((ability) => {
+      const knownByCharacterIds = characters
+        .filter((character) => (character.heroic_ability || []).some(
+          (name) => String(name).trim().toLocaleLowerCase() === ability.name.toLocaleLowerCase(),
+        ))
+        .map((character) => character.id);
+      const rulesText = [ability.description, JSON.stringify(ability.requirement || {})]
+        .join(' ')
+        .toLocaleLowerCase();
+      const partyDependent = /\b(another|other) (player|character|hero)\b|\bally\b|\bparty member\b/.test(rulesText);
+      return {
+        id: ability.id,
+        name: ability.name,
+        description: ability.description,
+        willpowerCost: ability.willpower_cost,
+        requirement: ability.requirement,
+        ruleKey: ability.rule_key,
+        activationType: ability.activation_type,
+        selected: soloState?.solo_heroic_ability_id === ability.id,
+        knownByCharacterIds,
+        soloCompatible: !partyDependent,
+        compatibilityWarning: partyDependent
+          ? 'This ability refers to another character or ally and may be unsuitable for a lone hero.'
+          : null,
+      };
+    }),
     rulesets: [{ key: 'db-solo-v1.2', name: 'Dragonbane Solo Adventure v1.2' }],
     modes: [
       { key: 'custom', available: true, name: 'Custom solo adventure' },
@@ -1582,6 +1621,13 @@ export async function getSoloState(user, campaignId) {
      LIMIT 10`,
     [campaignId],
   );
+  const { rows: pendingAdvancementRows } = await pool.query(
+    `SELECT * FROM solo_mission_advancements
+     WHERE campaign_id = $1 AND status <> 'complete'
+     ORDER BY created_at DESC LIMIT 1`,
+    [campaignId],
+  );
+  const pendingAdvancement = pendingAdvancementRows[0] || null;
   const [{ rows: journalSessionRows }, journalEvents] = await Promise.all([
     pool.query(
       `SELECT * FROM game_sessions
@@ -1602,6 +1648,7 @@ export async function getSoloState(user, campaignId) {
      ORDER BY created_at DESC LIMIT 1`,
     [campaignId],
   );
+  const pushedSourceIds = new Set(latestRolls.map((roll) => roll.previous_roll_id).filter(Boolean));
   const allowedNextActions = [];
   if (!state?.enabled) {
     allowedNextActions.push('get_solo_options', 'enable_solo_mode');
@@ -1609,28 +1656,42 @@ export async function getSoloState(user, campaignId) {
     if (!soloHeroicAbility) allowedNextActions.push('select_solo_heroic_ability');
     allowedNextActions.push('ask_fortune', 'draw_inspiration', 'start_session');
     if (!activeMission) {
-      allowedNextActions.push('start_solo_mission');
+      if (pendingAdvancement?.status === 'selecting_marks') allowedNextActions.push('select_solo_mission_marks');
+      if (pendingAdvancement?.status === 'ready_to_roll') allowedNextActions.push('resolve_solo_advancement');
+      if (pendingAdvancement?.status === 'claiming_abilities') allowedNextActions.push('claim_solo_advancement_ability');
+      if (!pendingAdvancement) allowedNextActions.push('start_solo_mission');
     } else {
       const nextWaypoint = waypoints.find(
         (waypoint) => Number(waypoint.position) === Number(activeMission.current_waypoint_index) + 1,
       );
       if (nextWaypoint) allowedNextActions.push('reveal_waypoint');
       allowedNextActions.push('complete_solo_mission');
+      allowedNextActions.push('add_solo_waypoints');
+      if (activeMission.status === 'active') allowedNextActions.push('begin_solo_return');
     }
     if (activeThreat?.status === 'active') allowedNextActions.push('advance_threat');
-    if (currentWaypoint?.status === 'active' && activeThreat?.status === 'active') {
+    if (activeThreat?.status === 'triggered') allowedNextActions.push('resolve_solo_threat');
+    if (activeMission && !activeThreat) allowedNextActions.push('set_solo_threat');
+    if (currentWaypoint?.status === 'active') {
       allowedNextActions.push('search_waypoint', 'scavenge_waypoint');
     }
     if (!activeCombats[0] && playerCharacter?.hp?.current > 0) {
       allowedNextActions.push('resolve_solo_check', 'take_solo_rest', 'resolve_solo_narrative_damage');
     }
     if (!activeCombats[0] && latestRolls.some((roll) => (
-      roll.result?.action === 'solo_check'
+      ['solo_check', 'solo_check_push'].includes(roll.result?.action)
       && roll.result?.requiresFailForward
       && !roll.consequence_id
+      && !pushedSourceIds.has(roll.id)
     ))) {
       allowedNextActions.push('resolve_solo_check_consequence');
     }
+    if (!activeCombats[0] && latestRolls.some((roll) => (
+      roll.result?.action === 'solo_check'
+      && roll.result?.outcome === 'failure'
+      && !roll.previous_roll_id
+      && !latestRolls.some((candidate) => candidate.previous_roll_id === roll.id)
+    ))) allowedNextActions.push('push_solo_check');
     if (playerCharacter?.hp?.current === 0 && Number(playerCharacter.deathRolls?.failed || 0) < 3) {
       allowedNextActions.push('resolve_solo_dying_action');
     }
@@ -1653,6 +1714,7 @@ export async function getSoloState(user, campaignId) {
     waypoints: waypoints.map(soloWaypointForOutput),
     currentWaypoint: soloWaypointForOutput(currentWaypoint),
     activeThreat: soloThreatForOutput(activeThreat),
+    pendingAdvancement: soloAdvancementForOutput(pendingAdvancement),
     activeDangers,
     activeCombat: activeCombats[0]
       ? { id: activeCombats[0].id, name: activeCombats[0].name }
@@ -1953,6 +2015,13 @@ export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}
       }
     }
     const alreadyKnown = abilityNames.some((name) => name.toLocaleLowerCase() === ability.name.toLocaleLowerCase());
+    if (alreadyKnown && !(state.solo_heroic_ability_id === ability.id && state.solo_heroic_ability_granted)) {
+      throw new HelperError(
+        409,
+        'INVALID_STATE',
+        `${character.name} already knows ${ability.name}. The Solo setup ability must be genuinely additional.`,
+      );
+    }
     if (!alreadyKnown) abilityNames.push(ability.name);
     const sameSelection = state.solo_heroic_ability_id === ability.id;
     const grantedBySolo = sameSelection
@@ -2025,6 +2094,83 @@ export async function selectSoloHeroicAbility(user, input, { sourceClient } = {}
       hash: idem.hash,
       response,
     });
+    return response;
+  });
+}
+
+export async function replaceSoloHeroicAbility(user, input, { sourceClient } = {}) {
+  const operation = 'replace_solo_heroic_ability';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'Replace an unsuitable heroic ability only between missions.');
+    }
+    const { rows: combats } = await client.query(
+      `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (combats[0]) throw new HelperError(409, 'INVALID_STATE', 'End active combat before replacing a heroic ability.');
+    const { rows: characters } = await client.query(
+      `SELECT id, name, heroic_ability FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [state.player_character_id, input.campaign_id],
+    );
+    const character = characters[0];
+    if (!character) throw new HelperError(409, 'INVALID_STATE', 'The Solo hero is unavailable.');
+    const abilityNames = Array.isArray(character.heroic_ability) ? [...character.heroic_ability] : [];
+    const removedIndex = abilityNames.findIndex(
+      (name) => String(name).trim().toLocaleLowerCase() === input.removed_ability_name.toLocaleLowerCase(),
+    );
+    if (removedIndex < 0) throw new HelperError(400, 'VALIDATION_ERROR', 'The Solo hero does not know the ability being replaced.');
+    if (state.solo_heroic_ability_granted && state.solo_heroic_ability_id) {
+      const { rows } = await client.query('SELECT name FROM heroic_abilities WHERE id = $1', [state.solo_heroic_ability_id]);
+      if (rows[0]?.name.toLocaleLowerCase() === input.removed_ability_name.toLocaleLowerCase()) {
+        throw new HelperError(409, 'INVALID_STATE', 'Change the additional Solo setup ability instead of replacing it as unsuitable.');
+      }
+    }
+    const { rows: replacements } = await client.query(
+      `SELECT id, name, description, rule_key FROM heroic_abilities WHERE id = $1`,
+      [input.replacement_ability_id],
+    );
+    const replacement = replacements[0];
+    if (!replacement) throw new HelperError(404, 'NOT_FOUND', 'Replacement heroic ability not found.');
+    if (abilityNames.some((name) => String(name).trim().toLocaleLowerCase() === replacement.name.toLocaleLowerCase())) {
+      throw new HelperError(409, 'INVALID_STATE', `${character.name} already knows ${replacement.name}.`);
+    }
+    abilityNames.splice(removedIndex, 1, replacement.name);
+    const resultingRevision = previousRevision + 1;
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query('UPDATE characters SET heroic_ability = $1 WHERE id = $2', [abilityNames, character.id]);
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.heroic_ability_replaced',
+      actorId: character.id,
+      payload: {
+        removedAbilityName: input.removed_ability_name,
+        replacementAbilityId: replacement.id,
+        replacementAbilityName: replacement.name,
+        confirmedByUser: true,
+        reason: input.reason,
+      },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${character.name} replaced ${input.removed_ability_name} with ${replacement.name}.`,
+      state_excerpt: { playerCharacter: { id: character.id, name: character.name, heroicAbilities: abilityNames } },
+    };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
     return response;
   });
 }
@@ -2382,6 +2528,144 @@ export async function resolveSoloCheck(user, input, { sourceClient } = {}) {
   });
 }
 
+export async function pushSoloCheck(user, input, { sourceClient } = {}) {
+  const operation = 'push_solo_check';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if ((input.cost === 'condition' && !input.condition)
+      || (input.cost === 'sole_survivor' && input.condition)) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Condition pushes require one condition; Sole Survivor pushes must not include one.');
+    }
+    const { rows: activeCombats } = await client.query(
+      `SELECT id FROM encounters WHERE party_id = $1 AND status = 'active' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (activeCombats[0]) throw new HelperError(409, 'INVALID_STATE', 'Solo checks may only be pushed outside combat.');
+    const { rows: sourceRows } = await client.query(
+      `SELECT roll.*,
+         EXISTS (SELECT 1 FROM recorded_rolls child WHERE child.previous_roll_id = roll.id) AS was_pushed,
+         EXISTS (SELECT 1 FROM solo_check_consequences consequence WHERE consequence.source_roll_id = roll.id) AS has_consequence
+       FROM recorded_rolls roll WHERE roll.id = $1 AND roll.campaign_id = $2 FOR UPDATE OF roll`,
+      [input.source_roll_id, input.campaign_id],
+    );
+    const sourceRoll = sourceRows[0];
+    if (!sourceRoll) throw new HelperError(404, 'NOT_FOUND', 'The source Solo roll was not found.');
+    if (sourceRoll.result?.action !== 'solo_check' || sourceRoll.result?.outcome !== 'failure') {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Only an ordinary failed, unpushed Solo check can be pushed.');
+    }
+    if (sourceRoll.previous_roll_id || sourceRoll.was_pushed || sourceRoll.has_consequence) {
+      throw new HelperError(409, 'INVALID_STATE', 'This Solo check has already been pushed or resolved with a consequence.');
+    }
+    const loadedActor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+    if (loadedActor.actor.lifeStatus === 'dead' || loadedActor.actor.currentHp <= 0) {
+      throw new HelperError(409, 'INVALID_STATE', 'The Solo hero cannot push while dying or dead.');
+    }
+    let costResolution;
+    if (input.cost === 'sole_survivor') {
+      const abilityNames = Array.isArray(loadedActor.storage?.row?.heroic_ability)
+        ? loadedActor.storage.row.heroic_ability : [];
+      if (!abilityNames.some((name) => normalizedSkillName(name) === 'sole survivor')) {
+        throw new HelperError(409, 'INVALID_STATE', 'The Solo hero does not know Sole Survivor.');
+      }
+      costResolution = applyActorChangeSet(loadedActor.actor, [{ type: 'spend_wp', amount: 3 }], conditionId);
+    } else {
+      if (!STANDARD_CONDITION_KEYS.has(input.condition)) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'Choose a standard Dragonbane condition.');
+      }
+      costResolution = applyActorChangeSet(loadedActor.actor, [{
+        type: 'add_condition',
+        key: input.condition,
+        source: `Pushed Solo check: ${input.explanation}`,
+      }], conditionId);
+    }
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await persistActor(client, costResolution.result, loadedActor.storage);
+    const selected = actorCheckTarget(
+      costResolution.result,
+      sourceRoll.result.checkType,
+      sourceRoll.result.checkName,
+    );
+    const check = resolveSoloSkillCheck({ target: selected.target, modifier: sourceRoll.result.modifier });
+    let criticalEffect = null;
+    let criticalTable = null;
+    if (['dragon', 'demon'].includes(check.outcome)) {
+      criticalTable = await loadSoloRuleTable(client, `solo_${check.outcome}_effect`, ACTIVE_SOLO_PROMPT_TABLE_VERSION);
+      criticalEffect = resolveSoloCriticalEffect(criticalTable.entries);
+    }
+    const advancementMark = sourceRoll.result.checkType === 'skill'
+      ? await markSkillAdvancement(client, { ...loadedActor, actor: costResolution.result }, selected.name, check)
+      : { eligible: false, added: false, alreadyMarked: false };
+    const resultingRevision = previousRevision + 1;
+    const dice = [...check.dice, ...(criticalEffect?.dice || [])];
+    const keptIndices = [...check.keptIndices, ...(criticalEffect ? [check.dice.length] : [])];
+    const pushedRoll = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id,
+      userId: user.id,
+      purpose: `Pushed ${sourceRoll.purpose}`,
+      expression: [check.expression, criticalEffect?.expression].filter(Boolean).join(' + '),
+      dice,
+      keptIndices,
+      keptValues: [...check.keptValues, ...(criticalEffect?.keptValues || [])],
+      tableKey: criticalTable?.tableKey || null,
+      tableVersion: criticalTable?.version || state.ruleset_version,
+      result: {
+        action: 'solo_check_push',
+        sourceRollId: sourceRoll.id,
+        pushCost: input.cost,
+        condition: input.condition || null,
+        explanation: input.explanation,
+        checkType: sourceRoll.result.checkType,
+        checkName: selected.name,
+        target: selected.target,
+        modifier: sourceRoll.result.modifier,
+        check,
+        outcome: check.outcome,
+        criticalEffect: criticalEffect ? { ...criticalEffect, advisory: true } : null,
+        advancementMark,
+        requiresFailForward: ['failure', 'demon'].includes(check.outcome),
+        context: sourceRoll.result.context || null,
+      },
+      previousRollId: sourceRoll.id,
+      campaignRevision: resultingRevision,
+    });
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    let sequence = await nextEventSequence(client, input.campaign_id);
+    const eventIds = [];
+    for (const event of costResolution.events) {
+      eventIds.push(await insertEvent(client, {
+        campaign: access.campaign, user, sequence, type: event.type, actorId: state.player_character_id,
+        payload: { ...event.payload, sourceRollId: sourceRoll.id, explanation: input.explanation },
+        visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+        previousRevision, resultingRevision,
+      }));
+      sequence += 1;
+    }
+    eventIds.push(await insertEvent(client, {
+      campaign: access.campaign, user, sequence, type: 'solo.check_pushed', actorId: state.player_character_id,
+      payload: { sourceRollId: sourceRoll.id, rollId: pushedRoll.id, cost: input.cost, condition: input.condition || null, explanation: input.explanation, outcome: check.outcome, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    }));
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: eventIds,
+      summary: `${selected.name} was pushed by ${input.cost === 'sole_survivor' ? 'spending 3 WP with Sole Survivor' : `taking ${input.condition}`}: ${check.outcome} (${check.roll} vs ${selected.target}).`,
+      state_excerpt: { roll: recordedRollForOutput(pushedRoll), playerCharacter: actorForOutput(costResolution.result, { includeGm: access.isGm }) },
+    };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
 export async function resolveSoloCheckConsequence(user, input, { sourceClient } = {}) {
   const operation = 'resolve_solo_check_consequence';
   return withTransaction(async (client) => {
@@ -2414,8 +2698,19 @@ export async function resolveSoloCheckConsequence(user, input, { sourceClient } 
     );
     const sourceRoll = sourceRolls[0];
     if (!sourceRoll) throw new HelperError(404, 'NOT_FOUND', 'The source Solo roll was not found.');
-    if (sourceRoll.result?.action !== 'solo_check' || !sourceRoll.result?.requiresFailForward) {
+    if (!['solo_check', 'solo_check_push'].includes(sourceRoll.result?.action) || !sourceRoll.result?.requiresFailForward) {
       throw new HelperError(400, 'VALIDATION_ERROR', 'Only a failed or Demon Solo check can receive a fail-forward consequence.');
+    }
+    if (sourceRoll.result.action === 'solo_check') {
+      const { rows: pushedRolls } = await client.query(
+        `SELECT id FROM recorded_rolls
+         WHERE campaign_id = $1 AND previous_roll_id = $2
+         LIMIT 1`,
+        [input.campaign_id, sourceRoll.id],
+      );
+      if (pushedRolls[0]) {
+        throw new HelperError(409, 'INVALID_STATE', 'Resolve the fail-forward consequence on the pushed result instead of the original roll.');
+      }
     }
     const { rows: existingConsequences } = await client.query(
       `SELECT id FROM solo_check_consequences WHERE campaign_id = $1 AND source_roll_id = $2`,
@@ -2744,6 +3039,18 @@ export async function startSoloMission(user, input, { sourceClient } = {}) {
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (input.unknown_waypoint_count !== undefined
+      && input.foreseen_waypoints.length + input.unknown_waypoint_count + 2 > 12) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'A Solo mission route may contain at most 12 waypoints.');
+    }
+
+    const { rows: pendingAdvancements } = await client.query(
+      `SELECT id FROM solo_mission_advancements WHERE campaign_id = $1 AND status <> 'complete' LIMIT 1`,
+      [input.campaign_id],
+    );
+    if (pendingAdvancements[0]) {
+      throw new HelperError(409, 'INVALID_STATE', 'Resolve the previous successful mission advancement before starting another mission.');
+    }
 
     if (state.current_mission_id) {
       const { rows: currentMissions } = await client.query(
@@ -2768,25 +3075,26 @@ export async function startSoloMission(user, input, { sourceClient } = {}) {
       [input.campaign_id, input.title, input.objective],
     );
     let mission = missionRows[0];
+    const unknownCount = input.unknown_waypoint_count
+      ?? Math.max(0, input.waypoint_count - 2 - input.foreseen_waypoints.length);
+    const plannedRoute = [
+      { kind: 'foreseen', status: 'active', ...input.opening_waypoint },
+      ...input.foreseen_waypoints.map((waypoint) => ({ kind: 'foreseen', status: 'revealed', ...waypoint })),
+      ...Array.from({ length: unknownCount }, () => ({ kind: 'unknown', status: 'hidden', title: null, description: null })),
+      { kind: 'foreseen', status: 'revealed', title: 'Objective', description: input.objective },
+    ];
     const waypointRows = [];
-    for (let position = 0; position < input.waypoint_count; position += 1) {
-      const first = position === 0;
-      const last = position === input.waypoint_count - 1;
-      const kind = first || last ? 'foreseen' : 'unknown';
-      const status = first ? 'active' : last ? 'revealed' : 'hidden';
-      const title = first ? input.opening_waypoint.title : last ? 'Objective' : null;
-      const description = first
-        ? input.opening_waypoint.description
-        : last ? input.objective : null;
+    for (let position = 0; position < plannedRoute.length; position += 1) {
+      const planned = plannedRoute[position];
       const { rows } = await client.query(
         `INSERT INTO solo_waypoints (
            mission_id, position, kind, status, title, description
          ) VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [mission.id, position, kind, status, title, description],
+        [mission.id, position, planned.kind, planned.status, planned.title, planned.description],
       );
       waypointRows.push(rows[0]);
-      if (kind === 'unknown') {
+      if (planned.kind === 'unknown') {
         await client.query(
           `INSERT INTO solo_waypoint_secrets (waypoint_id, payload, generated_from)
            VALUES ($1, '{}'::jsonb, '[]'::jsonb)`,
@@ -2794,6 +3102,7 @@ export async function startSoloMission(user, input, { sourceClient } = {}) {
         );
       }
     }
+    const objectiveWaypoint = waypointRows[waypointRows.length - 1];
 
     const { rows: threatRows } = await client.query(
       `INSERT INTO solo_threats (
@@ -2804,8 +3113,8 @@ export async function startSoloMission(user, input, { sourceClient } = {}) {
     );
     const threat = threatRows[0];
     const { rows: updatedMissionRows } = await client.query(
-      `UPDATE solo_missions SET active_threat_id = $1 WHERE id = $2 RETURNING *`,
-      [threat.id, mission.id],
+      `UPDATE solo_missions SET active_threat_id = $1, objective_waypoint_id = $2 WHERE id = $3 RETURNING *`,
+      [threat.id, objectiveWaypoint.id, mission.id],
     );
     mission = updatedMissionRows[0];
     await client.query(
@@ -2908,11 +3217,18 @@ export async function revealWaypoint(user, input, { sourceClient } = {}) {
         'Only the next waypoint in the current mission may be revealed.',
       );
     }
-    if (target.kind === 'unknown' && (!input.title || !input.description)) {
+    const { rows: secretRows } = await client.query(
+      `SELECT payload FROM solo_waypoint_secrets WHERE waypoint_id = $1`,
+      [target.id],
+    );
+    const storedSecret = secretRows[0]?.payload || {};
+    const suppliedTitle = input.title || storedSecret.title;
+    const suppliedDescription = input.description || storedSecret.description;
+    if (['unknown', 'diversion', 'return_route'].includes(target.kind) && (!suppliedTitle || !suppliedDescription)) {
       throw new HelperError(
         400,
         'VALIDATION_ERROR',
-        'A newly revealed unknown waypoint requires a title and description.',
+        'A newly revealed hidden waypoint requires a title and description.',
       );
     }
     if (input.generated_from_roll_ids.length > 0) {
@@ -2932,8 +3248,9 @@ export async function revealWaypoint(user, input, { sourceClient } = {}) {
         [current.id],
       );
     }
-    const revealedTitle = target.kind === 'unknown' ? input.title : target.title;
-    const revealedDescription = target.kind === 'unknown' ? input.description : target.description;
+    const hiddenGenerated = ['unknown', 'diversion', 'return_route'].includes(target.kind);
+    const revealedTitle = hiddenGenerated ? suppliedTitle : target.title;
+    const revealedDescription = hiddenGenerated ? suppliedDescription : target.description;
     const { rows: targetRows } = await client.query(
       `UPDATE solo_waypoints
        SET status = 'active', title = $1, description = $2
@@ -2942,7 +3259,7 @@ export async function revealWaypoint(user, input, { sourceClient } = {}) {
       [revealedTitle, revealedDescription, target.id],
     );
     const revealed = targetRows[0];
-    if (target.kind === 'unknown') {
+    if (hiddenGenerated) {
       await client.query(
         `UPDATE solo_waypoint_secrets
          SET payload = $1::jsonb, generated_from = $2::jsonb
@@ -3098,7 +3415,7 @@ export async function advanceThreat(user, input, { sourceClient } = {}) {
       campaign_revision: resultingRevision,
       event_ids: [eventId],
       summary: resolution.triggered
-        ? `Threat triggered at 6${threat.recurring ? ' and reset to 1' : ''}: ${threat.description}`
+        ? `Threat triggered at 6 and awaits resolution${threat.recurring ? ' before it resets to 1' : ''}: ${threat.description}`
         : `Threat advanced from ${resolution.previousCounter} to ${resolution.counter}: ${threat.description}`,
       state_excerpt: {
         threat: soloThreatForOutput(updatedThreat, { revealTriggerEffect: resolution.triggered }),
@@ -3113,6 +3430,103 @@ export async function advanceThreat(user, input, { sourceClient } = {}) {
       hash: idem.hash,
       response,
     });
+    return response;
+  });
+}
+
+export async function resolveThreat(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_solo_threat';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows } = await client.query(
+      `SELECT threat.* FROM solo_threats threat
+       JOIN solo_missions mission ON mission.id = threat.mission_id
+       WHERE threat.id = $1 AND mission.id = $2 AND mission.campaign_id = $3
+       FOR UPDATE OF threat`,
+      [input.threat_id, state.current_mission_id, input.campaign_id],
+    );
+    const threat = rows[0];
+    if (!threat || threat.status !== 'triggered') {
+      throw new HelperError(409, 'INVALID_STATE', 'Only the current triggered threat can be resolved.');
+    }
+    const resultingStatus = threat.recurring ? 'active' : 'resolved';
+    const resultingCounter = threat.recurring ? 1 : 6;
+    const { rows: updatedRows } = await client.query(
+      `UPDATE solo_threats SET status = $1, counter = $2 WHERE id = $3 RETURNING *`,
+      [resultingStatus, resultingCounter, threat.id],
+    );
+    if (!threat.recurring) {
+      await client.query(
+        `UPDATE solo_missions SET active_threat_id = NULL WHERE id = $1 AND active_threat_id = $2`,
+        [threat.mission_id, threat.id],
+      );
+    }
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.threat_resolved', actorId: state.player_character_id,
+      payload: { threatId: threat.id, recurring: threat.recurring, resolution: input.resolution, resultingStatus, resultingCounter, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: threat.recurring
+        ? `Recurring threat resolved and reset to 1: ${threat.description}`
+        : `Threat resolved and removed from the active mission: ${threat.description}`,
+      state_excerpt: { threat: soloThreatForOutput(updatedRows[0], { revealTriggerEffect: true }), activeThreatId: threat.recurring ? threat.id : null },
+    };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function setSoloThreat(user, input, { sourceClient } = {}) {
+  const operation = 'set_solo_threat';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows: missions } = await client.query(
+      `SELECT * FROM solo_missions WHERE id = $1 AND campaign_id = $2 AND status IN ('active','returning') FOR UPDATE`,
+      [state.current_mission_id, input.campaign_id],
+    );
+    const mission = missions[0];
+    if (!mission) throw new HelperError(409, 'INVALID_STATE', 'There is no active Solo mission.');
+    if (mission.active_threat_id && !input.replace_existing) {
+      throw new HelperError(409, 'INVALID_STATE', 'The mission already has an active or triggered threat.');
+    }
+    if (mission.active_threat_id) {
+      await client.query(`UPDATE solo_threats SET status = 'removed' WHERE id = $1 AND status IN ('active','triggered')`, [mission.active_threat_id]);
+    }
+    const { rows } = await client.query(
+      `INSERT INTO solo_threats (mission_id, description, counter, recurring, status, trigger_effect)
+       VALUES ($1, $2, 1, $3, 'active', $4::jsonb) RETURNING *`,
+      [mission.id, input.description, input.recurring, JSON.stringify(input.trigger_effect)],
+    );
+    await client.query('UPDATE solo_missions SET active_threat_id = $1 WHERE id = $2', [rows[0].id, mission.id]);
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.threat_set', actorId: state.player_character_id,
+      payload: { missionId: mission.id, threatId: rows[0].id, replacedThreatId: mission.active_threat_id || null, recurring: input.recurring, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId], summary: `New mission threat begins at 1: ${input.description}`, state_excerpt: { threat: soloThreatForOutput(rows[0]) } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
     return response;
   });
 }
@@ -3210,9 +3624,6 @@ async function loadExplorationContext(client, campaignId, waypointId, state) {
     [mission.active_threat_id, mission.id],
   );
   const threat = threats[0];
-  if (!threat) {
-    throw new HelperError(409, 'INVALID_STATE', 'Exploration requires an active mission threat.');
-  }
 
   await client.query(
     `INSERT INTO solo_waypoint_exploration (waypoint_id)
@@ -3263,6 +3674,239 @@ async function loadExplorationTables(client, keys) {
     loadSoloRuleTable(client, key, ACTIVE_SOLO_EXPLORATION_TABLE_VERSION)
   )));
   return Object.fromEntries(tables.map((table) => [table.tableKey, table]));
+}
+
+async function insertGeneratedWaypoints(client, {
+  mission,
+  count,
+  kind,
+  generatedFrom,
+  generateLocations = true,
+}) {
+  const insertedPosition = Number(mission.current_waypoint_index) + 1;
+  await client.query(
+    `UPDATE solo_waypoints SET position = position + 1000000
+     WHERE mission_id = $1 AND position >= $2`,
+    [mission.id, insertedPosition],
+  );
+  await client.query(
+    `UPDATE solo_waypoints SET position = position - $3
+     WHERE mission_id = $1 AND position >= 1000000`,
+    [mission.id, insertedPosition, 1000000 - count],
+  );
+  const tables = generateLocations
+    ? await loadExplorationTables(client, ['solo_area', ...SOLO_LOCATION_TABLE_KEYS])
+    : null;
+  const waypoints = [];
+  const resolutions = [];
+  for (let index = 0; index < count; index += 1) {
+    const location = tables ? resolveRandomLocation(tables) : null;
+    const { rows } = await client.query(
+      `INSERT INTO solo_waypoints (mission_id, position, kind, status)
+       VALUES ($1, $2, $3, 'hidden') RETURNING *`,
+      [mission.id, insertedPosition + index, kind],
+    );
+    const waypoint = rows[0];
+    await client.query(
+      `INSERT INTO solo_waypoint_secrets (waypoint_id, payload, generated_from)
+       VALUES ($1, $2::jsonb, $3::jsonb)`,
+      [
+        waypoint.id,
+        JSON.stringify(location ? { title: location.title, description: location.description } : {}),
+        JSON.stringify(generatedFrom),
+      ],
+    );
+    waypoints.push(waypoint);
+    if (location) resolutions.push(location);
+  }
+  return { waypoints, resolutions, insertedPosition };
+}
+
+export async function addSoloWaypoints(user, input, { sourceClient } = {}) {
+  const operation = 'add_solo_waypoints';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows: missions } = await client.query(
+      `SELECT * FROM solo_missions WHERE id = $1 AND campaign_id = $2 AND status IN ('active','returning') FOR UPDATE`,
+      [state.current_mission_id, input.campaign_id],
+    );
+    const mission = missions[0];
+    if (!mission) throw new HelperError(409, 'INVALID_STATE', 'There is no active Solo mission.');
+    const inserted = await insertGeneratedWaypoints(client, {
+      mission, count: input.count, kind: input.kind,
+      generateLocations: input.generate_locations,
+      generatedFrom: [{ kind: 'route_change', reason: input.reason }],
+    });
+    const resultingRevision = previousRevision + 1;
+    const dice = inserted.resolutions.flatMap((resolution) => resolution.dice);
+    const roll = dice.length ? await insertRecordedRoll(client, {
+      campaignId: input.campaign_id, sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id, userId: user.id,
+      purpose: `Generate ${input.count} ${input.kind} waypoint${input.count === 1 ? '' : 's'}`,
+      expression: inserted.resolutions.map((resolution) => resolution.expression).join(' + '),
+      dice, keptIndices: dice.map((_, index) => index), keptValues: [...dice],
+      tableKey: 'solo_area', tableVersion: ACTIVE_SOLO_EXPLORATION_TABLE_VERSION,
+      result: { action: 'solo_waypoints_added', kind: input.kind, count: input.count, generatedLocations: inserted.resolutions },
+      campaignRevision: resultingRevision,
+    }) : null;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.waypoints_added', actorId: state.player_character_id,
+      payload: { missionId: mission.id, waypointIds: inserted.waypoints.map(({ id }) => id), count: input.count, kind: input.kind, rollId: roll?.id || null, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: `${input.count} hidden ${input.kind} waypoint${input.count === 1 ? '' : 's'} added after the current scene.`,
+      state_excerpt: { waypoints: inserted.waypoints.map(soloWaypointForOutput), roll: roll ? recordedRollForOutput(roll) : null },
+    };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function beginSoloReturn(user, input, { sourceClient } = {}) {
+  const operation = 'begin_solo_return';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (input.route_type === 'dangerous' && !input.check_skill) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Dangerous return routes require Awareness or Sneaking.');
+    }
+    const { rows: missions } = await client.query(
+      `SELECT * FROM solo_missions WHERE id = $1 AND campaign_id = $2 AND status = 'active' FOR UPDATE`,
+      [state.current_mission_id, input.campaign_id],
+    );
+    let mission = missions[0];
+    if (!mission) throw new HelperError(409, 'INVALID_STATE', 'There is no outbound Solo mission ready for a return journey.');
+    const { rows: objectiveRows } = await client.query(
+      `SELECT * FROM solo_waypoints WHERE id = $1 AND mission_id = $2`,
+      [mission.objective_waypoint_id, mission.id],
+    );
+    const objective = objectiveRows[0];
+    if (!objective || !['active', 'resolved'].includes(objective.status)) {
+      throw new HelperError(409, 'INVALID_STATE', 'Reach the final objective before beginning the return journey.');
+    }
+    let check = null;
+    let routeRoll = null;
+    let inserted;
+    if (input.route_type === 'dangerous') {
+      const actor = await loadActor(client, input.campaign_id, state.player_character_id, { forUpdate: true });
+      const skill = actorSkill(actor.actor, input.check_skill);
+      if (!skill) throw new HelperError(409, 'INVALID_STATE', `The Solo hero has no usable ${input.check_skill} skill.`);
+      check = resolveSoloSkillCheck({ target: skill.target });
+      const failed = ['failure', 'demon'].includes(check.outcome);
+      inserted = await insertGeneratedWaypoints(client, {
+        mission, count: failed ? 2 : 1, kind: 'return_route', generateLocations: failed,
+        generatedFrom: [{ kind: 'dangerous_return', check: input.check_skill, outcome: check.outcome }],
+      });
+      const first = inserted.waypoints[0];
+      if (!failed) {
+        await client.query(
+          `UPDATE solo_waypoint_secrets SET payload = $1::jsonb WHERE waypoint_id = $2`,
+          [JSON.stringify({ title: 'Surface', description: 'The cleared route leads safely back to the surface.' }), first.id],
+        );
+      } else {
+        const surface = inserted.waypoints[1];
+        await client.query(
+          `UPDATE solo_waypoint_secrets SET payload = $1::jsonb WHERE waypoint_id = $2`,
+          [JSON.stringify({ title: 'Surface', description: 'The return route finally reaches safety.' }), surface.id],
+        );
+      }
+    } else if (input.route_type === 'alternative') {
+      routeRoll = resolveAlternativeReturnRoute();
+      inserted = await insertGeneratedWaypoints(client, {
+        mission, count: routeRoll.waypointCount, kind: 'return_route', generateLocations: true,
+        generatedFrom: [{ kind: 'alternative_return', d4: routeRoll.dice[0] }],
+      });
+      const last = inserted.waypoints.at(-1);
+      await client.query(
+        `UPDATE solo_waypoint_secrets SET payload = $1::jsonb WHERE waypoint_id = $2`,
+        [JSON.stringify({ title: 'Surface', description: 'The alternative route emerges at the surface.' }), last.id],
+      );
+    } else {
+      inserted = await insertGeneratedWaypoints(client, {
+        mission, count: 1, kind: 'return_route', generateLocations: false,
+        generatedFrom: [{ kind: 'cleared_return' }],
+      });
+      await client.query(
+        `UPDATE solo_waypoint_secrets SET payload = $1::jsonb WHERE waypoint_id = $2`,
+        [JSON.stringify({ title: 'Surface', description: 'The cleared route leads safely back to the surface.' }), inserted.waypoints[0].id],
+      );
+    }
+    const resultingRevision = previousRevision + 1;
+    const locationDice = inserted.resolutions.flatMap((resolution) => resolution.dice);
+    const dice = [...(check?.dice || []), ...(routeRoll?.dice || []), ...locationDice];
+    const roll = dice.length ? await insertRecordedRoll(client, {
+      campaignId: input.campaign_id, sessionId: access.campaign.active_session_id,
+      actorId: state.player_character_id, userId: user.id,
+      purpose: `${input.route_type} return journey`,
+      expression: [check?.expression, routeRoll?.expression, ...inserted.resolutions.map((resolution) => resolution.expression)].filter(Boolean).join(' + '),
+      dice, keptIndices: dice.map((_, index) => index), keptValues: [...dice],
+      tableKey: inserted.resolutions.length ? 'solo_area' : null, tableVersion: state.ruleset_version,
+      result: { action: 'solo_return_started', routeType: input.route_type, checkSkill: input.check_skill || null, check, waypointCount: inserted.waypoints.length },
+      campaignRevision: resultingRevision,
+    }) : null;
+    let returnDanger = null;
+    if (input.route_type === 'dangerous' && ['failure', 'demon'].includes(check?.outcome)) {
+      const dangerDescription = `Danger on the previous waypoint: ${inserted.resolutions[0]?.description || 'an unexpected return-route danger'}`;
+      const { rows } = await client.query(
+        `INSERT INTO solo_dangers (campaign_id, mission_id, waypoint_id, description, source_roll_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [input.campaign_id, mission.id, objective.id, dangerDescription, roll?.id || null],
+      );
+      returnDanger = rows[0];
+      await client.query(
+        `UPDATE solo_waypoints SET danger_ids = danger_ids || jsonb_build_array($1::text) WHERE id = $2`,
+        [returnDanger.id, objective.id],
+      );
+    }
+    const { rows: updatedMissions } = await client.query(
+      `UPDATE solo_missions SET status = 'returning', return_mode = $1 WHERE id = $2 RETURNING *`,
+      [input.route_type, mission.id],
+    );
+    mission = updatedMissions[0];
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.return_started', actorId: state.player_character_id,
+      payload: { missionId: mission.id, routeType: input.route_type, checkSkill: input.check_skill || null, check, waypointIds: inserted.waypoints.map(({ id }) => id), rollId: roll?.id || null, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: input.route_type === 'cleared'
+        ? 'The cleared return journey begins without incident.'
+        : input.route_type === 'alternative'
+          ? `The impossible direct route becomes an alternative journey of ${routeRoll.waypointCount} waypoints (D4+2).`
+          : `${input.check_skill} ${check.outcome}; ${['failure', 'demon'].includes(check.outcome) ? 'danger waits at the previous waypoint before the surface route.' : 'the dangerous route reaches the surface safely.'}`,
+      state_excerpt: {
+        mission: soloMissionForOutput(mission),
+        waypoints: inserted.waypoints.map(soloWaypointForOutput),
+        roll: roll ? recordedRollForOutput(roll) : null,
+        danger: returnDanger ? {
+          id: returnDanger.id, waypointId: returnDanger.waypoint_id,
+          description: returnDanger.description, status: returnDanger.status,
+        } : null,
+      },
+    };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
 }
 
 export async function searchWaypoint(user, input, { sourceClient } = {}) {
@@ -3354,7 +3998,9 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       ? await markSkillAdvancement(client, loadedActor, checkedSkillName, check)
       : { skill: null, eligible: false, added: false, alreadyMarked: false, markedSkills: loadedActor.actor.markedSkills || [] };
 
-    const threatResult = await updateExplorationThreat(client, context.threat, 1);
+    const threatResult = context.threat
+      ? await updateExplorationThreat(client, context.threat, 1)
+      : null;
     const { rows: explorationRows } = await client.query(
       `UPDATE solo_waypoint_exploration
        SET search_count = search_count + 1,
@@ -3440,7 +4086,7 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       previousRevision,
       resultingRevision,
     });
-    const threatEventId = await insertEvent(client, {
+    const threatEventId = threatResult ? await insertEvent(client, {
       campaign: access.campaign,
       user,
       sequence: sequence + 1,
@@ -3461,18 +4107,20 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       idempotencyKey: input.idempotency_key,
       previousRevision,
       resultingRevision,
-    });
+    }) : null;
 
     const outcome = input.known_nature ? 'known nature' : input.known_location ? 'known location' : check.outcome;
     const response = {
       success: true,
       campaign_revision: resultingRevision,
-      event_ids: [searchEventId, threatEventId],
-      summary: `Search (${outcome}): ${explorationFindingSummary(findingGroups)}. Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.`,
+      event_ids: [searchEventId, threatEventId].filter(Boolean),
+      summary: `Search (${outcome}): ${explorationFindingSummary(findingGroups)}.${threatResult ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ' The mission currently has no active threat.'}`,
       state_excerpt: {
         roll: recordedRollForOutput(rollRow),
         waypoint: soloWaypointForOutput({ ...context.waypoint, ...explorationRows[0] }),
-        threat: soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered }),
+        threat: threatResult
+          ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
+          : null,
         advancementMark,
         gameTime,
         itemDurationChanges,
@@ -3521,7 +4169,7 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
       tables,
     });
     const spendsStretch = input.spend_stretch || Number(context.exploration.scavenge_count) >= 1;
-    const threatResult = spendsStretch
+    const threatResult = spendsStretch && context.threat
       ? await updateExplorationThreat(client, context.threat, 1)
       : null;
     const { rows: explorationRows } = await client.query(
@@ -3627,7 +4275,7 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
       success: true,
       campaign_revision: resultingRevision,
       event_ids: eventIds,
-      summary: `Scavenge: ${explorationFindingSummary([finding])}.${spendsStretch ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : ' Quick first pass; no threat advance.'}`,
+      summary: `Scavenge: ${explorationFindingSummary([finding])}.${threatResult ? ` Threat ${threatResult.transition.previousCounter} → ${threatResult.transition.counter}.` : spendsStretch ? ' A stretch passed; the mission has no active threat.' : ' Quick first pass; no threat advance.'}`,
       state_excerpt: {
         roll: recordedRollForOutput(rollRow),
         waypoint: soloWaypointForOutput({ ...context.waypoint, ...explorationRows[0] }),
@@ -4726,7 +5374,8 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
     }
     const { rows: missionRows } = await client.query(
       `SELECT mission.*,
-         (SELECT MAX(position) FROM solo_waypoints WHERE mission_id = mission.id) AS final_position
+         (SELECT MAX(position) FROM solo_waypoints WHERE mission_id = mission.id) AS final_position,
+         (SELECT id FROM solo_waypoints WHERE mission_id = mission.id AND position = mission.current_waypoint_index) AS current_waypoint_id
        FROM solo_missions mission
        WHERE mission.id = $1 AND mission.campaign_id = $2
        FOR UPDATE OF mission`,
@@ -4736,12 +5385,14 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
     if (!mission || !['active', 'returning'].includes(mission.status)) {
       throw new HelperError(409, 'INVALID_STATE', 'The requested solo mission cannot be completed.');
     }
-    if (input.outcome === 'success'
-      && Number(mission.current_waypoint_index) !== Number(mission.final_position)) {
+    const atObjective = mission.current_waypoint_id === mission.objective_waypoint_id;
+    const atReturnEnd = mission.status === 'returning'
+      && Number(mission.current_waypoint_index) === Number(mission.final_position);
+    if (input.outcome === 'success' && !atObjective && !atReturnEnd) {
       throw new HelperError(
         409,
         'INVALID_STATE',
-        'A successful mission may only be completed at its final objective waypoint.',
+        'A successful mission may only be completed at its final objective or at the end of its return route.',
       );
     }
     await client.query(
@@ -4754,7 +5405,7 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
       await client.query(
         `UPDATE solo_threats
          SET status = CASE WHEN $1 = 'success' THEN 'resolved' ELSE 'removed' END
-         WHERE id = $2 AND status = 'active'`,
+         WHERE id = $2 AND status IN ('active', 'triggered')`,
         [input.outcome, mission.active_threat_id],
       );
     }
@@ -4769,6 +5420,18 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
       `UPDATE solo_campaign_states SET current_mission_id = NULL WHERE campaign_id = $1`,
       [input.campaign_id],
     );
+    let advancement = null;
+    if (input.outcome === 'success') {
+      const { rows } = await client.query(
+        `INSERT INTO solo_mission_advancements (
+           campaign_id, mission_id, character_id, marks_required, status
+         ) VALUES ($1, $2, $3, 5, 'selecting_marks')
+         ON CONFLICT (mission_id) DO UPDATE SET updated_at = now()
+         RETURNING *`,
+        [input.campaign_id, mission.id, state.player_character_id],
+      );
+      advancement = rows[0];
+    }
     const resultingRevision = previousRevision + 1;
     await client.query(
       'UPDATE parties SET helper_revision = $1 WHERE id = $2',
@@ -4804,8 +5467,9 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
         mission: soloMissionForOutput(completedRows[0]),
         currentMissionId: null,
         rewards: input.rewards,
+        advancement: soloAdvancementForOutput(advancement),
         advancementNotice: input.outcome === 'success'
-          ? 'Mission advancement marks are not automated yet; record them before the advancement phase is implemented.'
+          ? 'Choose exactly five skills to mark, then resolve advancement before the next mission.'
           : null,
       },
     };
@@ -4817,6 +5481,200 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
       hash: idem.hash,
       response,
     });
+    return response;
+  });
+}
+
+async function loadPendingSoloAdvancement(client, campaignId, { forUpdate = false } = {}) {
+  const { rows } = await client.query(
+    `SELECT * FROM solo_mission_advancements
+     WHERE campaign_id = $1 AND status <> 'complete'
+     ORDER BY created_at DESC LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [campaignId],
+  );
+  return rows[0] || null;
+}
+
+export async function selectSoloMissionMarks(user, input, { sourceClient } = {}) {
+  const operation = 'select_solo_mission_marks';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (new Set(input.skills.map(normalizedSkillName)).size !== 5) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Choose exactly five different skills.');
+    }
+    if (state.current_mission_id) throw new HelperError(409, 'INVALID_STATE', 'Mission advancement happens only between missions.');
+    const advancement = await loadPendingSoloAdvancement(client, input.campaign_id, { forUpdate: true });
+    if (!advancement || advancement.status !== 'selecting_marks') {
+      throw new HelperError(409, 'INVALID_STATE', 'There is no successful mission waiting for advancement marks.');
+    }
+    const { rows: characters } = await client.query(
+      `SELECT id, name, skill_levels, marked_skills FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [advancement.character_id, input.campaign_id],
+    );
+    const character = characters[0];
+    if (!character) throw new HelperError(409, 'INVALID_STATE', 'The Solo hero is unavailable.');
+    const canonicalSkills = input.skills.map((requested) => {
+      const match = Object.keys(character.skill_levels || {}).find(
+        (name) => normalizedSkillName(name) === normalizedSkillName(requested),
+      );
+      if (!match) throw new HelperError(400, 'VALIDATION_ERROR', `${character.name} has no skill named ${requested}.`);
+      return match;
+    });
+    const priorMarks = Array.isArray(character.marked_skills) ? character.marked_skills : [];
+    const alreadyMarked = canonicalSkills.find((skill) => priorMarks.some(
+      (marked) => normalizedSkillName(marked) === normalizedSkillName(skill),
+    ));
+    if (alreadyMarked) {
+      throw new HelperError(409, 'INVALID_STATE', `${alreadyMarked} is already marked. Choose five other skills so the mission grants five new marks.`);
+    }
+    const markedSkills = [...priorMarks, ...canonicalSkills];
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query('UPDATE characters SET marked_skills = $1 WHERE id = $2', [markedSkills, character.id]);
+    const { rows } = await client.query(
+      `UPDATE solo_mission_advancements SET selected_skills = $1, status = 'ready_to_roll' WHERE id = $2 RETURNING *`,
+      [canonicalSkills, advancement.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.advancement_marks_selected', actorId: character.id,
+      payload: { advancementId: advancement.id, missionId: advancement.mission_id, skills: canonicalSkills, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId], summary: `Five mission advancement marks selected: ${canonicalSkills.join(', ')}.`, state_excerpt: { advancement: soloAdvancementForOutput(rows[0]), markedSkills } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function resolveSoloAdvancement(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_solo_advancement';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id) throw new HelperError(409, 'INVALID_STATE', 'Resolve advancement only between missions.');
+    const advancement = await loadPendingSoloAdvancement(client, input.campaign_id, { forUpdate: true });
+    if (!advancement || advancement.status !== 'ready_to_roll') {
+      throw new HelperError(409, 'INVALID_STATE', 'Select the five mission marks before resolving advancement.');
+    }
+    const { rows: characters } = await client.query(
+      `SELECT id, name, skill_levels, marked_skills FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [advancement.character_id, input.campaign_id],
+    );
+    const character = characters[0];
+    if (!character) throw new HelperError(409, 'INVALID_STATE', 'The Solo hero is unavailable.');
+    const markedSkills = Array.isArray(character.marked_skills) ? character.marked_skills : [];
+    if (markedSkills.length < 5) throw new HelperError(409, 'INVALID_STATE', 'The Solo hero does not have the required advancement marks.');
+    const skills = markedSkills.map((marked) => {
+      const name = Object.keys(character.skill_levels || {}).find(
+        (candidate) => normalizedSkillName(candidate) === normalizedSkillName(marked),
+      );
+      if (!name) throw new HelperError(409, 'INVALID_STATE', `Marked skill ${marked} is no longer available.`);
+      return { name, level: Number(character.skill_levels[name]) };
+    });
+    const resolution = resolveSoloAdvancementRoll(skills);
+    const skillLevels = { ...(character.skill_levels || {}) };
+    for (const result of resolution.results) skillLevels[result.name] = result.resultingLevel;
+    const status = resolution.heroicAbilityRewards > 0 ? 'claiming_abilities' : 'complete';
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query(
+      `UPDATE characters SET skill_levels = $1::jsonb, marked_skills = '{}'::text[] WHERE id = $2`,
+      [JSON.stringify(skillLevels), character.id],
+    );
+    const { rows } = await client.query(
+      `UPDATE solo_mission_advancements SET roll_results = $1::jsonb,
+         pending_heroic_abilities = $2, status = $3,
+         completed_at = CASE WHEN $3 = 'complete' THEN now() ELSE NULL END
+       WHERE id = $4 RETURNING *`,
+      [JSON.stringify(resolution.results), resolution.heroicAbilityRewards, status, advancement.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    const roll = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id, sessionId: access.campaign.active_session_id,
+      actorId: character.id, userId: user.id, purpose: 'Between-mission advancement',
+      expression: resolution.expression, dice: resolution.dice,
+      keptIndices: resolution.keptIndices, keptValues: resolution.keptValues,
+      tableKey: null, tableVersion: state.ruleset_version,
+      result: { action: 'solo_advancement', missionId: advancement.mission_id, results: resolution.results, heroicAbilityRewards: resolution.heroicAbilityRewards },
+      campaignRevision: resultingRevision,
+    });
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.advancement_resolved', actorId: character.id,
+      payload: { advancementId: advancement.id, missionId: advancement.mission_id, rollId: roll.id, results: resolution.results, heroicAbilityRewards: resolution.heroicAbilityRewards, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const improved = resolution.results.filter(({ improved }) => improved).map(({ name }) => name);
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId], summary: `Advancement resolved: ${improved.length ? `${improved.join(', ')} improved` : 'no skills improved'}.${resolution.heroicAbilityRewards ? ` Choose ${resolution.heroicAbilityRewards} heroic ability reward${resolution.heroicAbilityRewards === 1 ? '' : 's'}.` : ''}`, state_excerpt: { advancement: soloAdvancementForOutput(rows[0]), roll: recordedRollForOutput(roll), skillLevels } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function claimSoloAdvancementAbility(user, input, { sourceClient } = {}) {
+  const operation = 'claim_solo_advancement_ability';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (state.current_mission_id) throw new HelperError(409, 'INVALID_STATE', 'Claim advancement rewards only between missions.');
+    const advancement = await loadPendingSoloAdvancement(client, input.campaign_id, { forUpdate: true });
+    if (!advancement || advancement.status !== 'claiming_abilities' || Number(advancement.pending_heroic_abilities) < 1) {
+      throw new HelperError(409, 'INVALID_STATE', 'There is no heroic ability advancement reward to claim.');
+    }
+    const [{ rows: characters }, { rows: abilities }] = await Promise.all([
+      client.query(`SELECT id, name, heroic_ability FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`, [advancement.character_id, input.campaign_id]),
+      client.query(`SELECT id, name, rule_key FROM heroic_abilities WHERE id = $1`, [input.ability_id]),
+    ]);
+    const character = characters[0];
+    const ability = abilities[0];
+    if (!character || !ability) throw new HelperError(404, 'NOT_FOUND', 'The Solo hero or heroic ability was not found.');
+    const abilityNames = Array.isArray(character.heroic_ability) ? [...character.heroic_ability] : [];
+    if (abilityNames.some((name) => normalizedSkillName(name) === normalizedSkillName(ability.name))) {
+      throw new HelperError(409, 'INVALID_STATE', `${character.name} already knows ${ability.name}.`);
+    }
+    abilityNames.push(ability.name);
+    const remaining = Number(advancement.pending_heroic_abilities) - 1;
+    const status = remaining === 0 ? 'complete' : 'claiming_abilities';
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    await client.query('UPDATE characters SET heroic_ability = $1 WHERE id = $2', [abilityNames, character.id]);
+    const { rows } = await client.query(
+      `UPDATE solo_mission_advancements SET pending_heroic_abilities = $1,
+         claimed_heroic_ability_ids = array_append(claimed_heroic_ability_ids, $2::uuid),
+         status = $3, completed_at = CASE WHEN $3 = 'complete' THEN now() ELSE NULL END
+       WHERE id = $4 RETURNING *`,
+      [remaining, ability.id, status, advancement.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.advancement_ability_claimed', actorId: character.id,
+      payload: { advancementId: advancement.id, abilityId: ability.id, abilityName: ability.name, remaining, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId], summary: `${character.name} gained ${ability.name} from reaching skill level 18.`, state_excerpt: { advancement: soloAdvancementForOutput(rows[0]), playerCharacter: { id: character.id, name: character.name, heroicAbilities: abilityNames } } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
     return response;
   });
 }

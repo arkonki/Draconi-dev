@@ -548,6 +548,19 @@ describe('Dragonbane MCP server', () => {
       expect(schemaText, `${tool.name} must not contain tuple-style items`)
         .not.toMatch(/"items":\[/);
     }
+    for (const name of [
+      'push_solo_check',
+      'replace_solo_heroic_ability',
+      'add_solo_waypoints',
+      'begin_solo_return',
+      'resolve_solo_threat',
+      'set_solo_threat',
+      'select_solo_mission_marks',
+      'resolve_solo_advancement',
+      'claim_solo_advancement_ability',
+    ]) {
+      expect(listed.tools.some((tool) => tool.name === name), `${name} should be published`).toBe(true);
+    }
   });
 
   it('returns the authoritative resume snapshot', async () => {

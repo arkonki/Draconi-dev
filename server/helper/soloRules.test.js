@@ -9,11 +9,13 @@ import {
   resolveLocationDetails,
   resolveInspiration,
   resolveNarrativeDamage,
+  resolveAlternativeReturnRoute,
   resolveSevereInjury,
   resolveSoloCriticalEffect,
   resolveSoloDyingAction,
   resolveSoloInjuryTreatment,
   resolveSoloRest,
+  resolveSoloAdvancement,
   resolveSoloSkillCheck,
 } from './soloRules.js';
 
@@ -384,12 +386,33 @@ describe('Solo rule resolution', () => {
     });
   });
 
-  it('resets a recurring threat to one after triggering', () => {
+  it('holds a recurring threat at six until its event is resolved', () => {
     expect(advanceThreatState({ counter: 5, recurring: true, status: 'active' }, 1)).toMatchObject({
       reachedCounter: 6,
-      counter: 1,
+      counter: 6,
       triggered: true,
-      status: 'active',
+      status: 'triggered',
+    });
+  });
+
+  it('generates D4+2 waypoints for an impossible return route', () => {
+    expect(resolveAlternativeReturnRoute(fixedRolls(3))).toMatchObject({
+      expression: '1d4', dice: [3], waypointCount: 5,
+    });
+  });
+
+  it('improves marked skills only when D20 exceeds the skill and awards level-18 abilities', () => {
+    expect(resolveSoloAdvancement([
+      { name: 'Awareness', level: 12 },
+      { name: 'Healing', level: 17 },
+      { name: 'Sneaking', level: 18 },
+    ], fixedRolls(13, 20, 20))).toMatchObject({
+      results: [
+        { name: 'Awareness', resultingLevel: 13, improved: true, reachedEighteen: false },
+        { name: 'Healing', resultingLevel: 18, improved: true, reachedEighteen: true },
+        { name: 'Sneaking', resultingLevel: 18, improved: false, reachedEighteen: false },
+      ],
+      heroicAbilityRewards: 1,
     });
   });
 });

@@ -157,6 +157,13 @@ export class HelperApiClient {
     });
   }
 
+  replaceSoloHeroicAbility(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/heroic-ability/replace`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
   askFortune(input) {
     const {
       campaign_id,
@@ -202,6 +209,13 @@ export class HelperApiClient {
     });
   }
 
+  pushSoloCheck(input) {
+    const { campaign_id, source_roll_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/checks/${source_roll_id}/push`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
   resolveSoloCheckConsequence(input) {
     const {
       campaign_id,
@@ -230,6 +244,55 @@ export class HelperApiClient {
       body,
       expectedRevision: expected_revision,
       idempotencyKey: idempotency_key,
+    });
+  }
+
+  addSoloWaypoints(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/waypoints`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  beginSoloReturn(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/return`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  setSoloThreat(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/threats`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveThreat(input) {
+    const { campaign_id, threat_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/threats/${threat_id}/resolve`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  selectSoloMissionMarks(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/advancement/marks`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveSoloAdvancement(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/advancement/resolve`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  claimSoloAdvancementAbility(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/advancement/heroic-ability`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
     });
   }
 

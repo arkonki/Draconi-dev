@@ -224,7 +224,13 @@ change threat, HP, conditions, or inventory. Any such mechanical consequence mus
 be applied through its guarded state operation. General Solo checks are rejected
 during active combat, where the encounter rules remain authoritative.
 
-When a check returns `requiresFailForward`, resolve it exactly once with
+An ordinary failed direct Solo check may first be pushed exactly once with
+`push_solo_check`. The player must explain how the push applies and choose
+either one inactive standard condition or, when the hero knows `Sole Survivor`,
+spend exactly 3 WP. The cost and reroll are atomic and the new immutable roll is
+linked to its source. Demons and already-pushed results cannot be pushed.
+
+When a check still returns `requiresFailForward`, resolve it exactly once with
 `resolve_solo_check_consequence`. A manual resolution records one consequence
 accepted by the player. A rolled resolution accepts two contextual alternatives,
 rolls an authoritative D6, and selects the first on 1-3 or the second on 4-6.
@@ -258,11 +264,30 @@ data pack installed through the database migrations. Deepfall Breach remains
 unavailable rather than exposing or inventing protected module content.
 
 Custom missions persist an objective, ordered waypoints, and one active threat.
+The route can include multiple planned foreseen waypoints and a configurable
+number of hidden unknown waypoints between the opening and final objective.
 Unknown waypoint payloads are stored separately from public waypoint rows and
 are not returned by `get_solo_state` before revelation. Waypoints advance only
 in sequence. Threats begin at 1, advance by 1 or 2 with an audited reason, and
-trigger at 6; recurring threats reset to 1. A successful mission can only be
-completed from its final objective waypoint.
+trigger at 6 and remain triggered until `resolve_solo_threat` records the event.
+Recurring threats then reset to 1; non-recurring threats are removed and can be
+replaced at counter 1 with `set_solo_threat`. Exploration remains usable while
+a replacement is being established.
+
+`add_solo_waypoints` inserts hidden unknown or diversion locations after the
+current waypoint for flight, secret paths, and route changes. Generated
+locations use the versioned area/location tables and immutable server dice.
+After the objective, `begin_solo_return` supports the three Solo v1.2 exits:
+a cleared route without incident; a dangerous route tested with Awareness or
+Sneaking, whose failure creates danger at the previous waypoint; or an
+impossible direct route with D4+2 generated return waypoints.
+
+A successful mission creates a mandatory between-mission advancement record.
+The player selects exactly five new skill marks, then
+`resolve_solo_advancement` rolls one D20 for every marked skill. A roll greater
+than the current value improves that skill by one, never above 18, and all marks
+are cleared afterward. Each skill that reaches 18 grants a pending heroic
+ability reward that must be claimed before another mission starts.
 
 The active waypoint also tracks Search and Scavenge usage. A thorough
 `search_waypoint` resolves the solo hero's stored Spot Hidden value (unless the

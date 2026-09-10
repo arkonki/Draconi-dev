@@ -5,6 +5,12 @@ import { authenticateHelperRequest, enforceHelperRateLimit, requireHelperScope }
 import { asHelperError, HelperError, validationError } from './errors.js';
 import { documentationHtml, openApiDocument } from './openapi.js';
 import {
+  addSoloWaypointsBodySchema,
+  addSoloWaypointsInputSchema,
+  beginSoloReturnBodySchema,
+  beginSoloReturnInputSchema,
+  claimSoloAdvancementAbilityBodySchema,
+  claimSoloAdvancementAbilityInputSchema,
   addEncounterParticipantsBodySchema,
   addEncounterParticipantsInputSchema,
   advanceCombatTurnBodySchema,
@@ -28,6 +34,8 @@ import {
   createRollRequestInputSchema,
   pushRollRequestBodySchema,
   pushRollRequestInputSchema,
+  pushSoloCheckBodySchema,
+  pushSoloCheckInputSchema,
   createEncounterBodySchema,
   createEncounterInputSchema,
   drawInspirationBodySchema,
@@ -68,6 +76,10 @@ import {
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageBodySchema,
   resolveSoloNarrativeDamageInputSchema,
+  resolveSoloAdvancementBodySchema,
+  resolveSoloAdvancementInputSchema,
+  resolveThreatBodySchema,
+  resolveThreatInputSchema,
   resolveCharacterInjuryActionInputSchema,
   rollCharacterSevereInjuryBodySchema,
   rollCharacterSevereInjuryInputSchema,
@@ -86,6 +98,12 @@ import {
   startCombatInputSchema,
   startSoloMissionBodySchema,
   startSoloMissionInputSchema,
+  replaceSoloHeroicAbilityBodySchema,
+  replaceSoloHeroicAbilityInputSchema,
+  selectSoloMissionMarksBodySchema,
+  selectSoloMissionMarksInputSchema,
+  setSoloThreatBodySchema,
+  setSoloThreatInputSchema,
   startSessionBodySchema,
   startSessionInputSchema,
   submitManualRollResultBodySchema,
@@ -94,6 +112,9 @@ import {
   takeSoloRestInputSchema,
 } from './schemas.js';
 import {
+  addSoloWaypoints,
+  beginSoloReturn,
+  claimSoloAdvancementAbility,
   addEncounterParticipants,
   advanceCombatTurn,
   advanceThreat,
@@ -126,6 +147,7 @@ import {
   listCampaigns,
   resolveGameAction,
   pushRollRequest,
+  pushSoloCheck,
   resolveRollRequestServer,
   resolveCharacterInjuryAction,
   resolveSoloDyingAction,
@@ -133,6 +155,8 @@ import {
   resolveSoloCheckConsequence,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
+  resolveSoloAdvancement,
+  resolveThreat,
   rollCharacterSevereInjury,
   advanceCharacterInjuryRecovery,
   removeEncounterParticipant,
@@ -142,6 +166,9 @@ import {
   startCombat,
   startSession,
   startSoloMission,
+  replaceSoloHeroicAbility,
+  selectSoloMissionMarks,
+  setSoloThreat,
   submitManualRollResult,
   takeSoloRest,
 } from './service.js';
@@ -500,6 +527,23 @@ export async function handleHelperApiRequest(request, response) {
       return true;
     }
 
+    const soloAbilityReplaceMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/heroic-ability\/replace$/);
+    if (soloAbilityReplaceMatch && request.method === 'POST') {
+      operation = 'replace_solo_heroic_ability';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(replaceSoloHeroicAbilityBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(replaceSoloHeroicAbilityInputSchema, {
+        campaign_id: soloAbilityReplaceMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await replaceSoloHeroicAbility(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     const fortuneMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/fortune$/);
     if (fortuneMatch && request.method === 'POST') {
       operation = 'ask_fortune';
@@ -557,6 +601,23 @@ export async function handleHelperApiRequest(request, response) {
       return true;
     }
 
+    const soloCheckPushMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/checks\/([^/]+)\/push$/);
+    if (soloCheckPushMatch && request.method === 'POST') {
+      operation = 'push_solo_check';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(pushSoloCheckBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(pushSoloCheckInputSchema, {
+        campaign_id: soloCheckPushMatch[0], source_roll_id: soloCheckPushMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await pushSoloCheck(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     const soloCheckConsequenceMatch = matchPath(
       pathname,
       /^\/api\/v1\/campaigns\/([^/]+)\/solo\/checks\/([^/]+)\/consequence$/,
@@ -594,6 +655,116 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await startSoloMission(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloWaypointsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/waypoints$/);
+    if (soloWaypointsMatch && request.method === 'POST') {
+      operation = 'add_solo_waypoints';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(addSoloWaypointsBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(addSoloWaypointsInputSchema, {
+        campaign_id: soloWaypointsMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await addSoloWaypoints(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloReturnMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/return$/);
+    if (soloReturnMatch && request.method === 'POST') {
+      operation = 'begin_solo_return';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(beginSoloReturnBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(beginSoloReturnInputSchema, {
+        campaign_id: soloReturnMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await beginSoloReturn(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloThreatsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/threats$/);
+    if (soloThreatsMatch && request.method === 'POST') {
+      operation = 'set_solo_threat';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(setSoloThreatBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(setSoloThreatInputSchema, {
+        campaign_id: soloThreatsMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await setSoloThreat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloThreatResolveMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/threats\/([^/]+)\/resolve$/);
+    if (soloThreatResolveMatch && request.method === 'POST') {
+      operation = 'resolve_solo_threat';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveThreatBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveThreatInputSchema, {
+        campaign_id: soloThreatResolveMatch[0], threat_id: soloThreatResolveMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveThreat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloAdvancementMarksMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/advancement\/marks$/);
+    if (soloAdvancementMarksMatch && request.method === 'POST') {
+      operation = 'select_solo_mission_marks';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(selectSoloMissionMarksBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(selectSoloMissionMarksInputSchema, { campaign_id: soloAdvancementMarksMatch[0], expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body });
+      campaignId = input.campaign_id;
+      const data = await selectSoloMissionMarks(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloAdvancementResolveMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/advancement\/resolve$/);
+    if (soloAdvancementResolveMatch && request.method === 'POST') {
+      operation = 'resolve_solo_advancement';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloAdvancementBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveSoloAdvancementInputSchema, { campaign_id: soloAdvancementResolveMatch[0], expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloAdvancement(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloAdvancementAbilityMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/advancement\/heroic-ability$/);
+    if (soloAdvancementAbilityMatch && request.method === 'POST') {
+      operation = 'claim_solo_advancement_ability';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(claimSoloAdvancementAbilityBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(claimSoloAdvancementAbilityInputSchema, { campaign_id: soloAdvancementAbilityMatch[0], expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body });
+      campaignId = input.campaign_id;
+      const data = await claimSoloAdvancementAbility(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

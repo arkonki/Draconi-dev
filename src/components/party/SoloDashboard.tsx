@@ -30,11 +30,13 @@ import {
   X,
 } from 'lucide-react';
 import {
+  addSoloWaypoints,
   advanceSoloThreat,
   askSoloFortune,
   completeSoloMission,
   drawSoloInspiration,
   fetchSoloState,
+  fetchSoloOptions,
   FortuneCategory,
   FortuneTilt,
   InspirationColumn,
@@ -49,9 +51,16 @@ import {
   resolveSoloDyingAction,
   resolveSoloCheck,
   resolveSoloCheckConsequence,
+  pushSoloCheck,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
   takeSoloRest,
+  beginSoloReturn,
+  claimSoloAdvancementAbility,
+  resolveSoloAdvancement,
+  resolveSoloThreat,
+  selectSoloMissionMarks,
+  setSoloThreat,
   SoloCheckModifier,
   SoloCheckType,
   SoloConsequenceEffect,
@@ -74,7 +83,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'check' | 'consequence' | 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'complete-mission';
+type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
 type SoloDashboardTab = 'adventure' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
@@ -266,6 +275,7 @@ function ActionModal({
 }) {
   const titles: Record<SoloAction, string> = {
     check: 'Resolve a Solo check',
+    push: 'Push the failed Solo check',
     consequence: 'Resolve the complication',
     fortune: 'Ask Fortune',
     inspiration: 'Draw Inspiration',
@@ -278,6 +288,10 @@ function ActionModal({
     damage: 'Resolve narrative damage',
     injury: 'Treat a severe injury',
     'advance-threat': 'Advance the threat',
+    'resolve-threat': 'Resolve the triggered threat',
+    'set-threat': 'Set a replacement threat',
+    'add-waypoints': 'Add route waypoints',
+    return: 'Begin the return journey',
     'complete-mission': 'Conclude the mission',
   };
 
@@ -386,6 +400,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [checkName, setCheckName] = useState('');
   const [checkModifier, setCheckModifier] = useState<SoloCheckModifier>('normal');
   const [checkContext, setCheckContext] = useState('');
+  const [pushRollId, setPushRollId] = useState<string | null>(null);
+  const [pushCost, setPushCost] = useState<'condition' | 'sole_survivor'>('condition');
+  const [pushCondition, setPushCondition] = useState('');
+  const [pushExplanation, setPushExplanation] = useState('');
   const [consequenceRollId, setConsequenceRollId] = useState<string | null>(null);
   const [consequenceMode, setConsequenceMode] = useState<'manual' | 'roll_choice'>('manual');
   const [consequenceDescriptions, setConsequenceDescriptions] = useState<[string, string]>(['', '']);
@@ -405,7 +423,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const [missionTitle, setMissionTitle] = useState('');
   const [missionObjective, setMissionObjective] = useState('');
-  const [waypointCount, setWaypointCount] = useState(3);
+  const [unknownWaypointCount, setUnknownWaypointCount] = useState(1);
+  const [foreseenWaypointsText, setForeseenWaypointsText] = useState('');
   const [openingTitle, setOpeningTitle] = useState('Departure');
   const [openingDescription, setOpeningDescription] = useState('');
   const [threatDescription, setThreatDescription] = useState('');
@@ -433,6 +452,16 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [injuryContext, setInjuryContext] = useState('');
   const [threatAmount, setThreatAmount] = useState<1 | 2>(1);
   const [threatReason, setThreatReason] = useState('');
+  const [threatResolution, setThreatResolution] = useState('');
+  const [replacementThreatDescription, setReplacementThreatDescription] = useState('');
+  const [replacementThreatEffect, setReplacementThreatEffect] = useState('');
+  const [replacementThreatRecurring, setReplacementThreatRecurring] = useState(false);
+  const [addedWaypointCount, setAddedWaypointCount] = useState(1);
+  const [addedWaypointKind, setAddedWaypointKind] = useState<'unknown' | 'diversion'>('diversion');
+  const [returnRouteType, setReturnRouteType] = useState<'cleared' | 'dangerous' | 'alternative'>('cleared');
+  const [returnCheckSkill, setReturnCheckSkill] = useState<'Awareness' | 'Sneaking'>('Awareness');
+  const [selectedAdvancementSkills, setSelectedAdvancementSkills] = useState<string[]>([]);
+  const [advancementAbilityId, setAdvancementAbilityId] = useState('');
   const [missionOutcome, setMissionOutcome] = useState<'success' | 'failure' | 'abandoned'>('success');
   const [missionSummary, setMissionSummary] = useState('');
 
@@ -442,6 +471,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     staleTime: 0,
   });
   const state = stateQuery.data;
+  const optionsQuery = useQuery({
+    queryKey: ['solo-settings', partyId],
+    queryFn: () => fetchSoloOptions(partyId),
+    enabled: Boolean(state?.pendingAdvancement),
+    staleTime: 0,
+  });
   const selectedInjury = state?.activeInjuries.find((injury) => injury.id === selectedInjuryId) || null;
   const soloCharacterId = state?.solo.playerCharacterId || state?.playerCharacter?.id || null;
   const isSoloCharacterSheetReady = Boolean(
@@ -529,6 +564,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const atFinalWaypoint = Boolean(
     state?.activeMission && state.activeMission.currentWaypointIndex === finalWaypointPosition,
   );
+  const atObjectiveWaypoint = Boolean(
+    state?.activeMission?.objectiveWaypointId
+    && state.currentWaypoint?.id === state.activeMission.objectiveWaypointId,
+  );
+  const canCompleteSuccessfully = Boolean(
+    atObjectiveWaypoint || (state?.activeMission?.status === 'returning' && atFinalWaypoint),
+  );
 
   const consequenceOption = (index: 0 | 1): SoloConsequenceOption => {
     const type = consequenceEffectTypes[index];
@@ -575,6 +617,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             modifier: checkModifier,
             context: checkContext.trim(),
           });
+        case 'push':
+          if (!pushRollId) throw new Error('Choose the failed Solo check to push.');
+          return pushSoloCheck(partyId, pushRollId, revision, {
+            cost: pushCost,
+            condition: pushCost === 'condition' ? pushCondition : undefined,
+            explanation: pushExplanation.trim(),
+          });
         case 'consequence': {
           if (!consequenceRollId) throw new Error('Choose the failed Solo check to resolve.');
           const first = consequenceOption(0);
@@ -600,16 +649,25 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             context: inspirationContext.trim(),
           });
         case 'start-mission':
+          {
+            const foreseenWaypoints = foreseenWaypointsText.split('\n')
+              .map((line) => line.trim()).filter(Boolean).map((line) => {
+                const [title, ...description] = line.split('::');
+                return { title: title.trim(), description: description.join('::').trim() };
+              });
           return startSoloMission(partyId, revision, {
             title: missionTitle.trim(),
             objective: missionObjective.trim(),
-            waypointCount,
+            waypointCount: foreseenWaypoints.length + unknownWaypointCount + 2,
+            unknownWaypointCount,
+            foreseenWaypoints,
             openingTitle: openingTitle.trim(),
             openingDescription: openingDescription.trim(),
             threatDescription: threatDescription.trim(),
             threatRecurring,
             threatTriggerEffect: threatEffect.trim(),
           });
+          }
         case 'reveal-waypoint':
           if (!nextWaypoint) throw new Error('There is no next waypoint to reveal.');
           return revealSoloWaypoint(partyId, nextWaypoint.id, revision, {
@@ -659,6 +717,26 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             amount: threatAmount,
             reason: threatReason.trim(),
           });
+        case 'resolve-threat':
+          if (!state.activeThreat) throw new Error('There is no triggered threat.');
+          return resolveSoloThreat(partyId, state.activeThreat.id, revision, threatResolution.trim());
+        case 'set-threat':
+          return setSoloThreat(partyId, revision, {
+            description: replacementThreatDescription.trim(),
+            recurring: replacementThreatRecurring,
+            triggerEffect: replacementThreatEffect.trim(),
+          });
+        case 'add-waypoints':
+          return addSoloWaypoints(partyId, revision, {
+            count: addedWaypointCount,
+            kind: addedWaypointKind,
+            generateLocations: true,
+          });
+        case 'return':
+          return beginSoloReturn(partyId, revision, {
+            routeType: returnRouteType,
+            checkSkill: returnRouteType === 'dangerous' ? returnCheckSkill : undefined,
+          });
         case 'complete-mission':
           if (!state.activeMission) throw new Error('There is no active mission.');
           return completeSoloMission(partyId, state.activeMission.id, revision, {
@@ -688,6 +766,26 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     },
   });
 
+  const advancementMutation = useMutation({
+    mutationFn: async (step: 'marks' | 'resolve' | 'ability') => {
+      if (!state) throw new Error('Solo state is not ready.');
+      if (step === 'marks') return selectSoloMissionMarks(partyId, state.campaignRevision, selectedAdvancementSkills);
+      if (step === 'resolve') return resolveSoloAdvancement(partyId, state.campaignRevision);
+      if (!advancementAbilityId) throw new Error('Choose a heroic ability reward.');
+      return claimSoloAdvancementAbility(partyId, state.campaignRevision, advancementAbilityId);
+    },
+    onSuccess: async (result) => {
+      setSuccessMessage(result.summary);
+      setSelectedAdvancementSkills([]);
+      setAdvancementAbilityId('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] }),
+        queryClient.invalidateQueries({ queryKey: ['solo-settings', partyId] }),
+        queryClient.invalidateQueries({ queryKey: ['party', partyId] }),
+      ]);
+    },
+  });
+
   const openAction = (action: SoloAction) => {
     setSuccessMessage(null);
     setOracleActionResult(null);
@@ -701,6 +799,11 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setCheckName(firstSkill || 'STR');
       setCheckModifier('normal');
       setCheckContext('');
+    }
+    if (action === 'push') {
+      setPushCost('condition');
+      setPushCondition('');
+      setPushExplanation('');
     }
     if (action === 'consequence') {
       setConsequenceMode('manual');
@@ -743,8 +846,22 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     if (action === 'advance-threat') {
       setThreatReason('');
     }
+    if (action === 'resolve-threat') setThreatResolution('');
+    if (action === 'set-threat') {
+      setReplacementThreatDescription('');
+      setReplacementThreatEffect('');
+      setReplacementThreatRecurring(false);
+    }
+    if (action === 'add-waypoints') {
+      setAddedWaypointCount(1);
+      setAddedWaypointKind('diversion');
+    }
+    if (action === 'return') {
+      setReturnRouteType('cleared');
+      setReturnCheckSkill('Awareness');
+    }
     if (action === 'complete-mission') {
-      setMissionOutcome(atFinalWaypoint ? 'success' : 'failure');
+      setMissionOutcome(canCompleteSuccessfully ? 'success' : 'failure');
       setMissionSummary('');
     }
     setActiveAction(action);
@@ -765,6 +882,11 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const openConsequenceAction = (rollId: string) => {
     setConsequenceRollId(rollId);
     openAction('consequence');
+  };
+
+  const openPushAction = (rollId: string) => {
+    setPushRollId(rollId);
+    openAction('push');
   };
 
   const submitAction = (event: FormEvent) => {
@@ -823,9 +945,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const currentSceneEntries = Object.entries(journal.currentScene || {});
   const activeJournalSession = journal.sessions.find((session) => session.status === 'active') || null;
   const completedJournalSessions = journal.sessions.filter((session) => session.status === 'completed');
+  const pushedSourceIds = new Set(state.latestRolls.map((roll) => roll.previousRollId).filter(Boolean));
   const unresolvedRolls = state.latestRolls.filter((roll) => (
-    roll.result.action === 'solo_check'
+    ['solo_check', 'solo_check_push'].includes(String(roll.result.action))
     && roll.result.requiresFailForward === true
+    && !roll.consequence
+    && !pushedSourceIds.has(roll.id)
+  ));
+  const pushableRolls = state.latestRolls.filter((roll) => (
+    roll.result.action === 'solo_check'
+    && roll.result.outcome === 'failure'
+    && !roll.previousRollId
+    && !pushedSourceIds.has(roll.id)
     && !roll.consequence
   ));
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
@@ -903,12 +1034,15 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="flex items-center gap-2 font-bold text-amber-950"><AlertTriangle className="h-5 w-5 text-amber-600" /> Complication awaiting resolution</h3>
-                    <p className="mt-1 text-sm text-amber-800">The latest failed check needs a consequence before the story continues.</p>
+                    <p className="mt-1 text-sm text-amber-800">The latest failed check may be pushed once if eligible, or resolved with a consequence.</p>
                   </div>
                   {canManage && (
-                    <Button size="sm" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>
-                      Resolve now
-                    </Button>
+                    <div className="flex gap-2">
+                      {pushableRolls.some((roll) => roll.id === unresolvedRolls[0].id) && (
+                        <Button size="sm" icon={Dices} onClick={() => openPushAction(unresolvedRolls[0].id)}>Push</Button>
+                      )}
+                      <Button size="sm" variant="outline" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>Take consequence</Button>
+                    </div>
                   )}
                 </div>
               </section>
@@ -923,10 +1057,52 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
               {!state.activeMission ? (
                 <div className="px-5 py-10 text-center">
-                  <Flag className="mx-auto h-10 w-10 text-stone-300" />
-                  <h4 className="mt-3 font-bold text-stone-800">No active mission</h4>
-                  <p className="mt-1 text-sm text-stone-500">Create a custom objective, route, and threat to begin the playable solo loop.</p>
-                  {canManage && <Button className="mt-5" icon={Flag} onClick={() => openAction('start-mission')}>Start a mission</Button>}
+                  {state.pendingAdvancement ? (
+                    <div className="mx-auto max-w-2xl text-left">
+                      <Sparkles className="h-10 w-10 text-amber-500" />
+                      <h4 className="mt-3 text-lg font-bold text-stone-900">Mission advancement</h4>
+                      <p className="mt-1 text-sm text-stone-600">Complete the between-mission advancement before starting the next mission.</p>
+                      {state.pendingAdvancement.status === 'selecting_marks' && (
+                        <div className="mt-4">
+                          <div className="text-sm font-bold text-stone-800">Choose exactly five unmarked skills</div>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            {skillOptions.filter(([name]) => !hero?.markedSkills?.some((marked) => titleCase(marked) === titleCase(name))).map(([name, value]) => (
+                              <label key={name} className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${selectedAdvancementSkills.includes(name) ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
+                                <input type="checkbox" checked={selectedAdvancementSkills.includes(name)} disabled={!selectedAdvancementSkills.includes(name) && selectedAdvancementSkills.length >= 5} onChange={(event) => setSelectedAdvancementSkills((current) => event.target.checked ? [...current, name] : current.filter((skill) => skill !== name))} />
+                                <span className="flex-1 font-semibold">{name}</span><span>{value}</span>
+                              </label>
+                            ))}
+                          </div>
+                          {canManage && <Button className="mt-4" loading={advancementMutation.isPending} disabled={selectedAdvancementSkills.length !== 5} onClick={() => advancementMutation.mutate('marks')}>Apply five marks</Button>}
+                        </div>
+                      )}
+                      {state.pendingAdvancement.status === 'ready_to_roll' && (
+                        <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                          <div className="font-bold text-indigo-950">Marks ready: {state.pendingAdvancement.selectedSkills.join(', ')}</div>
+                          <p className="mt-1 text-sm text-indigo-800">Draconi will roll D20 for every marked skill. A roll above the current value improves it by one, to a maximum of 18.</p>
+                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} onClick={() => advancementMutation.mutate('resolve')}>Roll advancement</Button>}
+                        </div>
+                      )}
+                      {state.pendingAdvancement.status === 'claiming_abilities' && (
+                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                          <div className="font-bold text-amber-950">Choose {state.pendingAdvancement.pendingHeroicAbilities} heroic ability reward(s)</div>
+                          <select value={advancementAbilityId} onChange={(event) => setAdvancementAbilityId(event.target.value)} className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm">
+                            <option value="">Choose heroic ability…</option>
+                            {(optionsQuery.data?.heroicAbilities || []).filter((ability) => !ability.knownByCharacterIds?.includes(hero?.id || '')).map((ability) => <option key={ability.id} value={ability.id}>{ability.name}</option>)}
+                          </select>
+                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} disabled={!advancementAbilityId} onClick={() => advancementMutation.mutate('ability')}>Claim ability</Button>}
+                        </div>
+                      )}
+                      {advancementMutation.error && <p className="mt-3 text-sm text-red-700">{advancementMutation.error.message}</p>}
+                    </div>
+                  ) : (
+                    <>
+                      <Flag className="mx-auto h-10 w-10 text-stone-300" />
+                      <h4 className="mt-3 font-bold text-stone-800">No active mission</h4>
+                      <p className="mt-1 text-sm text-stone-500">Create a custom objective, route, and threat to begin the playable solo loop.</p>
+                      {canManage && <Button className="mt-5" icon={Flag} onClick={() => openAction('start-mission')}>Start a mission</Button>}
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-5 p-5">
@@ -979,7 +1155,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                   {canManage && (
                     <div className="flex flex-wrap gap-2 border-t border-stone-100 pt-4">
-                      {state.currentWaypoint && state.activeThreat?.status === 'active' && (
+                      {state.currentWaypoint && (
                         <>
                           <Button icon={Search} onClick={() => openAction('search')}>Search</Button>
                           <Button variant="outline" icon={PackageSearch} onClick={() => openAction('scavenge')}>Scavenge</Button>
@@ -987,6 +1163,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       )}
                       {nextWaypoint && (
                         <Button icon={ChevronRight} onClick={() => openAction('reveal-waypoint')}>Reveal next waypoint</Button>
+                      )}
+                      <Button variant="outline" icon={Route} onClick={() => openAction('add-waypoints')}>Add route</Button>
+                      {atObjectiveWaypoint && state.activeMission.status === 'active' && (
+                        <Button variant="outline" icon={Route} onClick={() => openAction('return')}>Leave the site</Button>
                       )}
                       <Button variant="outline" icon={Flag} onClick={() => openAction('complete-mission')}>Conclude mission</Button>
                     </div>
@@ -1165,9 +1345,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <div className="divide-y divide-stone-100">
                   {state.latestRolls.map((roll) => {
                     const result = rollResultLabel(roll);
-                    const needsConsequence = roll.result.action === 'solo_check'
+                    const needsConsequence = ['solo_check', 'solo_check_push'].includes(String(roll.result.action))
                       && roll.result.requiresFailForward === true
-                      && !roll.consequence;
+                      && !roll.consequence
+                      && !pushedSourceIds.has(roll.id);
                     return (
                       <div key={roll.id} className="p-4 sm:px-5">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1343,14 +1524,20 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       <div key={index} className={`h-3 rounded-full ${index < threatCounter ? 'bg-amber-500' : 'bg-amber-100'}`} />
                     ))}
                   </div>
-                  <div className="mt-2 text-xs text-amber-800">{state.activeThreat.recurring ? 'Recurring: resets to 1 when triggered.' : 'One-time threat.'}</div>
+                  <div className="mt-2 text-xs text-amber-800">{state.activeThreat.recurring ? 'Recurring: resolves at 6, then resets to 1.' : 'One-time: resolve at 6, then replace it while delving.'}</div>
                   {canManage && state.activeThreat.status === 'active' && (
                     <div className="mt-4 flex gap-2">
                       <Button size="sm" variant="outline" onClick={() => { setThreatAmount(1); openAction('advance-threat'); }}>Advance +1</Button>
                       <Button size="sm" variant="outline" onClick={() => { setThreatAmount(2); openAction('advance-threat'); }}>Dire +2</Button>
                     </div>
                   )}
+                  {canManage && state.activeThreat.status === 'triggered' && (
+                    <Button className="mt-4" size="sm" icon={AlertTriangle} onClick={() => openAction('resolve-threat')}>Resolve triggered event</Button>
+                  )}
                 </>
+              )}
+              {canManage && state.activeMission && !state.activeThreat && (
+                <Button className="mt-4" size="sm" variant="outline" onClick={() => openAction('set-threat')}>Set replacement threat</Button>
               )}
             </section>
             )}
@@ -1432,6 +1619,37 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   A Dragon or Demon marks the selected skill once and rolls a generic critical-effect prompt. A failure requires a complication that moves the story forward; it does not silently alter HP, inventory, or threat.
                 </div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!checkName} icon={Dices}>Roll {titleCase(checkName || 'Check')}</Button>
+              </>
+            )}
+
+            {activeAction === 'push' && hero && pushRollId && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  Describe how the condition or Sole Survivor effort applies before rerolling. A Demon and an already-pushed roll can never be pushed.
+                </div>
+                <fieldset>
+                  <legend className="text-sm font-bold text-stone-700">Push cost</legend>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className={`rounded-lg border p-3 text-sm ${pushCost === 'condition' ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
+                      <input type="radio" name="push-cost" checked={pushCost === 'condition'} onChange={() => setPushCost('condition')} className="mr-2" /> Take a condition
+                    </label>
+                    <label className={`rounded-lg border p-3 text-sm ${pushCost === 'sole_survivor' ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'} ${state.soloHeroicAbility?.name !== 'Sole Survivor' ? 'opacity-50' : ''}`}>
+                      <input type="radio" name="push-cost" checked={pushCost === 'sole_survivor'} disabled={state.soloHeroicAbility?.name !== 'Sole Survivor'} onChange={() => setPushCost('sole_survivor')} className="mr-2" /> Sole Survivor · 3 WP
+                    </label>
+                  </div>
+                </fieldset>
+                {pushCost === 'condition' && (
+                  <label className="block text-sm font-bold text-stone-700">Condition
+                    <select value={pushCondition} onChange={(event) => setPushCondition(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                      <option value="">Choose an inactive condition…</option>
+                      {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{titleCase(key)}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="block text-sm font-bold text-stone-700">How does this push apply?
+                  <textarea value={pushExplanation} onChange={(event) => setPushExplanation(event.target.value)} required maxLength={1000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="I force the rusted gate while my muscles tremble, becoming exhausted…" />
+                </label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!pushExplanation.trim() || (pushCost === 'condition' && !pushCondition) || (pushCost === 'sole_survivor' && hero.wp.current < 3)} icon={Dices}>Pay cost and reroll</Button>
               </>
             )}
 
@@ -1609,9 +1827,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <label className="block text-sm font-bold text-stone-700">Objective
                   <textarea value={missionObjective} onChange={(event) => setMissionObjective(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Find the missing lantern before the ruins flood." />
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Number of waypoints
-                  <input type="number" min={2} max={12} value={waypointCount} onChange={(event) => setWaypointCount(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
-                  <span className="mt-1 block text-xs font-normal text-stone-500">The first and objective waypoints are known; intervening waypoints remain hidden.</span>
+                <label className="block text-sm font-bold text-stone-700">Unknown waypoints
+                  <input type="number" min={0} max={10} value={unknownWaypointCount} onChange={(event) => setUnknownWaypointCount(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                  <span className="mt-1 block text-xs font-normal text-stone-500">Unknown waypoints remain hidden until reached. Opening, planned, unknown, and objective waypoints may total at most 12.</span>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">Planned foreseen waypoints <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={foreseenWaypointsText} onChange={(event) => setForeseenWaypointsText(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={'Ruined Bridge :: The only crossing over the chasm\nSealed Gate :: A runed door guards the lower vault'} />
+                  <span className="mt-1 block text-xs font-normal text-stone-500">One per line: Title :: Description</span>
                 </label>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block text-sm font-bold text-stone-700">Opening waypoint
@@ -1628,9 +1850,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   <textarea value={threatEffect} onChange={(event) => setThreatEffect(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="What happens when the counter reaches 6?" />
                 </label>
                 <label className="flex items-center gap-2 text-sm font-semibold text-stone-700">
-                  <input type="checkbox" checked={threatRecurring} onChange={(event) => setThreatRecurring(event.target.checked)} className="h-4 w-4 rounded border-stone-300 text-indigo-600" /> Recurring threat (reset to 1 after triggering)
+                  <input type="checkbox" checked={threatRecurring} onChange={(event) => setThreatRecurring(event.target.checked)} className="h-4 w-4 rounded border-stone-300 text-indigo-600" /> Recurring threat (reset to 1 after its event is resolved)
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionTitle.trim() || !missionObjective.trim() || !openingTitle.trim() || !openingDescription.trim() || !threatDescription.trim() || waypointCount < 2 || waypointCount > 12} icon={Flag}>Start Mission</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionTitle.trim() || !missionObjective.trim() || !openingTitle.trim() || !openingDescription.trim() || !threatDescription.trim() || unknownWaypointCount < 0 || unknownWaypointCount + foreseenWaypointsText.split('\n').filter((line) => line.trim()).length + 2 > 12} icon={Flag}>Start Mission</Button>
               </>
             )}
 
@@ -1657,7 +1879,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeAction === 'search' && state.currentWaypoint && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  A thorough Search always consumes one stretch and advances <strong>{state.activeThreat?.description || 'the active threat'}</strong> by 1.
+                  A thorough Search always consumes one stretch{state.activeThreat ? <> and advances <strong>{state.activeThreat.description}</strong> by 1</> : '. No threat advances until a replacement is set'}.
                 </div>
                 <p className="text-sm text-stone-600">The server rolls Spot Hidden and records every die. A Dragon produces two possible finds; choose the one that best fits the fiction.</p>
                 <label htmlFor="solo-known-search-location" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
@@ -1859,14 +2081,75 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
+            {activeAction === 'resolve-threat' && state.activeThreat?.status === 'triggered' && (
+              <>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-950">
+                  <div className="font-bold">{state.activeThreat.description}</div>
+                  {state.activeThreat.triggerEffect && <p className="mt-1 text-sm">{journalValue(state.activeThreat.triggerEffect)}</p>}
+                </div>
+                <label className="block text-sm font-bold text-stone-700">How was the threat event resolved?
+                  <textarea value={threatResolution} onChange={(event) => setThreatResolution(event.target.value)} required maxLength={2000} rows={4} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                </label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!threatResolution.trim()} icon={CheckCircle2}>{state.activeThreat.recurring ? 'Resolve and reset to 1' : 'Resolve and remove threat'}</Button>
+              </>
+            )}
+
+            {activeAction === 'set-threat' && state.activeMission && (
+              <>
+                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">A delve should retain an active threat. The replacement begins at 1.</p>
+                <label className="block text-sm font-bold text-stone-700">Threat
+                  <textarea value={replacementThreatDescription} onChange={(event) => setReplacementThreatDescription(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                </label>
+                <label className="block text-sm font-bold text-stone-700">Effect at 6 <span className="font-normal text-stone-400">(optional)</span>
+                  <textarea value={replacementThreatEffect} onChange={(event) => setReplacementThreatEffect(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                </label>
+                <label className="flex items-center gap-2 text-sm font-semibold text-stone-700"><input type="checkbox" checked={replacementThreatRecurring} onChange={(event) => setReplacementThreatRecurring(event.target.checked)} /> Recurring inherent threat</label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!replacementThreatDescription.trim()} icon={AlertTriangle}>Set threat at 1</Button>
+              </>
+            )}
+
+            {activeAction === 'add-waypoints' && state.activeMission && (
+              <>
+                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">Use this when fleeing, following a secret path, or changing route. Locations are generated now with recorded Solo table rolls but remain hidden until reached.</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-bold text-stone-700">Kind
+                    <select value={addedWaypointKind} onChange={(event) => setAddedWaypointKind(event.target.value as typeof addedWaypointKind)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="diversion">Diversion</option><option value="unknown">Unknown route</option></select>
+                  </label>
+                  <label className="block text-sm font-bold text-stone-700">Count
+                    <input type="number" min={1} max={6} value={addedWaypointCount} onChange={(event) => setAddedWaypointCount(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                  </label>
+                </div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={addedWaypointCount < 1 || addedWaypointCount > 6} icon={Route}>Generate hidden waypoints</Button>
+              </>
+            )}
+
+            {activeAction === 'return' && state.activeMission && (
+              <>
+                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">Choose the route that matches the fiction after the objective is reached.</p>
+                <label className="block text-sm font-bold text-stone-700">Return route
+                  <select value={returnRouteType} onChange={(event) => setReturnRouteType(event.target.value as typeof returnRouteType)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                    <option value="cleared">Cleared route · no incident</option>
+                    <option value="dangerous">Dangerous route · Awareness or Sneaking</option>
+                    <option value="alternative">Direct return impossible · D4+2 waypoints</option>
+                  </select>
+                </label>
+                {returnRouteType === 'dangerous' && (
+                  <label className="block text-sm font-bold text-stone-700">Skill
+                    <select value={returnCheckSkill} onChange={(event) => setReturnCheckSkill(event.target.value as typeof returnCheckSkill)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="Awareness">Awareness</option><option value="Sneaking">Sneaking</option></select>
+                  </label>
+                )}
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Route}>Begin return journey</Button>
+              </>
+            )}
+
             {activeAction === 'complete-mission' && state.activeMission && (
               <>
-                {!atFinalWaypoint && (
+                {!canCompleteSuccessfully && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Success becomes available at the final objective waypoint. You may record failure or abandonment now.</div>
                 )}
                 <label className="block text-sm font-bold text-stone-700">Outcome
                   <select value={missionOutcome} onChange={(event) => setMissionOutcome(event.target.value as typeof missionOutcome)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="success" disabled={!atFinalWaypoint}>Success</option>
+                    <option value="success" disabled={!canCompleteSuccessfully}>Success</option>
                     <option value="failure">Failure</option>
                     <option value="abandoned">Abandoned</option>
                   </select>
@@ -1874,7 +2157,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <label className="block text-sm font-bold text-stone-700">Mission summary
                   <textarea value={missionSummary} onChange={(event) => setMissionSummary(event.target.value)} required maxLength={10000} rows={5} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Record what happened and what remains unresolved." />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionSummary.trim() || (missionOutcome === 'success' && !atFinalWaypoint)} icon={Flag}>Conclude Mission</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionSummary.trim() || (missionOutcome === 'success' && !canCompleteSuccessfully)} icon={Flag}>Conclude Mission</Button>
               </>
             )}
           </form>

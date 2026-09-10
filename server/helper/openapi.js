@@ -1,35 +1,44 @@
 import { z } from 'zod';
 import {
   addEncounterParticipantsBodySchema,
+  addSoloWaypointsBodySchema,
   advanceCombatTurnBodySchema,
   advanceCharacterInjuryRecoveryBodySchema,
   advanceThreatBodySchema,
   askFortuneBodySchema,
   appendCampaignEventBodySchema,
   applyActorChangesBodySchema,
+  beginSoloReturnBodySchema,
+  claimSoloAdvancementAbilityBodySchema,
   checkpointSessionBodySchema,
   completeSoloMissionBodySchema,
   completeSessionBodySchema,
   createEncounterBodySchema,
   createRollRequestBodySchema,
-  pushRollRequestBodySchema,
   drawInspirationBodySchema,
   disableSoloModeBodySchema,
   enableSoloModeBodySchema,
-  selectSoloHeroicAbilityBodySchema,
   endCombatBodySchema,
+  pushRollRequestBodySchema,
+  pushSoloCheckBodySchema,
+  replaceSoloHeroicAbilityBodySchema,
   resolveGameActionBodySchema,
   resolveRollRequestServerBodySchema,
   resolveSoloCheckBodySchema,
   resolveSoloCheckConsequenceBodySchema,
+  resolveSoloAdvancementBodySchema,
   resolveSoloDyingActionBodySchema,
   resolveSoloInjuryActionBodySchema,
   resolveSoloNarrativeDamageBodySchema,
+  resolveThreatBodySchema,
   rollCharacterSevereInjuryBodySchema,
   removeEncounterParticipantBodySchema,
   revealWaypointBodySchema,
   scavengeWaypointBodySchema,
   searchWaypointBodySchema,
+  selectSoloHeroicAbilityBodySchema,
+  selectSoloMissionMarksBodySchema,
+  setSoloThreatBodySchema,
   startSessionBodySchema,
   startCombatBodySchema,
   startSoloMissionBodySchema,
@@ -137,6 +146,16 @@ const idempotencyHeader = {
   schema: { type: 'string', minLength: 8, maxLength: 200 },
 };
 
+const soloWriteResponses = (description) => ({
+  200: { description, content: { 'application/json': { schema: successEnvelope() } } },
+  400: errorResponse,
+  401: errorResponse,
+  403: errorResponse,
+  404: errorResponse,
+  409: errorResponse,
+  428: errorResponse,
+});
+
 export const openApiDocument = {
   openapi: '3.1.0',
   'x-error-codes': [
@@ -160,7 +179,7 @@ export const openApiDocument = {
   ],
   info: {
     title: 'Dragonbane Helper API',
-    version: '1.17.0',
+    version: '1.18.0',
     description: [
       'Versioned API for reading and safely updating Dragonbane campaign state.',
       'PostgreSQL is authoritative. Every write requires If-Match and Idempotency-Key,',
@@ -470,6 +489,19 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/v1/campaigns/{campaignId}/solo/heroic-ability/replace': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Replace one unsuitable existing heroic ability',
+        description: 'Between missions, replaces exactly one ability already known by the solo hero with one they do not know. The user must explicitly confirm the one-for-one replacement.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(replaceSoloHeroicAbilityBodySchema) } },
+        },
+        responses: soloWriteResponses('Heroic ability replaced'),
+      },
+    },
     '/api/v1/campaigns/{campaignId}/solo/fortune': {
       post: {
         tags: ['Solo'],
@@ -528,6 +560,24 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/push': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Push one failed direct Solo check',
+        description: 'Rerolls one eligible failed Solo check once after the player explains the condition and either takes that condition or spends exactly 3 WP with Sole Survivor. Dragon, Demon, and already-pushed rolls are ineligible.',
+        parameters: [
+          campaignParameter,
+          { name: 'rollId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(pushSoloCheckBodySchema) } },
+        },
+        responses: soloWriteResponses('Solo check pushed and rerolled'),
+      },
+    },
     '/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/consequence': {
       post: {
         tags: ['Solo'],
@@ -571,6 +621,45 @@ export const openApiDocument = {
           409: errorResponse,
           428: errorResponse,
         },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/waypoints': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Add hidden unknown or diversion waypoints',
+        description: 'Adds one to six sequential hidden waypoints to the current mission without revealing their generated location prompts before arrival.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(addSoloWaypointsBodySchema) } },
+        },
+        responses: soloWriteResponses('Hidden mission waypoints added'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/return': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Begin the solo mission return journey',
+        description: 'Starts a cleared return, tests Awareness or Sneaking for a dangerous return, or generates D4+2 hidden waypoints when the original route is impossible.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(beginSoloReturnBodySchema) } },
+        },
+        responses: soloWriteResponses('Return journey started'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/threats': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Set or replace the active solo threat',
+        description: 'Creates a usable active threat for the current mission and optionally resolves any existing active or triggered threat it replaces.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(setSoloThreatBodySchema) } },
+        },
+        responses: soloWriteResponses('Active mission threat set'),
       },
     },
     '/api/v1/campaigns/{campaignId}/solo/rest': {
@@ -824,6 +913,45 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/v1/campaigns/{campaignId}/solo/advancement/marks': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Select exactly five mission advancement marks',
+        description: 'After a successful mission, marks exactly five different eligible skills chosen by the player before advancement rolls are made.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(selectSoloMissionMarksBodySchema) } },
+        },
+        responses: soloWriteResponses('Five advancement marks selected'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/advancement/resolve': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve pending between-mission advancement',
+        description: 'Rolls D20 for each marked skill. A roll above the current skill increases it by one, with the normal maximum of 18, and reaching 18 creates a pending heroic-ability reward.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloAdvancementBodySchema) } },
+        },
+        responses: soloWriteResponses('Mission advancement resolved'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/advancement/heroic-ability': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Claim a heroic ability earned through advancement',
+        description: 'Claims one not-yet-known heroic ability for each pending skill reward earned by advancing a skill to 18.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(claimSoloAdvancementAbilityBodySchema) } },
+        },
+        responses: soloWriteResponses('Advancement heroic ability claimed'),
+      },
+    },
     '/api/v1/campaigns/{campaignId}/solo/threats/{threatId}/advance': {
       post: {
         tags: ['Solo'],
@@ -846,6 +974,24 @@ export const openApiDocument = {
           409: errorResponse,
           428: errorResponse,
         },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/threats/{threatId}/resolve': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve a triggered solo threat event',
+        description: 'Records how the triggered event was resolved. Recurring threats reset to zero only after this step; non-recurring threats end and are detached from the mission.',
+        parameters: [
+          campaignParameter,
+          { name: 'threatId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveThreatBodySchema) } },
+        },
+        responses: soloWriteResponses('Triggered threat resolved'),
       },
     },
     '/api/v1/campaigns/{campaignId}/sessions': {

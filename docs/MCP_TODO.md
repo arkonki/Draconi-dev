@@ -85,6 +85,18 @@ Solo foundation already delivered toward this phase:
   including manual acceptance, authoritative D6 choice between two consequences,
   immutable source-roll linkage, guarded mechanical effects, realtime events,
   dashboard controls, REST, and MCP.
+- [x] Add the Solo-specific direct-check push transaction: one ordinary failure,
+  one required player explanation, and either an inactive condition or the
+  Sole Survivor 3 WP cost; reject Demons and already-pushed rolls.
+- [x] Complete the threat lifecycle with triggered-event resolution, recurring
+  reset only after resolution, non-recurring removal, and replacement threats.
+- [x] Support planned foreseen routes, configurable unknown waypoints, generated
+  diversions, and cleared/dangerous/D4+2 alternative return journeys.
+- [x] Enforce the successful-mission advancement sequence with exactly five
+  selected new marks, between-mission D20 rolls, maximum skill 18, cleared
+  marks, and heroic ability rewards for skills reaching 18.
+- [x] Exclude already-known additional Solo abilities, warn on party-dependent
+  choices, and support an explicit one-for-one unsuitable ability replacement.
 
 - [x] Add immutable roll-request and roll-result records linked to campaign,
   session, encounter, actor, and user where applicable.
@@ -302,6 +314,7 @@ announce removals only through a later schema-version change.
   quantities.
 - [ ] Create and manage NPCs.
 - [ ] Support initiative redraw, swap, and delay actions.
-- [ ] Manage treasure, rewards, experience, and advancement.
+- [ ] Manage treasure and non-Solo rewards. Solo v1.2 mission advancement is
+  implemented with authoritative five-mark selection and skill rolls.
 - [ ] Manage campaign locations, quests, journals, and relationships.
 - [ ] Control projector scenes and combat presentation from MCP.

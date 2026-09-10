@@ -16,6 +16,7 @@ import {
   enableSoloMode,
   fetchSoloOptions,
   fetchSoloState,
+  replaceSoloHeroicAbility,
   selectSoloHeroicAbility,
   SoloApiError,
 } from '../../lib/api/solo';
@@ -41,6 +42,8 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
   const [characterId, setCharacterId] = useState('');
   const [abilityId, setAbilityId] = useState('');
   const [oracleTilt, setOracleTilt] = useState<'even' | 'ask'>('ask');
+  const [removedAbilityName, setRemovedAbilityName] = useState('');
+  const [replacementAbilityId, setReplacementAbilityId] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDisableConfirmOpen, setIsDisableConfirmOpen] = useState(false);
 
@@ -88,6 +91,9 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
 
   const selectedCharacter = options?.characters.find((character) => character.id === characterId);
   const selectedAbility = options?.heroicAbilities.find((ability) => ability.id === abilityId);
+  const configuredSoloAbility = options?.heroicAbilities.find(
+    (ability) => ability.id === options.solo.soloHeroicAbilityId,
+  );
   const isEnabled = Boolean(options?.solo.enabled);
   const hasBlockingSoloActivity = Boolean(state?.activeMission || state?.activeCombat);
 
@@ -166,10 +172,33 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
     },
   });
 
+  const replaceAbilityMutation = useMutation({
+    onMutate: () => setSuccessMessage(null),
+    mutationFn: async () => {
+      if (!options || !removedAbilityName || !replacementAbilityId) {
+        throw new Error('Choose both the unsuitable ability and its replacement.');
+      }
+      return replaceSoloHeroicAbility(partyId, options.campaignRevision, {
+        removedAbilityName,
+        replacementAbilityId,
+      });
+    },
+    onSuccess: async (result) => {
+      setRemovedAbilityName('');
+      setReplacementAbilityId('');
+      setSuccessMessage(result.summary);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['solo-settings', partyId] }),
+        queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] }),
+        queryClient.invalidateQueries({ queryKey: ['party', partyId] }),
+      ]);
+    },
+  });
+
   if (!isOpen) return null;
 
-  const mutationError = saveMutation.error || disableMutation.error;
-  const isMutating = saveMutation.isPending || disableMutation.isPending;
+  const mutationError = saveMutation.error || disableMutation.error || replaceAbilityMutation.error;
+  const isMutating = saveMutation.isPending || disableMutation.isPending || replaceAbilityMutation.isPending;
 
   return (
     <>
@@ -301,8 +330,12 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                   >
                     <option value="">Select heroic ability…</option>
                     {orderedAbilities.map((ability) => (
-                      <option key={ability.id} value={ability.id}>
-                        {ability.ruleKey?.startsWith('solo.') ? 'Solo · ' : ''}{ability.name}
+                      <option
+                        key={ability.id}
+                        value={ability.id}
+                        disabled={ability.id !== options.solo.soloHeroicAbilityId && ability.knownByCharacterIds?.includes(characterId)}
+                      >
+                        {ability.ruleKey?.startsWith('solo.') ? 'Solo · ' : ''}{ability.name}{ability.knownByCharacterIds?.includes(characterId) && ability.id !== options.solo.soloHeroicAbilityId ? ' · already known' : ''}
                       </option>
                     ))}
                   </select>
@@ -322,6 +355,11 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                       )}
                     </div>
                     <p className="mt-2 text-sm leading-relaxed text-indigo-900">{selectedAbility.description}</p>
+                    {selectedAbility.compatibilityWarning && (
+                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-900">
+                        {selectedAbility.compatibilityWarning}
+                      </p>
+                    )}
                     {selectedAbility.ruleKey === 'solo.army_of_one' && (
                       <p className="mt-3 rounded-lg bg-white/70 p-3 text-xs font-medium text-indigo-800">
                         In combat while alone, the hero receives two distinct initiative cards and two turns per round.
@@ -332,6 +370,30 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                         After an eligible failed test, the hero may spend exactly 3 WP to push without taking a condition.
                       </p>
                     )}
+                  </div>
+                )}
+
+                {isEnabled && selectedCharacter && (
+                  <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                    <h3 className="font-bold text-stone-900">Replace an unsuitable existing ability</h3>
+                    <p className="mt-1 text-xs text-stone-500">Between missions, Solo v1.2 permits a one-for-one replacement. The additional Solo setup ability is managed above.</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <select value={removedAbilityName} onChange={(event) => setRemovedAbilityName(event.target.value)} disabled={isMutating || hasBlockingSoloActivity} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm">
+                        <option value="">Unsuitable ability…</option>
+                        {selectedCharacter.heroicAbilities
+                          .filter((name) => name.toLocaleLowerCase() !== configuredSoloAbility?.name.toLocaleLowerCase())
+                          .map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                      <select value={replacementAbilityId} onChange={(event) => setReplacementAbilityId(event.target.value)} disabled={isMutating || hasBlockingSoloActivity} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm">
+                        <option value="">Replacement ability…</option>
+                        {orderedAbilities.filter((ability) => !ability.knownByCharacterIds?.includes(characterId)).map((ability) => (
+                          <option key={ability.id} value={ability.id}>{ability.name}{ability.soloCompatible === false ? ' · party-dependent' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button className="mt-3" size="sm" variant="outline" loading={replaceAbilityMutation.isPending} disabled={!removedAbilityName || !replacementAbilityId || hasBlockingSoloActivity} onClick={() => replaceAbilityMutation.mutate()}>
+                      Confirm one-for-one replacement
+                    </Button>
                   </div>
                 )}
 

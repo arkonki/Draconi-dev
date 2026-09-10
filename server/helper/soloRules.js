@@ -396,6 +396,73 @@ export function resolveLocationDetails(tables, rollDie = secureRollDie) {
   };
 }
 
+export function resolveRandomLocation(tables, rollDie = secureRollDie) {
+  const dice = [];
+  const dieSides = [];
+  const area = recordTableRoll(tables?.solo_area, rollDie, dice, dieSides);
+  const locationDetails = resolveLocationDetails(tables, rollDie);
+  dice.push(...locationDetails.dice);
+  dieSides.push(...locationDetails.dieSides);
+  return {
+    expression: explorationDiceExpression(dieSides),
+    dice,
+    dieSides,
+    keptIndices: dice.map((_, index) => index),
+    keptValues: [...dice],
+    area,
+    locationDetails,
+    title: area.label,
+    description: locationDetails.details.map(
+      ({ category, detail }) => `${category.label}: ${detail.label}`,
+    ).join('; '),
+  };
+}
+
+export function resolveAlternativeReturnRoute(rollDie = secureRollDie) {
+  const roll = rollDie(4);
+  return {
+    expression: '1d4',
+    dice: [roll],
+    keptIndices: [0],
+    keptValues: [roll],
+    waypointCount: roll + 2,
+  };
+}
+
+export function resolveSoloAdvancement(skills, rollDie = secureRollDie) {
+  if (!Array.isArray(skills) || skills.length === 0) {
+    throw new Error('At least one marked skill is required for advancement.');
+  }
+  const seen = new Set();
+  const results = skills.map(({ name, level }) => {
+    const key = String(name || '').trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) throw new Error('Advancement skills must be named and unique.');
+    seen.add(key);
+    if (!Number.isInteger(level) || level < 1 || level > 18) {
+      throw new Error(`Advancement skill ${name} must be between 1 and 18.`);
+    }
+    const roll = rollDie(20);
+    const improved = level < 18 && roll > level;
+    const resultingLevel = improved ? level + 1 : level;
+    return {
+      name,
+      roll,
+      previousLevel: level,
+      resultingLevel,
+      improved,
+      reachedEighteen: improved && resultingLevel === 18,
+    };
+  });
+  return {
+    expression: `${results.length}d20`,
+    dice: results.map(({ roll }) => roll),
+    keptIndices: results.map((_, index) => index),
+    keptValues: results.map(({ roll }) => roll),
+    results,
+    heroicAbilityRewards: results.filter(({ reachedEighteen }) => reachedEighteen).length,
+  };
+}
+
 export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRolls = 5, options = {}) {
   if (!Number.isInteger(maxRolls) || maxRolls < 1) throw new Error('Maximum rolls must be positive.');
   const mainDieSides = Number.isInteger(options.dieSides) ? options.dieSides : 10;
@@ -451,7 +518,7 @@ export function resolveExplorationFind(entries, rollDie = secureRollDie, maxRoll
   };
 }
 
-export function advanceThreatState({ counter, recurring, status }, amount) {
+export function advanceThreatState({ counter, status }, amount) {
   if (status !== 'active') throw new Error(`Cannot advance a threat with status ${status}.`);
   if (!Number.isInteger(counter) || counter < 1 || counter > 6) throw new Error('Threat counter must be between 1 and 6.');
   if (!Number.isInteger(amount) || amount < 1 || amount > 2) throw new Error('Threat advance must be 1 or 2.');
@@ -463,7 +530,7 @@ export function advanceThreatState({ counter, recurring, status }, amount) {
     appliedAmount: reached - counter,
     reachedCounter: reached,
     triggered,
-    counter: triggered && recurring ? 1 : reached,
-    status: triggered && !recurring ? 'triggered' : 'active',
+    counter: reached,
+    status: triggered ? 'triggered' : 'active',
   };
 }

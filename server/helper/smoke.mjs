@@ -63,7 +63,7 @@ try {
          $1, $2, 'Smoke Hero', 14, 14, 8, 8,
          '{"exhausted":true,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false,"poisoned":true}'::jsonb,
          '{"inventory":[],"equipped":{"weapons":[]},"money":{}}'::jsonb,
-         '{"Spot Hidden":12,"Healing":12,"Persuasion":12}'::jsonb,
+         '{"Spot Hidden":12,"Healing":12,"Persuasion":12,"Awareness":12,"Sneaking":12,"Bushcraft":12,"Crafting":12,"Evade":12,"Hunting & Fishing":12,"Languages":12}'::jsonb,
          '{"CON":10,"WIL":10}'::jsonb
        ) RETURNING id`,
       [users[0].id, campaignId],
@@ -1127,6 +1127,67 @@ try {
   assert(soloCheckResult.roll === Math.min(...soloCheckResult.dice), 'Solo boon did not keep the lower d20.');
   assert(soloCheckResult.target === 12, 'Solo check did not use the stored skill target.');
 
+  const { rows: directPushFailureRows } = await pool.query(
+    `INSERT INTO recorded_rolls (
+       campaign_id, actor_id, source_user_id, purpose, source, expression,
+       dice, kept_indices, kept_values, result, campaign_revision
+     ) VALUES (
+       $1, $2, $3, 'Synthetic direct-push Solo check', 'server', '1d20',
+       ARRAY[17], ARRAY[0], ARRAY[17], $4::jsonb, $5
+     ) RETURNING id`,
+    [
+      campaignId,
+      actorId,
+      users[0].id,
+      JSON.stringify({
+        action: 'solo_check',
+        outcome: 'failure',
+        requiresFailForward: true,
+        checkType: 'skill',
+        checkName: 'Awareness',
+        modifier: 'normal',
+        context: 'A deliberately failed direct Solo check for push verification.',
+      }),
+      soloCheck.payload.data.campaign_revision,
+    ],
+  );
+  const directPushSourceId = directPushFailureRows[0].id;
+  const directPush = await api(`/api/v1/campaigns/${campaignId}/solo/checks/${directPushSourceId}/push`, {
+    method: 'POST',
+    headers: {
+      'if-match': `"${soloCheck.payload.data.campaign_revision}"`,
+      'idempotency-key': `smoke-direct-solo-push-${randomUUID()}`,
+    },
+    body: JSON.stringify({
+      cost: 'condition',
+      condition: 'dazed',
+      explanation: 'Smoke Hero keeps watching the passage despite ringing ears and becomes dazed.',
+      reason: 'Verify one authoritative direct Solo push with an explained condition.',
+    }),
+  });
+  assert(directPush.response.status === 200, `Direct Solo push failed: ${JSON.stringify(directPush.payload)}`);
+  assert(directPush.payload.data.state_excerpt.roll.previousRollId === directPushSourceId, 'Direct Solo push lost its source-roll link.');
+  assert(
+    directPush.payload.data.state_excerpt.playerCharacter.conditions.some(({ key }) => key === 'dazed'),
+    'Direct Solo push did not apply the selected condition.',
+  );
+  const sourceConsequenceAfterPush = await api(
+    `/api/v1/campaigns/${campaignId}/solo/checks/${directPushSourceId}/consequence`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${directPush.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-direct-push-source-consequence-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        resolution: { mode: 'manual', consequence: { description: 'Invalid source consequence.', effect: { type: 'story_event' } } },
+        confirmed_by_user: true,
+        reason: 'Verify consequences cannot be applied to the original roll after a push.',
+      }),
+    },
+  );
+  assert(sourceConsequenceAfterPush.response.status === 409, 'The original failed roll accepted a consequence after it was pushed.');
+
   const { rows: pendingFailureRows } = await pool.query(
     `INSERT INTO recorded_rolls (
        campaign_id, actor_id, source_user_id, purpose, source, expression,
@@ -1137,7 +1198,7 @@ try {
        '{"action":"solo_check","outcome":"failure","requiresFailForward":true}'::jsonb,
        $4
      ) RETURNING id`,
-    [campaignId, actorId, users[0].id, soloCheck.payload.data.campaign_revision],
+    [campaignId, actorId, users[0].id, directPush.payload.data.campaign_revision],
   );
   const pendingFailureId = pendingFailureRows[0].id;
   const consequenceKey = `smoke-solo-consequence-${randomUUID()}`;
@@ -1157,7 +1218,7 @@ try {
     {
       method: 'POST',
       headers: {
-        'if-match': `"${soloCheck.payload.data.campaign_revision}"`,
+        'if-match': `"${directPush.payload.data.campaign_revision}"`,
         'idempotency-key': consequenceKey,
       },
       body: JSON.stringify(consequenceBody),
@@ -1213,7 +1274,7 @@ try {
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
   );
-  assert(storedRolls.rows[0].count === 10, 'Trusted, pushed, concurrent, and Solo rolls were not persisted exactly once.');
+  assert(storedRolls.rows[0].count === 12, 'Trusted, pushed, concurrent, and Solo rolls were not persisted exactly once.');
 
   const missionStarted = await api(
     `/api/v1/campaigns/${campaignId}/solo/missions`,
@@ -1686,8 +1747,41 @@ try {
   assert(postMissionState.payload.data.activeMission === null, 'Completed mission remained active in Solo state.');
   assert(postMissionState.payload.data.solo.currentMissionId === null, 'Solo campaign retained a completed current mission ID.');
   assert(
-    postMissionState.payload.data.allowedNextActions.includes('start_solo_mission'),
-    'Solo state did not return to mission-start readiness after completion.',
+    postMissionState.payload.data.allowedNextActions.includes('select_solo_mission_marks'),
+    'Solo state did not require the five mission-success advancement marks.',
+  );
+  const priorMarkedSkills = postMissionState.payload.data.playerCharacter.markedSkills || [];
+  const selectedMissionMarks = Object.keys(postMissionState.payload.data.playerCharacter.skills)
+    .filter((skill) => !priorMarkedSkills.some((marked) => marked.toLowerCase() === skill.toLowerCase()))
+    .slice(0, 5);
+  assert(selectedMissionMarks.length === 5, 'Smoke character did not have five unmarked skills for mission advancement.');
+  const markedMission = await api(`/api/v1/campaigns/${campaignId}/solo/advancement/marks`, {
+    method: 'POST',
+    headers: {
+      'if-match': `"${postMissionState.payload.data.campaignRevision}"`,
+      'idempotency-key': `smoke-advancement-marks-${randomUUID()}`,
+    },
+    body: JSON.stringify({
+      skills: selectedMissionMarks,
+      reason: 'Verify the five selected mission-success advancement marks.',
+    }),
+  });
+  assert(markedMission.response.status === 200, `Mission mark selection failed: ${JSON.stringify(markedMission.payload)}`);
+  assert(markedMission.payload.data.state_excerpt.advancement.selectedSkills.length === 5, 'Mission did not persist exactly five selected marks.');
+  const resolvedAdvancement = await api(`/api/v1/campaigns/${campaignId}/solo/advancement/resolve`, {
+    method: 'POST',
+    headers: {
+      'if-match': `"${markedMission.payload.data.campaign_revision}"`,
+      'idempotency-key': `smoke-advancement-resolve-${randomUUID()}`,
+    },
+    body: JSON.stringify({ reason: 'Verify authoritative between-mission advancement rolls.' }),
+  });
+  assert(resolvedAdvancement.response.status === 200, `Mission advancement failed: ${JSON.stringify(resolvedAdvancement.payload)}`);
+  assert(resolvedAdvancement.payload.data.state_excerpt.roll.result.action === 'solo_advancement', 'Advancement roll was not recorded.');
+  const readyForNextMission = await api(`/api/v1/campaigns/${campaignId}/solo`);
+  assert(
+    readyForNextMission.payload.data.allowedNextActions.includes('start_solo_mission'),
+    'Solo state did not return to mission-start readiness after advancement.',
   );
 
   await pool.query(
@@ -1954,7 +2048,16 @@ try {
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/roll-requests/{requestId}/manual-result']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/rest']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/push']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/checks/{rollId}/consequence']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/heroic-ability/replace']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/return']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/threats']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/threats/{threatId}/resolve']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/advancement/marks']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/advancement/resolve']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/advancement/heroic-ability']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/dying/actions']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/damage']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/injuries/{injuryId}/actions']
@@ -2312,12 +2415,13 @@ try {
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
+      'one-time direct Solo push with an explained condition and pushed-source consequence guard',
       'one-time fail-forward consequence selection, source-roll linkage, and persisted resolution',
       'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
       'narrative damage, CON death rolls, unbaned Solo self-rally, D6 recovery, and persisted severe injuries',
       'medical care, per-shift retry limits, automatic injury recovery, confirmation, and audited healing overrides',
       'regular character injury rolls, owner authorization, medical care, and shift recovery',
-      'sequential waypoint reveal and successful mission completion',
+      'sequential waypoint reveal, successful mission completion, five selected marks, and authoritative advancement',
       'GM-only combat authorization',
       'GM context isolation',
       'OpenAPI document',
