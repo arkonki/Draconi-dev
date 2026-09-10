@@ -121,13 +121,14 @@ EOF
   : "${ADMIN_EMAIL:?ADMIN_EMAIL must be set in ${ENV_FILE}}"
   : "${ADMIN_USERNAME:?ADMIN_USERNAME must be set in ${ENV_FILE}}"
   : "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in ${ENV_FILE}}"
+  : "${ELKDATA_APP_IP:?ELKDATA_APP_IP must be supplied by Veebimajutus for the application bind address}"
   [[ "${ADMIN_PASSWORD}" != "change-me-now" ]] || fail "Refusing to deploy with the default administrator password"
 
   export NODE_ENV=production
   export PORT="${PORT:-3000}"
   export STORAGE_ROOT="${STORAGE_ROOT:-${DATA_DIR}/storage}"
   export BACKUP_ROOT="${BACKUP_ROOT:-${DATA_DIR}/backups}"
-  readonly API_PROXY_HOST="${ELKDATA_APP_IP:-127.0.0.1}"
+  readonly API_PROXY_HOST="${ELKDATA_APP_IP}"
   export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://draconi.ee}"
   export AUTH_MODE="${AUTH_MODE:-oauth}"
   export MCP_INTERNAL_API_BASE_URL="${MCP_INTERNAL_API_BASE_URL:-http://${API_PROXY_HOST}:${PORT}}"

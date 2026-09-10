@@ -33,8 +33,8 @@ import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.ELKDATA_APP_IP || process.env.DRACONI_HOST || '0.0.0.0';
-const MCP_INTERNAL_API_BASE_URL = process.env.MCP_INTERNAL_API_BASE_URL || `http://${HOST}:${PORT}`;
+const host = process.env.ELKDATA_APP_IP?.trim() || process.env.DRACONI_HOST?.trim() || '0.0.0.0';
+const MCP_INTERNAL_API_BASE_URL = process.env.MCP_INTERNAL_API_BASE_URL || `http://${host}:${PORT}`;
 const handleMcpHttpRequest = createMcpHttpHandler({
   apiBaseUrl: MCP_INTERNAL_API_BASE_URL,
   verifyAccessToken: (token) => authenticateOAuthAccessToken(token, true),
@@ -247,8 +247,8 @@ await waitForDatabase();
 await runMigrations();
 await bootstrapAdmin();
 const realtimeServer = await attachRealtimeServer(server);
-server.listen(PORT, HOST, () => {
-  console.log(`Dragonbane local API listening on ${HOST}:${PORT}`);
+server.listen(PORT, host, () => {
+  console.log(`Dragonbane local API listening on ${host}:${PORT}`);
 });
 startHousekeeping();
 

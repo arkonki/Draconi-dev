@@ -3,8 +3,9 @@ import { sendJson } from '../http.js';
 import { createMcpHttpHandler } from './http.js';
 
 const PORT = Number(process.env.MCP_PORT || 3100);
-const HOST = process.env.ELKDATA_APP_IP || process.env.DRACONI_MCP_HOST || '0.0.0.0';
-const API_BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3000';
+const host = process.env.ELKDATA_APP_IP?.trim() || process.env.DRACONI_MCP_HOST?.trim() || '0.0.0.0';
+const internalApiHost = process.env.ELKDATA_APP_IP?.trim() || '127.0.0.1';
+const API_BASE_URL = process.env.API_BASE_URL || `http://${internalApiHost}:3000`;
 const handleMcpHttpRequest = createMcpHttpHandler({ apiBaseUrl: API_BASE_URL });
 
 const httpServer = http.createServer(async (request, response) => {
@@ -18,8 +19,8 @@ const httpServer = http.createServer(async (request, response) => {
   }
 });
 
-httpServer.listen(PORT, HOST, () => {
-  console.log(`Dragonbane MCP server listening on ${HOST}:${PORT}/mcp`);
+httpServer.listen(PORT, host, () => {
+  console.log(`Dragonbane MCP server listening on ${host}:${PORT}/mcp`);
 });
 
 let shuttingDown = false;

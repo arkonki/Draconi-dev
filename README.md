@@ -248,9 +248,11 @@ For the production domain `https://draconi.ee`, build the frontend with
 these values from the production environment and defaults to the same paths.
 It also renders the Apache proxy configuration, including the WebSocket
 upgrade route, `/mcp`, and OAuth endpoints, from
-`hosting/apache.htaccess.template`. On Veebimajutus,
-`ELKDATA_APP_IP` is used automatically when the hosting panel supplies it;
-otherwise Node binds to all interfaces and Apache reaches it on localhost.
+`hosting/apache.htaccess.template`. On Veebimajutus, `ELKDATA_APP_IP` is used
+automatically as the Node and WebSocket bind address (the hosting panel currently
+reports `10.0.7.214`). The address is deliberately not hardcoded because the
+provider can change it. Production deployment stops if the variable is missing;
+local and Docker development continue to use their configured host fallbacks.
 
 Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files are captured together by the recovery commands:
 
