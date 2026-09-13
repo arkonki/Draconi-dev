@@ -31,6 +31,12 @@ export const gmWorkflowGuide = {
       'When a mechanic changes stored state, explain the intended effect and use the appropriate authoritative tool.',
       'Read state again before writing when the web app, another player, or another tool may have changed the campaign.',
     ],
+    campaignTime: [
+      'Call get_campaign_time before advancing the campaign clock.',
+      'Call advance_campaign_time only when play actually consumes one or more rounds, stretches, or shifts. Use the returned gameTime as authoritative.',
+      'Immediately tell the GM about each due roll notification returned by the time advance. Do not invent a universal official cadence; reminders must come from the campaign, activity, or adventure being played.',
+      'After the roll is actually made or deliberately waived, call resolve_time_roll_notification. A notification is not itself a die result.',
+    ],
     roll: [
       'Call request_roll with the actor, purpose, expression, target, mode, and visibility.',
       'For server or mixed mode, call resolve_roll_server only when server dice are desired and permitted. For player mode, wait for the player to submit through Draconi.',

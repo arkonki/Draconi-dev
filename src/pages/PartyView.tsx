@@ -8,7 +8,7 @@ import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
-  MessageSquare, ChevronDown, Dices, Map, Monitor
+  MessageSquare, ChevronDown, Dices, Map, Monitor, CalendarClock
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
@@ -24,6 +24,8 @@ import { useRealtimeChannel } from '../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../lib/appUrl';
 import { fetchSoloCampaignStatus } from '../lib/api/solo';
 import { TrustedRollFeed } from '../components/party/TrustedRollFeed';
+import { SessionManager } from '../components/party/SessionManager';
+import { fetchCampaignTimeState } from '../lib/api/campaignTime';
 
 type Tab = 'members' | 'solo' | 'rolls' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'rolls', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
@@ -98,6 +100,7 @@ export function PartyView() {
   const [isProjectorManagerOpen, setIsProjectorManagerOpen] = useState(false);
   const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
   const [isSoloSettingsOpen, setIsSoloSettingsOpen] = useState(false);
+  const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -134,6 +137,16 @@ export function PartyView() {
     retry: false,
   });
 
+  const isPartyOwner = Boolean(user && party && (user.id === party.created_by || isAdmin()));
+  const isCampaignGM = Boolean(isPartyOwner || party?.campaign_role === 'gm');
+  const { data: campaignTimeState } = useQuery({
+    queryKey: ['campaign-time', partyId],
+    queryFn: () => fetchCampaignTimeState(partyId!),
+    enabled: Boolean(partyId && isCampaignGM),
+    retry: false,
+    refetchInterval: isCampaignGM ? 30000 : false,
+  });
+
   const badgeBindings = useMemo(() => (
     partyId
       ? [{
@@ -148,6 +161,12 @@ export function PartyView() {
           schema: 'public' as const,
           table: 'campaign_memberships',
           filter: `party_id=eq.${partyId}`,
+        }, {
+          bindingId: 'campaign-time-event',
+          event: 'INSERT' as const,
+          schema: 'public' as const,
+          table: 'campaign_events',
+          filter: `campaign_id=eq.${partyId}`,
         }]
       : []
   ), [partyId]);
@@ -164,6 +183,11 @@ export function PartyView() {
         void queryClient.invalidateQueries({ queryKey: ['parties'] });
         return;
       }
+      if (bindingId === 'campaign-time-event') {
+        void queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+        void queryClient.invalidateQueries({ queryKey: ['timeTracker', partyId] });
+        return;
+      }
       setActiveTab((currentTab) => {
         if (currentTab !== 'chat') {
           setUnreadCount((prev) => prev + 1);
@@ -173,6 +197,7 @@ export function PartyView() {
     },
     onReconnect: async () => {
       await queryClient.invalidateQueries({ queryKey: ['messages', partyId] });
+      await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
     },
   });
 
@@ -196,8 +221,6 @@ export function PartyView() {
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
-  const isPartyOwner = Boolean(user && party && (user.id === party.created_by || isAdmin()));
-  const isCampaignGM = Boolean(isPartyOwner || party?.campaign_role === 'gm');
   const joinLink = party?.invite_code ? getAbsoluteAppUrl(`party/join/${party.invite_code}`) : '';
 
   if (isLoading) return <div className="flex justify-center items-center h-96"><LoadingSpinner size="lg" /></div>;
@@ -267,6 +290,20 @@ export function PartyView() {
                   onClick={() => setIsProjectorManagerOpen(true)}
                 >
                   Projector
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={CalendarClock}
+                  onClick={() => setIsSessionManagerOpen(true)}
+                  className="relative"
+                >
+                  Session
+                  {(campaignTimeState?.pendingNotifications.length || 0) > 0 ? (
+                    <span className="ml-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold inline-flex items-center justify-center">
+                      {campaignTimeState!.pendingNotifications.length}
+                    </span>
+                  ) : null}
                 </Button>
                 <Button
                   variant="secondary"
@@ -544,6 +581,12 @@ export function PartyView() {
         partyId={partyId!}
         partyName={party.name}
         partyMembers={party.members}
+      />
+      <SessionManager
+        isOpen={isSessionManagerOpen}
+        onClose={() => setIsSessionManagerOpen(false)}
+        partyId={partyId!}
+        partyName={party.name}
       />
       <CampaignRoleManager
         party={party}

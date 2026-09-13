@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
+  advanceCampaignTimeInputSchema,
+  createCampaignTimeReminderInputSchema,
   generateSoloNpcInputSchema,
+  recordManualTreasureDrawInputSchema,
   resolveSoloNpcBehaviorInputSchema,
   searchWaypointInputSchema,
 } from './schemas.js';
@@ -60,5 +63,60 @@ describe('Helper API schemas', () => {
       behavior: 'attack', role: 'sneaky', oracle: 'fortune',
       inspiration_columns: ['action', 'thing'],
     });
+  });
+
+  it('accepts duplicate physical treasure cards and preserves every entered record', () => {
+    const parsed = recordManualTreasureDrawInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 5,
+      idempotency_key: 'solo-treasure-schema-test',
+      card_count: 2,
+      cards: [
+        { title: 'Duplicate', contents: 'First physical card record.' },
+        { title: 'Duplicate', contents: 'First physical card record.' },
+      ],
+      shuffled_before_draw: true,
+      returned_and_shuffled: true,
+      reason: 'Record the two cards drawn from the physical deck.',
+    });
+    expect(parsed.cards).toHaveLength(2);
+    expect(parsed.cards[0]).toEqual(parsed.cards[1]);
+  });
+
+  it('accepts bounded Dragonbane campaign-time advances', () => {
+    expect(advanceCampaignTimeInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 6,
+      idempotency_key: 'campaign-time-advance-test',
+      unit: 'stretch',
+      amount: 2,
+      reason: 'The party searches the ruins.',
+    })).toMatchObject({ unit: 'stretch', amount: 2 });
+    expect(() => advanceCampaignTimeInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 6,
+      idempotency_key: 'campaign-time-invalid-test',
+      unit: 'hour',
+      amount: 1,
+      reason: 'Invalid unit.',
+    })).toThrow();
+  });
+
+  it('restricts time reminders to trusted dice notation', () => {
+    const reminder = {
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 6,
+      idempotency_key: 'campaign-time-reminder-test',
+      label: 'Encounter check',
+      dice_expression: '1d12',
+      interval_unit: 'stretch',
+      interval_count: 4,
+      reason: 'Schedule the adventure-specific check.',
+    };
+    expect(createCampaignTimeReminderInputSchema.parse(reminder)).toMatchObject({ dice_expression: '1d12' });
+    expect(() => createCampaignTimeReminderInputSchema.parse({
+      ...reminder,
+      dice_expression: 'roll whatever the GM says',
+    })).toThrow();
   });
 });

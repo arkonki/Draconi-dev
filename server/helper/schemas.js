@@ -541,6 +541,32 @@ export const scavengeWaypointInputSchema = z.object({
 export const scavengeWaypointBodySchema = scavengeWaypointInputSchema
   .omit({ campaign_id: true, waypoint_id: true, expected_revision: true, idempotency_key: true });
 
+const manualTreasureCardSchema = z.object({
+  title: z.string().trim().max(200).optional(),
+  contents: z.string().trim().min(1).max(5_000),
+}).strict();
+
+const recordManualTreasureDrawFields = {
+  mission_id: uuidSchema.optional(),
+  waypoint_id: uuidSchema.optional(),
+  source_roll_id: uuidSchema.optional(),
+  card_count: z.number().int().min(1).max(20),
+  cards: z.array(manualTreasureCardSchema).min(1).max(20),
+  shuffled_before_draw: z.boolean(),
+  returned_and_shuffled: z.boolean(),
+  notes: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const recordManualTreasureDrawInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...recordManualTreasureDrawFields,
+}).strict();
+
+export const recordManualTreasureDrawBodySchema = z.object(recordManualTreasureDrawFields).strict();
+
 const soloRestTypeSchema = z.enum(['round', 'stretch', 'shift']);
 const standardConditionSchema = z.enum([
   'exhausted',
@@ -826,6 +852,62 @@ export const completeSessionInputSchema = z.object({
 
 export const completeSessionBodySchema = completeSessionInputSchema
   .omit({ campaign_id: true, session_id: true, expected_revision: true, idempotency_key: true });
+
+export const advanceCampaignTimeInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  unit: z.enum(['round', 'stretch', 'shift']),
+  amount: z.number().int().min(1).max(1000),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const advanceCampaignTimeBodySchema = advanceCampaignTimeInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+const timeRollReminderFields = {
+  label: z.string().trim().min(1).max(200),
+  dice_expression: z.string().trim().max(50)
+    .regex(/^[1-9]\d?d(?:4|6|8|10|12|20|100)(?:\s*[+-]\s*\d{1,3})?$/i),
+  interval_unit: z.enum(['round', 'stretch', 'shift']),
+  interval_count: z.number().int().min(1).max(1000),
+  notes: z.string().trim().max(2000).optional(),
+};
+
+export const createCampaignTimeReminderInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...timeRollReminderFields,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const createCampaignTimeReminderBodySchema = createCampaignTimeReminderInputSchema
+  .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
+
+export const setCampaignTimeReminderActiveInputSchema = z.object({
+  campaign_id: uuidSchema,
+  reminder_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  active: z.boolean(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const setCampaignTimeReminderActiveBodySchema = setCampaignTimeReminderActiveInputSchema
+  .omit({ campaign_id: true, reminder_id: true, expected_revision: true, idempotency_key: true });
+
+export const resolveCampaignTimeNotificationInputSchema = z.object({
+  campaign_id: uuidSchema,
+  notification_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  resolution_note: z.string().trim().max(2000).optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const resolveCampaignTimeNotificationBodySchema = resolveCampaignTimeNotificationInputSchema
+  .omit({ campaign_id: true, notification_id: true, expected_revision: true, idempotency_key: true });
 
 export const checkpointSessionInputSchema = z.object({
   campaign_id: uuidSchema,

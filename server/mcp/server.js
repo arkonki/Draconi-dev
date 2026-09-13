@@ -4,6 +4,7 @@ import {
   beginSoloReturnInputSchema,
   claimSoloAdvancementAbilityInputSchema,
   addEncounterParticipantsInputSchema,
+  advanceCampaignTimeInputSchema,
   advanceCombatTurnInputSchema,
   advanceThreatInputSchema,
   askFortuneInputSchema,
@@ -11,6 +12,7 @@ import {
   checkpointSessionInputSchema,
   completeSoloMissionInputSchema,
   completeSessionInputSchema,
+  createCampaignTimeReminderInputSchema,
   createEncounterInputSchema,
   createRollRequestInputSchema,
   drawInspirationInputSchema,
@@ -36,6 +38,7 @@ import {
   pushRollRequestInputSchema,
   pushSoloCheckInputSchema,
   resolveRollRequestServerInputSchema,
+  resolveCampaignTimeNotificationInputSchema,
   resolveSoloCheckInputSchema,
   resolveSoloDyingActionInputSchema,
   resolveSoloInjuryActionInputSchema,
@@ -44,6 +47,7 @@ import {
   resolveSoloAdvancementInputSchema,
   resolveThreatInputSchema,
   removeEncounterParticipantInputSchema,
+  recordManualTreasureDrawInputSchema,
   revealWaypointInputSchema,
   scavengeWaypointInputSchema,
   searchWaypointInputSchema,
@@ -53,6 +57,7 @@ import {
   replaceSoloHeroicAbilityInputSchema,
   selectSoloMissionMarksInputSchema,
   setSoloThreatInputSchema,
+  setCampaignTimeReminderActiveInputSchema,
   takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
@@ -159,7 +164,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.19.0' },
+    { name: 'dragonbane-helper', version: '1.21.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_resume_state for one consistent continuation snapshot.',
@@ -171,6 +176,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'Treat gmContext, private GM notes, hidden content, and GM-only open threads as secret. Never expose or hint at them in player-facing narration, events, or shared session summaries.',
         'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
         'During an active session, use checkpoint_session to save the current structured scene and durable continuation summary instead of relying on narrative event text.',
+        'Use get_campaign_time before changing campaign time. Advance it only when play actually consumes a round, stretch, or shift. Report every due-roll notification returned by advance_campaign_time; never invent a universal encounter-check cadence or claim a roll was made until it was actually resolved.',
         'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
         'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
         'For a trusted general roll, use request_roll first. Use resolve_roll_server only when the request mode permits server dice, then read the immutable result with get_roll_request. An ordinary failed check may use push_roll once, but only after the user chooses an inactive condition and describes how it applies; resolve the returned request according to its mode. Never supply physical dice through MCP or replace a returned result.',
@@ -178,6 +184,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'Use resolve_solo_check for skill or attribute tests outside combat. An ordinary failure may be pushed exactly once with push_solo_check after the player explains the push and chooses either an inactive condition or the 3 WP Sole Survivor cost. Never push a Demon or an already-pushed result.',
         'When a Solo check returns requiresFailForward, use resolve_solo_check_consequence exactly once for that roll. Ask the user to accept one explicit consequence or offer two contextual consequences for the server to choose with 1D6. Never claim a mechanical consequence before the tool applies it.',
         'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
+        'When treasure is awarded, never invent, quote, or choose official treasure-card contents. Ask the user to shuffle their physical deck, draw the awarded number, transcribe every drawn card (duplicates are valid), return the cards, and shuffle again. Only after both shuffle confirmations and all contents are supplied may you call record_manual_treasure_draw.',
         'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
         'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
         'Use resolve_solo_injury_action only after the user explicitly chooses medical care or explicitly confirms a manual healed override. Medical care uses the stored Healing skill, successful care halves remaining recovery, failed care cannot be retried until the next shift, and shift rests advance temporary recovery automatically.',
@@ -409,6 +416,14 @@ export function createDragonbaneMcpServer(apiClient) {
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.scavengeWaypoint(input))));
 
+  server.registerTool('record_manual_treasure_draw', {
+    title: 'Record a physical Solo treasure-card draw',
+    description: 'GM-only. Record X cards the user physically drew from their official treasure deck after shuffling, including duplicates and user-entered contents. Requires confirmation that the cards were returned and the deck reshuffled. Never generate card text.',
+    inputSchema: recordManualTreasureDrawInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.recordManualTreasureDraw(input))));
+
   server.registerTool('take_solo_rest', {
     title: 'Take a solo rest',
     description: 'GM-only. Resolve a round, stretch, or shift rest for the solo hero. The server enforces once-per-shift limits, rolls recovery, requires an explicit condition choice and safe-location confirmation where applicable, advances game time and temporary injury recovery, and advances an active mission threat for stretch or shift rests.',
@@ -496,6 +511,46 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.claimSoloAdvancementAbility(input))));
+
+  server.registerTool('get_campaign_time', {
+    title: 'Get campaign session time',
+    description: 'GM-only. Read the authoritative round, stretch, and shift clock together with the active session, configured periodic roll reminders, and persistent due-roll notifications. Use before advancing time.',
+    inputSchema: getCampaignStateInputSchema.pick({ campaign_id: true }),
+    outputSchema: mcpReadResultSchema,
+    annotations: READ_ONLY,
+  }, safe(async (input) => readResult(await apiClient.getCampaignTime(input))));
+
+  server.registerTool('advance_campaign_time', {
+    title: 'Advance campaign time',
+    description: 'GM-only. Advance the authoritative clock by rounds, stretches, or shifts. Also updates timed equipment and the visual Time tracker, and returns any roll reminders now due. Read get_campaign_time first.',
+    inputSchema: advanceCampaignTimeInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.advanceCampaignTime(input))));
+
+  server.registerTool('create_time_roll_reminder', {
+    title: 'Schedule a campaign-time roll reminder',
+    description: 'GM-only. After the user establishes the activity or adventure cadence, schedule a named dice roll every X rounds, stretches, or shifts, counted from now. Do not invent a universal official cadence.',
+    inputSchema: createCampaignTimeReminderInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.createCampaignTimeReminder(input))));
+
+  server.registerTool('set_time_roll_reminder_active', {
+    title: 'Pause or resume a campaign-time roll reminder',
+    description: 'GM-only. Pause or resume an existing periodic roll reminder.',
+    inputSchema: setCampaignTimeReminderActiveInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.setCampaignTimeReminderActive(input))));
+
+  server.registerTool('resolve_time_roll_notification', {
+    title: 'Mark a due campaign-time roll handled',
+    description: 'GM-only. Resolve a pending roll notification after the roll has actually been made or deliberately waived. This does not manufacture a die result.',
+    inputSchema: resolveCampaignTimeNotificationInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveCampaignTimeNotification(input))));
 
   server.registerTool('get_session_history', {
     title: 'Get game session history',
@@ -698,6 +753,11 @@ export function createDragonbaneMcpServer(apiClient) {
       ],
       supportedSessionOperations: [
         'get_resume_state',
+        'get_campaign_time',
+        'advance_campaign_time',
+        'create_time_roll_reminder',
+        'set_time_roll_reminder_active',
+        'resolve_time_roll_notification',
         'get_session_history',
         'start_session',
         'checkpoint_session',
@@ -724,6 +784,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'reveal_waypoint',
         'search_waypoint',
         'scavenge_waypoint',
+        'record_manual_treasure_draw',
         'take_solo_rest',
         'resolve_solo_dying_action',
         'resolve_solo_narrative_damage',
@@ -795,12 +856,18 @@ export const mcpToolAnnotations = {
   reveal_waypoint: MODIFYING,
   search_waypoint: MODIFYING,
   scavenge_waypoint: MODIFYING,
+  record_manual_treasure_draw: MODIFYING,
   take_solo_rest: MODIFYING,
   resolve_solo_dying_action: MODIFYING,
   resolve_solo_narrative_damage: MODIFYING,
   resolve_solo_injury_action: MODIFYING,
   advance_threat: MODIFYING,
   complete_solo_mission: MODIFYING,
+  get_campaign_time: READ_ONLY,
+  advance_campaign_time: MODIFYING,
+  create_time_roll_reminder: MODIFYING,
+  set_time_roll_reminder_active: MODIFYING,
+  resolve_time_roll_notification: MODIFYING,
   get_session_history: READ_ONLY,
   start_session: MODIFYING,
   checkpoint_session: MODIFYING,

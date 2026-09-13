@@ -15,6 +15,8 @@ import {
   addEncounterParticipantsInputSchema,
   advanceCombatTurnBodySchema,
   advanceCombatTurnInputSchema,
+  advanceCampaignTimeBodySchema,
+  advanceCampaignTimeInputSchema,
   advanceThreatBodySchema,
   advanceThreatInputSchema,
   askFortuneBodySchema,
@@ -30,6 +32,8 @@ import {
   checkpointSessionInputSchema,
   completeSessionBodySchema,
   completeSessionInputSchema,
+  createCampaignTimeReminderBodySchema,
+  createCampaignTimeReminderInputSchema,
   createRollRequestBodySchema,
   createRollRequestInputSchema,
   pushRollRequestBodySchema,
@@ -85,6 +89,8 @@ import {
   resolveThreatBodySchema,
   resolveThreatInputSchema,
   resolveCharacterInjuryActionInputSchema,
+  resolveCampaignTimeNotificationBodySchema,
+  resolveCampaignTimeNotificationInputSchema,
   rollCharacterSevereInjuryBodySchema,
   rollCharacterSevereInjuryInputSchema,
   advanceCharacterInjuryRecoveryBodySchema,
@@ -93,6 +99,8 @@ import {
   removeEncounterParticipantInputSchema,
   revealWaypointBodySchema,
   revealWaypointInputSchema,
+  recordManualTreasureDrawBodySchema,
+  recordManualTreasureDrawInputSchema,
   scavengeWaypointBodySchema,
   scavengeWaypointInputSchema,
   searchWaypointBodySchema,
@@ -108,6 +116,8 @@ import {
   selectSoloMissionMarksInputSchema,
   setSoloThreatBodySchema,
   setSoloThreatInputSchema,
+  setCampaignTimeReminderActiveBodySchema,
+  setCampaignTimeReminderActiveInputSchema,
   startSessionBodySchema,
   startSessionInputSchema,
   submitManualRollResultBodySchema,
@@ -120,6 +130,7 @@ import {
   beginSoloReturn,
   claimSoloAdvancementAbility,
   addEncounterParticipants,
+  advanceCampaignTime,
   advanceCombatTurn,
   advanceThreat,
   appendCampaignEvent,
@@ -128,6 +139,7 @@ import {
   completeSoloMission,
   checkpointSession,
   completeSession,
+  createCampaignTimeReminder,
   createRollRequest,
   createEncounter,
   drawInspiration,
@@ -138,6 +150,7 @@ import {
   getActor,
   getCharacterInjuries,
   getCampaignState,
+  getCampaignTimeState,
   getCombatState,
   getEncounterSetupOptions,
   getRecentEvents,
@@ -155,6 +168,7 @@ import {
   pushSoloCheck,
   resolveRollRequestServer,
   resolveCharacterInjuryAction,
+  resolveCampaignTimeNotification,
   resolveSoloDyingAction,
   resolveSoloCheck,
   resolveSoloCheckConsequence,
@@ -167,6 +181,7 @@ import {
   advanceCharacterInjuryRecovery,
   removeEncounterParticipant,
   revealWaypoint,
+  recordManualTreasureDraw,
   scavengeWaypoint,
   searchWaypoint,
   startCombat,
@@ -175,6 +190,7 @@ import {
   replaceSoloHeroicAbility,
   selectSoloMissionMarks,
   setSoloThreat,
+  setCampaignTimeReminderActive,
   submitManualRollResult,
   takeSoloRest,
 } from './service.js';
@@ -1051,6 +1067,28 @@ export async function handleHelperApiRequest(request, response) {
       return true;
     }
 
+    const manualTreasureMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/treasure-draws$/,
+    );
+    if (manualTreasureMatch && request.method === 'POST') {
+      operation = 'record_manual_treasure_draw';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(recordManualTreasureDrawBodySchema, await readJson(request, 250_000));
+      const input = parseSchema(recordManualTreasureDrawInputSchema, {
+        campaign_id: manualTreasureMatch[0],
+        expected_revision: previousRevision,
+        idempotency_key: idempotencyKey,
+        ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await recordManualTreasureDraw(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     const missionCompleteMatch = matchPath(
       pathname,
       /^\/api\/v1\/campaigns\/([^/]+)\/solo\/missions\/([^/]+)\/complete$/,
@@ -1092,6 +1130,84 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await advanceThreat(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const campaignTimeMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/time$/);
+    if (campaignTimeMatch && request.method === 'GET') {
+      operation = 'get_campaign_time';
+      campaignId = campaignTimeMatch[0];
+      const data = await getCampaignTimeState(user, campaignId);
+      resultingRevision = data.campaignRevision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const campaignTimeAdvanceMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/time\/advance$/);
+    if (campaignTimeAdvanceMatch && request.method === 'POST') {
+      operation = 'advance_campaign_time';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(advanceCampaignTimeBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(advanceCampaignTimeInputSchema, {
+        campaign_id: campaignTimeAdvanceMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await advanceCampaignTime(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const campaignTimeRemindersMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/time\/reminders$/);
+    if (campaignTimeRemindersMatch && request.method === 'POST') {
+      operation = 'create_campaign_time_reminder';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(createCampaignTimeReminderBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(createCampaignTimeReminderInputSchema, {
+        campaign_id: campaignTimeRemindersMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await createCampaignTimeReminder(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const campaignTimeReminderMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/time\/reminders\/([^/]+)$/);
+    if (campaignTimeReminderMatch && request.method === 'PATCH') {
+      operation = 'set_campaign_time_reminder_active';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(setCampaignTimeReminderActiveBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(setCampaignTimeReminderActiveInputSchema, {
+        campaign_id: campaignTimeReminderMatch[0], reminder_id: campaignTimeReminderMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await setCampaignTimeReminderActive(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const campaignTimeNotificationMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/time\/notifications\/([^/]+)\/resolve$/);
+    if (campaignTimeNotificationMatch && request.method === 'POST') {
+      operation = 'resolve_campaign_time_notification';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveCampaignTimeNotificationBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveCampaignTimeNotificationInputSchema, {
+        campaign_id: campaignTimeNotificationMatch[0], notification_id: campaignTimeNotificationMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveCampaignTimeNotification(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

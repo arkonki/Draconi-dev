@@ -68,6 +68,11 @@ Solo foundation already delivered toward this phase:
 - [x] Add rules-aware Search and Scavenge actions with stored Spot Hidden checks,
   immutable server dice, per-waypoint usage, and automatic stretch/threat
   consequences through REST, MCP, and the Solo Dashboard.
+- [x] Keep the official Solo treasure deck physical: surface awarded card counts,
+  require manual shuffle/draw and return/reshuffle confirmations, preserve one
+  player-entered record per card (including duplicates), and expose the same
+  audited workflow through REST, MCP, and the Solo Dashboard without generating
+  card text or silently changing inventory.
 - [x] Add rules-aware round, stretch, and shift rests with authoritative
   recovery rolls, explicit condition and safety choices, per-shift limits,
   game-time advancement, and active-mission threat consequences.
@@ -299,6 +304,17 @@ production evaluation fixture covering reconnect after concurrent web-app and
 MCP changes. Preserve existing response fields during the first release and
 announce removals only through a later schema-version change.
 
+## Solo v1.2 rules-audit phases 6–7
+
+- [x] **Phase 6 — Physical treasure cards:** record manual X-card draws and
+  entered contents; link awarded Search/Scavenge results to their completed draw;
+  keep the official deck and all card selection outside the application.
+- [x] **Phase 7 — UI and MCP alignment:** expose the same authoritative Solo
+  actions in both clients, keep unresolved complications and awarded treasure at
+  the front of the adventure page, retain result modals until the user dismisses
+  them, and identify narrative prompts that do not apply mechanical state by
+  themselves.
+
 ## Phase 5 — Production evaluations
 
 - [ ] Test complete exploration, social, skill-test, pushed-roll, and combat
@@ -318,7 +334,8 @@ announce removals only through a later schema-version change.
 - [ ] Create and manage general campaign NPCs beyond the implemented simple
   Solo v1.2 Minion/Boss workflow.
 - [ ] Support initiative redraw, swap, and delay actions.
-- [ ] Manage treasure and non-Solo rewards. Solo v1.2 mission advancement is
-  implemented with authoritative five-mark selection and skill rolls.
+- [ ] Manage non-Solo treasure and rewards. Solo v1.2 physical treasure draws
+  and mission advancement are implemented; treasure never enters inventory
+  automatically.
 - [ ] Manage campaign locations, quests, journals, and relationships.
 - [ ] Control projector scenes and combat presentation from MCP.

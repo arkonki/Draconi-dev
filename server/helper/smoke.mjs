@@ -1475,6 +1475,33 @@ try {
   assert(searched.payload.data.state_excerpt.roll.result.check.target === 12, 'Search did not use the authoritative Spot Hidden value.');
   threatRevision = searched.payload.data.campaign_revision;
 
+  const manualTreasure = await api(
+    `/api/v1/campaigns/${campaignId}/solo/treasure-draws`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${threatRevision}"`,
+        'idempotency-key': `smoke-treasure-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        card_count: 2,
+        cards: [
+          { title: 'Repeated card', contents: 'Player-entered physical card contents.' },
+          { title: 'Repeated card', contents: 'Player-entered physical card contents.' },
+        ],
+        shuffled_before_draw: true,
+        returned_and_shuffled: true,
+        notes: 'Smoke test physical deck record.',
+        reason: 'Verify physical treasure workflow and duplicate-card preservation.',
+      }),
+    },
+  );
+  assert(manualTreasure.response.status === 200, `Manual treasure record failed: ${JSON.stringify(manualTreasure.payload)}`);
+  assert(manualTreasure.payload.data.state_excerpt.treasureDraw.cardCount === 2, 'Manual treasure card count was not persisted.');
+  assert(manualTreasure.payload.data.state_excerpt.treasureDraw.cards.length === 2, 'Manual treasure entries were not preserved.');
+  assert(manualTreasure.payload.data.state_excerpt.treasureDraw.cards[0].contents === manualTreasure.payload.data.state_excerpt.treasureDraw.cards[1].contents, 'Duplicate physical treasure cards were changed.');
+  threatRevision = manualTreasure.payload.data.campaign_revision;
+
   const roundRestKey = `smoke-round-rest-${randomUUID()}`;
   const roundRestBody = JSON.stringify({
     rest_type: 'round',
@@ -2144,8 +2171,12 @@ try {
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/recovery']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/characters/{characterId}/injuries/{injuryId}/actions']
       && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/search']
-      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge'],
-    'OpenAPI document is missing Solo exploration operations.',
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/waypoints/{waypointId}/scavenge']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/solo/treasure-draws']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/time']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/time/advance']
+      && openapiDocument.paths?.['/api/v1/campaigns/{campaignId}/time/reminders'],
+    'OpenAPI document is missing Solo exploration or campaign-time operations.',
   );
 
   if (mcpUrl) {
@@ -2166,6 +2197,11 @@ try {
       'start_session',
       'checkpoint_session',
       'complete_session',
+      'get_campaign_time',
+      'advance_campaign_time',
+      'create_time_roll_reminder',
+      'set_time_roll_reminder_active',
+      'resolve_time_roll_notification',
       'request_roll',
       'get_roll_request',
       'get_roll_history',
@@ -2184,6 +2220,7 @@ try {
       'reveal_waypoint',
       'search_waypoint',
       'scavenge_waypoint',
+      'record_manual_treasure_draw',
       'take_solo_rest',
       'resolve_solo_dying_action',
       'resolve_solo_narrative_damage',
@@ -2462,6 +2499,54 @@ try {
     'A system-granted solo ability remained after disabling solo mode.',
   );
 
+  const timeBefore = await api(`/api/v1/campaigns/${campaignId}/time`);
+  assert(timeBefore.response.status === 200, `Campaign time state failed: ${JSON.stringify(timeBefore.payload)}`);
+  const timeReminder = await api(
+    `/api/v1/campaigns/${campaignId}/time/reminders`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${timeBefore.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-time-reminder-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        label: 'Smoke encounter check', dice_expression: '1d12',
+        interval_unit: 'stretch', interval_count: 2,
+        reason: 'Verify campaign-time reminders.',
+      }),
+    },
+  );
+  assert(timeReminder.response.status === 200, `Time reminder failed: ${JSON.stringify(timeReminder.payload)}`);
+  const timeAdvanced = await api(
+    `/api/v1/campaigns/${campaignId}/time/advance`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${timeReminder.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-time-advance-${randomUUID()}`,
+      },
+      body: JSON.stringify({ unit: 'stretch', amount: 2, reason: 'Advance to the scheduled check.' }),
+    },
+  );
+  assert(timeAdvanced.response.status === 200, `Campaign time advance failed: ${JSON.stringify(timeAdvanced.payload)}`);
+  assert(timeAdvanced.payload.data.state_excerpt.dueNotifications.length === 1, 'Due time roll notification was not created.');
+  const timeAfter = await api(`/api/v1/campaigns/${campaignId}/time`);
+  assert(timeAfter.payload.data.pendingNotifications.length === 1, 'Pending time roll notification was not returned.');
+  assert(timeAfter.payload.data.tracker.currentDay >= 1, 'Legacy time tracker was not synchronized.');
+  const timeNotificationId = timeAfter.payload.data.pendingNotifications[0].id;
+  const timeResolved = await api(
+    `/api/v1/campaigns/${campaignId}/time/notifications/${timeNotificationId}/resolve`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${timeAfter.payload.data.campaignRevision}"`,
+        'idempotency-key': `smoke-time-resolve-${randomUUID()}`,
+      },
+      body: JSON.stringify({ reason: 'The GM handled the smoke check.' }),
+    },
+  );
+  assert(timeResolved.response.status === 200, `Time notification resolution failed: ${JSON.stringify(timeResolved.payload)}`);
+
   console.log(JSON.stringify({
     success: true,
     checks: [
@@ -2494,12 +2579,14 @@ try {
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',
       'waypoint Search and Scavenge rolls, idempotency, usage counters, and automatic time/threat consequences',
+      'manual physical treasure-card shuffle, duplicate entry, and return/reshuffle confirmation',
       'one-time direct Solo push with an explained condition and pushed-source consequence guard',
       'one-time fail-forward consequence selection, source-roll linkage, and persisted resolution',
       'round, stretch, and shift rest recovery, per-shift limits, game time, condition choice, safety, and preserved poison',
       'narrative damage, CON death rolls, unbaned Solo self-rally, D6 recovery, and persisted severe injuries',
       'medical care, per-shift retry limits, automatic injury recovery, confirmation, and audited healing overrides',
       'regular character injury rolls, owner authorization, medical care, and shift recovery',
+      'campaign session clock, legacy tracker synchronization, recurring roll reminder, and durable due notification',
       'sequential waypoint reveal, successful mission completion, five selected marks, and authoritative advancement',
       'GM-only combat authorization',
       'GM context isolation',

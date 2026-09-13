@@ -301,6 +301,26 @@ beforeEach(async () => {
       },
       meta: { requestId: 'request-waypoint-scavenge', campaignRevision: 51 },
     })),
+    recordManualTreasureDraw: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 70,
+        event_ids: ['8148bc35-e922-4f75-b812-55db91937399'],
+        summary: '2 physical treasure cards recorded and returned to the shuffled deck.',
+        state_excerpt: {
+          treasureDraw: {
+            cardCount: 2,
+            cards: [
+              { title: 'Silver cache', contents: 'The contents entered by the player.' },
+              { title: 'Silver cache', contents: 'The contents entered by the player.' },
+            ],
+            shuffledBeforeDraw: true,
+            returnedAndShuffled: true,
+          },
+        },
+      },
+      meta: { requestId: 'request-manual-treasure', campaignRevision: 70 },
+    })),
     takeSoloRest: vi.fn(async () => ({
       data: {
         success: true,
@@ -368,6 +388,26 @@ beforeEach(async () => {
       data: { campaignRevision: 42, sessions: [] },
       meta: { requestId: 'request-session-history', campaignRevision: 42 },
     })),
+    getCampaignTime: vi.fn(async () => ({
+      data: {
+        campaignRevision: 42,
+        gameTime: { elapsedSeconds: 900, rounds: 90, stretches: 1, shifts: 0 },
+        activeSession: null, reminders: [], pendingNotifications: [],
+      },
+      meta: { requestId: 'request-campaign-time', campaignRevision: 42 },
+    })),
+    advanceCampaignTime: vi.fn(async () => ({
+      data: {
+        success: true, campaign_revision: 43,
+        event_ids: ['2d1671cf-61da-4071-81ef-4ae29f56fc3d'],
+        summary: 'Advanced campaign time by 1 stretch.',
+        state_excerpt: { gameTime: { elapsedSeconds: 1800, stretches: 2 }, dueNotifications: [] },
+      },
+      meta: { requestId: 'request-campaign-time-advance', campaignRevision: 43 },
+    })),
+    createCampaignTimeReminder: vi.fn(),
+    setCampaignTimeReminderActive: vi.fn(),
+    resolveCampaignTimeNotification: vi.fn(),
     startSession: vi.fn(async () => ({
       data: {
         success: true,
@@ -519,6 +559,19 @@ afterEach(async () => {
 });
 
 describe('Dragonbane MCP server', () => {
+  it('exposes authoritative campaign time to the GM workflow', async () => {
+    const listed = await client.listTools();
+    expect(listed.tools.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      'get_campaign_time', 'advance_campaign_time', 'create_time_roll_reminder',
+      'set_time_roll_reminder_active', 'resolve_time_roll_notification',
+    ]));
+    const result = await client.callTool({ name: 'advance_campaign_time', arguments: {
+      campaign_id: campaignId, expected_revision: 42, idempotency_key: 'time-test-key',
+      unit: 'stretch', amount: 1, reason: 'The party searches the chamber.',
+    } });
+    expect(result.structuredContent).toMatchObject({ success: true, campaign_revision: 43 });
+  });
+
   it('returns structured campaign data and advertises clear metadata', async () => {
     const result = await client.callTool({ name: 'list_campaigns', arguments: {} });
     expect(result.structuredContent).toEqual({
@@ -1377,6 +1430,26 @@ describe('Dragonbane MCP server', () => {
         reason: 'The player explicitly chose to attempt medical care.',
       },
     });
+    const treasure = await client.callTool({
+      name: 'record_manual_treasure_draw',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 69,
+        idempotency_key: 'solo-treasure-1',
+        card_count: 2,
+        cards: [
+          { title: 'Silver cache', contents: 'The contents entered by the player.' },
+          { title: 'Silver cache', contents: 'The contents entered by the player.' },
+        ],
+        shuffled_before_draw: true,
+        returned_and_shuffled: true,
+        reason: 'The player completed the physical deck procedure.',
+      },
+    });
+    expect(treasure.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { treasureDraw: { cardCount: 2, returnedAndShuffled: true } },
+    });
     expect(injury.structuredContent).toMatchObject({
       success: true,
       state_excerpt: { injury: { remainingHealingShifts: 10, medicalCareApplied: true } },
@@ -1394,6 +1467,7 @@ describe('Dragonbane MCP server', () => {
     expect(api.revealWaypoint).toHaveBeenCalledTimes(1);
     expect(api.searchWaypoint).toHaveBeenCalledTimes(1);
     expect(api.scavengeWaypoint).toHaveBeenCalledTimes(1);
+    expect(api.recordManualTreasureDraw).toHaveBeenCalledTimes(1);
     expect(api.takeSoloRest).toHaveBeenCalledTimes(1);
     expect(api.resolveSoloDyingAction).toHaveBeenCalledTimes(1);
     expect(api.resolveSoloNarrativeDamage).toHaveBeenCalledTimes(1);

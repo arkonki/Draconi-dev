@@ -43,6 +43,7 @@ import {
   FortuneTilt,
   InspirationColumn,
   revealSoloWaypoint,
+  recordManualSoloTreasureDraw,
   scavengeSoloWaypoint,
   searchSoloWaypoint,
   SoloApiError,
@@ -86,7 +87,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
+type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'treasure' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
 type SoloDashboardTab = 'adventure' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
@@ -156,6 +157,16 @@ function rollResultLabel(roll: SoloRecordedRoll) {
     : null;
   if (outcome || criticalLabel || findings.length > 0) return [outcome, criticalLabel, findings.join(' + ')].filter(Boolean).join(' · ');
   return null;
+}
+
+function treasureCardsAwarded(value: unknown): number {
+  if (Array.isArray(value)) return value.reduce((total, entry) => total + treasureCardsAwarded(entry), 0);
+  if (!value || typeof value !== 'object') return 0;
+  return Object.entries(value).reduce((total, [key, entry]) => (
+    key === 'treasureCards' && Number.isInteger(entry) && Number(entry) > 0
+      ? total + Number(entry)
+      : total + treasureCardsAwarded(entry)
+  ), 0);
 }
 
 function waypointLabel(waypoint: SoloWaypoint) {
@@ -282,6 +293,7 @@ function ActionModal({
     consequence: 'Resolve the complication',
     fortune: 'Ask Fortune',
     inspiration: 'Draw Inspiration',
+    treasure: 'Record physical treasure cards',
     'npc-create': 'Create a simple NPC',
     'npc-behavior': 'Resolve NPC behavior',
     'start-mission': 'Start a custom mission',
@@ -437,6 +449,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [npcTilt, setNpcTilt] = useState<FortuneTilt>('even');
   const [npcDisposition, setNpcDisposition] = useState<'fled' | 'surrendered'>('fled');
   const [npcActionResult, setNpcActionResult] = useState<SoloWriteResult | null>(null);
+  const [treasureCardCount, setTreasureCardCount] = useState(1);
+  const [treasureCards, setTreasureCards] = useState<Array<{ title: string; contents: string }>>([{ title: '', contents: '' }]);
+  const [treasureShuffled, setTreasureShuffled] = useState(false);
+  const [treasureReturnedShuffled, setTreasureReturnedShuffled] = useState(false);
+  const [treasureNotes, setTreasureNotes] = useState('');
+  const [treasureSourceRollId, setTreasureSourceRollId] = useState<string | null>(null);
+  const [treasureActionResult, setTreasureActionResult] = useState<SoloWriteResult | null>(null);
+  const [explorationActionResult, setExplorationActionResult] = useState<SoloWriteResult | null>(null);
 
   const [missionTitle, setMissionTitle] = useState('');
   const [missionObjective, setMissionObjective] = useState('');
@@ -725,6 +745,20 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             spendStretch: scavengeStretch,
             context: scavengeContext.trim(),
           });
+        case 'treasure':
+          return recordManualSoloTreasureDraw(partyId, revision, {
+            cardCount: treasureCardCount,
+            cards: treasureCards.map((card) => ({
+              title: card.title.trim() || undefined,
+              contents: card.contents.trim(),
+            })),
+            shuffledBeforeDraw: treasureShuffled,
+            returnedAndShuffled: treasureReturnedShuffled,
+            missionId: state.activeMission?.id,
+            waypointId: state.currentWaypoint?.id,
+            sourceRollId: treasureSourceRollId || undefined,
+            notes: treasureNotes.trim() || undefined,
+          });
         case 'rest':
           return takeSoloRest(partyId, revision, {
             restType,
@@ -789,6 +823,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         setOracleActionResult(result);
       } else if (activeAction === 'npc-behavior') {
         setNpcActionResult(result);
+      } else if (activeAction === 'treasure') {
+        setTreasureActionResult(result);
+      } else if (activeAction === 'search' || activeAction === 'scavenge') {
+        setExplorationActionResult(result);
       } else {
         setActiveAction(null);
       }
@@ -853,6 +891,15 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setNpcDisposition('fled');
       setNpcActionResult(null);
     }
+    if (action === 'treasure') {
+      setTreasureCardCount(1);
+      setTreasureCards([{ title: '', contents: '' }]);
+      setTreasureShuffled(false);
+      setTreasureReturnedShuffled(false);
+      setTreasureNotes('');
+      setTreasureSourceRollId(null);
+      setTreasureActionResult(null);
+    }
     if (action === 'check') {
       const firstSkill = Object.keys(state?.playerCharacter?.skills || {}).sort()[0];
       setCheckType(firstSkill ? 'skill' : 'attribute');
@@ -882,10 +929,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setSearchContext('');
       setKnownSearchLocation(false);
       setKnownSearchNature(false);
+      setExplorationActionResult(null);
     }
     if (action === 'scavenge') {
       setScavengeContext('');
       setScavengeStretch(false);
+      setExplorationActionResult(null);
     }
     if (action === 'rest') {
       setRestType(state?.restState.available.round ? 'round' : state?.restState.available.stretch ? 'stretch' : 'shift');
@@ -931,7 +980,17 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     setActiveAction(null);
     setOracleActionResult(null);
     setNpcActionResult(null);
+    setTreasureActionResult(null);
+    setExplorationActionResult(null);
     actionMutation.reset();
+  };
+
+  const openTreasureAction = (count = 1, sourceRollId?: string) => {
+    openAction('treasure');
+    const normalizedCount = Math.max(1, Math.min(20, Math.round(count)));
+    setTreasureCardCount(normalizedCount);
+    setTreasureCards(Array.from({ length: normalizedCount }, () => ({ title: '', contents: '' })));
+    setTreasureSourceRollId(sourceRollId || null);
   };
 
   const openInjuryAction = (injuryId: string, action: 'medical_care' | 'mark_healed') => {
@@ -1020,6 +1079,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     && !pushedSourceIds.has(roll.id)
     && !roll.consequence
   ));
+  const recordedTreasureSourceIds = new Set((state.treasureDraws || []).map((draw) => draw.sourceRollId).filter(Boolean));
+  const pendingTreasureRolls = state.latestRolls
+    .map((roll) => ({
+      roll,
+      cardCount: roll.result.requiresChoice === true ? 0 : treasureCardsAwarded(roll.result),
+    }))
+    .filter(({ roll, cardCount }) => cardCount > 0 && !recordedTreasureSourceIds.has(roll.id));
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
     { id: 'adventure', label: 'Adventure', icon: Route, badge: unresolvedRolls.length || undefined },
     { id: 'state', label: 'State', icon: HeartPulse, badge: state.activeInjuries.length || undefined },
@@ -1104,6 +1170,24 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       )}
                       <Button size="sm" variant="outline" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>Take consequence</Button>
                     </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {activeDashboardTab === 'adventure' && pendingTreasureRolls.length > 0 && (
+              <section className="order-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><PackageSearch className="h-5 w-5 text-amber-600" /> Physical treasure draw pending</h3>
+                    <p className="mt-1 text-sm text-amber-800">
+                      The latest result awards {pendingTreasureRolls[0].cardCount} treasure card{pendingTreasureRolls[0].cardCount === 1 ? '' : 's'}. Shuffle and draw from your official deck, then enter what you drew.
+                    </p>
+                  </div>
+                  {canManage && (
+                    <Button size="sm" icon={PackageSearch} onClick={() => openTreasureAction(pendingTreasureRolls[0].cardCount, pendingTreasureRolls[0].roll.id)}>
+                      Record {pendingTreasureRolls[0].cardCount} card{pendingTreasureRolls[0].cardCount === 1 ? '' : 's'}
+                    </Button>
                   )}
                 </div>
               </section>
@@ -1382,6 +1466,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     <Button icon={Dices} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('check')}>Act</Button>
                     <Button icon={Gauge} onClick={() => openAction('fortune')}>Ask Fortune</Button>
                     <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>Inspire</Button>
+                    <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>Treasure</Button>
                     <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>Rest</Button>
                     {hero && hero.hp.current > 0 && (
                       <Button variant="outline" icon={HeartPulse} disabled={Boolean(state.activeCombat)} onClick={() => openAction('damage')}>Narrative damage</Button>
@@ -1392,6 +1477,35 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                 )}
               </div>
+            </section>
+            )}
+
+            {activeDashboardTab === 'adventure' && (
+            <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><PackageSearch className="h-5 w-5 text-amber-600" /> Physical treasure deck</h3>
+                  <p className="mt-1 text-sm text-stone-500">You shuffle and draw the official cards. Draconi only records the contents you enter.</p>
+                </div>
+                {canManage && <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>Record a draw</Button>}
+              </div>
+              {(state.treasureDraws || []).length === 0 ? (
+                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">No physical treasure-card draws recorded yet.</p>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {state.treasureDraws.slice(0, 3).map((draw) => (
+                    <details key={draw.id} className="rounded-xl border border-stone-200 bg-stone-50 p-3">
+                      <summary className="cursor-pointer text-sm font-bold text-stone-900">
+                        {draw.cardCount} card{draw.cardCount === 1 ? '' : 's'} · {new Date(draw.createdAt).toLocaleString()}
+                      </summary>
+                      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-stone-700">
+                        {draw.cards.map((card, index) => <li key={index}><strong>{card.title || `Card ${index + 1}`}:</strong> {card.contents}</li>)}
+                      </ol>
+                      {draw.notes && <p className="mt-2 text-xs text-stone-500">{draw.notes}</p>}
+                    </details>
+                  ))}
+                </div>
+              )}
             </section>
             )}
 
@@ -1669,6 +1783,52 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <OracleActionResult action={activeAction} result={oracleActionResult} onDone={closeAction} />
             )}
 
+            {(activeAction === 'search' || activeAction === 'scavenge') && explorationActionResult && (() => {
+              const roll = recordedRollFromWrite(explorationActionResult);
+              const rawGroups = roll?.result.findingChoices;
+              const findingGroups = Array.isArray(rawGroups) && rawGroups.every(Array.isArray)
+                ? rawGroups as Array<Array<Record<string, unknown>>>
+                : [Array.isArray(roll?.result.findings) ? roll.result.findings as Array<Record<string, unknown>> : []];
+              const requiresChoice = roll?.result.requiresChoice === true && findingGroups.length > 1;
+              const totalTreasure = requiresChoice ? 0 : treasureCardsAwarded(findingGroups);
+              return (
+                <div className="space-y-4" role="status" aria-live="polite">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                    <div className="text-lg font-extrabold">{explorationActionResult.summary}</div>
+                    <div className="mt-2 text-xs text-emerald-700">The roll and its time/threat effects are already recorded.</div>
+                  </div>
+                  {requiresChoice ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-bold text-stone-800">A Dragon produced two possible finds. Choose the one that best fits the fiction before continuing.</p>
+                      {findingGroups.map((group, index) => {
+                        const cardCount = treasureCardsAwarded(group);
+                        return (
+                          <div key={index} className="rounded-xl border border-stone-200 p-4">
+                            <div className="text-xs font-extrabold uppercase tracking-wide text-indigo-600">Choice {index + 1}</div>
+                            <div className="mt-1 text-sm text-stone-800">{group.map((entry) => String(entry.label || entry.key || 'Finding')).join(' + ')}</div>
+                            <Button className="mt-3" type="button" size="sm" icon={cardCount > 0 ? PackageSearch : CheckCircle2} onClick={() => cardCount > 0 && roll ? openTreasureAction(cardCount, roll.id) : closeAction()}>
+                              {cardCount > 0 ? `Choose and record ${cardCount} treasure card${cardCount === 1 ? '' : 's'}` : 'Choose this result'}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-800">
+                        {findingGroups.flat().map((entry, index) => <div key={index}>{String(entry.label || entry.key || 'Finding')}</div>)}
+                      </div>
+                      {totalTreasure > 0 && roll ? (
+                        <Button type="button" fullWidth icon={PackageSearch} onClick={() => openTreasureAction(totalTreasure, roll.id)}>Record {totalTreasure} physical treasure card{totalTreasure === 1 ? '' : 's'}</Button>
+                      ) : (
+                        <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>Done</Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             {activeAction === 'check' && hero && (
               <>
                 <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
@@ -1917,6 +2077,68 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
+            {activeAction === 'treasure' && treasureActionResult ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                  <div className="text-lg font-extrabold">{treasureActionResult.summary}</div>
+                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm">
+                    {treasureCards.map((card, index) => <li key={index}><strong>{card.title || `Card ${index + 1}`}:</strong> {card.contents}</li>)}
+                  </ol>
+                </div>
+                <p className="text-xs text-stone-500">The entered contents are saved in the adventure record. No inventory item was created automatically.</p>
+                <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>Done</Button>
+              </div>
+            ) : activeAction === 'treasure' && (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  Use your official physical treasure deck. Draconi does not know, generate, or reproduce its card contents.
+                </div>
+                <label className="block text-sm font-bold text-stone-700">Number of cards to draw
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    disabled={Boolean(treasureSourceRollId)}
+                    value={treasureCardCount}
+                    onChange={(event) => {
+                      const count = Math.max(1, Math.min(20, Math.round(Number(event.target.value) || 1)));
+                      setTreasureCardCount(count);
+                      setTreasureCards((current) => Array.from({ length: count }, (_, index) => current[index] || { title: '', contents: '' }));
+                      setTreasureShuffled(false);
+                      setTreasureReturnedShuffled(false);
+                    }}
+                    className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal"
+                  />
+                  {treasureSourceRollId && <span className="mt-1 block text-xs font-normal text-amber-700">This draw will resolve the treasure awarded by the linked Search or Scavenge result.</span>}
+                </label>
+                <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                  <input type="checkbox" checked={treasureShuffled} onChange={(event) => setTreasureShuffled(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                  <span className="font-bold">I shuffled, then physically drew {treasureCardCount} card{treasureCardCount === 1 ? '' : 's'}<span className="mt-0.5 block text-xs font-normal text-stone-500">Keep duplicate cards if they occur.</span></span>
+                </label>
+                <div className="space-y-3">
+                  {treasureCards.map((card, index) => (
+                    <fieldset key={index} className="rounded-xl border border-stone-200 p-3">
+                      <legend className="px-1 text-sm font-bold text-stone-800">Card {index + 1}</legend>
+                      <label className="block text-xs font-bold uppercase tracking-wide text-stone-500">Name <span className="font-normal normal-case">optional</span>
+                        <input value={card.title} onChange={(event) => setTreasureCards((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, title: event.target.value } : entry))} maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal" />
+                      </label>
+                      <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-stone-500">Contents
+                        <textarea value={card.contents} onChange={(event) => setTreasureCards((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, contents: event.target.value } : entry))} required maxLength={5000} rows={3} placeholder="Enter the card contents or your concise record of them" className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal" />
+                      </label>
+                    </fieldset>
+                  ))}
+                </div>
+                <label className="block text-sm font-bold text-stone-700">Adventure notes <span className="font-normal text-stone-400">optional</span>
+                  <textarea value={treasureNotes} onChange={(event) => setTreasureNotes(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Where it was found or how it enters the story" />
+                </label>
+                <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
+                  <input type="checkbox" checked={treasureReturnedShuffled} onChange={(event) => setTreasureReturnedShuffled(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
+                  <span className="font-bold">I returned every drawn card and shuffled the deck again</span>
+                </label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!treasureShuffled || !treasureReturnedShuffled || treasureCards.some((card) => !card.contents.trim())} icon={PackageSearch}>Save treasure draw</Button>
+              </>
+            )}
+
             {activeAction === 'npc-create' && (
               <>
                 <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
@@ -2084,7 +2306,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
-            {activeAction === 'search' && state.currentWaypoint && (
+            {activeAction === 'search' && state.currentWaypoint && !explorationActionResult && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
                   A thorough Search always consumes one stretch{state.activeThreat ? <> and advances <strong>{state.activeThreat.description}</strong> by 1</> : '. No threat advances until a replacement is set'}.
@@ -2108,7 +2330,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </>
             )}
 
-            {activeAction === 'scavenge' && state.currentWaypoint && (
+            {activeAction === 'scavenge' && state.currentWaypoint && !explorationActionResult && (
               <>
                 <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
                   {state.currentWaypoint.exploration.scavengeCount === 0

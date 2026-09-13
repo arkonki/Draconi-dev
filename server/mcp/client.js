@@ -358,6 +358,16 @@ export class HelperApiClient {
     });
   }
 
+  recordManualTreasureDraw(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/treasure-draws`, {
+      method: 'POST',
+      body,
+      expectedRevision: expected_revision,
+      idempotencyKey: idempotency_key,
+    });
+  }
+
   takeSoloRest(input) {
     const {
       campaign_id,
@@ -455,6 +465,38 @@ export class HelperApiClient {
     const query = new URLSearchParams();
     if (limit) query.set('limit', String(limit));
     return this.request(`/api/v1/campaigns/${campaign_id}/sessions?${query}`);
+  }
+
+  getCampaignTime({ campaign_id }) {
+    return this.request(`/api/v1/campaigns/${campaign_id}/time`);
+  }
+
+  advanceCampaignTime(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/time/advance`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  createCampaignTimeReminder(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/time/reminders`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  setCampaignTimeReminderActive(input) {
+    const { campaign_id, reminder_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/time/reminders/${reminder_id}`, {
+      method: 'PATCH', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveCampaignTimeNotification(input) {
+    const { campaign_id, notification_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/time/notifications/${notification_id}/resolve`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
   }
 
   startSession(input) {

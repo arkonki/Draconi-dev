@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   addEncounterParticipantsBodySchema,
   addSoloWaypointsBodySchema,
+  advanceCampaignTimeBodySchema,
   advanceCombatTurnBodySchema,
   advanceCharacterInjuryRecoveryBodySchema,
   advanceThreatBodySchema,
@@ -13,6 +14,7 @@ import {
   checkpointSessionBodySchema,
   completeSoloMissionBodySchema,
   completeSessionBodySchema,
+  createCampaignTimeReminderBodySchema,
   createEncounterBodySchema,
   createRollRequestBodySchema,
   drawInspirationBodySchema,
@@ -24,6 +26,7 @@ import {
   pushSoloCheckBodySchema,
   replaceSoloHeroicAbilityBodySchema,
   resolveGameActionBodySchema,
+  resolveCampaignTimeNotificationBodySchema,
   resolveRollRequestServerBodySchema,
   resolveSoloCheckBodySchema,
   resolveSoloCheckConsequenceBodySchema,
@@ -35,12 +38,14 @@ import {
   resolveThreatBodySchema,
   rollCharacterSevereInjuryBodySchema,
   removeEncounterParticipantBodySchema,
+  recordManualTreasureDrawBodySchema,
   revealWaypointBodySchema,
   scavengeWaypointBodySchema,
   searchWaypointBodySchema,
   selectSoloHeroicAbilityBodySchema,
   selectSoloMissionMarksBodySchema,
   setSoloThreatBodySchema,
+  setCampaignTimeReminderActiveBodySchema,
   startSessionBodySchema,
   startCombatBodySchema,
   startSoloMissionBodySchema,
@@ -922,6 +927,26 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/v1/campaigns/{campaignId}/solo/treasure-draws': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Record cards drawn manually from the physical Solo treasure deck',
+        description: 'The user shuffles and draws from their own official physical deck, enters one contents record per card, then returns and reshuffles the cards. Draconi does not generate or reproduce card contents.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(recordManualTreasureDrawBodySchema) } },
+        },
+        responses: {
+          200: { description: 'Physical treasure draw recorded', content: { 'application/json': { schema: successEnvelope() } } },
+          400: errorResponse,
+          401: errorResponse,
+          403: errorResponse,
+          409: errorResponse,
+          428: errorResponse,
+        },
+      },
+    },
     '/api/v1/campaigns/{campaignId}/solo/missions/{missionId}/complete': {
       post: {
         tags: ['Solo'],
@@ -1025,6 +1050,48 @@ export const openApiDocument = {
           content: { 'application/json': { schema: z.toJSONSchema(resolveThreatBodySchema) } },
         },
         responses: soloWriteResponses('Triggered threat resolved'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/time': {
+      get: {
+        tags: ['Campaigns'], summary: 'Read the GM campaign clock and due-roll reminders',
+        description: 'GM-only. Returns the authoritative round, stretch and shift clock, the active session, configured reminders, and pending roll notifications.',
+        parameters: [campaignParameter],
+        responses: { 200: { description: 'Campaign time state', content: { 'application/json': { schema: successEnvelope() } } }, 401: errorResponse, 403: errorResponse, 404: errorResponse },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/time/advance': {
+      post: {
+        tags: ['Campaigns'], summary: 'Advance authoritative campaign time',
+        description: 'GM-only. Advances rounds, stretches, or shifts; synchronizes the visual time tracker and timed equipment; and creates persistent notifications for due configured rolls.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(advanceCampaignTimeBodySchema) } } },
+        responses: { 200: { description: 'Campaign time advanced', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 409: errorResponse, 428: errorResponse },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/time/reminders': {
+      post: {
+        tags: ['Campaigns'], summary: 'Schedule a recurring campaign-time roll reminder',
+        description: 'GM-only. The interval begins at the current campaign-time count. This schedules a prompt; it never invents or executes an official roll cadence.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(createCampaignTimeReminderBodySchema) } } },
+        responses: { 200: { description: 'Reminder created', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 409: errorResponse, 428: errorResponse },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/time/reminders/{reminderId}': {
+      patch: {
+        tags: ['Campaigns'], summary: 'Pause or resume a campaign-time reminder',
+        parameters: [campaignParameter, { name: 'reminderId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, revisionHeader, idempotencyHeader],
+        requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(setCampaignTimeReminderActiveBodySchema) } } },
+        responses: { 200: { description: 'Reminder updated', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 404: errorResponse, 409: errorResponse, 428: errorResponse },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/time/notifications/{notificationId}/resolve': {
+      post: {
+        tags: ['Campaigns'], summary: 'Mark a due campaign-time roll as handled',
+        parameters: [campaignParameter, { name: 'notificationId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, revisionHeader, idempotencyHeader],
+        requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(resolveCampaignTimeNotificationBodySchema) } } },
+        responses: { 200: { description: 'Notification resolved', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 404: errorResponse, 409: errorResponse, 428: errorResponse },
       },
     },
     '/api/v1/campaigns/{campaignId}/sessions': {

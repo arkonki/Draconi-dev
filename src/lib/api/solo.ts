@@ -109,6 +109,21 @@ export interface SoloThreat {
   triggerEffect?: Record<string, unknown>;
 }
 
+export interface SoloTreasureDraw {
+  id: string;
+  campaignId: string;
+  missionId?: string | null;
+  waypointId?: string | null;
+  sourceRollId?: string | null;
+  cardCount: number;
+  cards: Array<{ title?: string; contents: string }>;
+  shuffledBeforeDraw: boolean;
+  returnedAndShuffled: boolean;
+  notes?: string | null;
+  campaignRevision: number;
+  createdAt: string;
+}
+
 export interface SoloNpc {
   id: string;
   campaignId: string;
@@ -273,6 +288,7 @@ export interface SoloState {
   pendingAdvancement?: SoloMissionAdvancement | null;
   activeDangers: SoloDanger[];
   npcs: SoloNpc[];
+  treasureDraws: SoloTreasureDraw[];
   activeCombat?: { id: string; name: string } | null;
   gameTime: Record<string, unknown>;
   restState: {
@@ -714,6 +730,38 @@ export async function scavengeSoloWaypoint(
     },
   );
   return parseResponse<SoloWriteResult>(response, 'Could not scavenge the current waypoint.');
+}
+
+export async function recordManualSoloTreasureDraw(
+  partyId: string,
+  revision: number,
+  input: {
+    cardCount: number;
+    cards: Array<{ title?: string; contents: string }>;
+    shuffledBeforeDraw: boolean;
+    returnedAndShuffled: boolean;
+    missionId?: string;
+    waypointId?: string;
+    sourceRollId?: string;
+    notes?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/treasure-draws`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      card_count: input.cardCount,
+      cards: input.cards,
+      shuffled_before_draw: input.shuffledBeforeDraw,
+      returned_and_shuffled: input.returnedAndShuffled,
+      mission_id: input.missionId,
+      waypoint_id: input.waypointId,
+      source_roll_id: input.sourceRollId,
+      notes: input.notes || undefined,
+      reason: 'The solo player physically drew, recorded, returned, and reshuffled the treasure cards.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not record the physical treasure-card draw.');
 }
 
 export async function takeSoloRest(

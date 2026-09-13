@@ -47,6 +47,7 @@ const STANDARD_CONDITION_KEYS = new Set([
   'disheartened',
 ]);
 const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
+const CAMPAIGN_TIME_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
 const ACTIVE_SOLO_PROMPT_TABLE_VERSION = 'user-solo-v1';
 const ACTIVE_SOLO_EXPLORATION_TABLE_VERSION = 'user-solo-v1';
 const SOLO_LOCATION_TABLE_KEYS = [
@@ -79,6 +80,118 @@ function advanceGameTime(value, seconds, lastAdvance) {
     elapsedSeconds: current.elapsedSeconds + seconds,
     lastAdvance: { ...lastAdvance, seconds, at: new Date().toISOString() },
   });
+}
+
+function campaignTimeUnitCount(gameTime, unit) {
+  return Math.floor(gameTimeForOutput(gameTime).elapsedSeconds / CAMPAIGN_TIME_SECONDS[unit]);
+}
+
+function timeReminderForOutput(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    label: row.label,
+    diceExpression: row.dice_expression,
+    intervalUnit: row.interval_unit,
+    intervalCount: Number(row.interval_count),
+    nextDueCount: Number(row.next_due_count),
+    notes: row.notes,
+    active: row.active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function timeNotificationForOutput(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    sessionId: row.session_id,
+    reminderId: row.reminder_id,
+    label: row.label,
+    diceExpression: row.dice_expression,
+    notes: row.notes,
+    dueUnit: row.due_unit,
+    dueCount: Number(row.due_count),
+    status: row.status,
+    resolvedAt: row.resolved_at,
+    resolutionNote: row.resolution_note,
+    createdAt: row.created_at,
+  };
+}
+
+function emptyTimeGrid() {
+  return Object.fromEntries(Array.from({ length: 24 }, (_, index) => [String(index + 1), {
+    stretches: [null, null, null, null],
+    notes: '',
+  }]));
+}
+
+async function synchronizeLegacyTimeTracker(client, campaignId, gameTime) {
+  const elapsedSeconds = gameTimeForOutput(gameTime).elapsedSeconds;
+  const currentDay = Math.floor(elapsedSeconds / (24 * 60 * 60)) + 1;
+  const secondsToday = elapsedSeconds % (24 * 60 * 60);
+  const completedStretches = Math.floor(secondsToday / CAMPAIGN_TIME_SECONDS.stretch);
+  const currentShift = Math.min(4, Math.floor(secondsToday / CAMPAIGN_TIME_SECONDS.shift) + 1);
+  const { rows } = await client.query(
+    'SELECT * FROM time_trackers WHERE party_id = $1 FOR UPDATE',
+    [campaignId],
+  );
+  const existing = rows[0];
+  const grid = existing && Number(existing.current_day) === currentDay
+    ? { ...emptyTimeGrid(), ...(existing.grid_state || {}) }
+    : emptyTimeGrid();
+  for (let index = 0; index < completedStretches; index += 1) {
+    const hour = String(Math.floor(index / 4) + 1);
+    const slot = index % 4;
+    const stretches = Array.isArray(grid[hour]?.stretches)
+      ? [...grid[hour].stretches]
+      : [null, null, null, null];
+    if (stretches[slot] === null || stretches[slot] === undefined) stretches[slot] = 'X';
+    grid[hour] = { ...grid[hour], stretches };
+  }
+  await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+  await client.query(
+    `INSERT INTO time_trackers (party_id, current_day, current_shift, grid_state)
+     VALUES ($1, $2, $3, $4::jsonb)
+     ON CONFLICT (party_id) DO UPDATE SET
+       current_day = EXCLUDED.current_day,
+       current_shift = EXCLUDED.current_shift,
+       grid_state = EXCLUDED.grid_state,
+       updated_at = now()`,
+    [campaignId, currentDay, currentShift, JSON.stringify(grid)],
+  );
+  return { currentDay, currentShift, completedStretches };
+}
+
+async function collectDueTimeNotifications(client, campaign, gameTime) {
+  const { rows: reminders } = await client.query(
+    `SELECT * FROM campaign_time_roll_reminders
+     WHERE campaign_id = $1 AND active = true FOR UPDATE`,
+    [campaign.id],
+  );
+  const dueNotifications = [];
+  for (const reminder of reminders) {
+    const currentCount = campaignTimeUnitCount(gameTime, reminder.interval_unit);
+    let nextDue = Number(reminder.next_due_count);
+    while (nextDue <= currentCount && dueNotifications.length < 100) {
+      const { rows } = await client.query(
+        `INSERT INTO campaign_time_roll_notifications (
+           campaign_id, session_id, reminder_id, label, dice_expression, notes, due_unit, due_count
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (reminder_id, due_count) DO NOTHING RETURNING *`,
+        [campaign.id, campaign.active_session_id, reminder.id, reminder.label,
+          reminder.dice_expression, reminder.notes, reminder.interval_unit, nextDue],
+      );
+      if (rows[0]) dueNotifications.push(rows[0]);
+      nextDue += Number(reminder.interval_count);
+    }
+    await client.query(
+      'UPDATE campaign_time_roll_reminders SET next_due_count = $1 WHERE id = $2',
+      [nextDue, reminder.id],
+    );
+  }
+  return dueNotifications;
 }
 
 async function advanceCampaignEquipmentTime(client, campaignId, elapsedSeconds) {
@@ -466,6 +579,42 @@ function soloNpcForOutput(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function soloTreasureDrawForOutput(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    missionId: row.mission_id || null,
+    waypointId: row.waypoint_id || null,
+    sourceRollId: row.source_roll_id || null,
+    cardCount: Number(row.card_count),
+    cards: row.cards || [],
+    shuffledBeforeDraw: row.shuffled_before_draw,
+    returnedAndShuffled: row.returned_and_shuffled,
+    notes: row.notes || null,
+    campaignRevision: Number(row.campaign_revision),
+    createdAt: row.created_at,
+  };
+}
+
+function treasureCardsInValue(value) {
+  if (Array.isArray(value)) return value.reduce((total, entry) => total + treasureCardsInValue(entry), 0);
+  if (!value || typeof value !== 'object') return 0;
+  return Object.entries(value).reduce((total, [key, entry]) => (
+    key === 'treasureCards' && Number.isInteger(entry) && Number(entry) > 0
+      ? total + Number(entry)
+      : total + treasureCardsInValue(entry)
+  ), 0);
+}
+
+function allowedTreasureCountsForRoll(result) {
+  if (result?.requiresChoice && Array.isArray(result.findingChoices)) {
+    return [...new Set(result.findingChoices.map(treasureCardsInValue).filter((count) => count > 0))];
+  }
+  const count = treasureCardsInValue(result);
+  return count > 0 ? [count] : [];
 }
 
 function recordedRollForOutput(row) {
@@ -1663,12 +1812,21 @@ export async function getSoloState(user, campaignId) {
     }, user.id),
   ]);
   const restState = await loadSoloRestState(pool, campaignId);
-  const { rows: soloNpcs } = await pool.query(
-    `SELECT * FROM solo_npcs
-     WHERE campaign_id = $1
-     ORDER BY created_at DESC, id DESC`,
-    [campaignId],
-  );
+  const [{ rows: soloNpcs }, { rows: treasureDraws }] = await Promise.all([
+    pool.query(
+      `SELECT * FROM solo_npcs
+       WHERE campaign_id = $1
+       ORDER BY created_at DESC, id DESC`,
+      [campaignId],
+    ),
+    pool.query(
+      `SELECT * FROM solo_treasure_draws
+       WHERE campaign_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 20`,
+      [campaignId],
+    ),
+  ]);
   const { rows: activeCombats } = await pool.query(
     `SELECT id, name FROM encounters
      WHERE party_id = $1 AND status = 'active'
@@ -1682,6 +1840,7 @@ export async function getSoloState(user, campaignId) {
   } else {
     if (!soloHeroicAbility) allowedNextActions.push('select_solo_heroic_ability');
     allowedNextActions.push('ask_fortune', 'draw_inspiration', 'start_session');
+    allowedNextActions.push('record_manual_treasure_draw');
     allowedNextActions.push('generate_solo_npc');
     if (soloNpcs.some((npc) => npc.status === 'active')) {
       allowedNextActions.push('resolve_solo_npc_behavior');
@@ -1748,6 +1907,7 @@ export async function getSoloState(user, campaignId) {
     pendingAdvancement: soloAdvancementForOutput(pendingAdvancement),
     activeDangers,
     npcs: soloNpcs.map(soloNpcForOutput),
+    treasureDraws: treasureDraws.map(soloTreasureDrawForOutput),
     activeCombat: activeCombats[0]
       ? { id: activeCombats[0].id, name: activeCombats[0].name }
       : null,
@@ -4377,6 +4537,8 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
       kind: 'solo_search',
       waypointId: context.waypoint.id,
     });
+    const tracker = await synchronizeLegacyTimeTracker(client, input.campaign_id, gameTime);
+    const dueNotifications = await collectDueTimeNotifications(client, access.campaign, gameTime);
     await client.query(
       'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
       [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
@@ -4408,6 +4570,8 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
         requiresChoice: check?.outcome === 'dragon',
         durationSeconds,
         gameTime,
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges,
         context: input.context || null,
         sourceKind: table.sourceKind,
@@ -4483,6 +4647,8 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
           : null,
         advancementMark,
         gameTime,
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges,
         notice: 'Search uses the installed Solo v1.2 table. Structured follow-ups must be resolved before applying their effects.',
       },
@@ -4549,6 +4715,8 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
       waypointId: context.waypoint.id,
       spentStretch: spendsStretch,
     });
+    const tracker = await synchronizeLegacyTimeTracker(client, input.campaign_id, gameTime);
+    const dueNotifications = await collectDueTimeNotifications(client, access.campaign, gameTime);
     await client.query(
       'UPDATE parties SET helper_revision = $1, game_time = $2::jsonb WHERE id = $3',
       [resultingRevision, JSON.stringify(gameTime), input.campaign_id],
@@ -4572,6 +4740,8 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
         spentStretch: spendsStretch,
         durationSeconds,
         gameTime,
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges,
         context: input.context || null,
         sourceKind: table.sourceKind,
@@ -4595,6 +4765,8 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
         stretchesSpent: Number(explorationRows[0].stretches_spent),
         durationSeconds,
         gameTime,
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges,
         context: input.context || null,
         reason: input.reason,
@@ -4643,6 +4815,8 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
           ? soloThreatForOutput(threatResult.threat, { revealTriggerEffect: threatResult.transition.triggered })
           : soloThreatForOutput(context.threat),
         gameTime,
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges,
         notice: 'Scavenge uses the installed Solo v1.2 table. Findings remain prompts until their inventory or story effects are confirmed.',
       },
@@ -4654,6 +4828,117 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
       operation,
       hash: idem.hash,
       response,
+    });
+    return response;
+  });
+}
+
+export async function recordManualTreasureDraw(user, input, { sourceClient } = {}) {
+  const operation = 'record_manual_treasure_draw';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client, user, input.campaign_id, input.idempotency_key, operation, input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    if (!input.shuffled_before_draw || !input.returned_and_shuffled) {
+      throw new HelperError(
+        400,
+        'VALIDATION_ERROR',
+        'Confirm both the shuffle before drawing and that all drawn cards were returned and shuffled back.',
+      );
+    }
+    if (input.cards.length !== input.card_count) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Enter exactly one contents record for every physically drawn card.');
+    }
+    const missionId = input.mission_id || state.current_mission_id || null;
+    if (input.mission_id && input.mission_id !== state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'Treasure can only be linked to the current Solo mission.');
+    }
+    if (input.waypoint_id) {
+      const { rows } = await client.query(
+        'SELECT id, mission_id FROM solo_waypoints WHERE id = $1',
+        [input.waypoint_id],
+      );
+      if (!rows[0] || rows[0].mission_id !== missionId) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'The selected waypoint is not part of the linked Solo mission.');
+      }
+    }
+    if (input.source_roll_id) {
+      const { rows } = await client.query(
+        `SELECT roll.id, roll.result, draw.id AS draw_id
+         FROM recorded_rolls roll
+         LEFT JOIN solo_treasure_draws draw ON draw.source_roll_id = roll.id
+         WHERE roll.id = $1 AND roll.campaign_id = $2`,
+        [input.source_roll_id, input.campaign_id],
+      );
+      if (!rows[0]) throw new HelperError(400, 'VALIDATION_ERROR', 'The source roll does not belong to this campaign.');
+      if (rows[0].draw_id) throw new HelperError(409, 'INVALID_STATE', 'Treasure has already been recorded for that source roll.');
+      const allowedCounts = allowedTreasureCountsForRoll(rows[0].result);
+      if (!allowedCounts.includes(input.card_count)) {
+        throw new HelperError(
+          400,
+          'VALIDATION_ERROR',
+          allowedCounts.length > 0
+            ? `The selected source result awards ${allowedCounts.join(' or ')} treasure card${allowedCounts.some((count) => count !== 1) ? 's' : ''}, not ${input.card_count}.`
+            : 'The selected source result does not award treasure cards.',
+        );
+      }
+    }
+    const resultingRevision = previousRevision + 1;
+    const { rows } = await client.query(
+      `INSERT INTO solo_treasure_draws (
+         campaign_id, mission_id, waypoint_id, source_roll_id, card_count, cards,
+         shuffled_before_draw, returned_and_shuffled, notes, created_by, campaign_revision
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [
+        input.campaign_id, missionId, input.waypoint_id || null, input.source_roll_id || null,
+        input.card_count, JSON.stringify(input.cards), input.shuffled_before_draw,
+        input.returned_and_shuffled, input.notes || null, user.id, resultingRevision,
+      ],
+    );
+    const draw = rows[0];
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.treasure_draw_recorded',
+      actorId: state.player_character_id,
+      payload: {
+        treasureDrawId: draw.id,
+        missionId,
+        waypointId: input.waypoint_id || null,
+        sourceRollId: input.source_roll_id || null,
+        cardCount: input.card_count,
+        cards: input.cards,
+        physicalDeck: true,
+        shuffledBeforeDraw: true,
+        returnedAndShuffled: true,
+        notes: input.notes || null,
+        reason: input.reason,
+      },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${input.card_count} physical treasure card${input.card_count === 1 ? '' : 's'} recorded and returned to the shuffled deck.`,
+      state_excerpt: {
+        treasureDraw: soloTreasureDrawForOutput(draw),
+        notice: 'The app stores only the contents entered from the physical cards; it never draws or supplies official card text.',
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key,
+      operation, hash: idem.hash, response,
     });
     return response;
   });
@@ -4796,6 +5081,8 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         at: new Date().toISOString(),
       },
     };
+    const tracker = await synchronizeLegacyTimeTracker(client, input.campaign_id, gameTime);
+    const dueNotifications = await collectDueTimeNotifications(client, access.campaign, gameTime);
 
     const { rows: restRows } = await client.query(
       `UPDATE solo_rest_states SET
@@ -4993,6 +5280,8 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
         actor: actorForOutput(resultingActor),
         restState: soloRestStateForOutput(restRows[0]),
         gameTime: gameTimeForOutput(gameTime),
+        tracker,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
         itemDurationChanges: advancedEquipment.changes,
         roll: rollRow ? recordedRollForOutput(rollRow) : null,
         advancementMark,
@@ -6035,6 +6324,211 @@ export async function claimSoloAdvancementAbility(user, input, { sourceClient } 
     });
     const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId], summary: `${character.name} gained ${ability.name} from reaching skill level 18.`, state_excerpt: { advancement: soloAdvancementForOutput(rows[0]), playerCharacter: { id: character.id, name: character.name, heroicAbilities: abilityNames } } };
     await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function getCampaignTimeState(user, campaignId) {
+  return withReadSnapshot(async (client) => {
+    const access = await requireCampaignAccess(client, user, campaignId, { gm: true });
+    const [{ rows: sessions }, { rows: reminders }, { rows: notifications }, { rows: trackers }] = await Promise.all([
+      access.campaign.active_session_id
+        ? client.query('SELECT * FROM game_sessions WHERE id = $1', [access.campaign.active_session_id])
+        : Promise.resolve({ rows: [] }),
+      client.query(
+        `SELECT * FROM campaign_time_roll_reminders
+         WHERE campaign_id = $1 ORDER BY active DESC, created_at DESC`,
+        [campaignId],
+      ),
+      client.query(
+        `SELECT * FROM campaign_time_roll_notifications
+         WHERE campaign_id = $1 AND status = 'pending'
+         ORDER BY created_at ASC`,
+        [campaignId],
+      ),
+      client.query('SELECT current_day, current_shift FROM time_trackers WHERE party_id = $1', [campaignId]),
+    ]);
+    return {
+      campaignRevision: Number(access.campaign.helper_revision || 0),
+      gameTime: gameTimeForOutput(access.campaign.game_time),
+      activeSession: sessions[0] ? sessionForOutput(sessions[0], { includeGm: true }) : null,
+      tracker: trackers[0] ? {
+        currentDay: Number(trackers[0].current_day),
+        currentShift: Number(trackers[0].current_shift),
+      } : null,
+      reminders: reminders.map(timeReminderForOutput),
+      pendingNotifications: notifications.map(timeNotificationForOutput),
+    };
+  });
+}
+
+export async function advanceCampaignTime(user, input, { sourceClient } = {}) {
+  const operation = 'advance_campaign_time';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const seconds = CAMPAIGN_TIME_SECONDS[input.unit] * input.amount;
+    const gameTime = advanceGameTime(access.campaign.game_time, seconds, {
+      source: 'campaign_session', unit: input.unit, amount: input.amount,
+    });
+    const equipmentDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, seconds);
+    const tracker = await synchronizeLegacyTimeTracker(client, input.campaign_id, gameTime);
+    const resultingRevision = previousRevision + 1;
+    await client.query(
+      'UPDATE parties SET game_time = $1::jsonb, helper_revision = $2 WHERE id = $3',
+      [JSON.stringify(gameTime), resultingRevision, input.campaign_id],
+    );
+
+    const dueNotifications = await collectDueTimeNotifications(client, access.campaign, gameTime);
+
+    const eventIds = [];
+    const timeEventId = await insertEvent(client, {
+      campaign: access.campaign, user, sessionId: access.campaign.active_session_id,
+      sequence: await nextEventSequence(client, input.campaign_id), type: 'time.advanced',
+      payload: { unit: input.unit, amount: input.amount, seconds, gameTime, tracker, reason: input.reason },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    eventIds.push(timeEventId);
+    for (const notification of dueNotifications) {
+      eventIds.push(await insertEvent(client, {
+        campaign: access.campaign, user, sessionId: access.campaign.active_session_id,
+        sequence: await nextEventSequence(client, input.campaign_id), type: 'time.roll_due',
+        payload: {
+          notificationId: notification.id, reminderId: notification.reminder_id,
+          label: notification.label, diceExpression: notification.dice_expression,
+          dueUnit: notification.due_unit, dueCount: Number(notification.due_count),
+        },
+        visibility: 'gm', sourceClient, idempotencyKey: null,
+        previousRevision: resultingRevision, resultingRevision,
+      }));
+    }
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: eventIds,
+      summary: `Advanced campaign time by ${input.amount} ${input.unit}${input.amount === 1 ? '' : 's'}.`,
+      state_excerpt: {
+        gameTime,
+        tracker,
+        equipmentDurationChanges,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key,
+      operation, hash: idem.hash, response,
+    });
+    return response;
+  });
+}
+
+export async function createCampaignTimeReminder(user, input, { sourceClient } = {}) {
+  const operation = 'create_campaign_time_reminder';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const currentCount = campaignTimeUnitCount(access.campaign.game_time, input.interval_unit);
+    const { rows } = await client.query(
+      `INSERT INTO campaign_time_roll_reminders (
+         campaign_id, label, dice_expression, interval_unit, interval_count,
+         next_due_count, notes, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [input.campaign_id, input.label, input.dice_expression.toLowerCase(), input.interval_unit,
+        input.interval_count, currentCount + input.interval_count, input.notes || null, user.id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign, user, sessionId: access.campaign.active_session_id,
+      sequence: await nextEventSequence(client, input.campaign_id), type: 'time.roll_reminder_created',
+      payload: { reminder: timeReminderForOutput(rows[0]), reason: input.reason },
+      visibility: 'gm', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: `Scheduled ${input.label}.`, state_excerpt: { reminder: timeReminderForOutput(rows[0]) } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id,
+      key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function setCampaignTimeReminderActive(user, input, { sourceClient } = {}) {
+  const operation = 'set_campaign_time_reminder_active';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const { rows: existingRows } = await client.query(
+      `SELECT * FROM campaign_time_roll_reminders
+       WHERE id = $1 AND campaign_id = $2 FOR UPDATE`,
+      [input.reminder_id, input.campaign_id],
+    );
+    if (!existingRows[0]) throw new HelperError(404, 'NOT_FOUND', 'Time roll reminder not found.');
+    const currentCount = campaignTimeUnitCount(access.campaign.game_time, existingRows[0].interval_unit);
+    const resumedDueCount = input.active && Number(existingRows[0].next_due_count) <= currentCount
+      ? currentCount + Number(existingRows[0].interval_count)
+      : Number(existingRows[0].next_due_count);
+    const { rows } = await client.query(
+      `UPDATE campaign_time_roll_reminders SET active = $1, next_due_count = $2
+       WHERE id = $3 RETURNING *`,
+      [input.active, resumedDueCount, input.reminder_id],
+    );
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, { campaign: access.campaign, user,
+      sessionId: access.campaign.active_session_id, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'time.roll_reminder_updated', payload: { reminder: timeReminderForOutput(rows[0]), reason: input.reason },
+      visibility: 'gm', sourceClient, idempotencyKey: input.idempotency_key, previousRevision, resultingRevision });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: `${rows[0].label} ${input.active ? 'enabled' : 'paused'}.`,
+      state_excerpt: { reminder: timeReminderForOutput(rows[0]) } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id,
+      key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function resolveCampaignTimeNotification(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_campaign_time_notification';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const { rows } = await client.query(
+      `UPDATE campaign_time_roll_notifications SET status = 'resolved', resolved_by = $1,
+         resolved_at = now(), resolution_note = $2
+       WHERE id = $3 AND campaign_id = $4 AND status = 'pending' RETURNING *`,
+      [user.id, input.resolution_note || null, input.notification_id, input.campaign_id],
+    );
+    if (!rows[0]) throw new HelperError(404, 'NOT_FOUND', 'Pending time roll notification not found.');
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, { campaign: access.campaign, user,
+      sessionId: rows[0].session_id, sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'time.roll_notification_resolved', payload: { notificationId: rows[0].id,
+        label: rows[0].label, resolutionNote: input.resolution_note || null, reason: input.reason },
+      visibility: 'gm', sourceClient, idempotencyKey: input.idempotency_key, previousRevision, resultingRevision });
+    const response = { success: true, campaign_revision: resultingRevision, event_ids: [eventId],
+      summary: `${rows[0].label} marked handled.`,
+      state_excerpt: { notification: timeNotificationForOutput(rows[0]) } };
+    await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id,
+      key: input.idempotency_key, operation, hash: idem.hash, response });
     return response;
   });
 }
@@ -7741,6 +8235,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
     let itemDurationChanges = [];
     let gameTime = gameTimeForOutput(access.campaign.game_time);
+    let tracker = null;
+    let dueNotifications = [];
     if (startedNewRound) {
       await client.query(
         `UPDATE encounter_combatants
@@ -7754,6 +8250,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
         combatId: input.combat_id,
         round,
       });
+      tracker = await synchronizeLegacyTimeTracker(client, input.campaign_id, gameTime);
+      dueNotifications = await collectDueTimeNotifications(client, access.campaign, gameTime);
     } else {
       if (active && !combatantCanAct(active) && !active.has_acted) {
         await client.query(
@@ -7826,7 +8324,10 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
       summary: startedNewRound
         ? `Round ${round} started. ${next.display_name} acts first.`
         : `The turn advanced to ${next.display_name}.`,
-      state_excerpt: { combat, gameTime, itemDurationChanges },
+      state_excerpt: {
+        combat, gameTime, tracker, itemDurationChanges,
+        dueNotifications: dueNotifications.map(timeNotificationForOutput),
+      },
     };
     await storeIdempotentResult(client, {
       campaignId: input.campaign_id,

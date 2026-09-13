@@ -124,6 +124,11 @@ Modifying:
 - `start_session`
 - `checkpoint_session`
 - `complete_session`
+- `get_campaign_time`
+- `advance_campaign_time`
+- `create_time_roll_reminder`
+- `set_time_roll_reminder_active`
+- `resolve_time_roll_notification`
 - `request_roll`
 - `push_roll`
 - `resolve_roll_server`
@@ -368,6 +373,21 @@ other campaign viewers are read-only. These operations use the campaign-scoped
 `/characters/{characterId}/injuries` REST routes and retain the same revision,
 idempotency, recorded-roll, and event guarantees as Solo actions.
 
+## Physical Solo treasure cards
+
+Draconi deliberately does not contain or generate the official treasure-card
+deck. When Search, Scavenge, or the story awards treasure, the Solo page shows
+the number of cards awaiting a physical draw. The player shuffles their own
+deck, draws that many cards, enters one contents record for each card, returns
+all cards, and shuffles again. Duplicate cards are valid and remain separate
+records.
+
+The `record_manual_treasure_draw` MCP tool follows the identical process. A GM
+assistant must ask for both shuffle confirmations and the player's entered card
+contents before calling it. The command is revision-checked, idempotent, and
+audited; it may link the record to the Search or Scavenge roll that awarded it.
+It never changes character inventory automatically.
+
 ## Combat workflow
 
 Combat preparation and runtime tools are GM-only:
@@ -411,6 +431,13 @@ durable container for the campaign events produced during one period of play:
 
 Only one session may be active for a campaign. Completing it clears the active
 session pointer while keeping its immutable event history.
+
+The party page Session manager and MCP use the same authoritative campaign
+clock: a round is 10 seconds, a stretch is 15 minutes, and a shift is 6 hours.
+`advance_campaign_time` also synchronizes the visual Time tab and advances timed
+equipment. GMs may schedule campaign- or adventure-specific dice reminders by
+round, stretch, or shift. Crossing a due boundary creates a durable GM-only
+notification; it does not roll dice or assume a universal encounter cadence.
 
 The MCP server also publishes the machine-readable
 `dragonbane://workflows/gm-session` resource and the
