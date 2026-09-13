@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Users, Sword, X } from 'lucide-react';
+import { ArrowRight, Plus, Users, Sword, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
@@ -204,7 +204,7 @@ export function AdventureParty() {
       {/* LIST MODE */}
       {!isCreating && (
         parties.length > 0 ? (
-          <div className="grid gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
             {parties.map((party) => (
               <div
                 key={party.id}
@@ -217,35 +217,60 @@ export function AdventureParty() {
                 }}
                 role="button"
                 tabIndex={0}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer overflow-hidden group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:border-blue-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-all cursor-pointer group p-4 min-w-0"
               >
-                <div className="p-4 md:p-6 border-b border-gray-100 bg-gray-50/50 group-hover:bg-blue-50/30 transition-colors">
-                  <h2 className="text-lg md:text-xl font-bold text-gray-900 flex items-center gap-2">
-                    <Users className="w-5 h-5 text-blue-500" />
-                    {party.name}
-                  </h2>
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:bg-blue-100 transition-colors">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h2 className="font-bold text-gray-900 truncate" title={party.name}>{party.name}</h2>
+                      <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">
+                        {party.campaign_role}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {party.members.length} {party.members.length === 1 ? 'adventurer' : 'adventurers'}
+                    </p>
+                  </div>
                 </div>
-                
-                <div className="p-4 md:p-6">
+
+                {party.description ? (
+                  <p className="mt-3 text-xs text-gray-500 line-clamp-2 min-h-8">{party.description}</p>
+                ) : null}
+
+                <div className="mt-3 min-h-9">
                   {party.members.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-                      {party.members.map((member) => (
-                        <div key={member.id} className="p-3 border border-gray-100 rounded-lg bg-white flex items-center gap-3 shadow-sm">
-                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                            <Sword className="w-4 h-4 text-gray-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-sm text-gray-800 truncate">{member.name}</h3>
-                            <p className="text-xs text-gray-500 truncate">{member.kin} {member.profession}</p>
-                          </div>
+                    <div className="flex items-center gap-1.5 overflow-hidden" aria-label={`${party.name} members`}>
+                      {party.members.slice(0, 4).map((member) => (
+                        <div
+                          key={member.id}
+                          title={`${member.name}${member.kin || member.profession ? ` · ${member.kin || ''} ${member.profession || ''}`.trim() : ''}`}
+                          className="inline-flex min-w-0 max-w-28 items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 py-1 pl-1 pr-2"
+                        >
+                          {member.portrait_url ? (
+                            <img src={member.portrait_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <span className="w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0">
+                              <Sword className="w-3 h-3 text-gray-400" />
+                            </span>
+                          )}
+                          <span className="text-[11px] font-semibold text-gray-700 truncate">{member.name}</span>
                         </div>
                       ))}
+                      {party.members.length > 4 ? (
+                        <span className="shrink-0 text-xs font-bold text-gray-500">+{party.members.length - 4}</span>
+                      ) : null}
                     </div>
                   ) : (
-                    <div className="text-center py-6 bg-gray-50 rounded-lg border border-dashed border-gray-200">
-                      <p className="text-sm text-gray-400 italic">No members in this party yet.</p>
-                    </div>
+                    <p className="text-xs text-gray-400 italic py-2">No members yet</p>
                   )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+                  <span className="text-gray-400">Open campaign</span>
+                  <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all" />
                 </div>
               </div>
             ))}
