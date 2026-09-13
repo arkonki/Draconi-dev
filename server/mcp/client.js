@@ -194,6 +194,20 @@ export class HelperApiClient {
     });
   }
 
+  generateSoloNpc(input) {
+    const { campaign_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/npcs`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
+  resolveSoloNpcBehavior(input) {
+    const { campaign_id, npc_id, expected_revision, idempotency_key, ...body } = input;
+    return this.request(`/api/v1/campaigns/${campaign_id}/solo/npcs/${npc_id}/behavior`, {
+      method: 'POST', body, expectedRevision: expected_revision, idempotencyKey: idempotency_key,
+    });
+  }
+
   resolveSoloCheck(input) {
     const {
       campaign_id,

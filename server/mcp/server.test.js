@@ -18,6 +18,7 @@ const injuryId = '997f700a-c155-41e5-9070-4cead9e84d65';
 const soloAbilityId = '30000000-0000-4000-8000-000000000101';
 const rollRequestId = '16cf09b9-fec2-47a5-ab41-052a6d88bc89';
 const pushedRollRequestId = '71df15b5-d192-4f15-b2f4-af51bf5af252';
+const soloNpcId = '51df15b5-d192-4f15-b2f4-af51bf5af252';
 
 let client;
 let server;
@@ -187,6 +188,26 @@ beforeEach(async () => {
         state_excerpt: { roll: { expression: '2d20', dice: [4, 8] } },
       },
       meta: { requestId: 'request-inspiration', campaignRevision: 46 },
+    })),
+    generateSoloNpc: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 47,
+        event_ids: ['f630f6b7-605b-452c-a184-d3441a26c79b'],
+        summary: 'Ashfang Captain was created as a Solo boss (melee, ranged).',
+        state_excerpt: { npc: { id: soloNpcId, monsterId, template: 'boss', roles: ['melee', 'ranged'] } },
+      },
+      meta: { requestId: 'request-npc-generate', campaignRevision: 47 },
+    })),
+    resolveSoloNpcBehavior: vi.fn(async () => ({
+      data: {
+        success: true,
+        campaign_revision: 48,
+        event_ids: ['a630f6b7-605b-452c-a184-d3441a26c79b'],
+        summary: 'Ashfang Captain: Wild Attack! Attack with a boon.',
+        state_excerpt: { resolution: { behavior: 'attack', roll: 5, role: 'melee' } },
+      },
+      meta: { requestId: 'request-npc-behavior', campaignRevision: 48 },
     })),
     resolveSoloCheck: vi.fn(async () => ({
       data: {
@@ -1401,5 +1422,43 @@ describe('Dragonbane MCP server', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/combine changes/i);
     expect(api.resolveGameAction).not.toHaveBeenCalled();
+  });
+
+  it('exposes rules-compliant Solo NPC generation and behavior tools', async () => {
+    const generated = await client.callTool({
+      name: 'generate_solo_npc',
+      arguments: {
+        campaign_id: campaignId,
+        expected_revision: 46,
+        idempotency_key: 'solo-npc-generate-1',
+        name: 'Ashfang Captain',
+        template: 'boss',
+        roles: ['melee', 'ranged'],
+        reason: 'The NPC was established in the current scene.',
+      },
+    });
+    expect(generated.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { npc: { id: soloNpcId, template: 'boss', roles: ['melee', 'ranged'] } },
+    });
+
+    const behavior = await client.callTool({
+      name: 'resolve_solo_npc_behavior',
+      arguments: {
+        campaign_id: campaignId,
+        npc_id: soloNpcId,
+        expected_revision: 47,
+        idempotency_key: 'solo-npc-behavior-1',
+        behavior: 'attack',
+        role: 'melee',
+        reason: 'Resolve the active NPC action.',
+      },
+    });
+    expect(behavior.structuredContent).toMatchObject({
+      success: true,
+      state_excerpt: { resolution: { behavior: 'attack', role: 'melee', roll: 5 } },
+    });
+    expect(api.generateSoloNpc).toHaveBeenCalledTimes(1);
+    expect(api.resolveSoloNpcBehavior).toHaveBeenCalledTimes(1);
   });
 });

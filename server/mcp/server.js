@@ -29,6 +29,7 @@ import {
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
   getSoloStateInputSchema,
+  generateSoloNpcInputSchema,
   listCampaignsInputSchema,
   mcpReadResultSchema,
   mcpWriteResultSchema,
@@ -39,6 +40,7 @@ import {
   resolveSoloDyingActionInputSchema,
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageInputSchema,
+  resolveSoloNpcBehaviorInputSchema,
   resolveSoloAdvancementInputSchema,
   resolveThreatInputSchema,
   removeEncounterParticipantInputSchema,
@@ -157,7 +159,7 @@ function jsonResource(uri, data) {
 
 export function createDragonbaneMcpServer(apiClient) {
   const server = new McpServer(
-    { name: 'dragonbane-helper', version: '1.18.0' },
+    { name: 'dragonbane-helper', version: '1.19.0' },
     {
       instructions: [
         'Dragonbane Helper is authoritative. Before continuing a campaign, call get_resume_state for one consistent continuation snapshot.',
@@ -183,6 +185,7 @@ export function createDragonbaneMcpServer(apiClient) {
         'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state. Use add_solo_waypoints for diversions and begin_solo_return for cleared, dangerous, or impossible return routes.',
         'When a threat reaches 6, narrate and resolve its event with resolve_solo_threat. A recurring threat resets to 1 only after resolution; replace a removed non-recurring threat with set_solo_threat while delving.',
         'After a successful Solo mission, complete the authoritative between-mission sequence before starting another: select exactly five new marks, resolve all marked skills with D20 greater than skill and maximum 18, then claim any heroic ability rewards returned for skills reaching 18.',
+        'Use generate_solo_npc for rules-compliant Minions and Bosses. Use resolve_solo_npc_behavior for their role-based D6 attack action, uncertain intent, or possible flight/surrender; then apply any attack roll, damage, defense, fear, or condition through the normal combat tools.',
         'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
       ].join(' '),
     },
@@ -315,6 +318,22 @@ export function createDragonbaneMcpServer(apiClient) {
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
   }, safe(async (input) => writeResult(await apiClient.drawInspiration(input))));
+
+  server.registerTool('generate_solo_npc', {
+    title: 'Generate a simple Solo NPC',
+    description: 'GM-only. Create a rules-compliant Solo v1.2 Minion or Boss with one or two of the melee, ranged, sneaky, or magic attacker roles. The returned monster ID can be added to a planned encounter.',
+    inputSchema: generateSoloNpcInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.generateSoloNpc(input))));
+
+  server.registerTool('resolve_solo_npc_behavior', {
+    title: 'Resolve Solo NPC behavior',
+    description: 'GM-only. Roll a selected NPC role attack on the exact Solo v1.2 D6 table, resolve uncertain intent with Fortune or Inspiration, or ask Fortune whether the NPC flees or surrenders. During active combat, supply the encounter and resolve only the active NPC.',
+    inputSchema: resolveSoloNpcBehaviorInputSchema,
+    outputSchema: mcpWriteResultSchema,
+    annotations: MODIFYING,
+  }, safe(async (input) => writeResult(await apiClient.resolveSoloNpcBehavior(input))));
 
   server.registerTool('resolve_solo_check', {
     title: 'Resolve a solo skill or attribute check',

@@ -10,6 +10,7 @@ import {
   CircleDot,
   Dices,
   Flag,
+  Ghost,
   Gauge,
   Heart,
   HeartPulse,
@@ -35,6 +36,7 @@ import {
   askSoloFortune,
   completeSoloMission,
   drawSoloInspiration,
+  generateSoloNpc,
   fetchSoloState,
   fetchSoloOptions,
   FortuneCategory,
@@ -54,6 +56,7 @@ import {
   pushSoloCheck,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
+  resolveSoloNpcBehavior,
   takeSoloRest,
   beginSoloReturn,
   claimSoloAdvancementAbility,
@@ -83,7 +86,7 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
+type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
 type SoloDashboardTab = 'adventure' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
@@ -279,6 +282,8 @@ function ActionModal({
     consequence: 'Resolve the complication',
     fortune: 'Ask Fortune',
     inspiration: 'Draw Inspiration',
+    'npc-create': 'Create a simple NPC',
+    'npc-behavior': 'Resolve NPC behavior',
     'start-mission': 'Start a custom mission',
     'reveal-waypoint': 'Reveal the next waypoint',
     search: 'Search the current waypoint',
@@ -420,6 +425,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const [selectedColumns, setSelectedColumns] = useState<InspirationColumn[]>(['action', 'attribute', 'thing']);
   const [inspirationContext, setInspirationContext] = useState('');
+  const [npcName, setNpcName] = useState('');
+  const [npcTemplate, setNpcTemplate] = useState<'minion' | 'boss'>('minion');
+  const [npcRoles, setNpcRoles] = useState<Array<'melee' | 'ranged' | 'sneaky' | 'magic'>>(['melee']);
+  const [npcNotes, setNpcNotes] = useState('');
+  const [selectedNpcId, setSelectedNpcId] = useState('');
+  const [npcBehavior, setNpcBehavior] = useState<'attack' | 'intent' | 'morale'>('attack');
+  const [npcBehaviorRole, setNpcBehaviorRole] = useState<'melee' | 'ranged' | 'sneaky' | 'magic'>('melee');
+  const [npcOracle, setNpcOracle] = useState<'fortune' | 'inspiration'>('fortune');
+  const [npcQuestion, setNpcQuestion] = useState('');
+  const [npcTilt, setNpcTilt] = useState<FortuneTilt>('even');
+  const [npcDisposition, setNpcDisposition] = useState<'fled' | 'surrendered'>('fled');
+  const [npcActionResult, setNpcActionResult] = useState<SoloWriteResult | null>(null);
 
   const [missionTitle, setMissionTitle] = useState('');
   const [missionObjective, setMissionObjective] = useState('');
@@ -478,6 +495,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     staleTime: 0,
   });
   const selectedInjury = state?.activeInjuries.find((injury) => injury.id === selectedInjuryId) || null;
+  const selectedNpc = state?.npcs?.find((npc) => npc.id === selectedNpcId) || null;
   const soloCharacterId = state?.solo.playerCharacterId || state?.playerCharacter?.id || null;
   const isSoloCharacterSheetReady = Boolean(
     soloCharacterId && viewedSheetCharacter?.id === soloCharacterId,
@@ -648,6 +666,26 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             columns: selectedColumns,
             context: inspirationContext.trim(),
           });
+        case 'npc-create':
+          return generateSoloNpc(partyId, revision, {
+            name: npcName.trim(),
+            template: npcTemplate,
+            roles: npcRoles,
+            missionId: state.activeMission?.id,
+            waypointId: state.currentWaypoint?.id,
+            notes: npcNotes.trim() || undefined,
+          });
+        case 'npc-behavior':
+          if (!selectedNpc) throw new Error('Choose an active Solo NPC.');
+          return resolveSoloNpcBehavior(partyId, selectedNpc.id, revision, {
+            behavior: npcBehavior,
+            role: npcBehavior === 'attack' ? npcBehaviorRole : undefined,
+            oracle: npcBehavior === 'intent' ? npcOracle : 'fortune',
+            question: npcQuestion.trim() || undefined,
+            tilt: npcTilt,
+            disposition: npcBehavior === 'morale' ? npcDisposition : undefined,
+            encounterId: state.activeCombat?.id,
+          });
         case 'start-mission':
           {
             const foreseenWaypoints = foreseenWaypointsText.split('\n')
@@ -749,6 +787,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setSuccessMessage(result.summary);
       if (activeAction === 'fortune' || activeAction === 'inspiration') {
         setOracleActionResult(result);
+      } else if (activeAction === 'npc-behavior') {
+        setNpcActionResult(result);
       } else {
         setActiveAction(null);
       }
@@ -792,6 +832,26 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     actionMutation.reset();
     if (action === 'fortune') {
       setFortuneTilt('even');
+    }
+    if (action === 'npc-create') {
+      setNpcName('');
+      setNpcTemplate('minion');
+      setNpcRoles(['melee']);
+      setNpcNotes('');
+    }
+    if (action === 'npc-behavior') {
+      const npc = state?.npcs?.find((candidate) => candidate.id === selectedNpcId)
+        || state?.npcs?.find((candidate) => candidate.status === 'active');
+      if (npc) {
+        setSelectedNpcId(npc.id);
+        setNpcBehaviorRole(npc.roles[0] || 'melee');
+      }
+      setNpcBehavior('attack');
+      setNpcOracle('fortune');
+      setNpcQuestion('');
+      setNpcTilt('even');
+      setNpcDisposition('fled');
+      setNpcActionResult(null);
     }
     if (action === 'check') {
       const firstSkill = Object.keys(state?.playerCharacter?.skills || {}).sort()[0];
@@ -870,6 +930,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const closeAction = () => {
     setActiveAction(null);
     setOracleActionResult(null);
+    setNpcActionResult(null);
     actionMutation.reset();
   };
 
@@ -1331,6 +1392,43 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                 )}
               </div>
+            </section>
+            )}
+
+            {activeDashboardTab === 'adventure' && (
+            <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><Ghost className="h-5 w-5 text-violet-600" /> Solo NPCs</h3>
+                  <p className="mt-1 text-sm text-stone-500">Rules-compliant Minions and Bosses with role-based actions.</p>
+                </div>
+                {canManage && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" icon={Ghost} onClick={() => openAction('npc-create')}>Create NPC</Button>
+                    <Button
+                      icon={Dices}
+                      disabled={!(state.npcs || []).some((npc) => npc.status === 'active')}
+                      onClick={() => openAction('npc-behavior')}
+                    >Resolve behavior</Button>
+                  </div>
+                )}
+              </div>
+              {(state.npcs || []).length === 0 ? (
+                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">No simple Solo NPCs have been created.</p>
+              ) : (
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {(state.npcs || []).map((npc) => (
+                    <div key={npc.id} className="rounded-xl border border-stone-200 bg-stone-50 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-stone-900">{npc.name}</div>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${npc.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'}`}>{titleCase(npc.status)}</span>
+                      </div>
+                      <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-violet-700">{titleCase(npc.template)} · {npc.roles.map(titleCase).join(' / ')}</div>
+                      <div className="mt-2 text-xs text-stone-600">HP {npc.profile.hp ?? '—'} · Armor {npc.profile.armor || '—'} · Damage {npc.profile.damage?.toUpperCase() || '—'} · Skill {npc.profile.relevantSkill ?? '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
             )}
 
@@ -1816,6 +1914,116 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </label>
                 <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">This uses the installed versioned Solo inspiration table.</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={selectedColumns.length === 0} icon={Wand2}>Draw Inspiration</Button>
+              </>
+            )}
+
+            {activeAction === 'npc-create' && (
+              <>
+                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
+                  Minions use attributes 10, HP 12 and skills 12/6. Bosses use attributes 14, HP 20, armor 4 and skills 15/8. Simple magic attackers ignore WP.
+                </div>
+                <label className="block text-sm font-bold text-stone-700">Name
+                  <input value={npcName} onChange={(event) => setNpcName(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Ashfang Captain" />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-bold text-stone-700">Template
+                    <select value={npcTemplate} onChange={(event) => setNpcTemplate(event.target.value as typeof npcTemplate)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                      <option value="minion">Minion</option><option value="boss">Boss</option>
+                    </select>
+                  </label>
+                  <fieldset>
+                    <legend className="text-sm font-bold text-stone-700">Roles · choose up to two</legend>
+                    <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                      {(['melee', 'ranged', 'sneaky', 'magic'] as const).map((role) => (
+                        <label key={role} className={`rounded border px-2 py-1.5 text-xs font-semibold ${npcRoles.includes(role) ? 'border-violet-400 bg-violet-50 text-violet-800' : 'border-stone-200 text-stone-600'}`}>
+                          <input
+                            type="checkbox"
+                            checked={npcRoles.includes(role)}
+                            disabled={!npcRoles.includes(role) && npcRoles.length >= 2}
+                            onChange={(event) => setNpcRoles((current) => event.target.checked ? [...current, role] : current.filter((value) => value !== role))}
+                            className="mr-1.5"
+                          />{titleCase(role)}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </div>
+                <label className="block text-sm font-bold text-stone-700">Description or notes <span className="font-normal text-stone-400">optional</span>
+                  <textarea value={npcNotes} onChange={(event) => setNpcNotes(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                </label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!npcName.trim() || npcRoles.length < 1} icon={Ghost}>Create {titleCase(npcTemplate)}</Button>
+              </>
+            )}
+
+            {activeAction === 'npc-behavior' && npcActionResult ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
+                  <div className="text-lg font-extrabold">{npcActionResult.summary}</div>
+                  <div className="mt-2 text-sm">{journalValue(npcActionResult.state_excerpt.resolution)}</div>
+                </div>
+                <p className="text-xs text-stone-500">The result is recorded. Apply any required attack roll, defense, damage, fear, or condition through the encounter controls.</p>
+                <Button type="button" fullWidth onClick={closeAction}>Done</Button>
+              </div>
+            ) : activeAction === 'npc-behavior' && (
+              <>
+                <label className="block text-sm font-bold text-stone-700">NPC
+                  <select
+                    value={selectedNpcId}
+                    onChange={(event) => {
+                      const id = event.target.value;
+                      setSelectedNpcId(id);
+                      const npc = state.npcs.find((candidate) => candidate.id === id);
+                      if (npc?.roles[0]) setNpcBehaviorRole(npc.roles[0]);
+                    }}
+                    required
+                    className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"
+                  >
+                    <option value="">Choose an active NPC…</option>
+                    {state.npcs.filter((npc) => npc.status === 'active').map((npc) => <option key={npc.id} value={npc.id}>{npc.name} · {titleCase(npc.template)}</option>)}
+                  </select>
+                </label>
+                <label className="block text-sm font-bold text-stone-700">Behavior
+                  <select value={npcBehavior} onChange={(event) => setNpcBehavior(event.target.value as typeof npcBehavior)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                    <option value="attack">Attack action · role D6 table</option>
+                    <option value="intent">Uncertain intent</option>
+                    <option value="morale">Possible flight or surrender</option>
+                  </select>
+                </label>
+                {npcBehavior === 'attack' && selectedNpc && (
+                  <label className="block text-sm font-bold text-stone-700">Attacker role
+                    <select value={npcBehaviorRole} onChange={(event) => setNpcBehaviorRole(event.target.value as typeof npcBehaviorRole)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                      {selectedNpc.roles.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}
+                    </select>
+                  </label>
+                )}
+                {npcBehavior === 'intent' && (
+                  <label className="block text-sm font-bold text-stone-700">Oracle
+                    <select value={npcOracle} onChange={(event) => setNpcOracle(event.target.value as typeof npcOracle)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                      <option value="fortune">Fortune · reaction</option><option value="inspiration">Inspiration · Action + Thing</option>
+                    </select>
+                  </label>
+                )}
+                {npcBehavior === 'morale' && (
+                  <label className="block text-sm font-bold text-stone-700">Possible outcome
+                    <select value={npcDisposition} onChange={(event) => setNpcDisposition(event.target.value as typeof npcDisposition)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                      <option value="fled">Flee</option><option value="surrendered">Surrender</option>
+                    </select>
+                  </label>
+                )}
+                {npcBehavior !== 'attack' && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block text-sm font-bold text-stone-700">Likelihood
+                      <select value={npcTilt} onChange={(event) => setNpcTilt(event.target.value as FortuneTilt)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
+                        <option value="unlikely">Unlikely</option><option value="even">Even</option><option value="likely">Likely</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+                <label className="block text-sm font-bold text-stone-700">Question or context <span className="font-normal text-stone-400">optional</span>
+                  <textarea value={npcQuestion} onChange={(event) => setNpcQuestion(event.target.value)} maxLength={1000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
+                </label>
+                {state.activeCombat && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800">This resolves against the active encounter and is allowed only when the selected NPC is the active combatant.</p>}
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!selectedNpc || (npcBehavior === 'attack' && !npcBehaviorRole)} icon={Dices}>Resolve behavior</Button>
               </>
             )}
 

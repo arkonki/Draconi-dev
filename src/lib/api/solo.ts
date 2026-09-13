@@ -109,6 +109,28 @@ export interface SoloThreat {
   triggerEffect?: Record<string, unknown>;
 }
 
+export interface SoloNpc {
+  id: string;
+  campaignId: string;
+  missionId?: string | null;
+  waypointId?: string | null;
+  monsterId: string;
+  name: string;
+  template: 'minion' | 'boss';
+  roles: Array<'melee' | 'ranged' | 'sneaky' | 'magic'>;
+  status: 'active' | 'fled' | 'surrendered' | 'defeated';
+  notes?: string | null;
+  profile: {
+    attributes?: number;
+    hp?: number;
+    movement?: number;
+    armor?: number;
+    damage?: string;
+    relevantSkill?: number;
+    otherSkill?: number;
+  };
+}
+
 export interface SoloRecordedRoll {
   id: string;
   purpose: string;
@@ -250,6 +272,7 @@ export interface SoloState {
   activeThreat?: SoloThreat | null;
   pendingAdvancement?: SoloMissionAdvancement | null;
   activeDangers: SoloDanger[];
+  npcs: SoloNpc[];
   activeCombat?: { id: string; name: string } | null;
   gameTime: Record<string, unknown>;
   restState: {
@@ -328,6 +351,67 @@ export async function fetchSoloState(partyId: string): Promise<SoloState> {
     headers: { accept: 'application/json' },
   });
   return parseResponse<SoloState>(response, 'Could not load solo-mode status.');
+}
+
+export async function generateSoloNpc(
+  partyId: string,
+  revision: number,
+  input: {
+    name: string;
+    template: 'minion' | 'boss';
+    roles: Array<'melee' | 'ranged' | 'sneaky' | 'magic'>;
+    missionId?: string;
+    waypointId?: string;
+    notes?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/npcs`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      name: input.name,
+      template: input.template,
+      roles: input.roles,
+      mission_id: input.missionId,
+      waypoint_id: input.waypointId,
+      notes: input.notes,
+      reason: 'The Solo player created a simple rules-compliant NPC.',
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not generate the Solo NPC.');
+}
+
+export async function resolveSoloNpcBehavior(
+  partyId: string,
+  npcId: string,
+  revision: number,
+  input: {
+    behavior: 'attack' | 'intent' | 'morale';
+    role?: 'melee' | 'ranged' | 'sneaky' | 'magic';
+    oracle?: 'fortune' | 'inspiration';
+    question?: string;
+    tilt?: 'unlikely' | 'even' | 'likely';
+    inspirationColumns?: Array<'action' | 'attribute' | 'thing'>;
+    disposition?: 'fled' | 'surrendered';
+    encounterId?: string;
+  },
+): Promise<SoloWriteResult> {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/solo/npcs/${npcId}/behavior`, {
+    method: 'POST',
+    headers: writeHeaders(revision),
+    body: JSON.stringify({
+      behavior: input.behavior,
+      role: input.role,
+      oracle: input.oracle || 'fortune',
+      question: input.question,
+      tilt: input.tilt || 'even',
+      inspiration_columns: input.inspirationColumns || ['action', 'thing'],
+      disposition: input.disposition,
+      encounter_id: input.encounterId,
+      reason: `The Solo player resolved ${input.behavior} for this NPC.`,
+    }),
+  });
+  return parseResponse<SoloWriteResult>(response, 'Could not resolve the Solo NPC behavior.');
 }
 
 export async function enableSoloMode(

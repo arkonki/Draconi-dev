@@ -132,6 +132,8 @@ Modifying:
 - `select_solo_heroic_ability`
 - `ask_fortune`
 - `draw_inspiration`
+- `generate_solo_npc`
+- `resolve_solo_npc_behavior`
 - `resolve_solo_check`
 - `resolve_solo_check_consequence`
 - `start_solo_mission`
@@ -262,6 +264,16 @@ The Fortune table implements the Solo v1.2 category and tilt mechanics.
 Inspiration and critical effects use the separately versioned `user-solo-v1`
 data pack installed through the database migrations. Deepfall Breach remains
 unavailable rather than exposing or inventing protected module content.
+
+`generate_solo_npc` creates a campaign-private Minion or Boss using the exact
+Solo v1.2 profile and one or two attacker roles. Its returned monster ID can be
+added to an encounter through the normal preparation flow. `resolve_solo_npc_behavior`
+uses the selected role's versioned D6 action table, Fortune or Inspiration for
+uncertain intent, and Fortune for possible flight or surrender. A successful
+morale result removes the combatant from further initiative without treating it
+as killed. The returned action is a mechanical instruction; required skill
+rolls, defenses, damage, fear, or conditions are still applied through the
+authoritative combat action flow.
 
 Custom missions persist an objective, ordered waypoints, and one active threat.
 The route can include multiple planned foreseen waypoints and a configurable

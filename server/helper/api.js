@@ -60,6 +60,8 @@ import {
   getSessionHistoryInputSchema,
   getSoloOptionsInputSchema,
   getSoloStateInputSchema,
+  generateSoloNpcBodySchema,
+  generateSoloNpcInputSchema,
   idempotencyKeySchema,
   listCampaignsInputSchema,
   resolveGameActionBodySchema,
@@ -76,6 +78,8 @@ import {
   resolveSoloInjuryActionInputSchema,
   resolveSoloNarrativeDamageBodySchema,
   resolveSoloNarrativeDamageInputSchema,
+  resolveSoloNpcBehaviorBodySchema,
+  resolveSoloNpcBehaviorInputSchema,
   resolveSoloAdvancementBodySchema,
   resolveSoloAdvancementInputSchema,
   resolveThreatBodySchema,
@@ -143,6 +147,7 @@ import {
   getSessionHistory,
   getSoloOptions,
   getSoloState,
+  generateSoloNpc,
   listActors,
   listCampaigns,
   resolveGameAction,
@@ -155,6 +160,7 @@ import {
   resolveSoloCheckConsequence,
   resolveSoloInjuryAction,
   resolveSoloNarrativeDamage,
+  resolveSoloNpcBehavior,
   resolveSoloAdvancement,
   resolveThreat,
   rollCharacterSevereInjury,
@@ -583,6 +589,44 @@ export async function handleHelperApiRequest(request, response) {
     }
 
     const soloCheckMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/checks$/);
+
+    const soloNpcsMatch = matchPath(pathname, /^\/api\/v1\/campaigns\/([^/]+)\/solo\/npcs$/);
+    if (soloNpcsMatch && request.method === 'POST') {
+      operation = 'generate_solo_npc';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(generateSoloNpcBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(generateSoloNpcInputSchema, {
+        campaign_id: soloNpcsMatch[0], expected_revision: previousRevision,
+        idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await generateSoloNpc(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
+    const soloNpcBehaviorMatch = matchPath(
+      pathname,
+      /^\/api\/v1\/campaigns\/([^/]+)\/solo\/npcs\/([^/]+)\/behavior$/,
+    );
+    if (soloNpcBehaviorMatch && request.method === 'POST') {
+      operation = 'resolve_solo_npc_behavior';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(resolveSoloNpcBehaviorBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(resolveSoloNpcBehaviorInputSchema, {
+        campaign_id: soloNpcBehaviorMatch[0], npc_id: soloNpcBehaviorMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await resolveSoloNpcBehavior(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+
     if (soloCheckMatch && request.method === 'POST') {
       operation = 'resolve_solo_check';
       previousRevision = parseRevision(request);

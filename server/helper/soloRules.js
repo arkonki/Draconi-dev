@@ -11,6 +11,28 @@ export const FORTUNE_CATEGORIES = [
 
 export const FORTUNE_TILTS = ['unlikely', 'even', 'likely'];
 export const INSPIRATION_COLUMNS = ['action', 'attribute', 'thing'];
+export const SOLO_NPC_ROLES = ['melee', 'ranged', 'sneaky', 'magic'];
+
+export const SIMPLE_NPC_TEMPLATES = Object.freeze({
+  minion: Object.freeze({
+    attributes: 10,
+    hp: 12,
+    movement: 10,
+    armor: 0,
+    damage: '2d6',
+    relevantSkill: 12,
+    otherSkill: 6,
+  }),
+  boss: Object.freeze({
+    attributes: 14,
+    hp: 20,
+    movement: 12,
+    armor: 4,
+    damage: '2d8',
+    relevantSkill: 15,
+    otherSkill: 8,
+  }),
+});
 
 export function secureRollDie(sides) {
   if (!Number.isInteger(sides) || sides < 2) throw new Error('Die sides must be an integer of at least 2.');
@@ -84,6 +106,36 @@ export function resolveInspiration({ columns, tables }, rollDie = secureRollDie)
     keptValues: [...dice],
     results,
     phrase: results.map((result) => result.keyword).join(' '),
+  };
+}
+
+export function simpleNpcTemplate(template) {
+  const resolved = SIMPLE_NPC_TEMPLATES[template];
+  if (!resolved) throw new Error(`Unsupported simple NPC template: ${template}`);
+  return { template, ...resolved };
+}
+
+export function resolveSoloNpcAttack({ role, table }, rollDie = secureRollDie) {
+  if (!SOLO_NPC_ROLES.includes(role)) throw new Error(`Unsupported Solo NPC role: ${role}`);
+  if (!table || !Number.isInteger(table.dieSides) || !Array.isArray(table.entries)) {
+    throw new Error(`Solo NPC ${role} attack table is unavailable or invalid.`);
+  }
+  const roll = rollDie(table.dieSides);
+  const entry = findTableEntry(table.entries, roll);
+  if (!entry || typeof entry !== 'object' || !entry.key || !entry.label || !entry.summary) {
+    throw new Error(`Solo NPC ${role} attack table has an invalid result for ${roll}.`);
+  }
+  const action = { ...entry };
+  delete action.min;
+  delete action.max;
+  return {
+    expression: `1d${table.dieSides}`,
+    dice: [roll],
+    keptIndices: [0],
+    keptValues: [roll],
+    roll,
+    role,
+    action,
   };
 }
 

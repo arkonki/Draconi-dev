@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { searchWaypointInputSchema } from './schemas.js';
+import {
+  generateSoloNpcInputSchema,
+  resolveSoloNpcBehaviorInputSchema,
+  searchWaypointInputSchema,
+} from './schemas.js';
 
 const baseSearch = {
   campaign_id: '5a135eb4-13a0-4d18-b000-8e050647c04f',
@@ -29,5 +33,32 @@ describe('Helper API schemas', () => {
       known_location: true,
       known_nature: true,
     })).toMatchObject({ known_location: true, known_nature: true });
+  });
+
+  it('accepts one or two supported roles for a simple Solo NPC', () => {
+    expect(generateSoloNpcInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 3,
+      idempotency_key: 'solo-npc-schema-test',
+      name: 'Ashfang Captain',
+      template: 'boss',
+      roles: ['melee', 'ranged'],
+      reason: 'Create the foe established in the scene.',
+    })).toMatchObject({ template: 'boss', roles: ['melee', 'ranged'] });
+  });
+
+  it('keeps the NPC behavior schema flat for MCP conversion', () => {
+    expect(resolveSoloNpcBehaviorInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      npc_id: '7d2d87a5-83c8-43af-8c9f-738032664570',
+      expected_revision: 4,
+      idempotency_key: 'solo-npc-action-test',
+      behavior: 'attack',
+      role: 'sneaky',
+      reason: 'Resolve the active NPC turn.',
+    })).toMatchObject({
+      behavior: 'attack', role: 'sneaky', oracle: 'fortune',
+      inspiration_columns: ['action', 'thing'],
+    });
   });
 });

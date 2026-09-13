@@ -19,6 +19,7 @@ import {
   disableSoloModeBodySchema,
   enableSoloModeBodySchema,
   endCombatBodySchema,
+  generateSoloNpcBodySchema,
   pushRollRequestBodySchema,
   pushSoloCheckBodySchema,
   replaceSoloHeroicAbilityBodySchema,
@@ -30,6 +31,7 @@ import {
   resolveSoloDyingActionBodySchema,
   resolveSoloInjuryActionBodySchema,
   resolveSoloNarrativeDamageBodySchema,
+  resolveSoloNpcBehaviorBodySchema,
   resolveThreatBodySchema,
   rollCharacterSevereInjuryBodySchema,
   removeEncounterParticipantBodySchema,
@@ -538,6 +540,37 @@ export const openApiDocument = {
           409: errorResponse,
           428: errorResponse,
         },
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/npcs': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Generate a rules-compliant simple Solo NPC',
+        description: 'Creates a Minion or Boss with the exact Solo v1.2 profile, one or two attack roles, and a reusable combat monster record.',
+        parameters: [campaignParameter, revisionHeader, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(generateSoloNpcBodySchema) } },
+        },
+        responses: soloWriteResponses('Simple Solo NPC generated'),
+      },
+    },
+    '/api/v1/campaigns/{campaignId}/solo/npcs/{npcId}/behavior': {
+      post: {
+        tags: ['Solo'],
+        summary: 'Resolve a Solo NPC attack, intent, or morale',
+        description: 'Uses the versioned role D6 table for attacks, Fortune or Inspiration for intent, and Fortune for fleeing or surrender. When linked to combat, only the active NPC may resolve behavior.',
+        parameters: [
+          campaignParameter,
+          { name: 'npcId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          revisionHeader,
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: z.toJSONSchema(resolveSoloNpcBehaviorBodySchema) } },
+        },
+        responses: soloWriteResponses('Solo NPC behavior resolved'),
       },
     },
     '/api/v1/campaigns/{campaignId}/solo/checks': {

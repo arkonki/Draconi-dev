@@ -30,10 +30,12 @@ import {
   resolveSoloCriticalEffect,
   resolveSoloDyingAction as resolveSoloDyingActionRoll,
   resolveSoloInjuryTreatment,
+  resolveSoloNpcAttack,
   resolveSoloRest,
   resolveSoloAdvancement as resolveSoloAdvancementRoll,
   resolveSoloSkillCheck,
   secureRollDie,
+  simpleNpcTemplate,
 } from './soloRules.js';
 
 const STANDARD_CONDITION_KEYS = new Set([
@@ -442,6 +444,25 @@ function soloThreatForOutput(row, { revealTriggerEffect = false } = {}) {
     ...(revealTriggerEffect || row.status === 'triggered'
       ? { triggerEffect: row.trigger_effect || {} }
       : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function soloNpcForOutput(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    missionId: row.mission_id || null,
+    waypointId: row.waypoint_id || null,
+    monsterId: row.monster_id,
+    name: row.name,
+    template: row.template,
+    roles: row.roles || [],
+    status: row.status,
+    notes: row.notes || null,
+    profile: row.metadata?.profile || {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1642,6 +1663,12 @@ export async function getSoloState(user, campaignId) {
     }, user.id),
   ]);
   const restState = await loadSoloRestState(pool, campaignId);
+  const { rows: soloNpcs } = await pool.query(
+    `SELECT * FROM solo_npcs
+     WHERE campaign_id = $1
+     ORDER BY created_at DESC, id DESC`,
+    [campaignId],
+  );
   const { rows: activeCombats } = await pool.query(
     `SELECT id, name FROM encounters
      WHERE party_id = $1 AND status = 'active'
@@ -1655,6 +1682,10 @@ export async function getSoloState(user, campaignId) {
   } else {
     if (!soloHeroicAbility) allowedNextActions.push('select_solo_heroic_ability');
     allowedNextActions.push('ask_fortune', 'draw_inspiration', 'start_session');
+    allowedNextActions.push('generate_solo_npc');
+    if (soloNpcs.some((npc) => npc.status === 'active')) {
+      allowedNextActions.push('resolve_solo_npc_behavior');
+    }
     if (!activeMission) {
       if (pendingAdvancement?.status === 'selecting_marks') allowedNextActions.push('select_solo_mission_marks');
       if (pendingAdvancement?.status === 'ready_to_roll') allowedNextActions.push('resolve_solo_advancement');
@@ -1716,6 +1747,7 @@ export async function getSoloState(user, campaignId) {
     activeThreat: soloThreatForOutput(activeThreat),
     pendingAdvancement: soloAdvancementForOutput(pendingAdvancement),
     activeDangers,
+    npcs: soloNpcs.map(soloNpcForOutput),
     activeCombat: activeCombats[0]
       ? { id: activeCombats[0].id, name: activeCombats[0].name }
       : null,
@@ -2356,6 +2388,334 @@ export async function drawInspiration(user, input, { sourceClient } = {}) {
       operation,
       hash: idem.hash,
       response,
+    });
+    return response;
+  });
+}
+
+export async function generateSoloNpc(user, input, { sourceClient } = {}) {
+  const operation = 'generate_solo_npc';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client, user, input.campaign_id, input.idempotency_key, operation, input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const roles = [...new Set(input.roles)];
+    if (roles.length !== input.roles.length) {
+      throw new HelperError(400, 'VALIDATION_ERROR', 'Each simple NPC role may be selected only once.');
+    }
+    const profile = simpleNpcTemplate(input.template);
+    const missionId = input.mission_id || state.current_mission_id || null;
+    if (input.mission_id && input.mission_id !== state.current_mission_id) {
+      throw new HelperError(409, 'INVALID_STATE', 'A simple NPC may only be linked to the current Solo mission.');
+    }
+    const waypointId = input.waypoint_id || null;
+    if (waypointId) {
+      const { rows } = await client.query(
+        `SELECT id, mission_id FROM solo_waypoints WHERE id = $1 FOR UPDATE`,
+        [waypointId],
+      );
+      if (!rows[0] || rows[0].mission_id !== missionId) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'The selected waypoint is not part of the linked Solo mission.');
+      }
+    }
+    const stats = {
+      STR: profile.attributes,
+      CON: profile.attributes,
+      AGL: profile.attributes,
+      INT: profile.attributes,
+      WIL: profile.attributes,
+      CHA: profile.attributes,
+      HP: profile.hp,
+      WP: 0,
+      MOVEMENT: profile.movement,
+      ARMOR: profile.armor,
+      DAMAGE: profile.damage.toUpperCase(),
+      RELEVANT_SKILLS: profile.relevantSkill,
+      OTHER_SKILLS: profile.otherSkill,
+      FEROCITY: 1,
+      SIMPLE_NPC_TEMPLATE: input.template,
+      SOLO_NPC_ROLES: roles,
+    };
+    const { rows: monsters } = await client.query(
+      `INSERT INTO monsters (created_by, name, description, category, stats, attacks, effects_summary)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+       RETURNING *`,
+      [
+        user.id,
+        input.name,
+        input.notes || `Rules-compliant Solo ${input.template}.`,
+        `Solo ${input.template}`,
+        JSON.stringify(stats),
+        JSON.stringify(roles.map((role) => ({ role, tableKey: `solo_npc_attack_${role}` }))),
+        `Attributes ${profile.attributes}; HP ${profile.hp}; Movement ${profile.movement}; Armor ${profile.armor || 'none'}; Damage ${profile.damage.toUpperCase()}; relevant skills ${profile.relevantSkill}, other skills ${profile.otherSkill}.`,
+      ],
+    );
+    const { rows: npcs } = await client.query(
+      `INSERT INTO solo_npcs (
+         campaign_id, mission_id, waypoint_id, monster_id, name, template,
+         roles, notes, metadata, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+       RETURNING *`,
+      [
+        input.campaign_id, missionId, waypointId, monsters[0].id, input.name,
+        input.template, roles, input.notes || null, JSON.stringify({ profile }), user.id,
+      ],
+    );
+    const npc = npcs[0];
+    if (waypointId) {
+      await client.query(
+        `UPDATE solo_waypoints
+         SET npc_ids = CASE WHEN $1 = ANY(npc_ids) THEN npc_ids ELSE array_append(npc_ids, $1) END
+         WHERE id = $2`,
+        [npc.id, waypointId],
+      );
+    }
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.npc_generated',
+      actorId: npc.id,
+      payload: {
+        npcId: npc.id,
+        monsterId: npc.monster_id,
+        name: npc.name,
+        template: npc.template,
+        roles: npc.roles,
+        profile,
+        missionId,
+        waypointId,
+        reason: input.reason,
+      },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${npc.name} was created as a Solo ${npc.template} (${roles.join(', ')}).`,
+      state_excerpt: { npc: soloNpcForOutput(npc) },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key,
+      operation, hash: idem.hash, response,
+    });
+    return response;
+  });
+}
+
+export async function resolveSoloNpcBehavior(user, input, { sourceClient } = {}) {
+  const operation = 'resolve_solo_npc_behavior';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(
+      client, user, input.campaign_id, input.idempotency_key, operation, input,
+    );
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
+    const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
+    const { rows: npcRows } = await client.query(
+      `SELECT npc.*, monster.stats
+       FROM solo_npcs npc JOIN monsters monster ON monster.id = npc.monster_id
+       WHERE npc.id = $1 AND npc.campaign_id = $2 FOR UPDATE OF npc`,
+      [input.npc_id, input.campaign_id],
+    );
+    const npc = npcRows[0];
+    if (!npc) throw new HelperError(404, 'NOT_FOUND', 'Solo NPC not found.');
+    if (npc.status !== 'active') {
+      throw new HelperError(409, 'INVALID_STATE', `${npc.name} is ${npc.status} and cannot resolve another behavior.`);
+    }
+    let encounter = null;
+    let combatant = null;
+    if (input.encounter_id) {
+      const { rows } = await client.query(
+        `SELECT encounter.id AS encounter_id, encounter.status AS encounter_status,
+           encounter.active_combatant_id, encounter.current_round,
+           combatant.*
+         FROM encounters encounter
+         JOIN encounter_combatants combatant
+           ON combatant.encounter_id = encounter.id AND combatant.monster_id = $1
+         WHERE encounter.id = $2 AND encounter.party_id = $3
+         ORDER BY combatant.created_at LIMIT 1`,
+        [npc.monster_id, input.encounter_id, input.campaign_id],
+      );
+      if (!rows[0]) throw new HelperError(400, 'VALIDATION_ERROR', `${npc.name} is not in that encounter.`);
+      encounter = {
+        id: rows[0].encounter_id,
+        status: rows[0].encounter_status,
+        activeCombatantId: rows[0].active_combatant_id,
+        currentRound: Number(rows[0].current_round),
+      };
+      combatant = rows[0];
+      if (encounter.status === 'active' && encounter.activeCombatantId !== combatant.id) {
+        throw new HelperError(409, 'NOT_ACTORS_TURN', `It is not ${npc.name}'s turn.`);
+      }
+    }
+
+    let resolution;
+    let tableKey;
+    let tableVersion;
+    let expression;
+    let dice;
+    let keptIndices;
+    let keptValues;
+    if (input.behavior === 'attack') {
+      if (!input.role) throw new HelperError(400, 'VALIDATION_ERROR', 'An attack behavior requires one of the NPC roles.');
+      if (!npc.roles.includes(input.role)) {
+        throw new HelperError(400, 'VALIDATION_ERROR', `${npc.name} does not have the ${input.role} role.`);
+      }
+      const table = await loadSoloRuleTable(client, `solo_npc_attack_${input.role}`, state.ruleset_version);
+      const attack = resolveSoloNpcAttack({ role: input.role, table });
+      resolution = { behavior: 'attack', ...attack, npcSkill: Number(npc.stats?.RELEVANT_SKILLS || 0) };
+      tableKey = table.tableKey;
+      tableVersion = table.version;
+      expression = attack.expression;
+      dice = [...attack.dice];
+      keptIndices = [...attack.keptIndices];
+      keptValues = [...attack.keptValues];
+      if (Array.isArray(attack.action.inspiration_columns)) {
+        const columns = attack.action.inspiration_columns;
+        const tableList = await Promise.all(columns.map((column) => (
+          loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
+        )));
+        const tables = Object.fromEntries(tableList.map((tableEntry, index) => [columns[index], tableEntry]));
+        const inspiration = resolveInspiration({ columns, tables });
+        const offset = dice.length;
+        resolution.inspiration = inspiration;
+        expression = `${expression} + ${inspiration.expression}`;
+        dice.push(...inspiration.dice);
+        keptIndices.push(...inspiration.keptIndices.map((index) => index + offset));
+        keptValues.push(...inspiration.keptValues);
+      }
+    } else if (input.behavior === 'intent' && input.oracle === 'inspiration') {
+      if (new Set(input.inspiration_columns).size !== input.inspiration_columns.length) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'Each Inspiration column may be selected only once.');
+      }
+      const tableList = await Promise.all(input.inspiration_columns.map((column) => (
+        loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
+      )));
+      const tables = Object.fromEntries(tableList.map((tableEntry, index) => [input.inspiration_columns[index], tableEntry]));
+      const inspiration = resolveInspiration({ columns: input.inspiration_columns, tables });
+      resolution = { behavior: 'intent', oracle: 'inspiration', question: input.question || `What does ${npc.name} intend?`, ...inspiration };
+      tableKey = 'inspiration';
+      tableVersion = ACTIVE_SOLO_PROMPT_TABLE_VERSION;
+      ({ expression, dice, keptIndices, keptValues } = inspiration);
+    } else {
+      if (input.behavior === 'morale' && !input.disposition) {
+        throw new HelperError(400, 'VALIDATION_ERROR', 'A morale check requires fled or surrendered as the possible disposition.');
+      }
+      const table = await loadSoloRuleTable(client, 'fortune', state.ruleset_version);
+      const category = input.behavior === 'morale' ? 'yes_no' : 'reaction';
+      const fortune = resolveFortune({ category, tilt: input.tilt, entries: table.entries });
+      const affirmative = ['yes', 'extreme yes'].includes(fortune.value);
+      resolution = {
+        behavior: input.behavior,
+        oracle: 'fortune',
+        question: input.question || (input.behavior === 'morale'
+          ? `Does ${npc.name} ${input.disposition === 'fled' ? 'flee' : 'surrender'}?`
+          : `What is ${npc.name}'s reaction or intent?`),
+        ...fortune,
+        ...(input.behavior === 'morale' ? { disposition: input.disposition, applied: affirmative } : {}),
+      };
+      tableKey = table.tableKey;
+      tableVersion = table.version;
+      ({ expression, dice, keptIndices, keptValues } = fortune);
+      if (input.behavior === 'morale' && affirmative) {
+        npc.status = input.disposition;
+        const { rows } = await client.query(
+          `UPDATE solo_npcs SET status = $1 WHERE id = $2 RETURNING *`,
+          [input.disposition, npc.id],
+        );
+        Object.assign(npc, rows[0]);
+        if (combatant) {
+          const statusEffect = {
+            id: `${input.disposition}-${npc.id}`,
+            key: input.disposition,
+            name: input.disposition === 'fled' ? 'Fled' : 'Surrendered',
+            description: `Removed from the fight by a Solo Fortune morale result.`,
+          };
+          await client.query(
+            `UPDATE encounter_combatants
+             SET status_effects = COALESCE(status_effects, '[]'::jsonb) || jsonb_build_array($1::jsonb),
+               has_acted = true,
+               completed_initiative_slots = initiative_slots
+             WHERE id = $2`,
+            [JSON.stringify(statusEffect), combatant.id],
+          );
+        }
+      }
+    }
+
+    const resultingRevision = previousRevision + 1;
+    const rollRow = await insertRecordedRoll(client, {
+      campaignId: input.campaign_id,
+      sessionId: access.campaign.active_session_id,
+      encounterId: input.encounter_id || null,
+      actorId: combatant?.id || npc.id,
+      userId: user.id,
+      purpose: `Solo NPC ${input.behavior}: ${npc.name}`,
+      expression,
+      dice,
+      keptIndices,
+      keptValues,
+      tableKey,
+      tableVersion,
+      result: { npcId: npc.id, npcName: npc.name, ...resolution },
+      campaignRevision: resultingRevision,
+    });
+    if (combatant) {
+      await appendCombatLog(client, input.encounter_id, {
+        type: 'solo_npc_behavior', ts: Date.now(), round: encounter.currentRound,
+        actorId: combatant.id, actorName: npc.name, behavior: input.behavior,
+        result: resolution, message: input.reason,
+      });
+    }
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'solo.npc_behavior_resolved',
+      actorId: npc.id,
+      payload: {
+        npcId: npc.id, monsterId: npc.monster_id, name: npc.name,
+        rollId: rollRow.id, encounterId: input.encounter_id || null,
+        resolution, reason: input.reason,
+      },
+      visibility: 'players', sourceClient, idempotencyKey: input.idempotency_key,
+      previousRevision, resultingRevision,
+    });
+    const label = resolution.action?.label || resolution.phrase || resolution.value;
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${npc.name}: ${label}.${resolution.action?.summary ? ` ${resolution.action.summary}` : ''}`,
+      state_excerpt: {
+        npc: soloNpcForOutput(npc),
+        roll: recordedRollForOutput(rollRow),
+        resolution,
+        followUp: input.behavior === 'attack'
+          ? 'Resolve any required NPC skill roll, defense, damage, or condition through the combat action flow.'
+          : null,
+      },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id, userId: user.id, key: input.idempotency_key,
+      operation, hash: idem.hash, response,
     });
     return response;
   });
@@ -6009,6 +6369,10 @@ function completedInitiativeSlotsFor(row) {
 }
 
 function combatantCanAct(row) {
+  const removedFromFight = Array.isArray(row.status_effects) && row.status_effects.some(
+    (effect) => ['fled', 'surrendered'].includes(String(effect?.key || '').toLowerCase()),
+  );
+  if (removedFromFight) return false;
   return row.current_hp > 0 || (
     row.is_player_character
     && row.current_hp === 0
@@ -6201,11 +6565,17 @@ export async function getEncounterSetupOptions(user, campaignId, {
 } = {}) {
   const access = await requireCampaignAccess(pool, user, campaignId, { gm: true });
   const search = String(monsterSearch || '').trim();
-  const monsterValues = [];
-  const monsterClauses = [];
+  const monsterValues = [campaignId];
+  const monsterClauses = [
+    `(NOT EXISTS (SELECT 1 FROM solo_npcs private_npc WHERE private_npc.monster_id = monsters.id)
+      OR EXISTS (
+        SELECT 1 FROM solo_npcs campaign_npc
+        WHERE campaign_npc.monster_id = monsters.id AND campaign_npc.campaign_id = $1
+      ))`,
+  ];
   if (search) {
     monsterValues.push(`%${search}%`);
-    monsterClauses.push(`(name ILIKE $1 OR COALESCE(category, '') ILIKE $1)`);
+    monsterClauses.push(`(name ILIKE $${monsterValues.length} OR COALESCE(category, '') ILIKE $${monsterValues.length})`);
   }
   monsterValues.push(monsterLimit);
   const monsterLimitParameter = `$${monsterValues.length}`;
@@ -6230,7 +6600,7 @@ export async function getEncounterSetupOptions(user, campaignId, {
     pool.query(
       `SELECT id, name, description, category, stats
        FROM monsters
-       ${monsterClauses.length ? `WHERE ${monsterClauses.join(' AND ')}` : ''}
+       WHERE ${monsterClauses.join(' AND ')}
        ORDER BY name, id
        LIMIT ${monsterLimitParameter}`,
       monsterValues,

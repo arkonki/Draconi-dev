@@ -1010,12 +1010,90 @@ try {
   );
   assert(armyCombatEnded.response.status === 200, `Army combat end failed: ${JSON.stringify(armyCombatEnded.payload)}`);
 
+  const generatedSoloNpc = await api(
+    `/api/v1/campaigns/${campaignId}/solo/npcs`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${armyCombatEnded.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-npc-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        name: 'Smoke Ashfang Captain',
+        template: 'boss',
+        roles: ['melee', 'ranged'],
+        notes: 'Disposable Phase 5 smoke-test NPC.',
+        reason: 'Verify the exact simple Boss profile.',
+      }),
+    },
+  );
+  assert(generatedSoloNpc.response.status === 200, `Solo NPC generation failed: ${JSON.stringify(generatedSoloNpc.payload)}`);
+  const generatedNpc = generatedSoloNpc.payload.data.state_excerpt.npc;
+  assert(
+    generatedNpc.profile.attributes === 14
+      && generatedNpc.profile.hp === 20
+      && generatedNpc.profile.armor === 4
+      && generatedNpc.profile.damage === '2d8'
+      && generatedNpc.profile.relevantSkill === 15
+      && generatedNpc.profile.otherSkill === 8,
+    'Generated Solo Boss did not use the exact v1.2 profile.',
+  );
+  const npcAttack = await api(
+    `/api/v1/campaigns/${campaignId}/solo/npcs/${generatedNpc.id}/behavior`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${generatedSoloNpc.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-npc-attack-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        behavior: 'attack',
+        role: 'melee',
+        reason: 'Verify the versioned melee NPC attack table.',
+      }),
+    },
+  );
+  assert(npcAttack.response.status === 200, `Solo NPC attack behavior failed: ${JSON.stringify(npcAttack.payload)}`);
+  assert(
+    npcAttack.payload.data.state_excerpt.roll.tableKey === 'solo_npc_attack_melee'
+      && npcAttack.payload.data.state_excerpt.roll.dice[0] >= 1
+      && npcAttack.payload.data.state_excerpt.roll.dice[0] <= 6,
+    'Solo NPC attack did not record the authoritative role D6 table.',
+  );
+  const npcIntent = await api(
+    `/api/v1/campaigns/${campaignId}/solo/npcs/${generatedNpc.id}/behavior`,
+    {
+      method: 'POST',
+      headers: {
+        'if-match': `"${npcAttack.payload.data.campaign_revision}"`,
+        'idempotency-key': `smoke-solo-npc-intent-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        behavior: 'intent',
+        oracle: 'inspiration',
+        inspiration_columns: ['action', 'thing'],
+        reason: 'Verify Inspiration-based NPC intent.',
+      }),
+    },
+  );
+  assert(npcIntent.response.status === 200, `Solo NPC intent failed: ${JSON.stringify(npcIntent.payload)}`);
+  assert(
+    npcIntent.payload.data.state_excerpt.resolution.phrase,
+    'Solo NPC Inspiration intent omitted its phrase.',
+  );
+  const setupWithSoloNpc = await api(`/api/v1/campaigns/${campaignId}/encounter-options?monsterSearch=Smoke%20Ashfang`);
+  assert(
+    setupWithSoloNpc.response.status === 200
+      && setupWithSoloNpc.payload.data.monsters.some(({ id }) => id === generatedNpc.monsterId),
+    `Generated Solo NPC was not available to this campaign encounter setup: ${JSON.stringify(setupWithSoloNpc.payload)}`,
+  );
+
   const selectedSoleSurvivor = await api(
     `/api/v1/campaigns/${campaignId}/solo/heroic-ability`,
     {
       method: 'POST',
       headers: {
-        'if-match': `"${armyCombatEnded.payload.data.campaign_revision}"`,
+        'if-match': `"${npcIntent.payload.data.campaign_revision}"`,
         'idempotency-key': `smoke-solo-survivor-${randomUUID()}`,
       },
       body: JSON.stringify({
@@ -1274,7 +1352,7 @@ try {
     'SELECT COUNT(*)::integer AS count FROM recorded_rolls WHERE campaign_id = $1',
     [campaignId],
   );
-  assert(storedRolls.rows[0].count === 12, 'Trusted, pushed, concurrent, and Solo rolls were not persisted exactly once.');
+  assert(storedRolls.rows[0].count === 14, 'Trusted, pushed, concurrent, Solo, and NPC behavior rolls were not persisted exactly once.');
 
   const missionStarted = await api(
     `/api/v1/campaigns/${campaignId}/solo/missions`,
@@ -2411,6 +2489,7 @@ try {
       'planned participant removal',
       'solo setup, idempotency, confirmed heroic ability selection, Fortune, Inspiration, and persisted state',
       'Army of One two-slot combat sequencing',
+      'simple Solo NPC profile, role attack table, Inspiration intent, and campaign encounter availability',
       'Sole Survivor exact WP cost, condition isolation, and atomic insufficient-WP rejection',
       'safe solo-mode disable and system-granted ability cleanup',
       'solo mission, hidden waypoint isolation, and threat trigger lifecycle',

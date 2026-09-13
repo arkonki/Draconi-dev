@@ -219,6 +219,49 @@ export const drawInspirationBodySchema = drawInspirationSchema
     }
   });
 
+const soloNpcRoleSchema = z.enum(['melee', 'ranged', 'sneaky', 'magic']);
+
+const generateSoloNpcFields = {
+  name: z.string().trim().min(1).max(200),
+  template: z.enum(['minion', 'boss']),
+  roles: z.array(soloNpcRoleSchema).min(1).max(2),
+  mission_id: uuidSchema.optional(),
+  waypoint_id: uuidSchema.optional(),
+  notes: z.string().trim().max(2_000).optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const generateSoloNpcInputSchema = z.object({
+  campaign_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...generateSoloNpcFields,
+}).strict();
+
+export const generateSoloNpcBodySchema = z.object(generateSoloNpcFields).strict();
+
+const resolveSoloNpcBehaviorFields = {
+  behavior: z.enum(['attack', 'intent', 'morale']),
+  role: soloNpcRoleSchema.optional(),
+  oracle: z.enum(['fortune', 'inspiration']).default('fortune'),
+  question: z.string().trim().max(1_000).optional(),
+  tilt: z.enum(['unlikely', 'even', 'likely']).default('even'),
+  inspiration_columns: z.array(inspirationColumnSchema).min(1).max(3).default(['action', 'thing']),
+  disposition: z.enum(['fled', 'surrendered']).optional(),
+  encounter_id: uuidSchema.optional(),
+  reason: z.string().trim().min(1).max(500),
+};
+
+export const resolveSoloNpcBehaviorInputSchema = z.object({
+  campaign_id: uuidSchema,
+  npc_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  ...resolveSoloNpcBehaviorFields,
+}).strict();
+
+export const resolveSoloNpcBehaviorBodySchema = z.object(resolveSoloNpcBehaviorFields).strict();
+
 const soloCheckFields = {
   check_type: z.enum(['skill', 'attribute']),
   check_name: z.string().trim().min(1).max(100),

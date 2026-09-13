@@ -57,6 +57,9 @@ Solo foundation already delivered toward this phase:
   condition.
 - [x] Model Army of One as one actor with two distinct initiative slots and two
   ordered turns per round in both the web encounter and Helper combat flows.
+- [x] Generate campaign-private Solo v1.2 Minions and Bosses with one or two
+  attacker roles; resolve their D6 role actions, Fortune/Inspiration intent,
+  and Fortune-based flight or surrender through shared REST/MCP services.
 - [x] Add campaign-level Solo Mode settings for the solo hero, Fortune default,
   additional ability, current mission/threat status, and safe disable behavior.
 - [x] Add a responsive Solo Dashboard with hero vitals, mission/waypoint state,
@@ -312,7 +315,8 @@ announce removals only through a later schema-version change.
 
 - [ ] Add and remove inventory items instead of changing only existing
   quantities.
-- [ ] Create and manage NPCs.
+- [ ] Create and manage general campaign NPCs beyond the implemented simple
+  Solo v1.2 Minion/Boss workflow.
 - [ ] Support initiative redraw, swap, and delay actions.
 - [ ] Manage treasure and non-Solo rewards. Solo v1.2 mission advancement is
   implemented with authoritative five-mark selection and skill rolls.

@@ -14,9 +14,11 @@ import {
   resolveSoloCriticalEffect,
   resolveSoloDyingAction,
   resolveSoloInjuryTreatment,
+  resolveSoloNpcAttack,
   resolveSoloRest,
   resolveSoloAdvancement,
   resolveSoloSkillCheck,
+  simpleNpcTemplate,
 } from './soloRules.js';
 
 const fortuneEntries = [
@@ -413,6 +415,31 @@ describe('Solo rule resolution', () => {
         { name: 'Sneaking', resultingLevel: 18, improved: false, reachedEighteen: false },
       ],
       heroicAbilityRewards: 1,
+    });
+  });
+
+  it('uses the exact simple Minion and Boss profiles', () => {
+    expect(simpleNpcTemplate('minion')).toEqual({
+      template: 'minion', attributes: 10, hp: 12, movement: 10, armor: 0,
+      damage: '2d6', relevantSkill: 12, otherSkill: 6,
+    });
+    expect(simpleNpcTemplate('boss')).toEqual({
+      template: 'boss', attributes: 14, hp: 20, movement: 12, armor: 4,
+      damage: '2d8', relevantSkill: 15, otherSkill: 8,
+    });
+  });
+
+  it('resolves a role-based NPC attack from its versioned D6 table', () => {
+    const table = {
+      dieSides: 6,
+      entries: [
+        { min: 1, max: 3, key: 'deal_a_blow', label: 'Deal a Blow!', summary: 'Melee attack.', modifier: 'normal' },
+        { min: 4, max: 4, key: 'defensive_stance', label: 'Defensive Stance!', summary: 'Defend.' },
+      ],
+    };
+    expect(resolveSoloNpcAttack({ role: 'melee', table }, fixedRolls(3))).toEqual({
+      expression: '1d6', dice: [3], keptIndices: [0], keptValues: [3], roll: 3, role: 'melee',
+      action: { key: 'deal_a_blow', label: 'Deal a Blow!', summary: 'Melee attack.', modifier: 'normal' },
     });
   });
 });
