@@ -47,7 +47,7 @@ const STANDARD_CONDITION_KEYS = new Set([
   'disheartened',
 ]);
 const SOLO_REST_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
-const CAMPAIGN_TIME_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60 };
+const CAMPAIGN_TIME_SECONDS = { round: 10, stretch: 15 * 60, shift: 6 * 60 * 60, day: 24 * 60 * 60 };
 const ACTIVE_SOLO_PROMPT_TABLE_VERSION = 'user-solo-v1';
 const ACTIVE_SOLO_EXPLORATION_TABLE_VERSION = 'user-solo-v1';
 const SOLO_LOCATION_TABLE_KEYS = [

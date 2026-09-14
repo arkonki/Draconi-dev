@@ -514,7 +514,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('get_campaign_time', {
     title: 'Get campaign session time',
-    description: 'GM-only. Read the authoritative round, stretch, and shift clock together with the active session, configured periodic roll reminders, and persistent due-roll notifications. Use before advancing time.',
+    description: 'GM-only. Read the authoritative elapsed campaign clock together with the active session, configured periodic roll reminders, and persistent due-roll notifications. Use before advancing time.',
     inputSchema: getCampaignStateInputSchema.pick({ campaign_id: true }),
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
@@ -522,7 +522,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('advance_campaign_time', {
     title: 'Advance campaign time',
-    description: 'GM-only. Advance the authoritative clock by rounds, stretches, or shifts. Also updates timed equipment and the visual Time tracker, and returns any roll reminders now due. Read get_campaign_time first.',
+    description: 'GM-only. Advance the authoritative clock by rounds, stretches, shifts, or days. Also updates timed equipment and the visual Time tracker, and returns any roll reminders now due. Read get_campaign_time first.',
     inputSchema: advanceCampaignTimeInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,

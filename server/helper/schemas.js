@@ -857,7 +857,7 @@ export const advanceCampaignTimeInputSchema = z.object({
   campaign_id: uuidSchema,
   expected_revision: revisionSchema,
   idempotency_key: idempotencyKeySchema,
-  unit: z.enum(['round', 'stretch', 'shift']),
+  unit: z.enum(['round', 'stretch', 'shift', 'day']),
   amount: z.number().int().min(1).max(1000),
   reason: z.string().trim().min(1).max(500),
 }).strict();

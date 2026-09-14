@@ -92,6 +92,14 @@ describe('Helper API schemas', () => {
       amount: 2,
       reason: 'The party searches the ruins.',
     })).toMatchObject({ unit: 'stretch', amount: 2 });
+    expect(advanceCampaignTimeInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      expected_revision: 6,
+      idempotency_key: 'campaign-time-day-advance-test',
+      unit: 'day',
+      amount: 9,
+      reason: 'Nine days pass during the journey.',
+    })).toMatchObject({ unit: 'day', amount: 9 });
     expect(() => advanceCampaignTimeInputSchema.parse({
       campaign_id: baseSearch.campaign_id,
       expected_revision: 6,

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BellRing, CalendarClock, Check, Pause, Play, Plus, X } from 'lucide-react';
+import { AlertTriangle, BellRing, CalendarClock, Check, Dices, Pause, Play, Plus, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -12,8 +12,12 @@ import {
   resolveCampaignTimeNotification,
   setCampaignTimeReminderActive,
   startCampaignSession,
+  type CampaignTimeAdvanceUnit,
   type CampaignTimeUnit,
 } from '../../lib/api/campaignTime';
+import { fetchRandomTables } from '../../lib/api/randomTables';
+import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
+import { rollOnTable } from '../../lib/game/randomTableUtils';
 
 interface SessionManagerProps {
   isOpen: boolean;
@@ -22,17 +26,8 @@ interface SessionManagerProps {
   partyName: string;
 }
 
-function unitLabel(unit: CampaignTimeUnit, amount: number) {
+function unitLabel(unit: CampaignTimeAdvanceUnit, amount: number) {
   return `${unit}${amount === 1 ? '' : 's'}`;
-}
-
-function clockLabel(elapsedSeconds: number) {
-  const day = Math.floor(elapsedSeconds / 86400) + 1;
-  const secondsToday = elapsedSeconds % 86400;
-  const hour = Math.floor(secondsToday / 3600);
-  const minute = Math.floor((secondsToday % 3600) / 60);
-  const shift = ['Morning', 'Day', 'Evening', 'Night'][Math.floor(hour / 6)] || 'Night';
-  return { day, shift, time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
 }
 
 export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionManagerProps) {
@@ -47,6 +42,9 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   const [intervalCount, setIntervalCount] = useState(1);
   const [intervalUnit, setIntervalUnit] = useState<CampaignTimeUnit>('stretch');
   const [reminderNotes, setReminderNotes] = useState('');
+  const [isRollTableOpen, setIsRollTableOpen] = useState(false);
+  const [selectedTableId, setSelectedTableId] = useState('');
+  const [tableRollResult, setTableRollResult] = useState<{ tableName: string; roll: number; result: string } | null>(null);
 
   const stateQuery = useQuery({
     queryKey: ['campaign-time', partyId],
@@ -55,7 +53,20 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
     refetchInterval: isOpen ? 15000 : false,
   });
   const state = stateQuery.data;
-  const clock = useMemo(() => clockLabel(state?.gameTime.elapsedSeconds || 0), [state?.gameTime.elapsedSeconds]);
+  const clock = useMemo(() => formatCampaignClock(state?.gameTime.elapsedSeconds || 0), [state?.gameTime.elapsedSeconds]);
+  const randomTablesQuery = useQuery({
+    queryKey: ['randomTables', partyId],
+    queryFn: () => fetchRandomTables(partyId),
+    enabled: isOpen && isRollTableOpen,
+  });
+  const selectedTable = randomTablesQuery.data?.find((table) => table.id === selectedTableId)
+    || randomTablesQuery.data?.[0];
+
+  const closeRollTable = () => {
+    setIsRollTableOpen(false);
+    setSelectedTableId('');
+    setTableRollResult(null);
+  };
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
@@ -117,9 +128,9 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                 <div className="rounded-xl bg-white border border-stone-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Current game time</p>
                   <div className="mt-2 flex items-end gap-3">
-                    <span className="text-3xl font-black text-stone-900">Day {clock.day}</span>
-                    <span className="text-lg font-semibold text-stone-600">{clock.shift} · {clock.time}</span>
+                    <span className="text-3xl font-black text-stone-900">{clock.elapsed}</span>
                   </div>
+                  <p className="mt-1 text-sm font-semibold text-stone-600">Day {clock.day} · {clock.shift} · {clock.time}</p>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="rounded bg-stone-100 p-2"><b className="block text-base">{state.gameTime.rounds}</b>Rounds</div>
                     <div className="rounded bg-stone-100 p-2"><b className="block text-base">{state.gameTime.stretches}</b>Stretches</div>
@@ -129,11 +140,11 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
 
                 <div className="rounded-xl bg-white border border-stone-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Advance time</p>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <input type="number" min={1} max={1000} value={advanceAmount}
                       onChange={(event) => setAdvanceAmount(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))}
                       className="w-20 rounded-md border border-stone-300 px-3 py-2" aria-label="Amount to advance" />
-                    {(['round', 'stretch', 'shift'] as CampaignTimeUnit[]).map((unit) => (
+                    {(['round', 'stretch', 'shift', 'day'] as CampaignTimeAdvanceUnit[]).map((unit) => (
                       <Button key={unit} variant={unit === 'stretch' ? 'primary' : 'outline'} size="sm"
                         disabled={mutation.isPending}
                         onClick={() => run(() => advanceCampaignTime(partyId, state.campaignRevision, unit, advanceAmount))}>
@@ -141,9 +152,15 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                       </Button>
                     ))}
                   </div>
-                  <p className="mt-3 text-xs text-stone-500">1 round = 10 seconds · 1 stretch = 15 minutes · 1 shift = 6 hours. Timed equipment and the Time tab update together. Active combat advances the round clock automatically.</p>
+                  <p className="mt-3 text-xs text-stone-500">1 round = 10 seconds · 1 stretch = 15 minutes · 1 shift = 6 hours · 1 day = 24 hours. Timed equipment and the Time tab update together. Active combat advances the round clock automatically.</p>
                 </div>
               </section>
+
+              <div className="flex justify-end">
+                <Button variant="secondary" icon={Dices} onClick={() => setIsRollTableOpen(true)}>
+                  Roll on table
+                </Button>
+              </div>
 
               <section className="rounded-xl bg-white border border-stone-200 p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -226,6 +243,76 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
             </>
           ) : null}
         </div>
+
+        {isRollTableOpen ? (
+          <div className="fixed inset-0 z-[100] bg-black/55 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="roll-table-title">
+            <div className="w-full max-w-lg rounded-xl border border-stone-300 bg-stone-50 shadow-2xl overflow-hidden">
+              <header className="flex items-center justify-between border-b border-stone-200 bg-white p-4">
+                <div className="flex items-center gap-2">
+                  <Dices className="h-5 w-5 text-indigo-600" />
+                  <h3 id="roll-table-title" className="text-lg font-bold font-serif text-stone-900">Roll Tables</h3>
+                </div>
+                <button type="button" onClick={closeRollTable} className="rounded-lg p-2 hover:bg-stone-100" aria-label="Close roll tables">
+                  <X className="h-5 w-5" />
+                </button>
+              </header>
+
+              <div className="p-4 space-y-4">
+                {randomTablesQuery.isLoading ? <div className="py-8 flex justify-center"><LoadingSpinner /></div> : null}
+                {randomTablesQuery.error ? <ErrorMessage message={randomTablesQuery.error.message} /> : null}
+
+                {!randomTablesQuery.isLoading && !randomTablesQuery.error && randomTablesQuery.data?.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-stone-300 p-6 text-center text-sm text-stone-500">
+                    No roll tables have been created for this campaign.
+                  </p>
+                ) : null}
+
+                {selectedTable && !tableRollResult ? (
+                  <>
+                    <div>
+                      <label htmlFor="session-roll-table" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-500">Table</label>
+                      <select
+                        id="session-roll-table"
+                        value={selectedTable.id}
+                        onChange={(event) => setSelectedTableId(event.target.value)}
+                        className="w-full rounded-md border border-stone-300 bg-white px-3 py-2"
+                      >
+                        {randomTablesQuery.data?.map((table) => (
+                          <option key={table.id} value={table.id}>{table.name} · {table.die_type.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-lg border border-stone-200 bg-white p-3">
+                      <p className="font-bold text-stone-900">{selectedTable.name}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-stone-500">{selectedTable.category} · {selectedTable.die_type.toUpperCase()} · {selectedTable.rows.length} entries</p>
+                      {selectedTable.description ? <p className="mt-2 text-sm text-stone-600">{selectedTable.description}</p> : null}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" onClick={closeRollTable}>Cancel</Button>
+                      <Button icon={Dices} onClick={() => {
+                        const rolled = rollOnTable(selectedTable);
+                        setTableRollResult({ tableName: selectedTable.name, ...rolled });
+                      }}>Roll {selectedTable.die_type.toUpperCase()}</Button>
+                    </div>
+                  </>
+                ) : null}
+
+                {tableRollResult ? (
+                  <div className="space-y-4" aria-live="polite">
+                    <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-5 text-center">
+                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">{tableRollResult.tableName}</p>
+                      <p className="my-2 text-4xl font-black text-stone-900">{tableRollResult.roll}</p>
+                      <p className="text-lg font-semibold text-stone-800">{tableRollResult.result}</p>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button onClick={closeRollTable}>Dismiss</Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

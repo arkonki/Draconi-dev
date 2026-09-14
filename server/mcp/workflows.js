@@ -33,7 +33,7 @@ export const gmWorkflowGuide = {
     ],
     campaignTime: [
       'Call get_campaign_time before advancing the campaign clock.',
-      'Call advance_campaign_time only when play actually consumes one or more rounds, stretches, or shifts. Use the returned gameTime as authoritative.',
+      'Call advance_campaign_time only when play actually consumes one or more rounds, stretches, shifts, or days. Use the returned gameTime as authoritative.',
       'Immediately tell the GM about each due roll notification returned by the time advance. Do not invent a universal official cadence; reminders must come from the campaign, activity, or adventure being played.',
       'After the roll is actually made or deliberately waived, call resolve_time_roll_notification. A notification is not itself a die result.',
     ],

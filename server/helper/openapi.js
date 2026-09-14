@@ -1063,7 +1063,7 @@ export const openApiDocument = {
     '/api/v1/campaigns/{campaignId}/time/advance': {
       post: {
         tags: ['Campaigns'], summary: 'Advance authoritative campaign time',
-        description: 'GM-only. Advances rounds, stretches, or shifts; synchronizes the visual time tracker and timed equipment; and creates persistent notifications for due configured rolls.',
+        description: 'GM-only. Advances rounds, stretches, shifts, or days; synchronizes the visual time tracker and timed equipment; and creates persistent notifications for due configured rolls.',
         parameters: [campaignParameter, revisionHeader, idempotencyHeader],
         requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(advanceCampaignTimeBodySchema) } } },
         responses: { 200: { description: 'Campaign time advanced', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 409: errorResponse, 428: errorResponse },

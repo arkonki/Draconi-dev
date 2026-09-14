@@ -567,7 +567,7 @@ describe('Dragonbane MCP server', () => {
     ]));
     const result = await client.callTool({ name: 'advance_campaign_time', arguments: {
       campaign_id: campaignId, expected_revision: 42, idempotency_key: 'time-test-key',
-      unit: 'stretch', amount: 1, reason: 'The party searches the chamber.',
+      unit: 'day', amount: 1, reason: 'A full day passes during the journey.',
     } });
     expect(result.structuredContent).toMatchObject({ success: true, campaign_revision: 43 });
   });

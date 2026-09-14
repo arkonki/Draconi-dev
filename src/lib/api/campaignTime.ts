@@ -1,6 +1,7 @@
 import { authenticatedApiFetch } from '../supabase';
 
 export type CampaignTimeUnit = 'round' | 'stretch' | 'shift';
+export type CampaignTimeAdvanceUnit = CampaignTimeUnit | 'day';
 
 export interface CampaignGameTime {
   schemaVersion: 'game-time-v1';
@@ -81,7 +82,7 @@ export async function fetchCampaignTimeState(partyId: string): Promise<CampaignT
 }
 
 export async function advanceCampaignTime(
-  partyId: string, revision: number, unit: CampaignTimeUnit, amount: number,
+  partyId: string, revision: number, unit: CampaignTimeAdvanceUnit, amount: number,
 ) {
   const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/time/advance`, {
     method: 'POST', headers: writeHeaders(revision),
