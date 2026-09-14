@@ -32,6 +32,7 @@ export interface CampaignTimeReminder {
 
 export interface CampaignTimeNotification {
   id: string;
+  reminderId?: string | null;
   label: string;
   diceExpression: string;
   notes?: string | null;
@@ -82,11 +83,11 @@ export async function fetchCampaignTimeState(partyId: string): Promise<CampaignT
 }
 
 export async function advanceCampaignTime(
-  partyId: string, revision: number, unit: CampaignTimeAdvanceUnit, amount: number,
+  partyId: string, revision: number, unit: CampaignTimeAdvanceUnit, amount: number, reason?: string,
 ) {
   const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/time/advance`, {
     method: 'POST', headers: writeHeaders(revision),
-    body: JSON.stringify({ unit, amount, reason: `The GM advanced campaign time by ${amount} ${unit}(s).` }),
+    body: JSON.stringify({ unit, amount, reason: reason || `The GM advanced campaign time by ${amount} ${unit}(s).` }),
   });
   return parseResponse(response, 'Could not advance campaign time.');
 }

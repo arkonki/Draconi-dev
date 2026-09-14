@@ -240,6 +240,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
       current_day: newTracker.current_day,
       current_shift: activeShift
     }).eq('id', newTracker.id);
+    await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
   };
 
   const handleStretchClick = (hour: number, stretchIndex: number) => {

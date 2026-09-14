@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BellRing, CalendarClock, Check, Dices, Pause, Play, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, Flame, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -19,6 +19,8 @@ import {
 import { fetchRandomTables } from '../../lib/api/randomTables';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
+import { rollDiceExpression } from '../../lib/game/diceExpression';
+import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 interface SessionManagerProps {
   isOpen: boolean;
@@ -30,6 +32,13 @@ interface SessionManagerProps {
 function unitLabel(unit: CampaignTimeAdvanceUnit, amount: number) {
   return `${unit}${amount === 1 ? '' : 's'}`;
 }
+
+const LIGHT_SOURCES = [
+  { id: 'torch', name: 'Torch', diceExpression: '1d6', detail: 'On 1, the torch goes out.' },
+  { id: 'lantern', name: 'Lantern', diceExpression: '1d8', detail: 'On 1, refill and relight the lantern.' },
+  { id: 'oil-lamp', name: 'Oil Lamp', diceExpression: '1d6', detail: 'On 1, refill and relight the lamp.' },
+  { id: 'candle', name: 'Tallow Candle', diceExpression: '1d4', detail: 'On 1, the candle goes out.' },
+] as const;
 
 export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionManagerProps) {
   const queryClient = useQueryClient();
@@ -46,6 +55,8 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   const [isRollTableOpen, setIsRollTableOpen] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState('');
   const [tableRollResult, setTableRollResult] = useState<{ tableName: string; roll: number; result: string } | null>(null);
+  const [lightSourceId, setLightSourceId] = useState<(typeof LIGHT_SOURCES)[number]['id']>('torch');
+  const [notificationRoll, setNotificationRoll] = useState<{ notificationId: string; dice: number[]; total: number } | null>(null);
 
   const stateQuery = useQuery({
     queryKey: ['campaign-time', partyId],
@@ -62,6 +73,30 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   });
   const selectedTable = randomTablesQuery.data?.find((table) => table.id === selectedTableId)
     || randomTablesQuery.data?.[0];
+  const selectedLightSource = LIGHT_SOURCES.find((source) => source.id === lightSourceId) || LIGHT_SOURCES[0];
+  const selectedLightReminder = state?.reminders.find((reminder) => reminder.label === `Light: ${selectedLightSource.name}`);
+
+  const timeTrackerBindings = useMemo(() => ([{
+    bindingId: 'session-modal-time-tracker',
+    event: '*' as const,
+    schema: 'public' as const,
+    table: 'time_trackers',
+    filter: `party_id=eq.${partyId}`,
+  }]), [partyId]);
+
+  useRealtimeChannel({
+    key: `session-modal-time-tracker:${partyId}`,
+    scope: `party:${partyId}`,
+    bindings: timeTrackerBindings,
+    enabled: isOpen,
+    fallbackRefetchMs: 15000,
+    onEvent: () => {
+      void queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+    },
+    onReconnect: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+    },
+  });
 
   const closeRollTable = () => {
     setIsRollTableOpen(false);
@@ -111,15 +146,37 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                     <BellRing className="w-5 h-5" /> {state.pendingNotifications.length} roll{state.pendingNotifications.length === 1 ? '' : 's'} due
                   </div>
                   {state.pendingNotifications.map((notification) => (
-                    <div key={notification.id} className="bg-white border border-amber-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center gap-3">
-                      <div className="flex-1">
-                        <p className="font-bold text-stone-900">{notification.label} · {notification.diceExpression}</p>
-                        <p className="text-xs text-stone-600">Due at {notification.dueUnit} {notification.dueCount}{notification.notes ? ` · ${notification.notes}` : ''}</p>
+                    <div key={notification.id} className="bg-white border border-amber-200 rounded-lg p-3 flex flex-col gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex-1">
+                          <p className="font-bold text-stone-900">{notification.label} · {notification.diceExpression}</p>
+                          <p className="text-xs text-stone-600">Due at {notification.dueUnit} {notification.dueCount}{notification.notes ? ` · ${notification.notes}` : ''}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="secondary" icon={Dices} disabled={mutation.isPending}
+                            onClick={() => {
+                              const result = rollDiceExpression(notification.diceExpression);
+                              if (result) setNotificationRoll({ notificationId: notification.id, dice: result.dice, total: result.total });
+                            }}>
+                            Roll
+                          </Button>
+                          <Button size="sm" icon={Check} disabled={mutation.isPending}
+                            onClick={() => {
+                              setNotificationRoll((current) => current?.notificationId === notification.id ? null : current);
+                              run(() => resolveCampaignTimeNotification(partyId, notification.id, state.campaignRevision));
+                            }}>
+                            Mark handled
+                          </Button>
+                        </div>
                       </div>
-                      <Button size="sm" icon={Check} disabled={mutation.isPending}
-                        onClick={() => run(() => resolveCampaignTimeNotification(partyId, notification.id, state.campaignRevision))}>
-                        Mark handled
-                      </Button>
+                      {notificationRoll?.notificationId === notification.id ? (
+                        <div className={`rounded-lg border p-3 ${notificationRoll.total === 1 && notification.label.startsWith('Light:') ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`} aria-live="polite">
+                          <p className="font-bold">Rolled {notificationRoll.dice.join(' + ')} = {notificationRoll.total}</p>
+                          {notification.label.startsWith('Light:') ? (
+                            <p className="mt-1 text-sm">{notificationRoll.total === 1 ? 'The flame goes out.' : 'The light stays lit.'}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </section>
@@ -149,6 +206,55 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                     ))}
                   </div>
                   <p className="mt-3 text-xs text-stone-500">1 round = 10 seconds · 1 stretch = 15 minutes · 1 shift = 6 hours · 1 day = 24 hours. Timed equipment and the Time tab update together. Active combat advances the round clock automatically.</p>
+                </div>
+              </section>
+
+              <section className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-stone-200 bg-white p-4">
+                  <h3 className="flex items-center gap-2 text-lg font-bold"><Bed className="h-5 w-5 text-emerald-600" /> Rest tracking</h3>
+                  <p className="mt-1 text-sm text-stone-500">Track the time spent resting. Apply HP, WP, and condition recovery from the character sheet.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={mutation.isPending}
+                      onClick={() => run(() => advanceCampaignTime(partyId, state.campaignRevision, 'round', 1, 'The party took a round rest.'))}>
+                      Round rest · 10 sec
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={mutation.isPending}
+                      onClick={() => run(() => advanceCampaignTime(partyId, state.campaignRevision, 'stretch', 1, 'The party took a stretch rest.'))}>
+                      Stretch rest · 15 min
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={mutation.isPending}
+                      onClick={() => run(() => advanceCampaignTime(partyId, state.campaignRevision, 'shift', 1, 'The party took a shift rest.'))}>
+                      Shift rest · 6 hours
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-stone-200 bg-white p-4">
+                  <h3 className="flex items-center gap-2 text-lg font-bold"><Flame className="h-5 w-5 text-orange-500" /> Light tracking</h3>
+                  <p className="mt-1 text-sm text-stone-500">An active light creates a roll reminder after every Stretch.</p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <select value={lightSourceId} onChange={(event) => setLightSourceId(event.target.value as typeof lightSourceId)}
+                      className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2">
+                      {LIGHT_SOURCES.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.diceExpression.toUpperCase()}</option>)}
+                    </select>
+                    <Button size="sm" variant={selectedLightReminder?.active ? 'danger' : 'primary'} icon={Flame} disabled={mutation.isPending}
+                      onClick={() => {
+                        if (selectedLightReminder) {
+                          run(() => setCampaignTimeReminderActive(partyId, selectedLightReminder.id, state.campaignRevision, !selectedLightReminder.active));
+                          return;
+                        }
+                        run(() => createCampaignTimeReminder(partyId, state.campaignRevision, {
+                          label: `Light: ${selectedLightSource.name}`,
+                          diceExpression: selectedLightSource.diceExpression,
+                          intervalCount: 1,
+                          intervalUnit: 'stretch',
+                          notes: `${selectedLightSource.detail} Maximum duration: one Shift.`,
+                        }));
+                      }}>
+                      {selectedLightReminder?.active ? 'Extinguish' : selectedLightReminder ? 'Relight' : 'Light'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-stone-500">{selectedLightSource.detail} A light can burn for no more than one Shift.</p>
                 </div>
               </section>
 
