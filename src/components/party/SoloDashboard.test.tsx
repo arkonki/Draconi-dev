@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { SoloWriteResult } from '../../lib/api/solo';
-import { OracleActionResult } from './SoloDashboard';
+import { OracleActionResult, SoloGameTimeSummary } from './SoloDashboard';
 
 function writeResult(roll: Record<string, unknown>, notice?: string): SoloWriteResult {
   return {
@@ -83,5 +83,33 @@ describe('Solo oracle action results', () => {
     expect(screen.getByText('D20: 4')).toBeInTheDocument();
     expect(screen.getByText('D20: 17')).toBeInTheDocument();
     expect(screen.getByText('This uses the generic Draconi inspiration table.')).toBeInTheDocument();
+  });
+});
+
+describe('Solo adventure game time', () => {
+  it('renders the structured campaign clock as readable game time', () => {
+    render(
+      <SoloGameTimeSummary
+        gameTime={{
+          schemaVersion: 'game-time-v1',
+          elapsedSeconds: (24 * 60 * 60) + (6 * 60 * 60) + (15 * 60) + 10,
+          rounds: 10900,
+          stretches: 121,
+          shifts: 5,
+          lastAdvance: { reason: 'The hero took a stretch rest.' },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Day 2')).toBeInTheDocument();
+    expect(screen.getByText('Morning · 06:15')).toBeInTheDocument();
+    expect(screen.queryByText(/elapsed$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last change:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/elapsedSeconds/)).not.toBeInTheDocument();
+  });
+
+  it('shows an empty-state message when no campaign clock exists', () => {
+    render(<SoloGameTimeSummary gameTime={{}} />);
+    expect(screen.getByText('No campaign time has been recorded yet.')).toBeInTheDocument();
   });
 });

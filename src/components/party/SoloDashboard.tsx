@@ -5,6 +5,7 @@ import {
   Brain,
   BookOpen,
   Bed,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CircleDot,
@@ -78,6 +79,7 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheet } from '../character/CharacterSheet';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 
 interface SoloDashboardProps {
   partyId: string;
@@ -182,6 +184,29 @@ function journalValue(value: unknown): string {
     return value.map(String).join(' · ');
   }
   return JSON.stringify(value, null, 2);
+}
+
+export function SoloGameTimeSummary({ gameTime }: { gameTime: Record<string, unknown> }) {
+  if (Object.keys(gameTime || {}).length === 0) {
+    return <p className="mt-2 text-sm text-stone-500">No campaign time has been recorded yet.</p>;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor(Number(gameTime.elapsedSeconds) || 0));
+  const clock = formatCampaignClock(elapsedSeconds);
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#1a472a] text-[#e8d5b5] shadow-sm">
+          <CalendarClock className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <div className="text-xl font-black text-stone-900">Day {clock.day}</div>
+          <div className="text-sm font-semibold text-stone-600">{clock.shift} · {clock.time}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function journalEventSummary(event: SoloJournalEvent): string | null {
@@ -1360,11 +1385,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
                     <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Game time</h4>
-                    {Object.keys(state.gameTime || {}).length === 0 ? (
-                      <p className="mt-2 text-sm text-stone-500">No campaign time has been recorded yet.</p>
-                    ) : (
-                      <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words text-sm text-stone-700">{JSON.stringify(state.gameTime, null, 2)}</pre>
-                    )}
+                    <SoloGameTimeSummary gameTime={state.gameTime || {}} />
                   </div>
                 </div>
                 )}

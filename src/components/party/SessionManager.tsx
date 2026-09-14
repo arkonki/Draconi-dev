@@ -42,6 +42,7 @@ const LIGHT_SOURCES = [
 
 export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionManagerProps) {
   const queryClient = useQueryClient();
+  const [activePanel, setActivePanel] = useState<'time' | 'session' | 'reminders'>('time');
   const [sessionTitle, setSessionTitle] = useState(`${partyName} Session`);
   const [gmNotes, setGmNotes] = useState('');
   const [summary, setSummary] = useState('');
@@ -114,45 +115,78 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
     onError: refresh,
   });
   const run = (action: () => Promise<unknown>) => mutation.mutate(action);
+  const handleClose = () => {
+    setActivePanel('time');
+    onClose();
+  };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/65 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-stone-50 rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-stone-300 flex flex-col">
-        <header className="p-4 border-b bg-stone-900 text-white flex items-center justify-between">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 p-2 backdrop-blur-sm sm:p-4">
+      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-stone-300 bg-stone-50 shadow-2xl">
+        <header className="flex items-center justify-between border-b bg-stone-900 px-4 py-3 text-white">
           <div className="flex items-center gap-3">
-            <CalendarClock className="w-6 h-6 text-amber-300" />
+            <CalendarClock className="h-5 w-5 text-amber-300" />
             <div>
-              <h2 className="text-xl font-bold font-serif">Game Session & Time</h2>
-              <p className="text-sm text-stone-300">{partyName}</p>
+              <h2 className="font-serif text-lg font-bold leading-tight">Game Session & Time</h2>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-stone-300">
+                <span>{partyName}</span>
+                {state?.activeSession ? <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-semibold text-emerald-200">Session active</span> : null}
+              </div>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-white/10" aria-label="Close session manager">
+          <button type="button" onClick={handleClose} className="p-2 rounded-lg hover:bg-white/10" aria-label="Close session manager">
             <X className="w-5 h-5" />
           </button>
         </header>
 
-        <div className="overflow-y-auto p-4 md:p-6 space-y-5">
+        <nav className="flex shrink-0 overflow-x-auto border-b border-stone-200 bg-white px-2" aria-label="Session manager sections">
+          {([
+            { id: 'time' as const, label: 'Time & rests', count: state?.pendingNotifications.length || 0 },
+            { id: 'session' as const, label: state?.activeSession ? 'End session' : 'Start session', count: 0 },
+            { id: 'reminders' as const, label: 'Roll reminders', count: state?.reminders.length || 0 },
+          ]).map((panel) => (
+            <button
+              key={panel.id}
+              type="button"
+              onClick={() => setActivePanel(panel.id)}
+              aria-current={activePanel === panel.id ? 'page' : undefined}
+              className={`relative flex min-h-11 shrink-0 items-center gap-2 px-4 text-sm font-bold transition-colors ${activePanel === panel.id ? 'text-[#1a472a]' : 'text-stone-500 hover:text-stone-800'}`}
+            >
+              {panel.label}
+              {panel.count > 0 ? (
+                <span className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] ${panel.id === 'time' ? 'bg-amber-500 text-white' : 'bg-stone-200 text-stone-700'}`}>
+                  {panel.count}
+                </span>
+              ) : null}
+              {activePanel === panel.id ? <span className="absolute inset-x-3 bottom-0 h-0.5 bg-[#1a472a]" /> : null}
+            </button>
+          ))}
+        </nav>
+
+        <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
           {stateQuery.isLoading ? <div className="py-16 flex justify-center"><LoadingSpinner size="lg" /></div> : null}
           {stateQuery.error ? <ErrorMessage message={stateQuery.error.message} /> : null}
           {mutation.error ? <ErrorMessage message={mutation.error.message} /> : null}
 
           {state ? (
             <>
+              {activePanel === 'time' ? <div className="space-y-3">
               {state.pendingNotifications.length > 0 ? (
-                <section className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 space-y-3" aria-live="assertive">
+                <section className="space-y-2 rounded-xl border-2 border-amber-400 bg-amber-50 p-3" aria-live="assertive">
                   <div className="flex items-center gap-2 text-amber-900 font-bold">
                     <BellRing className="w-5 h-5" /> {state.pendingNotifications.length} roll{state.pendingNotifications.length === 1 ? '' : 's'} due
                   </div>
-                  {state.pendingNotifications.map((notification) => (
-                    <div key={notification.id} className="bg-white border border-amber-200 rounded-lg p-3 flex flex-col gap-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {state.pendingNotifications.map((notification) => (
+                    <div key={notification.id} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-2.5">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <div className="flex-1">
                           <p className="font-bold text-stone-900">{notification.label} · {notification.diceExpression}</p>
                           <p className="text-xs text-stone-600">Due at {notification.dueUnit} {notification.dueCount}{notification.notes ? ` · ${notification.notes}` : ''}</p>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex shrink-0 gap-2">
                           <Button size="sm" variant="secondary" icon={Dices} disabled={mutation.isPending}
                             onClick={() => {
                               const result = rollDiceExpression(notification.diceExpression);
@@ -170,7 +204,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                         </div>
                       </div>
                       {notificationRoll?.notificationId === notification.id ? (
-                        <div className={`rounded-lg border p-3 ${notificationRoll.total === 1 && notification.label.startsWith('Light:') ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`} aria-live="polite">
+                        <div className={`rounded-lg border px-3 py-2 ${notificationRoll.total === 1 && notification.label.startsWith('Light:') ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`} aria-live="polite">
                           <p className="font-bold">Rolled {notificationRoll.dice.join(' + ')} = {notificationRoll.total}</p>
                           {notification.label.startsWith('Light:') ? (
                             <p className="mt-1 text-sm">{notificationRoll.total === 1 ? 'The flame goes out.' : 'The light stays lit.'}</p>
@@ -178,22 +212,23 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                         </div>
                       ) : null}
                     </div>
-                  ))}
+                    ))}
+                  </div>
                 </section>
               ) : null}
 
-              <section className="grid md:grid-cols-[1fr_1.2fr] gap-4">
-                <div className="rounded-xl bg-white border border-stone-200 p-4">
+              <section className="grid gap-3 md:grid-cols-[0.8fr_1.5fr]">
+                <div className="rounded-xl border border-stone-200 bg-white p-3">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Current game time</p>
-                  <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
-                    <span className="text-3xl font-black text-stone-900">Day {clock.day}</span>
-                    <span className="text-lg font-semibold text-stone-600">{clock.shift} · {clock.time}</span>
+                  <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-2xl font-black text-stone-900">Day {clock.day}</span>
+                    <span className="font-semibold text-stone-600">{clock.shift} · {clock.time}</span>
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-white border border-stone-200 p-4">
+                <div className="rounded-xl border border-stone-200 bg-white p-3">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Advance time</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <input type="number" min={1} max={1000} value={advanceAmount}
                       onChange={(event) => setAdvanceAmount(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))}
                       className="w-20 rounded-md border border-stone-300 px-3 py-2" aria-label="Amount to advance" />
@@ -205,15 +240,14 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                       </Button>
                     ))}
                   </div>
-                  <p className="mt-3 text-xs text-stone-500">1 round = 10 seconds · 1 stretch = 15 minutes · 1 shift = 6 hours · 1 day = 24 hours. Timed equipment and the Time tab update together. Active combat advances the round clock automatically.</p>
+                  <p className="mt-2 text-[11px] leading-snug text-stone-500">Round 10 sec · Stretch 15 min · Shift 6 hours · Day 24 hours. Combat rounds advance automatically.</p>
                 </div>
               </section>
 
-              <section className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-stone-200 bg-white p-4">
-                  <h3 className="flex items-center gap-2 text-lg font-bold"><Bed className="h-5 w-5 text-emerald-600" /> Rest tracking</h3>
-                  <p className="mt-1 text-sm text-stone-500">Track the time spent resting. Apply HP, WP, and condition recovery from the character sheet.</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
+              <section className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-stone-200 bg-white p-3">
+                  <h3 className="flex items-center gap-2 font-bold"><Bed className="h-4 w-4 text-emerald-600" /> Rest tracking</h3>
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" disabled={mutation.isPending}
                       onClick={() => run(() => advanceCampaignTime(partyId, state.campaignRevision, 'round', 1, 'The party took a round rest.'))}>
                       Round rest · 10 sec
@@ -227,12 +261,12 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                       Shift rest · 6 hours
                     </Button>
                   </div>
+                  <p className="mt-2 text-[11px] text-stone-500">Apply HP, WP, and condition recovery from the character sheet.</p>
                 </div>
 
-                <div className="rounded-xl border border-stone-200 bg-white p-4">
-                  <h3 className="flex items-center gap-2 text-lg font-bold"><Flame className="h-5 w-5 text-orange-500" /> Light tracking</h3>
-                  <p className="mt-1 text-sm text-stone-500">An active light creates a roll reminder after every Stretch.</p>
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <div className="rounded-xl border border-stone-200 bg-white p-3">
+                  <h3 className="flex items-center gap-2 font-bold"><Flame className="h-4 w-4 text-orange-500" /> Light tracking</h3>
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                     <select value={lightSourceId} onChange={(event) => setLightSourceId(event.target.value as typeof lightSourceId)}
                       className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2">
                       {LIGHT_SOURCES.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.diceExpression.toUpperCase()}</option>)}
@@ -254,17 +288,18 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                       {selectedLightReminder?.active ? 'Extinguish' : selectedLightReminder ? 'Relight' : 'Light'}
                     </Button>
                   </div>
-                  <p className="mt-2 text-xs text-stone-500">{selectedLightSource.detail} A light can burn for no more than one Shift.</p>
+                  <p className="mt-2 text-[11px] leading-snug text-stone-500">{selectedLightSource.detail} Maximum duration: one Shift.</p>
                 </div>
               </section>
 
               <div className="flex justify-end">
-                <Button variant="secondary" icon={Dices} onClick={() => setIsRollTableOpen(true)}>
+                <Button size="sm" variant="secondary" icon={Dices} onClick={() => setIsRollTableOpen(true)}>
                   Roll on table
                 </Button>
               </div>
+              </div> : null}
 
-              <section className="rounded-xl bg-white border border-stone-200 p-4">
+              {activePanel === 'session' ? <section className="rounded-xl border border-stone-200 bg-white p-4">
                 <div className="flex items-center gap-2 mb-3">
                   {state.activeSession ? <Play className="w-5 h-5 text-emerald-600" /> : <Pause className="w-5 h-5 text-stone-500" />}
                   <h3 className="font-bold text-lg">{state.activeSession ? state.activeSession.title : 'No active session'}</h3>
@@ -296,9 +331,9 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                     </div>
                   </div>
                 )}
-              </section>
+              </section> : null}
 
-              <section className="rounded-xl bg-white border border-stone-200 p-4 space-y-4">
+              {activePanel === 'reminders' ? <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4">
                 <div>
                   <h3 className="font-bold text-lg flex items-center gap-2"><BellRing className="w-5 h-5" /> Roll reminders</h3>
                   <p className="text-sm text-stone-500">Schedule campaign-specific checks. Reminders begin counting from now.</p>
@@ -324,7 +359,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                     }))}>Add</Button>
                 </div>
                 {state.reminders.length > 0 ? (
-                  <div className="divide-y divide-stone-200 border-t border-stone-200">
+                  <div className="max-h-[38vh] divide-y divide-stone-200 overflow-y-auto border-t border-stone-200 pr-1">
                     {state.reminders.map((reminder) => (
                       <div key={reminder.id} className="py-3 flex items-center gap-3">
                         <div className="flex-1 min-w-0">
@@ -353,7 +388,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                 ) : (
                   <p className="text-sm text-stone-500 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> No scheduled rolls.</p>
                 )}
-              </section>
+              </section> : null}
             </>
           ) : null}
         </div>
