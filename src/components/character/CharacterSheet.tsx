@@ -5,7 +5,7 @@ import { calculateMovement } from '../../lib/movement';
 import {
   HelpCircle, Swords, Bed, Award, ShieldCheck, Plus, Trash2, Minus,
   Bold, Italic, List, Pencil, Package, Sparkles, Book, UserSquare,
-  Gem, X, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete
+  Gem, X, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete, Dices
 } from 'lucide-react';
 import { SkillsModal } from './modals/SkillsModal';
 import { SpellcastingView } from './SpellcastingView';
@@ -26,6 +26,7 @@ import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PdfExportButton } from './PdfExportButton'; 
 import { advanceCharacterInjuryRecovery, fetchCharacterInjuries } from '../../lib/api/injuries';
 import { fetchSoloState, takeSoloRest, type SoloState } from '../../lib/api/solo';
+import { useDice } from '../dice/useDice';
 
 // --- HELPER COMPONENTS ---
 
@@ -435,25 +436,50 @@ interface AttributeCircleProps {
   conditionKey: string;
   conditionActive: boolean;
   onToggle: () => void;
-  onClick: () => void;
+  onRoll: () => void;
+  onEdit: () => void;
   isSaving: boolean;
 }
 
-const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onClick, isSaving }: AttributeCircleProps) => {
+const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onRoll, onEdit, isSaving }: AttributeCircleProps) => {
   const displayValue = value ?? 10;
   return (
-    <div className="attribute-circle-shell flex flex-col items-center relative group w-full max-w-[120px]"> 
-      <button 
-        onClick={onClick}
-        title={`Edit ${name} Score`}
-        className="attribute-circle-button w-16 h-16 md:w-20 md:h-20 rounded-full border-4 border-[#1a472a] bg-[#fdfbf7] flex items-center justify-center shadow-lg relative z-10 transition-all hover:scale-105 hover:bg-[#e8d5b5] group/circle outline-none focus:ring-2 ring-offset-2 ring-[#1a472a] cursor-pointer"
-      >
-        <span className="attribute-circle-value text-2xl md:text-3xl font-serif font-bold text-[#1a472a]">{displayValue}</span>
-        <span className="attribute-circle-name absolute -top-3 bg-[#fdfbf7] px-1 text-[10px] font-bold text-stone-500 uppercase tracking-widest border border-stone-200 rounded shadow-sm group-hover/circle:bg-white transition-colors">{name}</span>
-        <span className="absolute bottom-1 text-[#1a472a]/0 group-hover/circle:text-[#1a472a]/50 transition-colors"><Pencil size={10} /></span>
-      </button>
+    <div className="attribute-circle-shell flex flex-col items-center relative w-full max-w-[132px]">
+      <div className="relative z-10 flex h-[108px] w-[108px] flex-col overflow-hidden rounded-full border-4 border-[#1a472a] bg-[#fdfbf7] shadow-lg transition-transform hover:scale-[1.03]">
+        <span className="attribute-circle-name pointer-events-none absolute left-1/2 top-0 z-20 -translate-x-1/2 bg-[#fdfbf7] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-stone-500 shadow-sm">
+          {name}
+        </span>
+
+        <button
+          type="button"
+          onClick={onRoll}
+          aria-label={`Roll ${name} attribute test. Target ${displayValue}`}
+          title={`Roll ${name} (D20 ≤ ${displayValue})`}
+          className="group/roll relative flex min-h-0 flex-[3] items-center justify-center bg-[#fdfbf7] pt-2 text-[#1a472a] transition-colors hover:bg-[#e8d5b5] focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1a472a] touch-manipulation"
+        >
+          <span className="attribute-circle-value text-3xl font-serif font-bold transition-all duration-150 group-hover/roll:scale-75 group-hover/roll:opacity-0 group-focus-visible/roll:scale-75 group-focus-visible/roll:opacity-0">
+            {displayValue}
+          </span>
+          <span className="pointer-events-none absolute inset-0 flex translate-y-1 flex-col items-center justify-center pt-2 opacity-0 transition-all duration-150 group-hover/roll:translate-y-0 group-hover/roll:opacity-100 group-focus-visible/roll:translate-y-0 group-focus-visible/roll:opacity-100">
+            <Dices size={20} aria-hidden="true" />
+            <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest">Roll</span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={isSaving}
+          aria-label={`Edit ${name} score`}
+          title={`Edit ${name} score`}
+          className="group/edit relative flex min-h-0 flex-1 items-center justify-center border-t-2 border-[#1a472a]/35 bg-[#efe4cf] text-[#5c4d3c] transition-colors hover:bg-[#d4c5a3] hover:text-[#1a472a] focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1a472a] disabled:cursor-not-allowed disabled:opacity-50 touch-manipulation"
+        >
+          <Pencil size={14} className="transition-transform group-hover/edit:scale-110" aria-hidden="true" />
+        </button>
+      </div>
 
       <button 
+        type="button"
         onClick={onToggle}
         disabled={isSaving}
         className={`attribute-condition-button mt-2 w-full min-h-[40px] py-2 px-2 text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
@@ -607,7 +633,8 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 
 export function CharacterSheet({ soloState: providedSoloState }: { soloState?: SoloState } = {}) {
   const queryClient = useQueryClient();
-  const { character, fetchCharacter, adjustStat, toggleCondition, performRest, isLoading, error, isSaving, saveError, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
+  const { toggleDiceRoller } = useDice();
+  const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, saveError, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
 
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
   const [showRestOptionsModal, setShowRestOptionsModal] = useState(false);
@@ -745,10 +772,7 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
   const handleAttributeUpdate = async (newValue: number) => {
     if (!editingAttribute || !character) return;
     try {
-      const updatedAttributes = { ...character.attributes, [editingAttribute.name]: newValue };
-      useCharacterSheetStore.setState(state => ({ ...state, character: { ...state.character!, attributes: updatedAttributes } }));
-      const { error } = await supabase.from('characters').update({ attributes: updatedAttributes }).eq('id', character.id);
-      if (error) throw error;
+      await updateAttribute(editingAttribute.name, newValue);
     } catch (err) {
       console.error("Failed to update attribute", err);
     } finally {
@@ -901,7 +925,14 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
                       conditionKey={cond}
                       conditionActive={character.conditions?.[cond as keyof Character['conditions']]}
                       onToggle={() => handleConditionToggle(cond as keyof Character['conditions'])}
-                      onClick={() => setEditingAttribute({ 
+                      onRoll={() => toggleDiceRoller({
+                        initialDice: ['d20'],
+                        rollMode: 'skillCheck',
+                        targetValue: character.attributes?.[attr as AttributeName] ?? 10,
+                        description: `${attr} Attribute Test`,
+                        requiresBane: Boolean(character.conditions?.[cond as keyof Character['conditions']]),
+                      })}
+                      onEdit={() => setEditingAttribute({
                         name: attr as AttributeName, 
                         value: character.attributes?.[attr as AttributeName] || 10 
                       })}
