@@ -34,6 +34,8 @@ import {
   completeSessionInputSchema,
   createCampaignTimeReminderBodySchema,
   createCampaignTimeReminderInputSchema,
+  deleteCampaignTimeReminderBodySchema,
+  deleteCampaignTimeReminderInputSchema,
   createRollRequestBodySchema,
   createRollRequestInputSchema,
   pushRollRequestBodySchema,
@@ -140,6 +142,7 @@ import {
   checkpointSession,
   completeSession,
   createCampaignTimeReminder,
+  deleteCampaignTimeReminder,
   createRollRequest,
   createEncounter,
   drawInspiration,
@@ -1191,6 +1194,21 @@ export async function handleHelperApiRequest(request, response) {
       });
       campaignId = input.campaign_id;
       const data = await setCampaignTimeReminderActive(user, input, { sourceClient: sourceClient(request) });
+      resultingRevision = data.campaign_revision;
+      sendSuccess(response, requestId, data, resultingRevision);
+      return true;
+    }
+    if (campaignTimeReminderMatch && request.method === 'DELETE') {
+      operation = 'delete_campaign_time_reminder';
+      previousRevision = parseRevision(request);
+      idempotencyKey = parseIdempotencyKey(request);
+      const body = parseSchema(deleteCampaignTimeReminderBodySchema, await readJson(request, 100_000));
+      const input = parseSchema(deleteCampaignTimeReminderInputSchema, {
+        campaign_id: campaignTimeReminderMatch[0], reminder_id: campaignTimeReminderMatch[1],
+        expected_revision: previousRevision, idempotency_key: idempotencyKey, ...body,
+      });
+      campaignId = input.campaign_id;
+      const data = await deleteCampaignTimeReminder(user, input, { sourceClient: sourceClient(request) });
       resultingRevision = data.campaign_revision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

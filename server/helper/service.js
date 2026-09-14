@@ -10,6 +10,7 @@ import {
 } from './actors.js';
 import { requireCampaignAccess } from './auth.js';
 import { HelperError } from './errors.js';
+import { elapsedSecondsFromLegacyTimeTracker } from './campaignTime.js';
 import { conditionId } from './identifiers.js';
 import { applyActorChangeSet, consumeRalliedAction, validateActorCanAct } from './rules.js';
 import {
@@ -80,6 +81,25 @@ function advanceGameTime(value, seconds, lastAdvance) {
     elapsedSeconds: current.elapsedSeconds + seconds,
     lastAdvance: { ...lastAdvance, seconds, at: new Date().toISOString() },
   });
+}
+
+function gameTimeReconciledWithLegacyTracker(value, tracker) {
+  const current = gameTimeForOutput(value);
+  const legacyElapsedSeconds = elapsedSecondsFromLegacyTimeTracker(tracker);
+  if (legacyElapsedSeconds <= current.elapsedSeconds) return current;
+  return gameTimeForOutput({
+    ...current,
+    elapsedSeconds: legacyElapsedSeconds,
+    importedFromLegacyTimeTracker: true,
+  });
+}
+
+async function reconciledCampaignGameTime(client, campaign) {
+  const { rows } = await client.query(
+    'SELECT current_day, current_shift, grid_state FROM time_trackers WHERE party_id = $1 FOR UPDATE',
+    [campaign.id],
+  );
+  return gameTimeReconciledWithLegacyTracker(campaign.game_time, rows[0]);
 }
 
 function campaignTimeUnitCount(gameTime, unit) {
@@ -4533,7 +4553,8 @@ export async function searchWaypoint(user, input, { sourceClient } = {}) {
     const durationSeconds = SOLO_REST_SECONDS.stretch;
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
     const itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, durationSeconds);
-    const gameTime = advanceGameTime(access.campaign.game_time, durationSeconds, {
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    const gameTime = advanceGameTime(currentGameTime, durationSeconds, {
       kind: 'solo_search',
       waypointId: context.waypoint.id,
     });
@@ -4710,7 +4731,8 @@ export async function scavengeWaypoint(user, input, { sourceClient } = {}) {
     const durationSeconds = spendsStretch ? SOLO_REST_SECONDS.stretch : 2 * 60;
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
     const itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, durationSeconds);
-    const gameTime = advanceGameTime(access.campaign.game_time, durationSeconds, {
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    const gameTime = advanceGameTime(currentGameTime, durationSeconds, {
       kind: 'solo_scavenge',
       waypointId: context.waypoint.id,
       spentStretch: spendsStretch,
@@ -5067,9 +5089,7 @@ export async function takeSoloRest(user, input, { sourceClient } = {}) {
     resultingActor.inventory = normalizedEquipment.inventory;
     await persistActor(client, resultingActor, loadedActor.storage);
 
-    const previousGameTime = access.campaign.game_time && typeof access.campaign.game_time === 'object'
-      ? access.campaign.game_time
-      : {};
+    const previousGameTime = await reconciledCampaignGameTime(client, access.campaign);
     const oldElapsed = Number(previousGameTime.elapsedSeconds);
     const gameTime = {
       ...previousGameTime,
@@ -6346,11 +6366,12 @@ export async function getCampaignTimeState(user, campaignId) {
          ORDER BY created_at ASC`,
         [campaignId],
       ),
-      client.query('SELECT current_day, current_shift FROM time_trackers WHERE party_id = $1', [campaignId]),
+      client.query('SELECT current_day, current_shift, grid_state FROM time_trackers WHERE party_id = $1', [campaignId]),
     ]);
+    const gameTime = gameTimeReconciledWithLegacyTracker(access.campaign.game_time, trackers[0]);
     return {
       campaignRevision: Number(access.campaign.helper_revision || 0),
-      gameTime: gameTimeForOutput(access.campaign.game_time),
+      gameTime,
       activeSession: sessions[0] ? sessionForOutput(sessions[0], { includeGm: true }) : null,
       tracker: trackers[0] ? {
         currentDay: Number(trackers[0].current_day),
@@ -6372,7 +6393,8 @@ export async function advanceCampaignTime(user, input, { sourceClient } = {}) {
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const seconds = CAMPAIGN_TIME_SECONDS[input.unit] * input.amount;
-    const gameTime = advanceGameTime(access.campaign.game_time, seconds, {
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    const gameTime = advanceGameTime(currentGameTime, seconds, {
       source: 'campaign_session', unit: input.unit, amount: input.amount,
     });
     const equipmentDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, seconds);
@@ -6436,7 +6458,8 @@ export async function createCampaignTimeReminder(user, input, { sourceClient } =
     if (idem.response) return idem.response;
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
-    const currentCount = campaignTimeUnitCount(access.campaign.game_time, input.interval_unit);
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    const currentCount = campaignTimeUnitCount(currentGameTime, input.interval_unit);
     const { rows } = await client.query(
       `INSERT INTO campaign_time_roll_reminders (
          campaign_id, label, dice_expression, interval_unit, interval_count,
@@ -6477,7 +6500,8 @@ export async function setCampaignTimeReminderActive(user, input, { sourceClient 
       [input.reminder_id, input.campaign_id],
     );
     if (!existingRows[0]) throw new HelperError(404, 'NOT_FOUND', 'Time roll reminder not found.');
-    const currentCount = campaignTimeUnitCount(access.campaign.game_time, existingRows[0].interval_unit);
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    const currentCount = campaignTimeUnitCount(currentGameTime, existingRows[0].interval_unit);
     const resumedDueCount = input.active && Number(existingRows[0].next_due_count) <= currentCount
       ? currentCount + Number(existingRows[0].interval_count)
       : Number(existingRows[0].next_due_count);
@@ -6497,6 +6521,61 @@ export async function setCampaignTimeReminderActive(user, input, { sourceClient 
       state_excerpt: { reminder: timeReminderForOutput(rows[0]) } };
     await storeIdempotentResult(client, { campaignId: input.campaign_id, userId: user.id,
       key: input.idempotency_key, operation, hash: idem.hash, response });
+    return response;
+  });
+}
+
+export async function deleteCampaignTimeReminder(user, input, { sourceClient } = {}) {
+  const operation = 'delete_campaign_time_reminder';
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [input.campaign_id]);
+    const access = await requireCampaignAccess(client, user, input.campaign_id, { gm: true });
+    const idem = await idempotentResult(client, user, input.campaign_id, input.idempotency_key, operation, input);
+    if (idem.response) return idem.response;
+    assertCampaignWritable(access.campaign);
+    const previousRevision = assertRevision(access.campaign, input.expected_revision);
+    const { rows: existingRows } = await client.query(
+      `SELECT * FROM campaign_time_roll_reminders
+       WHERE id = $1 AND campaign_id = $2 FOR UPDATE`,
+      [input.reminder_id, input.campaign_id],
+    );
+    const reminder = existingRows[0];
+    if (!reminder) throw new HelperError(404, 'NOT_FOUND', 'Time roll reminder not found.');
+    if (reminder.active) {
+      throw new HelperError(409, 'INVALID_STATE', 'Pause the time roll reminder before removing it.');
+    }
+
+    await client.query('DELETE FROM campaign_time_roll_reminders WHERE id = $1', [input.reminder_id]);
+    const resultingRevision = previousRevision + 1;
+    await client.query('UPDATE parties SET helper_revision = $1 WHERE id = $2', [resultingRevision, input.campaign_id]);
+    const eventId = await insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sessionId: access.campaign.active_session_id,
+      sequence: await nextEventSequence(client, input.campaign_id),
+      type: 'time.roll_reminder_deleted',
+      payload: { reminder: timeReminderForOutput(reminder), reason: input.reason },
+      visibility: 'gm',
+      sourceClient,
+      idempotencyKey: input.idempotency_key,
+      previousRevision,
+      resultingRevision,
+    });
+    const response = {
+      success: true,
+      campaign_revision: resultingRevision,
+      event_ids: [eventId],
+      summary: `${reminder.label} removed.`,
+      state_excerpt: { reminderId: reminder.id },
+    };
+    await storeIdempotentResult(client, {
+      campaignId: input.campaign_id,
+      userId: user.id,
+      key: input.idempotency_key,
+      operation,
+      hash: idem.hash,
+      response,
+    });
     return response;
   });
 }
@@ -8234,7 +8313,8 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
     const resultingCombatRevision = Number(context.encounter.helper_revision || 0) + 1;
     await client.query(`SELECT set_config('draconi.skip_campaign_revision', 'on', true)`);
     let itemDurationChanges = [];
-    let gameTime = gameTimeForOutput(access.campaign.game_time);
+    const currentGameTime = await reconciledCampaignGameTime(client, access.campaign);
+    let gameTime = currentGameTime;
     let tracker = null;
     let dueNotifications = [];
     if (startedNewRound) {
@@ -8245,7 +8325,7 @@ export async function advanceCombatTurn(user, input, { sourceClient } = {}) {
         [input.combat_id, next.id],
       );
       itemDurationChanges = await advanceCampaignEquipmentTime(client, input.campaign_id, 10);
-      gameTime = advanceGameTime(access.campaign.game_time, 10, {
+      gameTime = advanceGameTime(currentGameTime, 10, {
         kind: 'combat_round',
         combatId: input.combat_id,
         round,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceCampaignTimeInputSchema,
   createCampaignTimeReminderInputSchema,
+  deleteCampaignTimeReminderInputSchema,
   generateSoloNpcInputSchema,
   recordManualTreasureDrawInputSchema,
   resolveSoloNpcBehaviorInputSchema,
@@ -126,5 +127,15 @@ describe('Helper API schemas', () => {
       ...reminder,
       dice_expression: 'roll whatever the GM says',
     })).toThrow();
+  });
+
+  it('accepts revision-safe removal of a time reminder', () => {
+    expect(deleteCampaignTimeReminderInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      reminder_id: '15aa8f35-45da-43aa-a767-7c98bba69c72',
+      expected_revision: 8,
+      idempotency_key: 'campaign-time-reminder-delete-test',
+      reason: 'The paused reminder is no longer needed.',
+    })).toMatchObject({ reminder_id: '15aa8f35-45da-43aa-a767-7c98bba69c72' });
   });
 });

@@ -897,6 +897,17 @@ export const setCampaignTimeReminderActiveInputSchema = z.object({
 export const setCampaignTimeReminderActiveBodySchema = setCampaignTimeReminderActiveInputSchema
   .omit({ campaign_id: true, reminder_id: true, expected_revision: true, idempotency_key: true });
 
+export const deleteCampaignTimeReminderInputSchema = z.object({
+  campaign_id: uuidSchema,
+  reminder_id: uuidSchema,
+  expected_revision: revisionSchema,
+  idempotency_key: idempotencyKeySchema,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const deleteCampaignTimeReminderBodySchema = deleteCampaignTimeReminderInputSchema
+  .omit({ campaign_id: true, reminder_id: true, expected_revision: true, idempotency_key: true });
+
 export const resolveCampaignTimeNotificationInputSchema = z.object({
   campaign_id: uuidSchema,
   notification_id: uuidSchema,

@@ -15,6 +15,7 @@ import {
   completeSoloMissionBodySchema,
   completeSessionBodySchema,
   createCampaignTimeReminderBodySchema,
+  deleteCampaignTimeReminderBodySchema,
   createEncounterBodySchema,
   createRollRequestBodySchema,
   drawInspirationBodySchema,
@@ -1084,6 +1085,13 @@ export const openApiDocument = {
         parameters: [campaignParameter, { name: 'reminderId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, revisionHeader, idempotencyHeader],
         requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(setCampaignTimeReminderActiveBodySchema) } } },
         responses: { 200: { description: 'Reminder updated', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 404: errorResponse, 409: errorResponse, 428: errorResponse },
+      },
+      delete: {
+        tags: ['Campaigns'], summary: 'Remove a paused campaign-time reminder',
+        description: 'GM-only. Active reminders must be paused before they can be removed.',
+        parameters: [campaignParameter, { name: 'reminderId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, revisionHeader, idempotencyHeader],
+        requestBody: { required: true, content: { 'application/json': { schema: z.toJSONSchema(deleteCampaignTimeReminderBodySchema) } } },
+        responses: { 200: { description: 'Reminder removed', content: { 'application/json': { schema: successEnvelope() } } }, 400: errorResponse, 401: errorResponse, 403: errorResponse, 404: errorResponse, 409: errorResponse, 428: errorResponse },
       },
     },
     '/api/v1/campaigns/{campaignId}/time/notifications/{notificationId}/resolve': {

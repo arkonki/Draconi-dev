@@ -137,6 +137,16 @@ export async function setCampaignTimeReminderActive(
   return parseResponse(response, 'Could not update the roll reminder.');
 }
 
+export async function deleteCampaignTimeReminder(
+  partyId: string, reminderId: string, revision: number,
+) {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/time/reminders/${reminderId}`, {
+    method: 'DELETE', headers: writeHeaders(revision),
+    body: JSON.stringify({ reason: 'The GM removed the paused campaign-time roll reminder.' }),
+  });
+  return parseResponse(response, 'Could not remove the roll reminder.');
+}
+
 export async function resolveCampaignTimeNotification(
   partyId: string, notificationId: string, revision: number,
 ) {

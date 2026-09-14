@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BellRing, CalendarClock, Check, Dices, Pause, Play, Plus, X } from 'lucide-react';
+import { AlertTriangle, BellRing, CalendarClock, Check, Dices, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import {
   advanceCampaignTime,
   createCampaignTimeReminder,
+  deleteCampaignTimeReminder,
   endCampaignSession,
   fetchCampaignTimeState,
   resolveCampaignTimeNotification,
@@ -127,14 +128,9 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
               <section className="grid md:grid-cols-[1fr_1.2fr] gap-4">
                 <div className="rounded-xl bg-white border border-stone-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Current game time</p>
-                  <div className="mt-2 flex items-end gap-3">
-                    <span className="text-3xl font-black text-stone-900">{clock.elapsed}</span>
-                  </div>
-                  <p className="mt-1 text-sm font-semibold text-stone-600">Day {clock.day} · {clock.shift} · {clock.time}</p>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="rounded bg-stone-100 p-2"><b className="block text-base">{state.gameTime.rounds}</b>Rounds</div>
-                    <div className="rounded bg-stone-100 p-2"><b className="block text-base">{state.gameTime.stretches}</b>Stretches</div>
-                    <div className="rounded bg-stone-100 p-2"><b className="block text-base">{state.gameTime.shifts}</b>Shifts</div>
+                  <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
+                    <span className="text-3xl font-black text-stone-900">Day {clock.day}</span>
+                    <span className="text-lg font-semibold text-stone-600">{clock.shift} · {clock.time}</span>
                   </div>
                 </div>
 
@@ -229,10 +225,22 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                           <p className={`font-semibold ${reminder.active ? 'text-stone-900' : 'text-stone-400 line-through'}`}>{reminder.label} · {reminder.diceExpression}</p>
                           <p className="text-xs text-stone-500">Every {reminder.intervalCount} {unitLabel(reminder.intervalUnit, reminder.intervalCount)} · next at {reminder.intervalUnit} {reminder.nextDueCount}</p>
                         </div>
-                        <Button variant="outline" size="sm" icon={reminder.active ? Pause : Play} disabled={mutation.isPending}
-                          onClick={() => run(() => setCampaignTimeReminderActive(partyId, reminder.id, state.campaignRevision, !reminder.active))}>
-                          {reminder.active ? 'Pause' : 'Resume'}
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" icon={reminder.active ? Pause : Play} disabled={mutation.isPending}
+                            onClick={() => run(() => setCampaignTimeReminderActive(partyId, reminder.id, state.campaignRevision, !reminder.active))}>
+                            {reminder.active ? 'Pause' : 'Resume'}
+                          </Button>
+                          {!reminder.active ? (
+                            <Button variant="danger" size="sm" icon={Trash2} disabled={mutation.isPending}
+                              onClick={() => {
+                                if (window.confirm(`Remove the paused reminder “${reminder.label}”?`)) {
+                                  run(() => deleteCampaignTimeReminder(partyId, reminder.id, state.campaignRevision));
+                                }
+                              }}>
+                              Remove
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
