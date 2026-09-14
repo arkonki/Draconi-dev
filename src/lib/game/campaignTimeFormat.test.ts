@@ -21,4 +21,15 @@ describe('formatCampaignClock', () => {
   it('normalizes invalid or negative elapsed time', () => {
     expect(formatCampaignClock(-20)).toMatchObject({ day: 1, time: '00:00' });
   });
+
+  it.each([
+    [6, 'Morning'],
+    [7, 'Day'],
+    [12, 'Day'],
+    [13, 'Evening'],
+    [18, 'Evening'],
+    [19, 'Night'],
+  ] as const)('maps %i:00 to the Time page shift %s', (hour, shift) => {
+    expect(formatCampaignClock(hour * 60 * 60).shift).toBe(shift);
+  });
 });
