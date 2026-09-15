@@ -25,6 +25,7 @@
     "test:workflow": "node scripts/workflow-smoke.mjs",
     "test:housekeeping": "node scripts/housekeeping-smoke.mjs",
     "test:helper-api": "node --env-file-if-exists=.env server/helper/smoke.mjs",
+    "mcp:measure": "node server/mcp/measure.mjs",
     "test:oauth": "node --env-file-if-exists=.env server/oauth.smoke.mjs",
     "tunnel:start": "bash scripts/tunnel-client.sh start",
     "tunnel:status": "bash scripts/tunnel-client.sh status",

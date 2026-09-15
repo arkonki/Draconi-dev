@@ -5,6 +5,12 @@ import {
   createCampaignTimeReminderInputSchema,
   deleteCampaignTimeReminderInputSchema,
   generateSoloNpcInputSchema,
+  getCampaignStateInputSchema,
+  getEncounterSetupOptionsInputSchema,
+  getRecentEventsInputSchema,
+  getResumeStateInputSchema,
+  getRollHistoryInputSchema,
+  getSessionHistoryInputSchema,
   recordManualTreasureDrawInputSchema,
   resolveSoloNpcBehaviorInputSchema,
   searchWaypointInputSchema,
@@ -19,6 +25,41 @@ const baseSearch = {
 };
 
 describe('Helper API schemas', () => {
+  it('uses small default read pages and accepts opaque history cursors', () => {
+    const cursor = '7d2d87a5-83c8-43af-8c9f-738032664570';
+    expect(getCampaignStateInputSchema.parse({ campaign_id: baseSearch.campaign_id })).toMatchObject({
+      recent_event_limit: 10,
+    });
+    expect(getRecentEventsInputSchema.parse({ campaign_id: baseSearch.campaign_id })).toMatchObject({ limit: 10 });
+    expect(getRollHistoryInputSchema.parse({ campaign_id: baseSearch.campaign_id, cursor })).toMatchObject({
+      cursor,
+      limit: 10,
+    });
+    expect(getSessionHistoryInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      session_cursor: cursor,
+      checkpoint_cursor: cursor,
+    })).toMatchObject({ session_cursor: cursor, checkpoint_cursor: cursor, limit: 10 });
+    expect(getEncounterSetupOptionsInputSchema.parse({ campaign_id: baseSearch.campaign_id })).toMatchObject({
+      monster_limit: 20,
+    });
+  });
+
+  it('accepts bounded token-conscious resume profiles without changing the legacy default', () => {
+    expect(getResumeStateInputSchema.parse({ campaign_id: baseSearch.campaign_id })).toEqual({
+      campaign_id: baseSearch.campaign_id,
+    });
+    expect(getResumeStateInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      detail: 'focused',
+      recent_roll_limit: 5,
+    })).toMatchObject({ detail: 'focused', recent_roll_limit: 5 });
+    expect(() => getResumeStateInputSchema.parse({
+      campaign_id: baseSearch.campaign_id,
+      detail: 'summary',
+    })).toThrow();
+  });
+
   it('defaults Solo Search knowledge flags to false', () => {
     expect(searchWaypointInputSchema.parse(baseSearch)).toMatchObject({
       known_location: false,

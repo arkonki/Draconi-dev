@@ -57,9 +57,11 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/state?${query}`);
   }
 
-  getResumeState({ campaign_id, actor_id }) {
+  getResumeState({ campaign_id, actor_id, detail, recent_roll_limit }) {
     const query = new URLSearchParams();
     if (actor_id) query.set('actorId', actor_id);
+    if (detail) query.set('detail', detail);
+    if (recent_roll_limit) query.set('recentRollLimit', String(recent_roll_limit));
     return this.request(`/api/v1/campaigns/${campaign_id}/resume-state?${query}`);
   }
 
@@ -77,9 +79,10 @@ export class HelperApiClient {
     return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests/${request_id}`);
   }
 
-  getRollHistory({ campaign_id, encounter_id, limit }) {
+  getRollHistory({ campaign_id, encounter_id, cursor, limit }) {
     const query = new URLSearchParams();
     if (encounter_id) query.set('encounterId', encounter_id);
+    if (cursor) query.set('cursor', cursor);
     if (limit) query.set('limit', String(limit));
     return this.request(`/api/v1/campaigns/${campaign_id}/roll-requests?${query}`);
   }
@@ -461,8 +464,10 @@ export class HelperApiClient {
     });
   }
 
-  getSessionHistory({ campaign_id, limit }) {
+  getSessionHistory({ campaign_id, session_cursor, checkpoint_cursor, limit }) {
     const query = new URLSearchParams();
+    if (session_cursor) query.set('sessionCursor', session_cursor);
+    if (checkpoint_cursor) query.set('checkpointCursor', checkpoint_cursor);
     if (limit) query.set('limit', String(limit));
     return this.request(`/api/v1/campaigns/${campaign_id}/sessions?${query}`);
   }

@@ -7,14 +7,14 @@ export const gmWorkflowGuide = {
   version: GM_WORKFLOW_VERSION,
   authority: [
     'Draconi is the authoritative source for campaign, character, roll, session, encounter, and combat state.',
-    'Call get_resume_state before narrating or changing an existing campaign. Never reconstruct state from conversation memory or event prose.',
+    'Call get_resume_state with detail="focused" before narrating or changing an existing campaign. Never reconstruct state from conversation memory or event prose.',
     'Never invent campaign identifiers, actor identifiers, mechanics, dice, HP, WP, conditions, inventory, or hidden information.',
     'Use the latest campaign revision for every write and a unique idempotency key for every distinct intended change.',
   ],
   workflows: {
     sessionStart: [
       'If campaign_id is missing, call list_campaigns and ask the user to choose when more than one plausible campaign exists.',
-      'Call get_resume_state. Its scene, checkpoint, characters, Solo progress, active combat, and roll handoffs are one consistent snapshot.',
+      'Call get_resume_state with detail="focused". Its scene, checkpoint, focus character, Solo progress, active combat, and roll handoffs are one consistent snapshot.',
       'If an active session already exists, resume it instead of creating a duplicate.',
       'If there is no active session, call start_session with the latest revision, a clear title, an optional opening scene, and private GM notes only when needed.',
       'Use the returned session and campaign revision as authoritative.',
@@ -59,7 +59,7 @@ export const gmWorkflowGuide = {
       'Call end_combat only when combat is actually over and save a durable, player-safe outcome summary.',
     ],
     sessionCompletion: [
-      'Read get_resume_state and, when useful, get_recent_events before composing the record.',
+      'Read get_resume_state with detail="focused" and, when useful, get_recent_events before composing the record.',
       'Write a concise summary of durable events that players experienced or can know.',
       'Keep secrets and private GM notes out of the shared summary. Put unresolved secret threads only in unresolved_threads.',
       'Call complete_session with the active session identifier, latest revision, summary, explicit unresolved_threads array, and optional ending scene.',
@@ -68,11 +68,11 @@ export const gmWorkflowGuide = {
   },
   recovery: {
     revisionConflict: [
-      'On REVISION_CONFLICT, call get_resume_state again, reassess the intended action against the new state, and do not blindly replay stale arguments.',
+      'On REVISION_CONFLICT, call get_resume_state with detail="focused" again, reassess the intended action against the new state, and do not blindly replay stale arguments.',
       'Use a new idempotency key only for a newly assessed request. Reuse the prior key only when retrying the exact same request after an uncertain transport outcome.',
     ],
     interruptedConversation: [
-      'Do not rely on remembered tool results. Read get_resume_state, then use get_recent_events only when narrative history beyond the checkpoint is needed.',
+      'Do not rely on remembered tool results. Read get_resume_state with detail="focused", then use get_recent_events only when narrative history beyond the checkpoint is needed.',
       'If a write may have succeeded but its response was lost, read state/events first. Retry the identical request with the same idempotency key only when confirmation is still impossible.',
     ],
     missingIdentifiers: [
@@ -148,7 +148,7 @@ export const gmWorkflowPrompts = [
           text: [
             `Run this Dragonbane ${playMode} session using the ${GM_WORKFLOW_VERSION} workflow.`,
             campaignId
-              ? `The campaign ID is ${campaignId}. Call get_resume_state before narrating or acting.`
+              ? `The campaign ID is ${campaignId}. Call get_resume_state with detail="focused" before narrating or acting.`
               : 'No campaign ID was supplied. Call list_campaigns and never guess an identifier.',
             playMode === 'solo'
               ? 'Use the Solo state included by get_resume_state; call get_solo_state later only for a detailed turn-by-turn refresh.'
@@ -179,7 +179,7 @@ export const gmWorkflowPrompts = [
           text: [
             `Recover this Dragonbane session using the ${GM_WORKFLOW_VERSION} workflow.`,
             campaignId
-              ? `Call get_resume_state for ${campaignId}. Use its active combat and latest checkpoint; call get_recent_events only if additional narrative history is needed.`
+              ? `Call get_resume_state for ${campaignId} with detail="focused". Use its active combat and latest checkpoint; call get_recent_events only if additional narrative history is needed.`
               : 'Call list_campaigns to rediscover the campaign. Never guess an identifier.',
             'Resume the returned active session and combat turn; do not create duplicates or replay remembered writes.',
             'Treat any supplied conversational context as unverified until it matches Draconi.',
@@ -209,7 +209,7 @@ export const gmWorkflowPrompts = [
           text: [
             `Complete this Dragonbane session using the ${GM_WORKFLOW_VERSION} workflow.`,
             campaignId
-              ? `Call get_resume_state for ${campaignId} and get_recent_events before preparing the record.`
+              ? `Call get_resume_state for ${campaignId} with detail="focused" and get_recent_events before preparing the record.`
               : 'Call list_campaigns to identify the campaign. Never guess an identifier.',
             'Confirm an active session exists. Summarize durable events the players know, keep private GM notes out of the summary, and place secret unresolved story threads only in unresolved_threads.',
             'Call complete_session with the active session ID and latest revision. Do not invent events or identifiers.',

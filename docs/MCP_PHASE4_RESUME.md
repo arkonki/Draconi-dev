@@ -3,10 +3,22 @@
 Phase 4 uses PostgreSQL as the authority for reconnecting an MCP-assisted game.
 The preferred read is `get_resume_state` (REST:
 `GET /api/v1/campaigns/{campaignId}/resume-state`). The service performs that
-read in one repeatable-read, read-only transaction and returns
-`resume-state-v1` with one `campaignRevision`.
+read in one repeatable-read, read-only transaction and returns one
+`campaignRevision`.
 
-The snapshot contains all campaign characters, an explicit
+For normal AI-GM continuation, request `detail=focused` and optionally set
+`recentRollLimit` (the recommended value is 5). This returns the
+`resume-state-v2` focused contract: the focus character with one deduplicated
+equipment list, active combat, current Solo context, scene/checkpoint summaries,
+pending rolls, and bounded recent rolls. Use `detail=compact` for routing and
+status checks. It contains identity, revision, time, session/scene summaries,
+focus vitals, active-combat identity, pending roll identities, and current Solo
+mission context. Both profiles have automated 25 KB and 12 KB ceilings.
+
+Omitting `detail`, or explicitly requesting `detail=full`, preserves the
+comprehensive `resume-state-v1` contract for existing clients and diagnostics.
+
+The full snapshot contains all campaign characters, an explicit
 `focusCharacterId`, the singular `character` convenience projection when a
 focus is known, current scene, latest checkpoint, unresolved threads for GMs,
 active combat, active Solo mission/waypoint/threat/dangers, visible pending and

@@ -360,9 +360,15 @@ export async function handleHelperApiRequest(request, response) {
       const input = parseSchema(getResumeStateInputSchema, {
         campaign_id: resumeStateMatch[0],
         actor_id: url.searchParams.get('actorId') || undefined,
+        detail: url.searchParams.get('detail') || undefined,
+        recent_roll_limit: url.searchParams.get('recentRollLimit') || undefined,
       });
       campaignId = input.campaign_id;
-      const data = await getResumeState(user, campaignId, { actorId: input.actor_id });
+      const data = await getResumeState(user, campaignId, {
+        actorId: input.actor_id,
+        detail: input.detail,
+        recentRollLimit: input.recent_roll_limit,
+      });
       resultingRevision = data.campaignRevision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;
@@ -374,11 +380,13 @@ export async function handleHelperApiRequest(request, response) {
       const input = parseSchema(getRollHistoryInputSchema, {
         campaign_id: rollRequestsMatch[0],
         encounter_id: url.searchParams.get('encounterId') || undefined,
+        cursor: url.searchParams.get('cursor') || undefined,
         limit: url.searchParams.get('limit') || undefined,
       });
       campaignId = input.campaign_id;
       const data = await getRollHistory(user, campaignId, {
         encounterId: input.encounter_id,
+        cursor: input.cursor,
         limit: input.limit,
       });
       resultingRevision = data.campaignRevision;
@@ -1236,10 +1244,16 @@ export async function handleHelperApiRequest(request, response) {
       operation = 'get_session_history';
       const input = parseSchema(getSessionHistoryInputSchema, {
         campaign_id: sessionsMatch[0],
+        session_cursor: url.searchParams.get('sessionCursor') || undefined,
+        checkpoint_cursor: url.searchParams.get('checkpointCursor') || undefined,
         limit: url.searchParams.get('limit') || undefined,
       });
       campaignId = input.campaign_id;
-      const data = await getSessionHistory(user, campaignId, { limit: input.limit });
+      const data = await getSessionHistory(user, campaignId, {
+        limit: input.limit,
+        sessionCursor: input.session_cursor,
+        checkpointCursor: input.checkpoint_cursor,
+      });
       resultingRevision = data.campaignRevision;
       sendSuccess(response, requestId, data, resultingRevision);
       return true;

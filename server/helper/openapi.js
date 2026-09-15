@@ -249,7 +249,7 @@ export const openApiDocument = {
         description: 'Returns current scene, actors, active combat, recent events, and GM context only when the token has GM access.',
         parameters: [
           campaignParameter,
-          { name: 'recentEventLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+          { name: 'recentEventLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 } },
         ],
         responses: {
           200: { description: 'Campaign snapshot', content: { 'application/json': { schema: successEnvelope() } } },
@@ -263,10 +263,12 @@ export const openApiDocument = {
       get: {
         tags: ['Campaigns'],
         summary: 'Get one revision-consistent continuation snapshot',
-        description: 'Preferred reconnect read. Returns all campaign characters, an explicit focus character, scene and checkpoint state, active combat, Solo progress, visible roll handoffs, and normalized game time from one database snapshot.',
+        description: 'Preferred reconnect read. Use focused for ordinary AI-GM continuation, compact for routing and status checks, or full for the backwards-compatible comprehensive snapshot.',
         parameters: [
           campaignParameter,
           { name: 'actorId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'detail', in: 'query', schema: { type: 'string', enum: ['compact', 'focused', 'full'], default: 'full' } },
+          { name: 'recentRollLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 30, default: 5 } },
         ],
         responses: {
           200: { description: 'Authoritative resume snapshot', content: { 'application/json': { schema: successEnvelope() } } },
@@ -284,7 +286,8 @@ export const openApiDocument = {
         parameters: [
           campaignParameter,
           { name: 'encounterId', in: 'query', schema: { type: 'string', format: 'uuid' } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 } },
+          { name: 'cursor', in: 'query', description: 'Continue after the last request ID from the previous page.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 10 } },
         ],
         responses: {
           200: { description: 'Trusted roll history', content: { 'application/json': { schema: successEnvelope() } } },
@@ -1109,7 +1112,9 @@ export const openApiDocument = {
         description: 'Returns durable session summaries. Private GM notes are included only for GM access.',
         parameters: [
           campaignParameter,
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+          { name: 'sessionCursor', in: 'query', description: 'Continue sessions after the last session ID from the previous page.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'checkpointCursor', in: 'query', description: 'Continue checkpoints after the last checkpoint ID from the previous page.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 } },
         ],
         responses: {
           200: { description: 'Game session history', content: { 'application/json': { schema: successEnvelope() } } },
@@ -1320,7 +1325,7 @@ export const openApiDocument = {
         parameters: [
           campaignParameter,
           { name: 'monsterSearch', in: 'query', schema: { type: 'string', maxLength: 100 } },
-          { name: 'monsterLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+          { name: 'monsterLimit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
         ],
         responses: {
           200: { description: 'Encounter setup options', content: { 'application/json': { schema: successEnvelope() } } },
@@ -1568,7 +1573,7 @@ export const openApiDocument = {
           { name: 'type', in: 'query', schema: { type: 'string', maxLength: 100 } },
           { name: 'actorId', in: 'query', schema: { type: 'string', format: 'uuid' } },
           { name: 'sessionId', in: 'query', schema: { type: 'string', format: 'uuid' } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 10 } },
         ],
         responses: {
           200: { description: 'Newest-first event page', content: { 'application/json': { schema: successEnvelope({ type: 'array' }) } } },

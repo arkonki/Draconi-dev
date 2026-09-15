@@ -99,7 +99,7 @@ Read-only:
 
 - `list_campaigns`
 - `get_campaign_state`
-- `get_resume_state` (preferred reconnect/continuation read)
+- `get_resume_state` (preferred reconnect/continuation read; use `detail: "focused"` and `recent_roll_limit: 5` for AI-GM play)
 - `get_actor`
 - `get_combat_state`
 - `get_encounter_setup_options`
@@ -154,6 +154,18 @@ Modifying:
 
 The modifying tools have `readOnlyHint: false`, `idempotentHint: true`, and
 `openWorldHint: false`. Read-only tools advertise `readOnlyHint: true`.
+
+MCP write results are delta-oriented. Actor changes return field-level
+before/after values, and combat writes retain the active-turn summary without
+echoing the complete roster. Read `get_actor` or `get_combat_state` only when a
+later decision needs details that are not in the write result.
+
+For OpenAI Responses or Agents clients, enable
+[tool search and deferred loading](https://developers.openai.com/api/docs/guides/tools-tool-search)
+or restrict MCP `allowed_tools` to the active workflow. Deferred discovery is a
+client configuration, not an MCP-server flag. Draconi keeps the full endpoint
+available for compatibility; its measured 11-tool core campaign/session group
+is 24,386 serialized bytes.
 
 ## Trusted general rolls
 
@@ -428,6 +440,13 @@ durable container for the campaign events produced during one period of play:
    explicit unresolved threads (an empty array when there are none), and an
    optional ending scene.
 4. Use `get_session_history` when resuming later to retrieve prior summaries.
+
+History reads are deliberately bounded. `get_recent_events`, `get_roll_history`,
+and `get_session_history` default to 10 records. Follow `nextCursor` for roll
+history or the independent `nextCursors.sessions` and
+`nextCursors.checkpoints` values only when older records are actually needed.
+The normal continuation path is `get_resume_state` with `detail: "focused"`;
+history is a fallback when that snapshot does not contain enough context.
 
 Only one session may be active for a campaign. Completing it clears the active
 session pointer while keeping its immutable event history.

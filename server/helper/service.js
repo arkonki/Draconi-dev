@@ -12,7 +12,9 @@ import { requireCampaignAccess } from './auth.js';
 import { HelperError } from './errors.js';
 import { elapsedSecondsFromLegacyTimeTracker } from './campaignTime.js';
 import { conditionId } from './identifiers.js';
+import { projectResumeState } from './resumeProfiles.js';
 import { applyActorChangeSet, consumeRalliedAction, validateActorCanAct } from './rules.js';
+import { actorChangesForOutput } from './writeDeltas.js';
 import {
   parseTrustedDiceExpression,
   resolveTrustedManualRoll,
@@ -1079,38 +1081,68 @@ export async function getRecentEvents(user, campaignId, filters = {}) {
   const access = await requireCampaignAccess(pool, user, campaignId);
   return eventRows(pool, access, campaignId, {
     ...filters,
-    limit: filters.limit || 20,
+    limit: filters.limit || 10,
   }, user.id);
 }
 
-export async function getSessionHistory(user, campaignId, { limit = 20 } = {}) {
+export async function getSessionHistory(user, campaignId, {
+  limit = 10,
+  sessionCursor,
+  checkpointCursor,
+} = {}) {
   return withReadSnapshot(async (client) => {
     const access = await requireCampaignAccess(client, user, campaignId);
+    const sessionValues = [campaignId];
+    let sessionCursorClause = '';
+    if (sessionCursor) {
+      sessionValues.push(sessionCursor);
+      sessionCursorClause = `AND (created_at, id) < (
+        SELECT created_at, id FROM game_sessions WHERE id = $${sessionValues.length} AND campaign_id = $1
+      )`;
+    }
+    sessionValues.push(limit + 1);
+    const checkpointValues = [campaignId];
+    let checkpointCursorClause = '';
+    if (checkpointCursor) {
+      checkpointValues.push(checkpointCursor);
+      checkpointCursorClause = `AND (created_at, id) < (
+        SELECT created_at, id FROM game_session_checkpoints WHERE id = $${checkpointValues.length} AND campaign_id = $1
+      )`;
+    }
+    checkpointValues.push(limit + 1);
     const [{ rows }, { rows: checkpoints }] = await Promise.all([
       client.query(
         `SELECT * FROM game_sessions
          WHERE campaign_id = $1
-         ORDER BY created_at DESC
-         LIMIT $2`,
-        [campaignId, limit],
+           ${sessionCursorClause}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${sessionValues.length}`,
+        sessionValues,
       ),
       client.query(
         `SELECT * FROM game_session_checkpoints
          WHERE campaign_id = $1
+           ${checkpointCursorClause}
          ORDER BY created_at DESC, id DESC
-         LIMIT $2`,
-        [campaignId, limit],
+         LIMIT $${checkpointValues.length}`,
+        checkpointValues,
       ),
     ]);
-    const checkpointOutput = checkpoints.map((row) => checkpointForOutput(
+    const sessionPage = rows.slice(0, limit);
+    const checkpointPage = checkpoints.slice(0, limit);
+    const checkpointOutput = checkpointPage.map((row) => checkpointForOutput(
       row,
       { includeGm: access.isGm },
     ));
     return {
       campaignRevision: Number(access.campaign.helper_revision || 0),
-      sessions: rows.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
+      sessions: sessionPage.map((row) => sessionForOutput(row, { includeGm: access.isGm })),
       checkpoints: checkpointOutput,
-      latestCheckpoint: checkpointOutput[0] || null,
+      latestCheckpoint: checkpointCursor ? null : checkpointOutput[0] || null,
+      nextCursors: {
+        sessions: rows.length > limit ? sessionPage.at(-1)?.id || null : null,
+        checkpoints: checkpoints.length > limit ? checkpointPage.at(-1)?.id || null : null,
+      },
     };
   });
 }
@@ -1283,13 +1315,21 @@ export async function getRollRequest(user, campaignId, requestId) {
   };
 }
 
-export async function getRollHistory(user, campaignId, { encounterId, limit = 30 } = {}) {
+export async function getRollHistory(user, campaignId, { encounterId, cursor, limit = 10 } = {}) {
   const access = await requireCampaignAccess(pool, user, campaignId);
   const values = [campaignId];
   const clauses = ['request.campaign_id = $1'];
   if (encounterId) {
     values.push(encounterId);
     clauses.push(`request.encounter_id = $${values.length}`);
+  }
+  if (cursor) {
+    values.push(cursor);
+    clauses.push(`(request.created_at, request.id) < (
+      SELECT cursor_request.created_at, cursor_request.id
+      FROM roll_requests cursor_request
+      WHERE cursor_request.id = $${values.length} AND cursor_request.campaign_id = $1
+    )`);
   }
   if (!access.isGm) {
     values.push(user.id);
@@ -1298,7 +1338,7 @@ export async function getRollHistory(user, campaignId, { encounterId, limit = 30
       OR (request.visibility = 'assigned' AND request.assigned_user_id = $${values.length})
     )`);
   }
-  values.push(limit);
+  values.push(limit + 1);
   const { rows } = await pool.query(
     `SELECT request.*, result.resolution_source,
        result.submitted_by AS result_submitted_by,
@@ -1315,9 +1355,11 @@ export async function getRollHistory(user, campaignId, { encounterId, limit = 30
      LIMIT $${values.length}`,
     values,
   );
+  const page = rows.slice(0, limit);
   return {
     campaignRevision: Number(access.campaign.helper_revision || 0),
-    requests: rows.map(rollRequestForOutput),
+    requests: page.map(rollRequestForOutput),
+    nextCursor: rows.length > limit ? page.at(-1)?.id || null : null,
   };
 }
 
@@ -7134,7 +7176,7 @@ function monsterStat(stats, upper, lower, fallback) {
 
 export async function getEncounterSetupOptions(user, campaignId, {
   monsterSearch,
-  monsterLimit = 50,
+  monsterLimit = 20,
 } = {}) {
   const access = await requireCampaignAccess(pool, user, campaignId, { gm: true });
   const search = String(monsterSearch || '').trim();
@@ -7543,7 +7585,7 @@ export async function removeEncounterParticipant(user, input, { sourceClient } =
   });
 }
 
-export async function getCampaignState(user, campaignId, { recentEventLimit = 20 } = {}) {
+export async function getCampaignState(user, campaignId, { recentEventLimit = 10 } = {}) {
   const access = await requireCampaignAccess(pool, user, campaignId);
   const campaign = campaignForOutput(access.campaign, access.role);
   const { rows: sessions } = access.campaign.active_session_id
@@ -7572,7 +7614,11 @@ export async function getCampaignState(user, campaignId, { recentEventLimit = 20
   return result;
 }
 
-export async function getResumeState(user, campaignId, { actorId } = {}) {
+export async function getResumeState(user, campaignId, {
+  actorId,
+  detail = 'full',
+  recentRollLimit,
+} = {}) {
   return withReadSnapshot(async (client) => {
     const access = await requireCampaignAccess(client, user, campaignId);
     const campaignRevision = Number(access.campaign.helper_revision || 0);
@@ -7697,7 +7743,11 @@ export async function getResumeState(user, campaignId, { actorId } = {}) {
         OR (request.visibility = 'assigned' AND request.assigned_user_id = $${rollValues.length})
       )`);
     }
-    rollValues.push(30);
+    const effectiveRollLimit = Math.max(
+      1,
+      Math.min(30, Number(recentRollLimit) || (detail === 'full' ? 30 : 5)),
+    );
+    rollValues.push(effectiveRollLimit);
     const { rows: rollRows } = await client.query(
       `SELECT request.*, result.resolution_source,
          result.submitted_by AS result_submitted_by,
@@ -7720,7 +7770,7 @@ export async function getResumeState(user, campaignId, { actorId } = {}) {
     const checkpoint = checkpointForOutput(checkpointRows[0], { includeGm: access.isGm });
     const resumeScene = sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm });
     resumeScene.dangers = resumeScene.dangers.filter((danger) => danger.status !== 'resolved');
-    return {
+    const fullState = {
       schemaVersion: 'resume-state-v1',
       campaignRevision,
       campaign: campaignForOutput(access.campaign, access.role),
@@ -7747,6 +7797,10 @@ export async function getResumeState(user, campaignId, { actorId } = {}) {
       gameTime: gameTimeForOutput(access.campaign.game_time),
       ...(access.isGm ? { gmContext: access.campaign.gm_context || {} } : {}),
     };
+    return projectResumeState(fullState, {
+      detail,
+      recentRollLimit: effectiveRollLimit,
+    });
   });
 }
 
@@ -7817,6 +7871,8 @@ export async function applyActorChanges(user, input, { sourceClient } = {}) {
       campaign_revision: resultingRevision,
       event_ids: eventIds,
       summary: resolution.explanation,
+      changes: actorChangesForOutput(input.actor_id, resolution.events),
+      next: { read_required: false },
       state_excerpt: {
         actor: actorForOutput(resolution.result, { includeGm: access.isGm }),
         warnings: resolution.warnings,

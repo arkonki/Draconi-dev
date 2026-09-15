@@ -11,6 +11,7 @@ const combatId = '82783674-9f79-4539-bd97-d88b3c772cc0';
 const monsterId = 'a245161e-d43c-4f17-a702-e1cbf7ca22d7';
 const monsterActorId = 'f4974280-bb74-4560-a8c1-11117b6668af';
 const sessionId = '9e748766-03c7-48ca-a59b-d17d66173c3f';
+const checkpointId = 'eefc5d0d-69f4-46ce-b174-15c7b06df9dc';
 const missionId = 'f35f9f4e-65c8-4a7f-a63a-3aa66ac84f48';
 const threatId = '4a7fd3d4-384d-42bc-9362-2c6379d70291';
 const waypointId = 'b93bd6e4-7b86-4ccd-8639-cb5f5fd5dd56';
@@ -385,7 +386,13 @@ beforeEach(async () => {
       meta: { requestId: 'request-mission-complete', campaignRevision: 53 },
     })),
     getSessionHistory: vi.fn(async () => ({
-      data: { campaignRevision: 42, sessions: [] },
+      data: {
+        campaignRevision: 42,
+        sessions: [],
+        checkpoints: [],
+        latestCheckpoint: { id: checkpointId, continuationSummary: 'Duplicate of the first checkpoint.' },
+        nextCursors: { sessions: null, checkpoints: null },
+      },
       meta: { requestId: 'request-session-history', campaignRevision: 42 },
     })),
     getCampaignTime: vi.fn(async () => ({
@@ -540,6 +547,8 @@ beforeEach(async () => {
         campaign_revision: 43,
         event_ids: ['4f5ccf68-7f6f-44ae-8aae-b59757fdf934'],
         summary: 'Alaric took 2 damage and now has 12 HP.',
+        changes: [{ actor_id: actorId, field: 'hp.current', before: 14, after: 12 }],
+        next: { read_required: false },
         state_excerpt: { actor: { id: actorId, hp: { current: 12, max: 14 } } },
       },
       meta: { requestId: 'request-6', campaignRevision: 43 },
@@ -647,6 +656,24 @@ describe('Dragonbane MCP server', () => {
       success: true,
       campaign_revision: 42,
       data: { schemaVersion: 'resume-state-v1', campaignRevision: 42 },
+    });
+  });
+
+  it('forwards the token-conscious resume profile arguments', async () => {
+    await client.callTool({
+      name: 'get_resume_state',
+      arguments: {
+        campaign_id: campaignId,
+        actor_id: actorId,
+        detail: 'focused',
+        recent_roll_limit: 5,
+      },
+    });
+    expect(api.getResumeState).toHaveBeenCalledWith({
+      campaign_id: campaignId,
+      actor_id: actorId,
+      detail: 'focused',
+      recent_roll_limit: 5,
     });
   });
 
@@ -897,7 +924,12 @@ describe('Dragonbane MCP server', () => {
       success: true,
       campaign_revision: 43,
       event_ids: ['4f5ccf68-7f6f-44ae-8aae-b59757fdf934'],
+      state_excerpt: {
+        changes: [{ actor_id: actorId, field: 'hp.current', before: 14, after: 12 }],
+        next: { read_required: false },
+      },
     });
+    expect(result.structuredContent.state_excerpt).not.toHaveProperty('actor');
   });
 
   it('exposes the complete revision-safe combat workflow', async () => {
@@ -1047,8 +1079,13 @@ describe('Dragonbane MCP server', () => {
     expect(history.structuredContent).toMatchObject({
       success: true,
       campaign_revision: 42,
-      data: { sessions: [] },
+      data: {
+        sessions: [],
+        checkpoints: [],
+        nextCursors: { sessions: null, checkpoints: null },
+      },
     });
+    expect(history.structuredContent.data).not.toHaveProperty('latestCheckpoint');
 
     const started = await client.callTool({
       name: 'start_session',

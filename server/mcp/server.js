@@ -61,6 +61,7 @@ import {
   takeSoloRestInputSchema,
 } from '../helper/schemas.js';
 import { HelperApiClientError } from './client.js';
+import { compactWriteStateExcerpt } from '../helper/writeDeltas.js';
 import {
   actorChangesServiceInput,
   applyActorChangesMcpInputSchema,
@@ -105,10 +106,40 @@ function readResult(envelope) {
   };
 }
 
+function sessionHistoryReadResult(envelope) {
+  const data = { ...envelope.data };
+  delete data.latestCheckpoint;
+  return readResult({ ...envelope, data });
+}
+
 function writeResult(envelope) {
+  const data = envelope.data?.state_excerpt
+    ? { ...envelope.data, state_excerpt: compactWriteStateExcerpt(envelope.data.state_excerpt) }
+    : envelope.data;
   return {
-    structuredContent: envelope.data,
-    content: [{ type: 'text', text: envelope.data.summary }],
+    structuredContent: data,
+    content: [{ type: 'text', text: data.summary }],
+  };
+}
+
+function actorDeltaWriteResult(envelope) {
+  const data = envelope.data;
+  const result = {
+    success: data.success,
+    campaign_revision: data.campaign_revision,
+    event_ids: data.event_ids,
+    summary: data.summary,
+    state_excerpt: {
+      changes: data.changes || [],
+      next: data.next || { read_required: false },
+      ...(data.state_excerpt?.warnings?.length
+        ? { warnings: data.state_excerpt.warnings }
+        : {}),
+    },
+  };
+  return {
+    structuredContent: result,
+    content: [{ type: 'text', text: data.summary }],
   };
 }
 
@@ -157,7 +188,7 @@ function jsonResource(uri, data) {
     contents: [{
       uri: uri.href,
       mimeType: 'application/json',
-      text: JSON.stringify(data, null, 2),
+      text: JSON.stringify(data),
     }],
   };
 }
@@ -167,33 +198,11 @@ export function createDragonbaneMcpServer(apiClient) {
     { name: 'dragonbane-helper', version: '1.21.0' },
     {
       instructions: [
-        'Dragonbane Helper is authoritative. Before continuing a campaign, call get_resume_state for one consistent continuation snapshot.',
-        `Use the ${GM_WORKFLOW_URI} resource or a published Dragonbane workflow prompt for the complete session, recovery, and privacy procedures.`,
-        'Before every write use the latest campaign revision and a unique idempotency key.',
-        'On REVISION_CONFLICT, read state again and reassess; never repeat stale arguments.',
-        'After a disconnect or lost response, read campaign state and recent events before retrying. Reuse an idempotency key only for the exact same uncertain request.',
-        'If an identifier is missing, rediscover it with a read tool; never guess it. Resume an active session or combat from returned state instead of creating a duplicate.',
-        'Treat gmContext, private GM notes, hidden content, and GM-only open threads as secret. Never expose or hint at them in player-facing narration, events, or shared session summaries.',
-        'Use start_session before sustained play so later campaign and combat events are attached to the session; complete_session when play ends.',
-        'During an active session, use checkpoint_session to save the current structured scene and durable continuation summary instead of relying on narrative event text.',
-        'Use get_campaign_time before changing campaign time. Advance it only when play actually consumes a round, stretch, or shift. Report every due-roll notification returned by advance_campaign_time; never invent a universal encounter-check cadence or claim a roll was made until it was actually resolved.',
-        'To prepare combat, discover valid characters and monsters, create a planned encounter, add participants, then use start_combat to assign initiative and begin. A lone solo hero with Army of One requires two distinct initiative_slots.',
-        'During combat, resolve only the active actor, then advance the turn after its turn-consuming action.',
-        'For a trusted general roll, use request_roll first. Use resolve_roll_server only when the request mode permits server dice, then read the immutable result with get_roll_request. An ordinary failed check may use push_roll once, but only after the user chooses an inactive condition and describes how it applies; resolve the returned request according to its mode. Never supply physical dice through MCP or replace a returned result.',
-        'For solo play, call get_solo_state before narrating. Fortune, Inspiration, and skill-check results are authoritative only when returned by their tools.',
-        'Use resolve_solo_check for skill or attribute tests outside combat. An ordinary failure may be pushed exactly once with push_solo_check after the player explains the push and chooses either an inactive condition or the 3 WP Sole Survivor cost. Never push a Demon or an already-pushed result.',
-        'When a Solo check returns requiresFailForward, use resolve_solo_check_consequence exactly once for that roll. Ask the user to accept one explicit consequence or offer two contextual consequences for the server to choose with 1D6. Never claim a mechanical consequence before the tool applies it.',
-        'Use search_waypoint for a thorough Spot Hidden search and scavenge_waypoint for a quick exploration find; honor their recorded stretch and threat consequences and treat generic findings as prompts, not automatic inventory.',
-        'When treasure is awarded, never invent, quote, or choose official treasure-card contents. Ask the user to shuffle their physical deck, draw the awarded number, transcribe every drawn card (duplicates are valid), return the cards, and shuffle again. Only after both shuffle confirmations and all contents are supplied may you call record_manual_treasure_draw.',
-        'Use take_solo_rest only after the user chooses the rest type and any condition to clear. A shift rest requires explicit confirmation of a safe location; stretch and shift rests advance an active mission threat. Never clear poison, fear, or custom effects as a standard rest condition.',
-        'At 0 HP, use resolve_solo_dying_action for server-authoritative death rolls, self-rally, or life-saving Healing. Never declare recovery, injury, or death before the tool returns it. Self-rally uses the stored Persuasion value without a bane in Solo mode.',
-        'Use resolve_solo_injury_action only after the user explicitly chooses medical care or explicitly confirms a manual healed override. Medical care uses the stored Healing skill, successful care halves remaining recovery, failed care cannot be retried until the next shift, and shift rests advance temporary recovery automatically.',
-        'Use resolve_solo_narrative_damage only after the user confirms that narrative damage applies and whether severity is known. During active combat, use resolve_game_action instead.',
-        'Never reveal or infer a hidden waypoint. Use only the public waypoint fields returned by get_solo_state. Use add_solo_waypoints for diversions and begin_solo_return for cleared, dangerous, or impossible return routes.',
-        'When a threat reaches 6, narrate and resolve its event with resolve_solo_threat. A recurring threat resets to 1 only after resolution; replace a removed non-recurring threat with set_solo_threat while delving.',
-        'After a successful Solo mission, complete the authoritative between-mission sequence before starting another: select exactly five new marks, resolve all marked skills with D20 greater than skill and maximum 18, then claim any heroic ability rewards returned for skills reaching 18.',
-        'Use generate_solo_npc for rules-compliant Minions and Bosses. Use resolve_solo_npc_behavior for their role-based D6 attack action, uncertain intent, or possible flight/surrender; then apply any attack roll, damage, defense, fear, or condition through the normal combat tools.',
-        'Never invent HP, WP, conditions, inventory, combat, or campaign facts.',
+        'Draconi is authoritative. Before continuing an existing campaign, call get_resume_state with detail="focused" and never reconstruct state from conversation memory.',
+        'Before each write, use the latest campaign revision and a unique idempotency key. On REVISION_CONFLICT, reread state and reassess. After an uncertain lost response, verify state and events before retrying; reuse a key only for the exact same request.',
+        'Never guess identifiers, mechanics, dice, or stored state. Resume returned active sessions and combats instead of creating duplicates.',
+        'Keep gmContext, private GM notes, hidden content, and GM-only threads secret from player-facing output.',
+        `Load ${GM_WORKFLOW_URI} or a published workflow prompt for session, combat, roll, Solo, recovery, treasure, advancement, NPC, and privacy procedures.`,
       ].join(' '),
     },
   );
@@ -216,7 +225,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('get_resume_state', {
     title: 'Resume a Dragonbane campaign',
-    description: 'Preferred continuation read. Returns one revision-consistent snapshot containing every campaign character, focus character, scene, latest checkpoint, active combat, Solo progress, pending roll handoffs, and game time.',
+    description: 'Preferred continuation read. Use detail="focused" for normal AI-GM turns, "compact" for status checks, and "full" only for diagnostics or complete exports. The default remains full for compatibility.',
     inputSchema: getResumeStateInputSchema,
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
@@ -240,7 +249,7 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('get_roll_history', {
     title: 'List trusted campaign rolls',
-    description: 'Read visible pending and resolved trusted rolls, optionally restricted to one encounter. Use this for campaign roll history instead of reconstructing results from narrative events.',
+    description: 'Read one bounded page of visible trusted rolls, optionally for one encounter. Follow nextCursor only when older results are needed.',
     inputSchema: getRollHistoryInputSchema,
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
@@ -554,11 +563,11 @@ export function createDragonbaneMcpServer(apiClient) {
 
   server.registerTool('get_session_history', {
     title: 'Get game session history',
-    description: 'List recent game sessions and their durable summaries. GM access also includes private GM notes.',
+    description: 'Read one bounded page of sessions and checkpoints. Follow each next cursor only when older history is needed; GM access includes private notes.',
     inputSchema: getSessionHistoryInputSchema,
     outputSchema: mcpReadResultSchema,
     annotations: READ_ONLY,
-  }, safe(async (input) => readResult(await apiClient.getSessionHistory(input))));
+  }, safe(async (input) => sessionHistoryReadResult(await apiClient.getSessionHistory(input))));
 
   server.registerTool('start_session', {
     title: 'Start a game session',
@@ -680,7 +689,7 @@ export function createDragonbaneMcpServer(apiClient) {
     inputSchema: applyActorChangesMcpInputSchema,
     outputSchema: mcpWriteResultSchema,
     annotations: MODIFYING,
-  }, safe(async (input) => writeResult(await apiClient.applyActorChanges(
+  }, safe(async (input) => actorDeltaWriteResult(await apiClient.applyActorChanges(
     actorChangesServiceInput(input),
   ))));
 
@@ -698,7 +707,7 @@ export function createDragonbaneMcpServer(apiClient) {
     { title: 'Campaign state', description: 'Compact authoritative campaign snapshot', mimeType: 'application/json' },
     safeResource(async (uri, { campaignId }) => jsonResource(
       uri,
-      (await apiClient.getCampaignState({ campaign_id: campaignId, recent_event_limit: 20 })).data,
+      (await apiClient.getCampaignState({ campaign_id: campaignId, recent_event_limit: 10 })).data,
     )),
   );
 
@@ -708,7 +717,7 @@ export function createDragonbaneMcpServer(apiClient) {
     { title: 'Campaign resume state', description: 'Revision-consistent authoritative continuation snapshot', mimeType: 'application/json' },
     safeResource(async (uri, { campaignId }) => jsonResource(
       uri,
-      (await apiClient.getResumeState({ campaign_id: campaignId })).data,
+      (await apiClient.getResumeState({ campaign_id: campaignId, detail: 'focused' })).data,
     )),
   );
 

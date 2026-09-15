@@ -7,23 +7,37 @@ Reduce the token cost of the Draconi MCP integration without weakening authoriza
 The current baseline is:
 
 - 61 registered MCP tools
-- Approximately 136,811 serialized characters in `tools/list`
-- Roughly 27,000–34,000 model tokens for the complete tool catalog, depending on tokenizer
-- Approximately 6,071 characters, or roughly 1,500 tokens, in always-on server instructions
-- A resume payload that duplicates focus-character, scene, time, roll, checkpoint, and equipment data
+- 108,193 serialized bytes in the backwards-compatible full `tools/list`
+- Roughly 22,000–27,000 model tokens for the complete tool catalog, depending on tokenizer
+- 818 bytes in always-on server instructions
+- A legacy full resume payload that remains available for compatibility; focused and compact profiles remove its duplicate projections
+
+## Implementation status — 2026-09-15
+
+- Phase 0 measurement coverage is complete. Deterministic full-catalog, per-tool, surface, core-catalog, instruction, representative resume, read, and write measurements now run through `npm run mcp:measure` and regression tests.
+- Phase 1 core work is complete. Always-on instructions contain only universal authority, revision, idempotency, recovery, identifier, and privacy rules; detailed procedures remain in the GM workflow resource and prompts.
+- MCP JSON resources now use compact serialization.
+- Phase 3 resume profiles are implemented across MCP, REST, and the shared Helper service. Omitted `detail` remains the backwards-compatible `resume-state-v1`; `compact` and `focused` return `resume-state-v2`.
+- Phase 4 resume deduplication is implemented in the v2 profiles. They remove repeated character/equipment projections, nested campaign scene/time, checkpoint scene, and pending/recent roll overlap.
+- AI-GM workflow instructions and prompts now prefer `detail="focused"` with five recent rolls; `full` remains available for diagnostics and existing clients.
+- Compact and focused response budgets are enforced against six deterministic campaign shapes. Current maxima are 3,547 bytes compact and 21,769 bytes focused, versus up to 184,985 bytes for the legacy full response.
+- Phase 2 client-capability analysis is complete. [OpenAI tool search/deferred loading](https://developers.openai.com/api/docs/guides/tools-tool-search) is configured by the Responses or Agents client, not by an MCP-server capability flag. The measured 11-tool core surface is 24,386 bytes, within the 40 KB target; the complete endpoint remains available for compatibility. Client integrations should enable deferred loading or restrict `allowed_tools` to the relevant capability group.
+- Phase 5 is implemented at the MCP response boundary for actor and combat writes. `apply_actor_changes` returns a 299-byte field-level delta; combat writes retain the active-turn summary without echoing large rosters; representative ordinary writes are 299–1,124 bytes. A broader per-operation audit remains rollout work.
+- Phase 6 is complete. Recent events, trusted rolls, and session/checkpoint history default to 10 records; roll and session history expose continuation cursors; monster discovery defaults to 20; MCP session history omits its duplicate latest-checkpoint projection.
+- Phase 7 compact resource serialization and generic output-schema reduction are complete. The repeated output-schema surface fell from 39,335 to 9,882 bytes, reducing the full catalog by about 29.5 KB without changing runtime structured results. Further input-description trimming is optional and should be judged against model reliability.
 
 ## Target budgets
 
 | Surface | Current baseline | Target |
 |---|---:|---:|
-| Core `tools/list` | 136,811 characters | 40,000 characters or less |
-| Always-on server instructions | 6,071 characters | 1,500 characters or less |
-| Typical focused resume response | To be measured | 25,000 characters or less |
-| Compact resume response | Not available | 12,000 characters or less |
-| Ordinary write response | To be measured | 5,000 characters or less |
-| Default recent rolls | 30 | 5–10 |
-| Default recent events | 20 | 10 |
-| Default session history | 20 sessions and 20 checkpoints | 5–10 combined records |
+| Core `tools/list` | 24,386 bytes when client-filtered | 40,000 bytes or less |
+| Always-on server instructions | 818 bytes | 1,500 bytes or less |
+| Typical focused resume response | 8,367–21,769 bytes in fixtures | 25,000 bytes or less |
+| Compact resume response | 2,588–3,547 bytes in fixtures | 12,000 bytes or less |
+| Ordinary write response | 299–1,124 bytes in fixtures | 5,000 bytes or less |
+| Default recent rolls | 10 history / 5 focused resume | 5–10 |
+| Default recent events | 10 | 10 |
+| Default session history | 10 sessions and 10 checkpoints | 5–10 per collection |
 
 Budgets should be enforced using serialized JSON byte or character counts in automated tests. Tokenizer-specific measurements may be collected as diagnostics, but CI should use deterministic character counts.
 

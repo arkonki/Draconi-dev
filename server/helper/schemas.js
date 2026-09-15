@@ -16,12 +16,14 @@ export const campaignIdInputSchema = z.object({
 
 export const getCampaignStateInputSchema = z.object({
   campaign_id: uuidSchema,
-  recent_event_limit: z.coerce.number().int().min(1).max(50).default(20),
+  recent_event_limit: z.coerce.number().int().min(1).max(50).default(10),
 }).strict();
 
 export const getResumeStateInputSchema = z.object({
   campaign_id: uuidSchema,
   actor_id: uuidSchema.optional(),
+  detail: z.enum(['compact', 'focused', 'full']).optional(),
+  recent_roll_limit: z.coerce.number().int().min(1).max(30).optional(),
 }).strict();
 
 const trustedRollKindSchema = z.enum(['generic', 'check', 'damage', 'recovery', 'advancement']);
@@ -62,7 +64,8 @@ export const getRollRequestInputSchema = z.object({
 export const getRollHistoryInputSchema = z.object({
   campaign_id: uuidSchema,
   encounter_id: uuidSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(30),
+  cursor: uuidSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
 }).strict();
 
 const resolveRollRequestFields = {
@@ -769,7 +772,7 @@ export const getCombatStateInputSchema = z.object({
 export const getEncounterSetupOptionsInputSchema = z.object({
   campaign_id: uuidSchema,
   monster_search: z.string().trim().max(100).optional(),
-  monster_limit: z.coerce.number().int().min(1).max(100).default(50),
+  monster_limit: z.coerce.number().int().min(1).max(100).default(20),
 }).strict();
 
 export const getRecentEventsInputSchema = z.object({
@@ -779,12 +782,14 @@ export const getRecentEventsInputSchema = z.object({
   type: z.string().trim().min(1).max(100).optional(),
   actor_id: uuidSchema.optional(),
   session_id: uuidSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
 }).strict();
 
 export const getSessionHistoryInputSchema = z.object({
   campaign_id: uuidSchema,
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  session_cursor: uuidSchema.optional(),
+  checkpoint_cursor: uuidSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 }).strict();
 
 const sceneVisibilitySchema = z.enum(['players', 'gm']).default('players');
@@ -1177,26 +1182,9 @@ export const appendCampaignEventInputSchema = z.object({
 export const appendCampaignEventBodySchema = appendCampaignEventInputSchema
   .omit({ campaign_id: true, expected_revision: true, idempotency_key: true });
 
-export const mcpReadResultSchema = z.object({
-  success: z.boolean(),
-  data: z.unknown().optional(),
-  campaign_revision: z.number().int().min(0).optional(),
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-    details: z.unknown().optional(),
-  }).optional(),
-}).strict();
+// Tool results remain fully structured at runtime. Publishing only the stable
+// discriminator avoids repeating the same generic envelope for every tool.
+const mcpResultSchema = z.looseObject({ success: z.boolean() });
 
-export const mcpWriteResultSchema = z.object({
-  success: z.boolean(),
-  campaign_revision: z.number().int().min(0).optional(),
-  event_ids: z.array(uuidSchema).optional(),
-  summary: z.string().optional(),
-  state_excerpt: z.unknown().optional(),
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-    details: z.unknown().optional(),
-  }).optional(),
-}).strict();
+export const mcpReadResultSchema = mcpResultSchema;
+export const mcpWriteResultSchema = mcpResultSchema;
