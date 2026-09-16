@@ -463,10 +463,10 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
           <span className="attribute-circle-value text-3xl font-serif font-bold transition-all duration-150 sm:group-hover/roll:scale-75 sm:group-hover/roll:opacity-0 group-focus-visible/roll:scale-75 group-focus-visible/roll:opacity-0">
             {displayValue}
           </span>
-          <span className="pointer-events-none absolute bottom-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[#1a472a]/75 sm:inset-0 sm:bottom-auto sm:translate-y-1 sm:flex-col sm:justify-center sm:pt-2 sm:opacity-0 sm:transition-all sm:duration-150 sm:group-hover/roll:translate-y-0 sm:group-hover/roll:opacity-100 group-focus-visible/roll:translate-y-0 group-focus-visible/roll:opacity-100">
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center pt-2 text-[#1a472a] opacity-0 transition-all duration-150 sm:group-hover/roll:opacity-100 group-focus-visible/roll:opacity-100">
             <Dices size={20} aria-hidden="true" />
-            <span className="sm:mt-0.5">Roll</span>
           </span>
+          <span className="pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest text-[#1a472a]/75 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover/roll:opacity-100 group-focus-visible/roll:opacity-100">Roll</span>
         </button>
 
         {editEnabled && <button
@@ -627,6 +627,16 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
           headerClassName="border-b-2 border-[#d4c5a3] bg-[#fdfbf7]"
           titleClassName="font-serif text-[#1a472a]"
           bodyClassName="bg-[#fdfbf7]"
+          footer={isEditing ? (
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={cancelNoteEditing}>Cancel</Button>
+              <Button variant="primary" onClick={handleSaveNote}>Save Entry</Button>
+            </div>
+          ) : (
+            <div className="flex justify-end">
+              <Button size="sm" variant="secondary" onClick={() => { setSavedNoteSnapshot(activeNote ? { ...activeNote } : null); setIsEditing(true); }} icon={Pencil}>Edit</Button>
+            </div>
+          )}
         >
              <div className="p-4 md:p-6 flex flex-col min-h-full">
                 {isEditing ? (
@@ -644,16 +654,9 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
                     ) : (
                       <textarea ref={textareaRef} aria-label="Journal entry content" className="min-h-[45dvh] flex-1 p-4 bg-white resize-none outline-none font-serif text-stone-800 w-full border-x border-b border-stone-200" value={activeNote.content} onChange={e => setActiveNote({...activeNote, content: e.target.value})} />
                     )}
-                    <div className="mt-4 flex justify-end gap-2">
-                       <Button variant="secondary" onClick={cancelNoteEditing}>Cancel</Button>
-                       <Button variant="primary" onClick={handleSaveNote}>Save Entry</Button>
-                    </div>
                   </>
                 ) : (
                   <>
-                    <div className="flex justify-end border-b-2 border-stone-200 pb-2 mb-4">
-                      <Button size="sm" variant="secondary" onClick={() => { setSavedNoteSnapshot(activeNote ? { ...activeNote } : null); setIsEditing(true); }} icon={Pencil}>Edit</Button>
-                    </div>
                     <div className="flex-1 overflow-y-auto prose prose-stone max-w-none custom-scrollbar pr-2">
                        <MarkdownRenderer content={activeNote.content} />
                     </div>
@@ -695,6 +698,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   const [soloSafeLocation, setSoloSafeLocation] = useState(false);
   const [isSoloRestSaving, setIsSoloRestSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'equipment' | 'abilities' | 'notes'>('equipment');
+  const lowerPanelRef = useRef<HTMLDivElement>(null);
 
   const characterInjuriesQuery = useQuery({
     queryKey: ['character-injuries', character?.party_id, character?.id],
@@ -737,6 +741,18 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [showSevereInjuriesModal]);
+
+  useEffect(() => {
+    if (!showSecondaryActions) return undefined;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-character-more-menu]') && !target?.closest('[data-character-more-trigger]')) {
+        setShowSecondaryActions(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [showSecondaryActions]);
 
   if (isLoading) return <div className={`${embedded ? 'min-h-[24rem]' : 'min-h-screen'} flex items-center justify-center bg-[#f5f0e1]`}><LoadingSpinner size="lg" /><span className="ml-3 font-serif text-xl text-[#1a472a]">Unrolling Scroll...</span></div>;
   if (error) return <div className="p-4 text-center text-red-500 font-serif">Error loading scroll: {error}</div>;
@@ -897,6 +913,33 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
     action();
   };
 
+  const openJournal = () => {
+    setShowSecondaryActions(false);
+    setActiveTab('notes');
+    window.setTimeout(() => lowerPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
+  const handleMoreMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setShowSecondaryActions(false);
+      return;
+    }
+    if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key) || items.length === 0) return;
+    event.preventDefault();
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : ['ArrowDown', 'ArrowRight'].includes(event.key)
+          ? (currentIndex + 1 + items.length) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex].focus();
+  };
+
   const openGeneralRoll = () => toggleDiceRoller({
     initialDice: ['d20'],
     rollMode: 'generic',
@@ -904,7 +947,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   });
 
   return (
-    <div className={`character-sheet-root ${embedded ? 'min-h-0' : 'min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-hidden`}>
+    <div className={`character-sheet-root ${embedded ? 'character-sheet-embedded min-h-0' : 'character-sheet-standalone min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-hidden`}>
       <div className={`character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] border-x-0 md:border-2 border-[#d4c5a3] relative ${embedded ? 'shadow-none md:border-0' : 'shadow-2xl'}`}>
         
         {/* HEADER */}
@@ -934,18 +977,33 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
                   <span className="mt-1 text-xs font-bold uppercase">{btn.label}</span>
                 </button>
               ))}
-              <button type="button" onClick={() => setShowSecondaryActions((current) => !current)} aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
+              <button type="button" data-character-more-trigger onClick={() => setShowSecondaryActions((current) => !current)} aria-haspopup="menu" aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
                 <MoreHorizontal size={18} /><span className="mt-1 text-xs font-bold uppercase">More</span>
               </button>
             </div>
           </div>
           {showSecondaryActions && (
-            <div className="fixed bottom-16 right-3 z-50 grid w-64 grid-cols-2 gap-2 rounded-lg border border-stone-300 bg-[#fdfbf7] p-3 text-stone-800 shadow-2xl md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.5rem)]" role="menu" aria-label="More character actions">
-              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowBioModal(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><UserSquare size={18} /> Bio</button>
-              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowAdvancementSystem(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><Award size={18} /> Advancement</button>
-              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowPlayerAidModal(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><HelpCircle size={18} /> Player Aid</button>
-              <button type="button" role="menuitem" onClick={() => { setIsAttributeEditMode((current) => !current); setShowSecondaryActions(false); }} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><Pencil size={18} /> {isAttributeEditMode ? 'Stop editing' : 'Edit attributes'}</button>
-              <div className="col-span-2"><PdfExportButton character={character} /></div>
+            <div data-character-more-menu className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-[#d4c5a3] bg-[#fdfbf7] text-stone-800 shadow-[0_18px_50px_rgba(28,25,23,0.28)] md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.25rem)]" role="menu" aria-label="More character actions" onKeyDown={handleMoreMenuKeyDown}>
+              <div className="border-b border-[#d4c5a3] bg-[#1a472a] px-4 py-3 text-left font-serif text-sm font-bold uppercase tracking-wider text-[#e8d5b5]">Character options</div>
+              <div className="grid grid-cols-1 gap-1 p-2">
+                {[
+                  { label: 'Bio & appearance', icon: UserSquare, action: () => openSecondaryAction(() => setShowBioModal(true)) },
+                  { label: 'Journal', icon: Scroll, action: openJournal },
+                  { label: 'Advancement', icon: Award, action: () => openSecondaryAction(() => setShowAdvancementSystem(true)) },
+                  { label: 'Player aid', icon: HelpCircle, action: () => openSecondaryAction(() => setShowPlayerAidModal(true)) },
+                ].map((item) => (
+                  <button key={item.label} type="button" role="menuitem" onClick={item.action} className="group flex min-h-12 w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm font-bold text-stone-700 transition-colors hover:border-[#d4c5a3] hover:bg-[#f0e6d2] hover:text-[#1a472a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a472a]">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-stone-100 text-[#1a472a] transition-colors group-hover:bg-[#1a472a] group-hover:text-[#e8d5b5]"><item.icon size={17} /></span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+                <button type="button" role="menuitem" aria-pressed={isAttributeEditMode} onClick={() => { setIsAttributeEditMode((current) => !current); setShowSecondaryActions(false); }} className={`group flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a472a] ${isAttributeEditMode ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-transparent text-stone-700 hover:border-[#d4c5a3] hover:bg-[#f0e6d2] hover:text-[#1a472a]'}`}>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${isAttributeEditMode ? 'bg-amber-200 text-amber-900' : 'bg-stone-100 text-[#1a472a] group-hover:bg-[#1a472a] group-hover:text-[#e8d5b5]'}`}><Pencil size={17} /></span>
+                  <span>{isAttributeEditMode ? 'Finish editing attributes' : 'Edit attributes'}</span>
+                </button>
+                <div className="my-1 h-px bg-[#d4c5a3]" aria-hidden="true" />
+                <PdfExportButton character={character} variant="menu" />
+              </div>
             </div>
           )}
         </div>
@@ -1113,7 +1171,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
             </div>
           </div>
 
-          <div className="w-full">
+          <div ref={lowerPanelRef} className="w-full scroll-mt-16">
              <div className="character-sheet-lower-panel bg-white border-2 border-stone-300 flex flex-col rounded-sm shadow-md">
                 <div className="character-sheet-tabs relative flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto after:pointer-events-none after:sticky after:right-0 after:w-8 after:shrink-0 after:bg-gradient-to-l after:from-stone-200 after:to-transparent md:after:hidden">
                    <button onClick={() => setActiveTab('equipment')} className={`character-sheet-tab-button flex-1 min-w-[150px] py-3 px-4 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
@@ -1130,15 +1188,16 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
         </div>
 
         <div className="h-4 bg-[#1a472a] border-t-4 border-[#d4c5a3]"></div>
-        <nav className="sticky bottom-0 z-40 grid grid-cols-5 border-t border-[#d4c5a3] bg-[#1a472a] pb-[max(0.25rem,env(safe-area-inset-bottom))] text-[#e8d5b5] shadow-[0_-4px_16px_rgba(0,0,0,0.2)] md:hidden" aria-label="Character actions">
+        <nav className={`sticky bottom-0 z-40 grid ${canCastSpells() ? 'grid-cols-6' : 'grid-cols-5'} border-t border-[#d4c5a3] bg-[#1a472a] pb-[max(0.25rem,env(safe-area-inset-bottom))] text-[#e8d5b5] shadow-[0_-4px_16px_rgba(0,0,0,0.2)] md:hidden`} aria-label="Character actions">
           {[
             { label: 'Roll', icon: Dices, action: openGeneralRoll },
             { label: 'Skills', icon: Book, action: () => setShowSkillsModal(true) },
             { label: 'Inventory', icon: Package, action: () => setShowInventoryModal(true) },
+            ...(canCastSpells() ? [{ label: 'Spells', icon: Sparkles, action: () => setShowSpellcastingModal(true) }] : []),
             { label: 'Rest', icon: Bed, action: () => setShowRestOptionsModal(true) },
             { label: 'More', icon: MoreHorizontal, action: () => setShowSecondaryActions((current) => !current) },
           ].map((action) => (
-            <button key={action.label} type="button" onClick={action.action} className="flex min-h-14 flex-col items-center justify-center gap-1 px-1 text-xs font-bold transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#e8d5b5]">
+            <button key={action.label} type="button" data-character-more-trigger={action.label === 'More' ? '' : undefined} aria-haspopup={action.label === 'More' ? 'menu' : undefined} aria-expanded={action.label === 'More' ? showSecondaryActions : undefined} onClick={action.action} className="flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-bold transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#e8d5b5] sm:text-xs">
               <action.icon size={19} aria-hidden="true" />
               <span>{action.label}</span>
             </button>
@@ -1185,6 +1244,58 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #1a472a; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+          .character-sheet-standalone {
+            padding: 0.5rem !important;
+          }
+          .character-sheet-shell {
+            width: 100%;
+          }
+          .character-sheet-header {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+          }
+          .character-sheet-main {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+          }
+          .character-sheet-top-grid,
+          .character-sheet-name-vitals {
+            column-gap: 1rem !important;
+          }
+          .character-sheet-attributes {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+          }
+          .character-sheet-attributes-grid {
+            grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+            column-gap: 0.5rem !important;
+            row-gap: 0 !important;
+          }
+          .attribute-circle-shell {
+            max-width: none !important;
+          }
+          .attribute-circle-shell > div {
+            width: clamp(4.75rem, 10.5vw, 5.75rem) !important;
+            height: clamp(4.75rem, 10.5vw, 5.75rem) !important;
+            border-width: 3px !important;
+          }
+          .attribute-circle-value {
+            font-size: 1.5rem !important;
+          }
+          .attribute-circle-name {
+            font-size: 0.55rem !important;
+            letter-spacing: 0.08em !important;
+          }
+          .attribute-condition-button {
+            min-height: 2rem !important;
+            margin-top: 0.25rem !important;
+            padding: 0.25rem 0.125rem !important;
+            font-size: clamp(0.48rem, 1.1vw, 0.6rem) !important;
+            letter-spacing: 0.025em !important;
+          }
+        }
 
       `}</style>
     </div>

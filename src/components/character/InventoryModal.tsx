@@ -415,14 +415,57 @@ export const MoneyManagementModal = ({
         <div className="flex flex-col items-center"><label className={`text-xs font-bold uppercase tracking-wider mb-2 ${color}`}>{label}</label><div className="flex items-center gap-3"><button onClick={() => setter(Math.max(0, value - 1))} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Minus size={20} strokeWidth={3} /></button><div className="w-16 h-12 flex items-center justify-center bg-gray-50 border-2 border-gray-200 rounded-xl"><span className="text-xl font-mono font-bold">{value}</span></div><button onClick={() => setter(value + 1)} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Plus size={20} strokeWidth={3} /></button></div><div className="flex gap-1 mt-2">{[5, 10].map(amt => (<button key={amt} onClick={() => setter(value + amt)} className="px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded text-gray-500 hover:bg-gray-100">+{amt}</button>))}</div></div>
     );
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[80]"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in zoom-in-95 duration-200 overflow-hidden"><div className="p-4 border-b bg-gray-50 flex justify-between items-center"><h3 className="text-lg font-bold text-gray-800">Wallet</h3><button onClick={onClose} className="p-2 bg-gray-200 rounded-full hover:bg-gray-300 transition-colors"><X size={18} /></button></div><div className="p-6"><div className="mb-8 p-4 bg-yellow-50 border border-yellow-100 text-center rounded-xl shadow-sm"><p className="text-xs text-yellow-700 font-bold uppercase tracking-widest mb-1">Current Balance</p><p className="text-3xl font-serif font-bold text-yellow-900">{formatCost(currentMoney)}</p></div><div className="space-y-6 mb-8"><CoinInput label="Gold" value={gold} setter={setGold} color="text-yellow-600" /><CoinInput label="Silver" value={silver} setter={setSilver} color="text-gray-500" /><CoinInput label="Copper" value={copper} setter={setCopper} color="text-orange-700" /></div>{error && <ErrorMessage message={error} />}<div className="grid grid-cols-2 gap-4"><button onClick={() => handleTransaction(-1)} className="py-4 bg-red-100 text-red-800 font-bold rounded-xl hover:bg-red-200 transition-colors flex items-center justify-center gap-2"><MinusCircle size={20} /> Spend</button><button onClick={() => handleTransaction(1)} className="py-4 bg-green-100 text-green-800 font-bold rounded-xl hover:bg-green-200 transition-colors flex items-center justify-center gap-2"><Plus size={20} /> Add</button></div></div></div></div>
+        <AccessibleDialog
+            onClose={onClose}
+            title="Wallet"
+            description={`Current balance: ${formatCost(currentMoney)}`}
+            size="sm"
+            layer="nested"
+            panelClassName="rounded-2xl"
+            bodyClassName="p-6"
+        >
+            <div className="mb-8 rounded-xl border border-yellow-100 bg-yellow-50 p-4 text-center shadow-sm">
+                <p className="text-sm font-bold uppercase tracking-widest text-yellow-700">Current Balance</p>
+                <p className="font-serif text-3xl font-bold text-yellow-900">{formatCost(currentMoney)}</p>
+            </div>
+            <div className="mb-8 space-y-6">
+                <CoinInput label="Gold" value={gold} setter={setGold} color="text-yellow-600" />
+                <CoinInput label="Silver" value={silver} setter={setSilver} color="text-gray-500" />
+                <CoinInput label="Copper" value={copper} setter={setCopper} color="text-orange-700" />
+            </div>
+            {error && <ErrorMessage message={error} />}
+            <div className="grid grid-cols-2 gap-4">
+                <button type="button" onClick={() => handleTransaction(-1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-100 py-3 font-bold text-red-800 transition-colors hover:bg-red-200"><MinusCircle size={20} /> Spend</button>
+                <button type="button" onClick={() => handleTransaction(1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-green-100 py-3 font-bold text-green-800 transition-colors hover:bg-green-200"><Plus size={20} /> Add</button>
+            </div>
+        </AccessibleDialog>
     );
 };
 
 const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: number) => void; }) => {
     const [amount, setAmount] = useState<number>(1);
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[60]"><div className="bg-white rounded-lg shadow-xl w-full max-w-sm"><div className="p-4 border-b flex justify-between items-center bg-green-50 rounded-t-lg"><h3 className="text-lg font-bold flex items-center gap-2 text-green-800"><Utensils className="w-5 h-5" /> Forage & Hunt</h3><button onClick={onClose} className="p-1 rounded-full hover:bg-green-100 text-green-800"><X size={20} /></button></div><div className="p-6"><p className="text-sm text-gray-600 mb-4">Enter amount of rations obtained.</p><div className="bg-gray-50 p-3 rounded border border-gray-200 text-xs text-gray-500 mb-6 space-y-1"><p><strong>Fishing:</strong> Rod (D4), Net (D6)</p><p><strong>Hunting:</strong> Squirrel/Crow (1), Rabbit (D3), Fox (D4), Boar (2D6), Deer (2D8)</p><p><strong>Foraging:</strong> Mushrooms/Roots (D3)</p></div><div className="flex items-center justify-center gap-4 mb-6"><button onClick={() => setAmount(Math.max(1, amount - 1))} className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-100"><MinusCircle size={20} /></button><span className="text-3xl font-bold font-mono w-16 text-center">{amount}</span><button onClick={() => setAmount(amount + 1)} className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-100"><Plus size={20} /></button></div><Button variant="primary" className="w-full bg-green-700 hover:bg-green-800" onClick={() => onAdd(amount)}>Add {amount} Ration{amount !== 1 ? 's' : ''}</Button></div></div></div>
+        <AccessibleDialog
+            onClose={onClose}
+            title="Forage & Hunt"
+            description="Enter the number of rations obtained."
+            icon={<Utensils className="h-5 w-5 text-green-700" />}
+            size="sm"
+            layer="nested"
+            bodyClassName="p-6"
+        >
+            <div className="mb-6 space-y-1 rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                <p><strong>Fishing:</strong> Rod (D4), Net (D6)</p>
+                <p><strong>Hunting:</strong> Squirrel/Crow (1), Rabbit (D3), Fox (D4), Boar (2D6), Deer (2D8)</p>
+                <p><strong>Foraging:</strong> Mushrooms/Roots (D3)</p>
+            </div>
+            <div className="mb-6 flex items-center justify-center gap-4">
+                <button type="button" aria-label="Remove one ration" onClick={() => setAmount(Math.max(1, amount - 1))} className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 hover:bg-gray-100"><MinusCircle size={20} /></button>
+                <output aria-live="polite" className="w-16 text-center font-mono text-3xl font-bold">{amount}</output>
+                <button type="button" aria-label="Add one ration" onClick={() => setAmount(amount + 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 hover:bg-gray-100"><Plus size={20} /></button>
+            </div>
+            <Button variant="primary" className="w-full bg-green-700 hover:bg-green-800" onClick={() => onAdd(amount)}>Add {amount} Ration{amount !== 1 ? 's' : ''}</Button>
+        </AccessibleDialog>
     );
 };
 
@@ -891,9 +934,19 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
             {/* Animal Selector Modal */}
             {animalSelector && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[100] backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 overflow-hidden animate-in zoom-in-95 duration-200">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Equip {animalSelector.item.name} to...</h3>
+                <AccessibleDialog
+                    onClose={() => {
+                        const eq = structuredClone(character.equipment);
+                        eq.inventory = mergeIntoInventory(eq.inventory, animalSelector.item);
+                        handleUpdateEquipment(eq);
+                        setAnimalSelector(null);
+                    }}
+                    title={`Equip ${animalSelector.item.name}`}
+                    description="Choose which animal carries this item."
+                    size="sm"
+                    layer="nested"
+                    bodyClassName="p-6"
+                >
                         <div className="space-y-2 mb-6">
                             {animalSelector.candidates.map(animal => (
                                 <button
@@ -925,12 +978,24 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                         >
                             Cancel
                         </Button>
-                    </div>
-                </div>
+                </AccessibleDialog>
             )}
 
             {itemToDelete && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[90] backdrop-blur-sm"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center transform transition-all scale-100"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600"><Trash2 size={28} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Drop Item?</h3><p className="text-sm text-gray-500 mb-6">Are you sure you want to drop <strong>{itemToDelete.name}</strong>? {itemToDelete.quantity > 1 ? "1 unit will be removed." : "This cannot be undone."}</p><div className="grid grid-cols-2 gap-3"><Button variant="ghost" onClick={() => setItemToDelete(null)}>Cancel</Button><Button variant="danger" onClick={confirmDropItem}>Confirm</Button></div></div></div>
+                <AccessibleDialog
+                    onClose={() => setItemToDelete(null)}
+                    title="Drop item?"
+                    description={<>Are you sure you want to drop <strong>{itemToDelete.name}</strong>? {itemToDelete.quantity > 1 ? 'One unit will be removed.' : 'This cannot be undone.'}</>}
+                    icon={<Trash2 className="h-6 w-6 text-red-600" />}
+                    size="sm"
+                    layer="critical"
+                    bodyClassName="p-6"
+                >
+                    <div className="grid grid-cols-2 gap-3">
+                        <Button variant="ghost" onClick={() => setItemToDelete(null)}>Cancel</Button>
+                        <Button variant="danger" onClick={confirmDropItem}>Confirm</Button>
+                    </div>
+                </AccessibleDialog>
             )}
             <AccessibleDialog
                 onClose={onClose}

@@ -69,7 +69,7 @@ export function AppRoutes() {
               <PrivateRoute>
                 <>
                   <Navigation />
-                  <main id="main-content" className="container mx-auto px-4 py-8">
+                  <main id="main-content" className="app-main container mx-auto px-4 py-8">
                     {/* Nested Routes for authenticated pages */}
                     <Routes>
                       <Route path="/" element={<Characters />} />

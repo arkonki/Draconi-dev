@@ -110,7 +110,17 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
 
   const getConditionForAttribute = (attr: AttributeName): keyof Character['conditions'] => { return { 'STR': 'exhausted', 'CON': 'sickly', 'AGL': 'dazed', 'INT': 'angry', 'WIL': 'scared', 'CHA': 'disheartened' }[attr] as keyof Character['conditions']; };
   
-  const handleSkillClick = (skillName: string, skillValue: number, isAffected: boolean) => { toggleDiceRoller({ initialDice: ['d20'], rollMode: 'skillCheck', targetValue: skillValue, description: `${skillName} Check`, requiresBane: isAffected, skillName, }); onClose(); };
+  const handleSkillClick = (skillName: string, skillValue: number, isAffected: boolean) => {
+    setActiveTooltip(null);
+    toggleDiceRoller({
+      initialDice: ['d20'],
+      rollMode: 'skillCheck',
+      targetValue: skillValue,
+      description: `${skillName} Check`,
+      requiresBane: isAffected,
+      skillName,
+    });
+  };
   
   const getTooltipLayout = (triggerEl: HTMLElement | null) => {
     if (!triggerEl || !triggerEl.isConnected) return null;

@@ -2,6 +2,17 @@
 
 The work should be completed in six phases. The modal foundation and responsive structure should come first, because most later improvements depend on them.
 
+## Current implementation status — 2026-09-16
+
+- **Phase 0:** Functional validation complete. Responsive baseline screenshots and recorded keyboard/screen-reader observations remain.
+- **Phase 1:** Shared dialog foundation and primary migrations complete. Inventory Wallet, Forage, animal selection, drop confirmation, equipment notes, Conditions, Experience, and Skill Advancement now use the shared dialog stack. Remaining custom overlays must be reviewed before final acceptance.
+- **Phase 2:** Embedded shared character-sheet dialog and responsive 1–2–3 column layout complete. The embedded sheet now has one document scroll owner. Final typography, touch-target, short-landscape, and overflow QA remain.
+- **Phase 3:** Sticky mobile summary, mobile action bar, explicit attribute roll/edit behavior, Advancement naming, notification placement, conditional Spells action, Journal action, and keyboard-aware More menu complete.
+- **Phase 4:** Skills preserves dialog/search/scroll context while rolling. Notes has protected drafts and fixed editor actions. Advancement warns before abandoning in-progress work. Death-roll manual adjustments are expandable. Remaining work is final inventory density, spell-list return-position QA, and modal polish.
+- **Phase 5:** Shared-dialog and Skills regression tests exist and pass. The full responsive/manual matrix and remaining workflow tests are still required.
+
+This file is the source of truth for character-sheet improvements. Older general improvement documents are intentionally excluded from this workstream.
+
 ## Phase 0 — Restore development validation
 
 **Goal:** Make the character sheet render locally so every UI change can be visually tested.

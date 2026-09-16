@@ -56,6 +56,7 @@ export interface AccessibleDialogProps {
   titleClassName?: string;
   bodyClassName?: string;
   footerClassName?: string;
+  bodyScrollable?: boolean;
 }
 
 export function AccessibleDialog({
@@ -81,6 +82,7 @@ export function AccessibleDialog({
   titleClassName = '',
   bodyClassName = '',
   footerClassName = '',
+  bodyScrollable = true,
 }: AccessibleDialogProps) {
   const generatedId = useId();
   const titleId = `${generatedId}-title`;
@@ -147,7 +149,7 @@ export function AccessibleDialog({
   if (!isOpen) return null;
 
   const mobilePanel = fullScreenMobile
-    ? 'h-[100dvh] rounded-none sm:h-auto sm:max-h-[92dvh] sm:rounded-xl'
+    ? 'h-[100dvh] rounded-none pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:h-auto sm:max-h-[92dvh] sm:rounded-xl sm:p-0'
     : 'max-h-[calc(100dvh-1rem)] rounded-xl sm:max-h-[90dvh]';
 
   return (
@@ -192,7 +194,7 @@ export function AccessibleDialog({
             )}
           </div>
         </div>}
-        <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${bodyClassName}`}>
+        <div className={`min-h-0 flex-1 ${bodyScrollable ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'} ${bodyClassName}`}>
           {children}
         </div>
         {footer && (

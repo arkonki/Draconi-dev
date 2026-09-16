@@ -2,6 +2,7 @@ import React from 'react';
 import { supabase } from '../../lib/supabase';
 import { Character } from '../../types/character';
 import { AlertCircle } from 'lucide-react';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 interface ConditionsModalProps {
   character: Character;
@@ -61,38 +62,29 @@ export function ConditionsModal({ character, onClose, onUpdate }: ConditionsModa
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-lg w-full">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold">Conditions</h2>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ×
-            </button>
-          </div>
-
+    <AccessibleDialog
+      onClose={onClose}
+      title="Conditions"
+      description="Conditions apply a bane to rolls using their associated attribute."
+      size="md"
+      layer="nested"
+      fullScreenMobile
+      bodyClassName="p-4 sm:p-6"
+    >
           <div className="space-y-4">
             {Object.entries(conditionDescriptions).map(([condition, info]) => (
-              <div
+              <button
+                type="button"
                 key={condition}
-                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                className="w-full min-h-11 rounded-lg border p-4 text-left hover:bg-gray-50"
                 onClick={() => handleConditionToggle(condition as keyof typeof character.conditions)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    handleConditionToggle(condition as keyof typeof character.conditions);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
               >
                 <div className="flex items-center gap-4">
                   <input
                     type="checkbox"
                     checked={character.conditions[condition as keyof typeof character.conditions]}
+                    tabIndex={-1}
+                    aria-hidden="true"
                     onChange={() => {}}
                     className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -103,7 +95,7 @@ export function ConditionsModal({ character, onClose, onUpdate }: ConditionsModa
                     <p className="text-sm text-gray-600">{info.description}</p>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -119,8 +111,6 @@ export function ConditionsModal({ character, onClose, onUpdate }: ConditionsModa
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

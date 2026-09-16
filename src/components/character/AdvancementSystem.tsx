@@ -391,9 +391,17 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     );
   };
 
+  const requestClose = () => {
+    if (step === 'initial' || step === 'finished') {
+      onClose();
+      return;
+    }
+    if (window.confirm('Leave advancement? Your current selections and step will be lost.')) onClose();
+  };
+
   return (
     <AccessibleDialog
-      onClose={onClose}
+      onClose={requestClose}
       title="Advancement"
       description="Resolve end-of-session marks or study progress."
       icon={<GraduationCap className="h-6 w-6 text-blue-600" />}

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Character } from '../../types/character';
 import { GraduationCap, AlertCircle, Check } from 'lucide-react';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
+import { Button } from '../shared/Button';
 
 interface ExperienceModalProps {
   character: Character;
@@ -58,24 +60,21 @@ export function ExperienceModal({ character, onClose, onUpdate }: ExperienceModa
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-2xl font-bold">Experience</h2>
-              <p className="text-gray-600">
-                Mark skills that rolled a Dragon (1) or Bane (20) during play
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ×
-            </button>
-          </div>
-
+    <AccessibleDialog
+      onClose={onClose}
+      title="Experience"
+      description="Mark skills that rolled a Dragon (1) or Demon (20) during play."
+      size="xl"
+      layer="nested"
+      fullScreenMobile
+      bodyClassName="p-4 sm:p-6"
+      footer={(
+        <div className="flex justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon={GraduationCap} onClick={handleAdvance}>Save Progress</Button>
+        </div>
+      )}
+    >
           {error && (
             <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg flex items-center gap-2">
               <AlertCircle className="w-5 h-5" />
@@ -85,21 +84,15 @@ export function ExperienceModal({ character, onClose, onUpdate }: ExperienceModa
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
             {Object.entries(skillGroups).map(([attribute, skills]) => (
-              <div key={attribute} className="space-y-2">
+              <fieldset key={attribute} className="space-y-2">
                 <h3 className="font-medium">{attribute} Skills</h3>
                 {skills.map(skill => (
-                  <div
+                  <button
+                    type="button"
                     key={skill}
                     onClick={() => handleSkillToggle(skill)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        handleSkillToggle(skill);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    className={`flex items-center gap-2 p-2 rounded cursor-pointer ${
+                    aria-pressed={selectedSkills.includes(skill)}
+                    className={`flex min-h-11 w-full items-center gap-2 rounded p-2 text-left ${
                       selectedSkills.includes(skill)
                         ? 'bg-blue-50 border-blue-200'
                         : 'hover:bg-gray-50'
@@ -113,29 +106,11 @@ export function ExperienceModal({ character, onClose, onUpdate }: ExperienceModa
                       {selectedSkills.includes(skill) && <Check className="w-3 h-3" />}
                     </div>
                     <span>{skill}</span>
-                  </div>
+                  </button>
                 ))}
-              </div>
+              </fieldset>
             ))}
           </div>
-
-          <div className="flex justify-end gap-4">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAdvance}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <GraduationCap className="w-5 h-5" />
-              Save Progress
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, Sword, Dices, Star, X, Save, Hammer, Crosshair, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { Shield, Sword, Dices, Star, Save, Hammer, Crosshair, AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -11,6 +11,7 @@ import { Button } from '../shared/Button';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { sendMessage } from '../../lib/api/chat';
 import { formatItemAttackRange, type ItemRangeValue } from '../../lib/itemRange';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 // --- HELPER FUNCTIONS ---
 const skillAttributeMap: Record<string, AttributeName> = { 
@@ -108,12 +109,24 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
   const uniqueId = `broken-${item.id}`;
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[80] backdrop-blur-sm">
-      <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-lg max-w-lg w-full p-6 shadow-2xl flex flex-col animate-in zoom-in-95">
-        <div className="flex justify-between items-center mb-4 border-b-2 border-[#1a472a]/20 pb-2">
-          <h3 className="text-xl font-serif font-bold text-[#1a472a]">Manage: {item.name}</h3>
-          <button onClick={onClose} className="text-stone-500 hover:text-red-600"><X /></button>
+    <AccessibleDialog
+      onClose={onClose}
+      title={`Manage: ${item.name}`}
+      description="Update the item's condition and permanent modifiers."
+      size="md"
+      layer="nested"
+      fullScreenMobile
+      panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+      headerClassName="border-b-2 border-[#1a472a]/20 bg-[#fdfbf7]"
+      titleClassName="font-serif text-[#1a472a]"
+      bodyClassName="p-4 sm:p-6"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon={Save} onClick={handleSave}>Save Changes</Button>
         </div>
+      )}
+    >
         <div className="space-y-6 font-serif text-stone-800">
           <div className={`p-4 border rounded-sm transition-colors ${isBroken ? 'bg-red-50 border-red-300' : 'bg-stone-50 border-stone-200'}`}>
              <h4 className="font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><AlertTriangle size={14} className={isBroken ? 'text-red-600' : 'text-stone-400'}/>Condition & Durability</h4>
@@ -131,9 +144,7 @@ const ItemNotesModal = ({ item, category, character, onClose, onSave }: { item: 
             <div><label htmlFor="bonusText" className="block text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Bonus / Modifier</label><input type="text" id="bonusText" value={bonusText} onChange={(e) => setBonusText(e.target.value)} disabled={!isEnhanced} className="block w-full border border-stone-300 rounded-sm p-2 font-serif focus:ring-2 focus:ring-[#1a472a] focus:border-transparent disabled:bg-stone-100 disabled:text-stone-400" placeholder={isEnhanced ? (category === 'armor' ? "e.g., +1" : "e.g., +D4") : "Item must be enhanced first"} /></div>
           </div>
         </div>
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-stone-200"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={Save} onClick={handleSave}>Save Changes</Button></div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 };
 

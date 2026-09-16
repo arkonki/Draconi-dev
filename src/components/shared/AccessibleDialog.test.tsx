@@ -49,4 +49,35 @@ describe('AccessibleDialog', () => {
     await waitFor(() => expect(opener).toHaveFocus());
     opener.remove();
   });
+
+  it('can delegate scrolling to an embedded document view', () => {
+    render(
+      <AccessibleDialog onClose={() => undefined} title="Embedded sheet" bodyScrollable={false}>
+        <div data-testid="embedded-content">Sheet</div>
+      </AccessibleDialog>,
+    );
+
+    const content = screen.getByTestId('embedded-content');
+    expect(content.parentElement).toHaveClass('overflow-hidden');
+    expect(content.parentElement).not.toHaveClass('overflow-y-auto');
+  });
+
+  it('only lets the topmost nested dialog respond to Escape', () => {
+    const closeBase = vi.fn();
+    const closeNested = vi.fn();
+    render(
+      <>
+        <AccessibleDialog onClose={closeBase} title="Base dialog">
+          <button type="button">Base action</button>
+        </AccessibleDialog>
+        <AccessibleDialog onClose={closeNested} title="Nested dialog" layer="nested">
+          <button type="button">Nested action</button>
+        </AccessibleDialog>
+      </>,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(closeNested).toHaveBeenCalledTimes(1);
+    expect(closeBase).not.toHaveBeenCalled();
+  });
 });

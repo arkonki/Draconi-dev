@@ -276,24 +276,6 @@ export function DeathRollTracker({ character, soloMode = false, soloState }: Dea
              <CheckCircle size={12} /> Successes
            </div>
            <ProgressDots count={deathRollSuccesses} type="success" />
-           <div className="flex gap-1">
-             <button 
-                onClick={() => adjustValue('success', -1)} 
-                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
-                disabled={isSaving}
-                title="Remove Success"
-             >
-                <Minus size={10} />
-             </button>
-             <button 
-                onClick={() => adjustValue('success', 1)} 
-                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
-                disabled={isSaving}
-                title="Add Success (Rolled ≤ CON)"
-             >
-                <Plus size={10} />
-             </button>
-           </div>
         </div>
 
         {/* Failures */}
@@ -302,26 +284,23 @@ export function DeathRollTracker({ character, soloMode = false, soloState }: Dea
              <XCircle size={12} /> Failures
            </div>
            <ProgressDots count={deathRollFailures} type="failure" />
-           <div className="flex gap-1">
-             <button 
-                onClick={() => adjustValue('failure', -1)} 
-                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
-                disabled={isSaving}
-                title="Remove Failure"
-             >
-                <Minus size={10} />
-             </button>
-             <button 
-                onClick={() => adjustValue('failure', 1)} 
-                className="w-9 h-9 bg-white border border-stone-300 rounded hover:bg-stone-100 disabled:opacity-50 flex items-center justify-center touch-manipulation" 
-                disabled={isSaving}
-                title="Add Failure (Rolled > CON)"
-             >
-                <Plus size={10} />
-             </button>
-           </div>
         </div>
       </div>
+
+      <details className="rounded border border-red-200 bg-white/60">
+        <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-bold text-stone-700">Manual death-roll tracking</summary>
+        <div className="grid grid-cols-2 gap-4 border-t border-red-100 p-3">
+          {(['success', 'failure'] as const).map((type) => (
+            <div key={type} className="text-center">
+              <div className={`mb-2 text-xs font-bold uppercase ${type === 'success' ? 'text-green-700' : 'text-red-700'}`}>{type === 'success' ? 'Successes' : 'Failures'}</div>
+              <div className="flex justify-center gap-2">
+                <button type="button" aria-label={`Remove one ${type}`} onClick={() => adjustValue(type, -1)} className="flex h-11 w-11 items-center justify-center rounded border border-stone-300 bg-white hover:bg-stone-100 disabled:opacity-50" disabled={isSaving}><Minus size={16} /></button>
+                <button type="button" aria-label={`Add one ${type}`} onClick={() => adjustValue(type, 1)} className="flex h-11 w-11 items-center justify-center rounded border border-stone-300 bg-white hover:bg-stone-100 disabled:opacity-50" disabled={isSaving}><Plus size={16} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </details>
 
       {/* Result Banner */}
       {lastRollResult && (

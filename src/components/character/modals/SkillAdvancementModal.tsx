@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { Character } from '../../../types/character';
-import { Book, AlertCircle, Check, X, Search } from 'lucide-react';
+import { Book, AlertCircle, Check, Search } from 'lucide-react';
+import { AccessibleDialog } from '../../shared/AccessibleDialog';
+import { Button } from '../../shared/Button';
 
 interface SkillAdvancementModalProps {
   character: Character;
@@ -59,27 +61,22 @@ export function SkillAdvancementModal({ character, onClose, onUpdate }: SkillAdv
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                <Book className="w-6 h-6 text-blue-600" />
-                Learn New Skill
-              </h2>
-              <p className="text-gray-600">
-                Select a skill to learn. Once learned, a skill's base chance is doubled.
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
+    <AccessibleDialog
+      onClose={onClose}
+      title="Learn New Skill"
+      description="Select a skill to learn. Once learned, its base chance is doubled."
+      icon={<Book className="h-6 w-6 text-blue-600" />}
+      size="lg"
+      layer="nested"
+      fullScreenMobile
+      bodyClassName="p-4 sm:p-6"
+      footer={(
+        <div className="flex justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon={Check} onClick={handleConfirm} disabled={!selectedSkill}>Learn Skill</Button>
+        </div>
+      )}
+    >
           {error && (
             <div className="mb-6 flex items-start gap-2 p-4 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -111,18 +108,12 @@ export function SkillAdvancementModal({ character, onClose, onUpdate }: SkillAdv
                 .find(([, skills]) => skills.includes(skill))?.[0];
 
               return (
-                <div
+                <button
+                  type="button"
                   key={skill}
                   onClick={() => setSelectedSkill(skill)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setSelectedSkill(skill);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                  aria-pressed={selectedSkill === skill}
+                  className={`min-h-11 rounded-lg border p-4 text-left transition-all ${
                     selectedSkill === skill
                       ? 'border-blue-500 bg-blue-50'
                       : 'border-gray-200 hover:border-blue-300'
@@ -139,30 +130,10 @@ export function SkillAdvancementModal({ character, onClose, onUpdate }: SkillAdv
                       <Check className="w-5 h-5 text-blue-500" />
                     )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
-
-          {/* Action Buttons */}
-          <div className="flex justify-end gap-4">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={!selectedSkill}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Check className="w-5 h-5" />
-              Learn Skill
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

@@ -49,6 +49,7 @@ export function CharacterSheetDialog({
       headerClassName="bg-stone-800 text-white border-stone-700"
       titleClassName="font-serif text-white"
       bodyClassName="flex flex-col bg-[#f5f0e1]"
+      bodyScrollable={false}
     >
       {members.length > 1 && onSelectMember && (
         <div className="shrink-0 border-b border-stone-300 bg-stone-100 px-3 py-2">
