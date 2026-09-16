@@ -10,6 +10,7 @@ Observed on the deployed character page at `draconi.ee` and checked at desktop, 
 - Remove the visible mobile breadcrumb scrollbar and shorten character-page breadcrumbs to Home, ellipsis, and the current character.
 - Repair dialog headers with actions at phone widths. Titles and descriptions now receive a full row, while search/actions use a separate responsive row.
 - Make the Skills search field fill the available mobile width without squeezing the title into a narrow column.
+- Keep the global navigation in its compact menu through tablet widths. The previous desktop navigation activated at 768px and made the document 25px wider than the viewport.
 
 ## Verified problems from the deployed build
 
@@ -21,6 +22,6 @@ Observed on the deployed character page at `draconi.ee` and checked at desktop, 
 
 ## Follow-up checks after deployment
 
-- Recheck the sheet at 375x812, 768x1024, 900px desktop, and 1280px desktop.
+- Recheck the sheet at 375x812, 768x1024, 900px desktop, and 1280px desktop. The first redeploy passed phone and wide-desktop checks; the tablet navigation breakpoint requires one additional deployment.
 - Open Skills, Inventory, Spells, Rest, and More at phone width and confirm their header actions remain readable.
 - Confirm the More menu stays anchored below the stacked tablet action row.

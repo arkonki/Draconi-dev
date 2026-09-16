@@ -87,7 +87,7 @@ export function Navigation() {
           </div>
 
           {/* --- DESKTOP NAV --- */}
-          <div className="hidden md:flex flex-1 items-center justify-end space-x-6">
+          <div className="hidden lg:flex flex-1 items-center justify-end space-x-6">
             {/* Navigation Links */}
             <div className="flex items-center space-x-1">
               {navItems
@@ -177,7 +177,7 @@ export function Navigation() {
           </div>
 
           {/* --- MOBILE TOGGLE --- */}
-          <div className="md:hidden flex items-center gap-2">
+          <div className="flex items-center gap-2 lg:hidden">
             <button
               onClick={toggleDiceRoller}
               className="p-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -197,7 +197,7 @@ export function Navigation() {
 
       {/* --- MOBILE MENU --- */}
       {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-x-0 top-16 bg-gray-900 border-b border-gray-800 shadow-2xl z-50 animate-in slide-in-from-top-2 duration-200">
+        <div className="fixed inset-x-0 top-16 z-50 border-b border-gray-800 bg-gray-900 shadow-2xl animate-in slide-in-from-top-2 duration-200 lg:hidden">
           
           {/* Mobile User Profile */}
           <div className="bg-gray-800/80 px-4 py-4 border-b border-gray-700 flex items-center gap-4">
