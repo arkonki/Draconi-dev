@@ -11,6 +11,7 @@ Observed on the deployed character page at `draconi.ee` and checked at desktop, 
 - Repair dialog headers with actions at phone widths. Titles and descriptions now receive a full row, while search/actions use a separate responsive row.
 - Make the Skills search field fill the available mobile width without squeezing the title into a narrow column.
 - Keep the global navigation in its compact menu through tablet widths. The previous desktop navigation activated at 768px and made the document 25px wider than the viewport.
+- Widen the character-sheet header actions from 64px to 80px. The Inventory label measured approximately 72px and previously extended beyond its button boundary.
 
 ## Verified problems from the deployed build
 

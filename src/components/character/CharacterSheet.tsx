@@ -929,12 +929,12 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
                 { label: 'Inventory', icon: Package, action: () => setShowInventoryModal(true) },
                 ...(canCastSpells() ? [{ label: 'Spells', icon: Sparkles, action: () => setShowSpellcastingModal(true) }] : []),
               ].map(btn => (
-                <button type="button" key={btn.label} onClick={btn.action} className="character-sheet-action-button flex min-h-14 w-16 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] active:bg-[#1a472a] touch-manipulation">
+                <button type="button" key={btn.label} onClick={btn.action} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] active:bg-[#1a472a] touch-manipulation">
                   <btn.icon size={18} />
                   <span className="mt-1 text-xs font-bold uppercase">{btn.label}</span>
                 </button>
               ))}
-              <button type="button" onClick={() => setShowSecondaryActions((current) => !current)} aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-16 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
+              <button type="button" onClick={() => setShowSecondaryActions((current) => !current)} aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
                 <MoreHorizontal size={18} /><span className="mt-1 text-xs font-bold uppercase">More</span>
               </button>
             </div>
