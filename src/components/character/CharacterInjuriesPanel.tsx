@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { HeartPulse, Plus, X } from 'lucide-react';
+import { HeartPulse, Plus } from 'lucide-react';
 import {
   fetchCharacterInjuries,
   resolveCharacterInjuryAction,
@@ -9,6 +9,7 @@ import {
 import type { SoloCharacterInjury } from '../../lib/api/solo';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 interface CharacterInjuriesPanelProps {
   campaignId: string;
@@ -172,27 +173,24 @@ export function CharacterInjuriesPanel({
       )}
 
       {dialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <form onSubmit={submit} className="w-full max-w-md rounded border-4 border-[#1a472a] bg-[#fdfbf7] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-3 border-b border-stone-200 pb-3">
-              <div>
-                <h3 className="font-serif text-xl font-bold text-[#1a472a]">
-                  {dialog.action === 'roll' ? 'Roll Severe Injury' : dialog.injury?.name}
-                </h3>
-                <p className="mt-1 text-xs text-stone-600">
-                  {dialog.action === 'roll'
-                    ? 'The server rolls D20, determines the injury, and rolls its healing time.'
-                    : dialog.action === 'medical_care'
-                      ? `Roll Healing ${state.character.skills?.Healing ?? '—'}. Success halves the remaining recovery time.`
-                      : 'This confirmed override immediately marks the injury healed and keeps an audit event.'}
-                </p>
-              </div>
-              <button type="button" onClick={() => setDialog(null)} disabled={mutation.isPending} aria-label="Close" className="p-1 text-stone-500 hover:text-stone-900">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+        <AccessibleDialog
+          onClose={() => setDialog(null)}
+          title={dialog.action === 'roll' ? 'Roll Severe Injury' : dialog.injury?.name || 'Severe Injury'}
+          description={dialog.action === 'roll'
+            ? 'The server rolls D20, determines the injury, and rolls its healing time.'
+            : dialog.action === 'medical_care'
+              ? `Roll Healing ${state.character.skills?.Healing ?? '—'}. Success halves the remaining recovery time.`
+              : 'This confirmed override immediately marks the injury healed and keeps an audit event.'}
+          size="md"
+          layer="critical"
+          closeDisabled={mutation.isPending}
+          panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+          titleClassName="font-serif text-xl text-[#1a472a]"
+          bodyClassName="bg-[#fdfbf7] p-5"
+        >
+          <form onSubmit={submit}>
             {dialog.action === 'mark_healed' && (
-              <div className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                 Use this only when the injury was healed outside the tracker or needs a GM correction. Permanent injuries can only be removed this way.
               </div>
             )}
@@ -205,7 +203,7 @@ export function CharacterInjuriesPanel({
               {dialog.action === 'roll' ? 'Roll and Record Injury' : dialog.action === 'medical_care' ? 'Roll Healing and Apply Care' : 'Confirm and Mark Healed'}
             </Button>
           </form>
-        </div>
+        </AccessibleDialog>
       )}
     </div>
   );

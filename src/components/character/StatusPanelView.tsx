@@ -6,6 +6,7 @@ export function StatusPanelView() {
   const activeStatusMessage = useCharacterSheetStore((state) => state.activeStatusMessage);
   const clearActiveStatusMessage = useCharacterSheetStore((state) => state.clearActiveStatusMessage);
   const saveError = useCharacterSheetStore((state) => state.saveError);
+  const isSaving = useCharacterSheetStore((state) => state.isSaving);
   
   // Auto-dismiss the active status message after 5 seconds
   useEffect(() => {
@@ -18,12 +19,12 @@ export function StatusPanelView() {
   }, [activeStatusMessage, clearActiveStatusMessage]);
 
   // If nothing to show, render nothing
-  if (!activeStatusMessage && !saveError) {
+  if (!activeStatusMessage && !saveError && !isSaving) {
     return null;
   }
 
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-3 pointer-events-none w-full max-w-sm px-4 sm:px-0">
+    <div className="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-3 right-3 z-[110] flex flex-col gap-3 sm:bottom-4 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm" aria-live="polite">
       
       {/* 1. ERROR TOAST (High Priority) */}
       {saveError && (
@@ -38,6 +39,13 @@ export function StatusPanelView() {
         </div>
       )}
 
+      {isSaving && !saveError && (
+        <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-emerald-700/50 bg-emerald-950 px-4 py-3 text-white shadow-2xl" role="status">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-200 border-t-transparent" aria-hidden="true" />
+          <span className="text-sm font-medium">Saving character…</span>
+        </div>
+      )}
+
       {/* 2. STATUS / SUCCESS TOAST */}
       {activeStatusMessage && (
         <div className="pointer-events-auto flex items-center gap-3 bg-indigo-900 text-white px-4 py-3 rounded-xl shadow-2xl shadow-indigo-900/20 animate-in slide-in-from-top-5 fade-in duration-300 border border-indigo-700/50 backdrop-blur-sm">
@@ -45,11 +53,12 @@ export function StatusPanelView() {
             <Zap className="w-5 h-5 text-yellow-300" />
           </div>
           <div className="flex flex-col mr-2 grow">
-            <span className="font-bold text-[10px] uppercase tracking-wider text-indigo-300 mb-0.5">System</span>
+            <span className="font-bold text-xs uppercase tracking-wider text-indigo-300 mb-0.5">Update</span>
             <span className="text-sm font-medium leading-tight">{activeStatusMessage}</span>
           </div>
           <button 
             onClick={clearActiveStatusMessage}
+            aria-label="Dismiss status message"
             className="w-9 h-9 flex items-center justify-center text-indigo-300 hover:text-white hover:bg-white/10 rounded-full transition-colors shrink-0 touch-manipulation"
           >
             <X className="w-4 h-4" />

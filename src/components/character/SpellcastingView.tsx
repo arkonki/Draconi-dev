@@ -8,6 +8,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useDice } from '../dice/useDice';
 import type { RollHistoryEntry } from '../dice/diceTypes';
 import { sendMessage } from '../../lib/api/chat';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 // --- CONFIGURATION ---
 const requirementExplanations: Record<string, string> = {
@@ -544,15 +545,16 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   if (spellsLoading) return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"><LoadingSpinner size="lg" /></div>;
 
   return (
-    <div className="spellcasting-modal-root fixed inset-0 z-40 flex items-center justify-center p-0 sm:p-6">
-      <button
-        type="button"
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label="Close spellbook"
-      />
-      
-      <div className="spellcasting-modal-shell relative bg-white w-full max-w-4xl h-[100dvh] sm:h-[85vh] rounded-none sm:rounded-xl shadow-2xl flex flex-col overflow-hidden border-0 sm:border border-stone-200 animate-in zoom-in-95 duration-200">
+    <AccessibleDialog
+      onClose={onClose}
+      title="Spellbook"
+      ariaLabel="Character spellbook"
+      size="xl"
+      fullScreenMobile
+      hideHeader
+      panelClassName="spellcasting-modal-shell sm:h-[85dvh] sm:max-w-4xl sm:border border-stone-200"
+      bodyClassName="relative flex flex-col overflow-hidden"
+    >
          
          {/* Header */}
          <div className="spellcasting-modal-header p-4 sm:p-6 border-b border-stone-200 bg-stone-50 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
@@ -667,8 +669,6 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          <div className="spellcasting-modal-footer p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
             Prep Limit: {preparedRankedSpellCount} / {preparationLimit} • Tricks don't count against limit
          </div>
-      </div>
-
       {/* Detail Panel Overlay */}
       <SpellDetailPane spell={infoPaneSpell} onClose={() => setInfoPaneSpell(null)} />
       <style>{`
@@ -866,6 +866,6 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
           }
         }
       `}</style>
-    </div>
+    </AccessibleDialog>
   );
 }

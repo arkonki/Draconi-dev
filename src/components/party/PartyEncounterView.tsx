@@ -24,7 +24,7 @@ import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import { TextWithDice } from '../shared/TextWithDice';
-import { CharacterSheet } from '../character/CharacterSheet';
+import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { RandomTableManager } from '../tools/RandomTableManager';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import {
@@ -1521,55 +1521,6 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
   );
 }
 
-interface CharacterSheetModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  isLoading: boolean;
-  isReady: boolean;
-  error: string | null;
-  onRetry: () => void;
-}
-
-function CharacterSheetModal({ isOpen, onClose, title, isLoading, isReady, error, onRetry }: CharacterSheetModalProps) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[70] p-2 md:p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full h-[96vh] md:h-[92vh] max-w-[1400px] overflow-hidden border border-stone-300 flex flex-col">
-        <div className="p-3 md:p-4 border-b bg-stone-800 text-white flex justify-between items-center">
-          <div>
-            <h3 className="text-base md:text-lg font-bold font-serif">Character Sheet</h3>
-            <p className="text-xs text-stone-300">{title}</p>
-          </div>
-          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close character sheet">
-            <XCircle size={24} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto bg-[#f5f0e1]">
-          {error ? (
-            <div className="h-full flex flex-col items-center justify-center p-6 text-center">
-              <p className="text-red-600 font-semibold">{error}</p>
-              <div className="mt-4 flex gap-2">
-                <Button variant="secondary" onClick={onClose}>Close</Button>
-                <Button variant="primary" onClick={onRetry}>Retry</Button>
-              </div>
-            </div>
-          ) : isLoading || !isReady ? (
-            <div className="h-full flex items-center justify-center gap-3 text-stone-600">
-              <LoadingSpinner />
-              <span className="font-medium">Loading character sheet...</span>
-            </div>
-          ) : (
-            <CharacterSheet />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface RollTablesModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -2619,7 +2570,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           onSwap={handleWaitConfirm}
         />
       )}
-      <CharacterSheetModal
+      <CharacterSheetDialog
         isOpen={isCharacterSheetModalOpen}
         onClose={handleCloseCharacterSheetModal}
         title={sheetCombatant?.display_name || 'Character'}

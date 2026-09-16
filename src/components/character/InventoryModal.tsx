@@ -14,6 +14,7 @@ import { applyMoneyDelta, formatCost, subtractCost, parseCost } from '../../lib/
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
 import { formatItemAttackRange } from '../../lib/itemRange';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
@@ -931,8 +932,16 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             {itemToDelete && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[90] backdrop-blur-sm"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center transform transition-all scale-100"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600"><Trash2 size={28} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Drop Item?</h3><p className="text-sm text-gray-500 mb-6">Are you sure you want to drop <strong>{itemToDelete.name}</strong>? {itemToDelete.quantity > 1 ? "1 unit will be removed." : "This cannot be undone."}</p><div className="grid grid-cols-2 gap-3"><Button variant="ghost" onClick={() => setItemToDelete(null)}>Cancel</Button><Button variant="danger" onClick={confirmDropItem}>Confirm</Button></div></div></div>
             )}
-            <div className="inventory-modal-root fixed inset-0 bg-black/50 flex items-center justify-center p-0 md:p-4 z-50">
-                <div className="inventory-modal-shell bg-white md:rounded-2xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
+            <AccessibleDialog
+                onClose={onClose}
+                title="Inventory"
+                ariaLabel="Character inventory"
+                size="xl"
+                fullScreenMobile
+                hideHeader
+                panelClassName="inventory-modal-shell md:h-[90dvh] md:max-w-4xl"
+                bodyClassName="relative flex flex-col overflow-hidden"
+            >
                     <div className="inventory-modal-header px-4 py-3 border-b flex items-center justify-between bg-white z-20">
                         <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 rounded font-bold">HEAVY</span>}</div></div></div>
                         <div className="inventory-modal-toolbar flex items-center gap-2"><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button onClick={onClose} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
@@ -1231,8 +1240,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             </button>
                         </div>
                     )}
-                </div>
-            </div>
+            </AccessibleDialog>
             <style>{`
               @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
                 .inventory-modal-shell {

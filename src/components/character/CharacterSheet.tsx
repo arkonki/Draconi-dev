@@ -5,7 +5,7 @@ import { calculateMovement } from '../../lib/movement';
 import {
   HelpCircle, Swords, Bed, Award, ShieldCheck, Plus, Trash2, Minus,
   Bold, Italic, List, Pencil, Package, Sparkles, Book, UserSquare,
-  Gem, X, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete, Dices
+  Gem, Backpack, Scroll, AlertCircle, History, RotateCcw, Calculator, CornerDownLeft, Delete, Dices, MoreHorizontal
 } from 'lucide-react';
 import { SkillsModal } from './modals/SkillsModal';
 import { SpellcastingView } from './SpellcastingView';
@@ -22,6 +22,7 @@ import { PlayerAidModal } from './modals/PlayerAidModal';
 import { supabase } from '../../lib/supabase';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PdfExportButton } from './PdfExportButton'; 
 import { advanceCharacterInjuryRecovery, fetchCharacterInjuries } from '../../lib/api/injuries';
@@ -70,7 +71,6 @@ const StatModificationModal = ({
 }) => {
   const [inputValue, setInputValue] = useState<string>('');
   const [mode, setMode] = useState<'damage' | 'heal'>('damage');
-  const modalRef = useRef<HTMLDivElement>(null);
 
   // Handle Physical Keyboard events
   useEffect(() => {
@@ -146,23 +146,19 @@ const StatModificationModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90] backdrop-blur-sm p-4">
-      <div ref={modalRef} className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden">
-        
-        {/* Header */}
-        <div className="bg-[#1a472a] text-[#e8d5b5] p-3 flex justify-between items-center border-b-4 border-[#d4c5a3] shrink-0">
-          <div className="flex flex-col">
-            <h3 className="text-lg font-serif font-bold uppercase tracking-wide flex items-center gap-2">
-              <Calculator size={18} /> Modify {statName}
-            </h3>
-            <span className="text-xs opacity-80 font-mono">
-              Current: {currentValue} / {maxValue}
-            </span>
-          </div>
-          <button onClick={onClose} className="hover:text-white bg-white/10 p-1.5 rounded hover:bg-white/20 transition-colors"><X size={20} /></button>
-        </div>
-
-        <div className="p-4 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+    <AccessibleDialog
+      onClose={onClose}
+      title={`Modify ${statName}`}
+      description={`Current: ${currentValue} / ${maxValue}`}
+      icon={<Calculator size={20} />}
+      size="sm"
+      layer="nested"
+      panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+      headerClassName="border-b-4 border-[#d4c5a3] bg-[#1a472a] text-[#e8d5b5]"
+      titleClassName="font-serif uppercase tracking-wide text-[#e8d5b5]"
+      bodyClassName="bg-[#fdfbf7] p-4 custom-scrollbar"
+    >
+        <div className="flex flex-col gap-4">
           
           {/* Mode Toggles */}
           <div className="flex gap-2 shrink-0">
@@ -269,8 +265,7 @@ const StatModificationModal = ({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 };
 
@@ -411,22 +406,29 @@ const AttributeEditModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[80] backdrop-blur-sm p-4">
-      <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-lg p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 relative">
-        <button onClick={onClose} className="absolute top-2 right-2 text-stone-400 hover:text-red-600"><X size={20} /></button>
-        <h3 className="text-2xl font-serif font-bold text-[#1a472a] mb-2 uppercase tracking-wide border-b-2 border-[#d4c5a3] pb-2">Edit {attribute}</h3>
-        <p className="text-xs text-stone-500 italic mb-6 font-serif leading-relaxed">{getHelperText(attribute)}</p>
-        <div className="flex items-center justify-center gap-4 mb-6">
-          <button onClick={() => setNewValue(prev => Math.max(1, prev - 1))} className="w-12 h-12 rounded border-2 border-stone-300 hover:border-[#1a472a] flex items-center justify-center text-2xl font-bold text-stone-600 hover:text-[#1a472a] bg-white transition-colors"><Minus size={20} /></button>
-          <div className="w-20 h-20 rounded-full border-4 border-[#1a472a] bg-white flex items-center justify-center text-4xl font-serif font-bold text-[#1a472a] shadow-inner">{newValue}</div>
-          <button onClick={() => setNewValue(prev => Math.min(18, prev + 1))} className="w-12 h-12 rounded border-2 border-stone-300 hover:border-[#1a472a] flex items-center justify-center text-2xl font-bold text-stone-600 hover:text-[#1a472a] bg-white transition-colors"><Plus size={20} /></button>
-        </div>
+    <AccessibleDialog
+      onClose={onClose}
+      title={`Edit ${attribute}`}
+      description={getHelperText(attribute)}
+      size="sm"
+      layer="nested"
+      panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+      headerClassName="border-b-2 border-[#d4c5a3] bg-[#fdfbf7]"
+      titleClassName="font-serif uppercase tracking-wide text-[#1a472a]"
+      bodyClassName="bg-[#fdfbf7] p-6"
+      footer={(
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onClose} className="w-full">Cancel</Button>
           <Button variant="primary" onClick={() => onSave(newValue)} className="w-full">Confirm</Button>
         </div>
-      </div>
-    </div>
+      )}
+    >
+        <div className="flex items-center justify-center gap-4 mb-6">
+          <button type="button" aria-label={`Decrease ${attribute}`} onClick={() => setNewValue(prev => Math.max(1, prev - 1))} className="w-12 h-12 rounded border-2 border-stone-300 hover:border-[#1a472a] flex items-center justify-center text-2xl font-bold text-stone-600 hover:text-[#1a472a] bg-white transition-colors"><Minus size={20} /></button>
+          <div className="w-20 h-20 rounded-full border-4 border-[#1a472a] bg-white flex items-center justify-center text-4xl font-serif font-bold text-[#1a472a] shadow-inner">{newValue}</div>
+          <button type="button" aria-label={`Increase ${attribute}`} onClick={() => setNewValue(prev => Math.min(18, prev + 1))} className="w-12 h-12 rounded border-2 border-stone-300 hover:border-[#1a472a] flex items-center justify-center text-2xl font-bold text-stone-600 hover:text-[#1a472a] bg-white transition-colors"><Plus size={20} /></button>
+        </div>
+    </AccessibleDialog>
   );
 };
 
@@ -438,10 +440,11 @@ interface AttributeCircleProps {
   onToggle: () => void;
   onRoll: () => void;
   onEdit: () => void;
+  editEnabled: boolean;
   isSaving: boolean;
 }
 
-const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onRoll, onEdit, isSaving }: AttributeCircleProps) => {
+const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle, onRoll, onEdit, editEnabled, isSaving }: AttributeCircleProps) => {
   const displayValue = value ?? 10;
   return (
     <div className="attribute-circle-shell flex flex-col items-center relative w-full max-w-[132px]">
@@ -457,16 +460,16 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
           title={`Roll ${name} (D20 ≤ ${displayValue})`}
           className="group/roll relative flex min-h-0 flex-[3] items-center justify-center bg-[#fdfbf7] pt-2 text-[#1a472a] transition-colors hover:bg-[#e8d5b5] focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1a472a] touch-manipulation"
         >
-          <span className="attribute-circle-value text-3xl font-serif font-bold transition-all duration-150 group-hover/roll:scale-75 group-hover/roll:opacity-0 group-focus-visible/roll:scale-75 group-focus-visible/roll:opacity-0">
+          <span className="attribute-circle-value text-3xl font-serif font-bold transition-all duration-150 sm:group-hover/roll:scale-75 sm:group-hover/roll:opacity-0 group-focus-visible/roll:scale-75 group-focus-visible/roll:opacity-0">
             {displayValue}
           </span>
-          <span className="pointer-events-none absolute inset-0 flex translate-y-1 flex-col items-center justify-center pt-2 opacity-0 transition-all duration-150 group-hover/roll:translate-y-0 group-hover/roll:opacity-100 group-focus-visible/roll:translate-y-0 group-focus-visible/roll:opacity-100">
+          <span className="pointer-events-none absolute bottom-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[#1a472a]/75 sm:inset-0 sm:bottom-auto sm:translate-y-1 sm:flex-col sm:justify-center sm:pt-2 sm:opacity-0 sm:transition-all sm:duration-150 sm:group-hover/roll:translate-y-0 sm:group-hover/roll:opacity-100 group-focus-visible/roll:translate-y-0 group-focus-visible/roll:opacity-100">
             <Dices size={20} aria-hidden="true" />
-            <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest">Roll</span>
+            <span className="sm:mt-0.5">Roll</span>
           </span>
         </button>
 
-        <button
+        {editEnabled && <button
           type="button"
           onClick={onEdit}
           disabled={isSaving}
@@ -475,14 +478,14 @@ const AttributeCircle = ({ name, value, conditionKey, conditionActive, onToggle,
           className="group/edit relative flex min-h-0 flex-1 items-center justify-center border-t-2 border-[#1a472a]/35 bg-[#efe4cf] text-[#5c4d3c] transition-colors hover:bg-[#d4c5a3] hover:text-[#1a472a] focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1a472a] disabled:cursor-not-allowed disabled:opacity-50 touch-manipulation"
         >
           <Pencil size={14} className="transition-transform group-hover/edit:scale-110" aria-hidden="true" />
-        </button>
+        </button>}
       </div>
 
       <button 
         type="button"
         onClick={onToggle}
         disabled={isSaving}
-        className={`attribute-condition-button mt-2 w-full min-h-[40px] py-2 px-2 text-[10px] uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
+        className={`attribute-condition-button mt-2 w-full min-h-[44px] py-2 px-2 text-xs uppercase font-bold tracking-wider border rounded-sm transition-all shadow-sm touch-manipulation
         ${conditionActive 
           ? 'bg-red-700 border-red-800 text-white' 
           : 'bg-stone-200 border-stone-300 text-stone-600 hover:bg-stone-300'}`}
@@ -521,6 +524,7 @@ interface EditableCharacterNote {
 const CharacterNotesSection = ({ character }: { character: Character }) => {
   const [notes, setNotes] = useState<CharacterNote[]>([]);
   const [activeNote, setActiveNote] = useState<EditableCharacterNote | null>(null);
+  const [savedNoteSnapshot, setSavedNoteSnapshot] = useState<EditableCharacterNote | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -543,7 +547,32 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
     if (!activeNote?.title) return;
     const noteData = { ...activeNote, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString() };
     const { data } = await supabase.from('notes').upsert(noteData).select().single();
-    setActiveNote(data); setIsEditing(false); loadNotes();
+    setActiveNote(data); setSavedNoteSnapshot(data); setIsEditing(false); setShowPreview(false); loadNotes();
+  };
+
+  const noteIsDirty = Boolean(
+    isEditing && activeNote && (
+      activeNote.title !== (savedNoteSnapshot?.title || '')
+      || activeNote.content !== (savedNoteSnapshot?.content || '')
+    ),
+  );
+
+  const closeActiveNote = () => {
+    if (noteIsDirty && !window.confirm('Discard unsaved changes to this journal entry?')) return;
+    setActiveNote(null);
+    setSavedNoteSnapshot(null);
+    setIsEditing(false);
+    setShowPreview(false);
+  };
+
+  const cancelNoteEditing = () => {
+    if (!savedNoteSnapshot?.id) {
+      closeActiveNote();
+      return;
+    }
+    setActiveNote({ ...savedNoteSnapshot });
+    setIsEditing(false);
+    setShowPreview(false);
   };
 
   const handleDeleteNote = async (id: string) => {
@@ -554,19 +583,21 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
     <div className="h-full flex flex-col p-4">
       <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2 gap-3">
         <h4 className="font-serif font-bold text-stone-700 text-xl">Journal Entries</h4>
-        <button onClick={() => { setActiveNote({ title: '', content: '' }); setIsEditing(true); }} className="text-[#1a472a] text-xs md:text-sm font-bold flex items-center gap-1.5 border border-[#1a472a] px-3 py-2 rounded hover:bg-[#1a472a] hover:text-white transition-colors min-h-[40px] touch-manipulation whitespace-nowrap"><Plus size={14} /> NEW ENTRY</button>
+        <button onClick={() => { setSavedNoteSnapshot(null); setActiveNote({ title: '', content: '' }); setIsEditing(true); setShowPreview(false); }} className="text-[#1a472a] text-xs md:text-sm font-bold flex items-center gap-1.5 border border-[#1a472a] px-3 py-2 rounded hover:bg-[#1a472a] hover:text-white transition-colors min-h-[44px] touch-manipulation whitespace-nowrap"><Plus size={14} /> NEW ENTRY</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pr-1 custom-scrollbar">
         {notes.length === 0 && <div className="col-span-full text-center py-8 text-stone-400 italic">No notes written yet.</div>}
         {notes.map(note => (
           <div
             key={note.id}
-            onClick={() => { setActiveNote(note); setIsEditing(false); }}
+            onClick={() => { setSavedNoteSnapshot({ ...note }); setActiveNote({ ...note }); setIsEditing(false); setShowPreview(false); }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                setActiveNote(note);
+                setSavedNoteSnapshot({ ...note });
+                setActiveNote({ ...note });
                 setIsEditing(false);
+                setShowPreview(false);
               }
             }}
             role="button"
@@ -585,13 +616,22 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
       </div>
 
       {activeNote && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[70] backdrop-blur-sm">
-          <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded-lg w-full max-w-2xl h-[85vh] flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-200">
-             <button onClick={() => setActiveNote(null)} className="absolute top-2 right-2 text-stone-500 hover:text-red-600 p-3 touch-manipulation"><X /></button>
-             <div className="p-4 md:p-6 flex flex-col h-full">
+        <AccessibleDialog
+          onClose={closeActiveNote}
+          title={isEditing ? (activeNote.id ? 'Edit journal entry' : 'New journal entry') : activeNote.title}
+          description={noteIsDirty ? 'Unsaved changes' : undefined}
+          size="lg"
+          layer="nested"
+          fullScreenMobile
+          panelClassName="sm:h-[85dvh] border-4 border-[#1a472a] bg-[#fdfbf7]"
+          headerClassName="border-b-2 border-[#d4c5a3] bg-[#fdfbf7]"
+          titleClassName="font-serif text-[#1a472a]"
+          bodyClassName="bg-[#fdfbf7]"
+        >
+             <div className="p-4 md:p-6 flex flex-col min-h-full">
                 {isEditing ? (
                   <>
-                    <input className="text-2xl font-serif font-bold bg-transparent border-b-2 border-[#1a472a] mb-4 outline-none text-[#1a472a] w-full" value={activeNote.title} onChange={e => setActiveNote({...activeNote, title: e.target.value})} placeholder="Title" />
+                    <input aria-label="Journal entry title" className="text-2xl font-serif font-bold bg-transparent border-b-2 border-[#1a472a] mb-4 outline-none text-[#1a472a] w-full" value={activeNote.title} onChange={e => setActiveNote({...activeNote, title: e.target.value})} placeholder="Title" />
                     <div className="flex gap-2 bg-stone-100 p-2 border-b border-stone-300 overflow-x-auto">
                       <ToolbarButton icon={Bold} label="Bold" onClick={() => insertMarkdown('**', '**')} />
                       <ToolbarButton icon={Italic} label="Italic" onClick={() => insertMarkdown('*', '*')} />
@@ -602,18 +642,17 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
                     {showPreview ? (
                       <div className="flex-1 overflow-y-auto p-4 prose prose-stone max-w-none"><MarkdownRenderer content={activeNote.content} /></div>
                     ) : (
-                      <textarea ref={textareaRef} className="flex-1 p-4 bg-white resize-none outline-none font-serif text-stone-800 w-full border-x border-b border-stone-200" value={activeNote.content} onChange={e => setActiveNote({...activeNote, content: e.target.value})} />
+                      <textarea ref={textareaRef} aria-label="Journal entry content" className="min-h-[45dvh] flex-1 p-4 bg-white resize-none outline-none font-serif text-stone-800 w-full border-x border-b border-stone-200" value={activeNote.content} onChange={e => setActiveNote({...activeNote, content: e.target.value})} />
                     )}
                     <div className="mt-4 flex justify-end gap-2">
-                       <Button variant="secondary" onClick={() => setIsEditing(false)}>Cancel</Button>
+                       <Button variant="secondary" onClick={cancelNoteEditing}>Cancel</Button>
                        <Button variant="primary" onClick={handleSaveNote}>Save Entry</Button>
                     </div>
                   </>
                 ) : (
                   <>
-                    <div className="flex justify-between items-start border-b-2 border-stone-200 pb-2 mb-4 pr-8">
-                      <h2 className="text-2xl md:text-3xl font-serif font-bold text-[#1a472a] break-words">{activeNote.title}</h2>
-                      <Button size="sm" variant="secondary" onClick={() => setIsEditing(true)} icon={Pencil}>Edit</Button>
+                    <div className="flex justify-end border-b-2 border-stone-200 pb-2 mb-4">
+                      <Button size="sm" variant="secondary" onClick={() => { setSavedNoteSnapshot(activeNote ? { ...activeNote } : null); setIsEditing(true); }} icon={Pencil}>Edit</Button>
                     </div>
                     <div className="flex-1 overflow-y-auto prose prose-stone max-w-none custom-scrollbar pr-2">
                        <MarkdownRenderer content={activeNote.content} />
@@ -622,8 +661,7 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
                   </>
                 )}
              </div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
     </div>
   );
@@ -631,10 +669,15 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
 
 // --- MAIN SHEET COMPONENT ---
 
-export function CharacterSheet({ soloState: providedSoloState }: { soloState?: SoloState } = {}) {
+export interface CharacterSheetProps {
+  soloState?: SoloState;
+  embedded?: boolean;
+}
+
+export function CharacterSheet({ soloState: providedSoloState, embedded = false }: CharacterSheetProps = {}) {
   const queryClient = useQueryClient();
   const { toggleDiceRoller } = useDice();
-  const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, saveError, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
+  const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
 
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
   const [showRestOptionsModal, setShowRestOptionsModal] = useState(false);
@@ -644,6 +687,8 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
   const [showBioModal, setShowBioModal] = useState(false);
   const [showPlayerAidModal, setShowPlayerAidModal] = useState(false);
   const [showSevereInjuriesModal, setShowSevereInjuriesModal] = useState(false);
+  const [showSecondaryActions, setShowSecondaryActions] = useState(false);
+  const [isAttributeEditMode, setIsAttributeEditMode] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<{name: AttributeName, value: number} | null>(null);
   const [healerPresent, setHealerPresent] = useState(false);
   const [soloRestCondition, setSoloRestCondition] = useState('');
@@ -693,7 +738,7 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [showSevereInjuriesModal]);
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-[#f5f0e1]"><LoadingSpinner size="lg" /><span className="ml-3 font-serif text-xl text-[#1a472a]">Unrolling Scroll...</span></div>;
+  if (isLoading) return <div className={`${embedded ? 'min-h-[24rem]' : 'min-h-screen'} flex items-center justify-center bg-[#f5f0e1]`}><LoadingSpinner size="lg" /><span className="ml-3 font-serif text-xl text-[#1a472a]">Unrolling Scroll...</span></div>;
   if (error) return <div className="p-4 text-center text-red-500 font-serif">Error loading scroll: {error}</div>;
   if (!character) return <div className="p-4 text-center">Character data not available.</div>;
 
@@ -791,9 +836,19 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
     const stretchAvailable = !isSoloHero || Boolean(soloState?.restState.available.stretch);
     const stretchReady = stretchAvailable && (!isSoloHero || activeStandardConditions.length === 0 || Boolean(soloRestCondition));
     return (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-         <div className="bg-[#fdfbf7] border-4 border-[#1a472a] rounded p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
-            <h3 className="text-2xl font-serif font-bold text-[#1a472a] mb-4 border-b-2 border-stone-200 pb-2">Take a Rest</h3>
+      <AccessibleDialog
+        onClose={() => setShowRestOptionsModal(false)}
+        title="Take a Rest"
+        description="Choose a rest only after its listed amount of game time has passed."
+        icon={<Bed size={20} />}
+        size="md"
+        closeDisabled={isSoloRestSaving}
+        panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+        headerClassName="border-b-2 border-stone-200 bg-[#fdfbf7]"
+        titleClassName="font-serif text-2xl text-[#1a472a]"
+        bodyClassName="bg-[#fdfbf7] p-4 sm:p-6"
+        footer={<Button variant="secondary" onClick={() => setShowRestOptionsModal(false)} disabled={isSoloRestSaving} className="w-full">Cancel</Button>}
+      >
             <div className="space-y-3 font-serif">
               {isSoloHero && (
                 <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
@@ -801,8 +856,8 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
                 </div>
               )}
               <button type="button" onClick={() => handleRest('round')} disabled={!roundAvailable || isSoloRestSaving} className="w-full text-left p-3 min-h-[56px] hover:bg-[#e8d5b5] border border-stone-300 rounded group transition-colors touch-manipulation disabled:cursor-not-allowed disabled:opacity-50">
-                <div className="font-bold text-[#1a472a]">Round Rest (Action)</div>
-                <div className="text-sm text-stone-600">Recover 1d6 WP. No HP.{isSoloHero && !roundAvailable ? ' Already used this shift.' : ''}</div>
+                <div className="font-bold text-[#1a472a]">Round Rest (10 seconds / one action)</div>
+                <div className="text-sm text-stone-600">Recover 1d6 WP. No HP recovery.{isSoloHero && !roundAvailable ? ' Already used this shift.' : ''}</div>
               </button>
               <div className="p-3 border border-stone-300 rounded group disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                 <button type="button" onClick={() => handleRest('stretch')} disabled={(character?.current_hp ?? 0) <= 0 || !stretchReady || isSoloRestSaving} className="w-full text-left min-h-[48px] hover:bg-[#e8d5b5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation">
@@ -833,15 +888,24 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
                 <div className="text-sm text-stone-600">Full HP/WP and conditions. Advances temporary severe injuries by one shift.</div>
               </button>
             </div>
-            <button type="button" onClick={() => setShowRestOptionsModal(false)} disabled={isSoloRestSaving} className="mt-4 w-full py-3 text-stone-500 hover:text-stone-800 font-bold uppercase text-xs tracking-widest disabled:opacity-50">Cancel</button>
-         </div>
-      </div>
+      </AccessibleDialog>
     );
   };
 
+  const openSecondaryAction = (action: () => void) => {
+    setShowSecondaryActions(false);
+    action();
+  };
+
+  const openGeneralRoll = () => toggleDiceRoller({
+    initialDice: ['d20'],
+    rollMode: 'generic',
+    description: 'General D20 Roll',
+  });
+
   return (
-    <div className="character-sheet-root min-h-screen bg-[#f5f0e1] text-stone-800 p-0 md:p-6 font-sans overflow-x-hidden">
-      <div className="character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] shadow-2xl border-x-0 md:border-2 border-[#d4c5a3] relative">
+    <div className={`character-sheet-root ${embedded ? 'min-h-0' : 'min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-hidden`}>
+      <div className={`character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] border-x-0 md:border-2 border-[#d4c5a3] relative ${embedded ? 'shadow-none md:border-0' : 'shadow-2xl'}`}>
         
         {/* HEADER */}
         <div className="character-sheet-header bg-[#1a472a] text-[#e8d5b5] p-4 flex flex-col md:flex-row justify-between items-center border-b-4 border-[#d4c5a3] relative">
@@ -856,27 +920,49 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
             </div>
           </div>
 
-          <div className="character-sheet-actions z-10 mt-4 md:mt-0 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
-            <div className="character-sheet-action-row flex gap-2 min-w-max px-1">
+          <div className="character-sheet-actions z-10 mt-4 hidden w-full md:mt-0 md:block md:w-auto">
+            <div className="character-sheet-action-row flex gap-2 px-1">
               {[
-                { label: 'Bio', icon: UserSquare, action: () => setShowBioModal(true) },
+                { label: 'Roll', icon: Dices, action: openGeneralRoll },
+                { label: 'Skills', icon: Book, action: () => setShowSkillsModal(true) },
                 { label: 'Rest', icon: Bed, action: () => setShowRestOptionsModal(true) },
                 { label: 'Inventory', icon: Package, action: () => setShowInventoryModal(true) },
-                { label: 'Session', icon: Award, action: () => setShowAdvancementSystem(true) },
-                { label: 'Help', icon: HelpCircle, action: () => setShowPlayerAidModal(true) },
+                ...(canCastSpells() ? [{ label: 'Spells', icon: Sparkles, action: () => setShowSpellcastingModal(true) }] : []),
               ].map(btn => (
-                <button key={btn.label} onClick={btn.action} className="character-sheet-action-button flex flex-col items-center justify-center w-14 h-12 md:w-16 md:h-14 min-h-[48px] bg-[#2c5e3f] hover:bg-[#3a7a52] active:bg-[#1a472a] rounded border border-[#4a8a62] text-[#e8d5b5] transition-colors shadow-sm touch-manipulation">
+                <button type="button" key={btn.label} onClick={btn.action} className="character-sheet-action-button flex min-h-14 w-16 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] active:bg-[#1a472a] touch-manipulation">
                   <btn.icon size={18} />
-                  <span className="text-[9px] md:text-[10px] uppercase font-bold mt-1">{btn.label}</span>
+                  <span className="mt-1 text-xs font-bold uppercase">{btn.label}</span>
                 </button>
               ))}
-              <PdfExportButton character={character} />
+              <button type="button" onClick={() => setShowSecondaryActions((current) => !current)} aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-16 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
+                <MoreHorizontal size={18} /><span className="mt-1 text-xs font-bold uppercase">More</span>
+              </button>
             </div>
+          </div>
+          {showSecondaryActions && (
+            <div className="fixed bottom-16 right-3 z-50 grid w-64 grid-cols-2 gap-2 rounded-lg border border-stone-300 bg-[#fdfbf7] p-3 text-stone-800 shadow-2xl md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.5rem)]" role="menu" aria-label="More character actions">
+              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowBioModal(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><UserSquare size={18} /> Bio</button>
+              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowAdvancementSystem(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><Award size={18} /> Advancement</button>
+              <button type="button" role="menuitem" onClick={() => openSecondaryAction(() => setShowPlayerAidModal(true))} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><HelpCircle size={18} /> Player Aid</button>
+              <button type="button" role="menuitem" onClick={() => { setIsAttributeEditMode((current) => !current); setShowSecondaryActions(false); }} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 text-sm font-bold hover:bg-stone-100"><Pencil size={18} /> {isAttributeEditMode ? 'Stop editing' : 'Edit attributes'}</button>
+              <div className="col-span-2"><PdfExportButton character={character} /></div>
+            </div>
+          )}
+        </div>
+
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#d4c5a3] bg-[#fdfbf7]/95 px-3 py-2 shadow-sm backdrop-blur md:hidden">
+          <div className="min-w-0">
+            <div className="truncate font-serif text-lg font-bold text-[#1a472a]">{character.name}</div>
+            <div className="truncate text-xs text-stone-600">{activeStandardConditions.length ? activeStandardConditions.join(' • ') : 'No active conditions'}</div>
+          </div>
+          <div className="flex shrink-0 gap-2 text-sm font-bold">
+            <span className="rounded bg-red-100 px-2 py-1 text-red-800">HP {currentHP}/{maxHP}</span>
+            <span className="rounded bg-teal-100 px-2 py-1 text-teal-800">WP {currentWP}/{maxWP}</span>
           </div>
         </div>
 
         {/* MAIN PAPER AREA */}
-        <div className="character-sheet-main p-3 md:p-8 space-y-6 md:space-y-8 bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]">
+        <div className="character-sheet-main space-y-6 bg-[#f7f0df] p-3 pb-24 md:space-y-8 md:p-8">
           
           {/* NAME & VITALS ROW */}
           <div className="character-sheet-name-vitals grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 items-end">
@@ -908,8 +994,7 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
           {/* ATTRIBUTES ROW - UPDATED FOR MOBILE RESPONSIVENESS */}
           <div className="character-sheet-attributes relative py-4 md:py-6">
              <div className="hidden md:block absolute top-1/2 left-0 w-full h-2 bg-[#1a472a] opacity-20 -z-0 rounded-full"></div>
-             {/* grid-cols-2 on mobile, grid-cols-6 on desktop */}
-             <div className="character-sheet-attributes-grid relative z-10 grid grid-cols-2 md:grid-cols-6 gap-y-8 gap-x-4 justify-items-center">
+             <div className="character-sheet-attributes-grid relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-y-8 gap-x-4 justify-items-center">
                 {[
                   ['STR', 'exhausted'], 
                   ['CON', 'sickly'], 
@@ -936,6 +1021,7 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
                         name: attr as AttributeName, 
                         value: character.attributes?.[attr as AttributeName] || 10 
                       })}
+                      editEnabled={isAttributeEditMode}
                       isSaving={isSaving}
                    />
                 ))}
@@ -943,8 +1029,8 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
           </div>
 
           {/* TOP SECTION: 3 Columns */}
-          <div className="character-sheet-top-grid grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-            <div className="space-y-4 md:space-y-6">
+          <div className="character-sheet-top-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 md:gap-8">
+            <div className="space-y-4 md:col-span-2 md:space-y-6 xl:col-span-1">
                <PaperSection
                  title="Vitals & Combat"
                  action={showSevereInjuriesShortcut ? (
@@ -1028,11 +1114,11 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
           </div>
 
           <div className="w-full">
-             <div className="character-sheet-lower-panel bg-white border-2 border-stone-300 min-h-[500px] flex flex-col rounded-sm shadow-md">
-                <div className="character-sheet-tabs flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto hide-scrollbar">
-                   <button onClick={() => setActiveTab('equipment')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
-                   <button onClick={() => setActiveTab('abilities')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
-                   <button onClick={() => setActiveTab('notes')} className={`character-sheet-tab-button flex-1 min-w-[180px] py-4 px-6 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
+             <div className="character-sheet-lower-panel bg-white border-2 border-stone-300 flex flex-col rounded-sm shadow-md">
+                <div className="character-sheet-tabs relative flex border-b-2 border-stone-300 bg-stone-100 overflow-x-auto after:pointer-events-none after:sticky after:right-0 after:w-8 after:shrink-0 after:bg-gradient-to-l after:from-stone-200 after:to-transparent md:after:hidden">
+                   <button onClick={() => setActiveTab('equipment')} className={`character-sheet-tab-button flex-1 min-w-[150px] py-3 px-4 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'equipment' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Swords className="inline mr-2 w-4 h-4"/> Combat & Gear</button>
+                   <button onClick={() => setActiveTab('abilities')} className={`character-sheet-tab-button flex-1 min-w-[150px] py-3 px-4 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'abilities' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><ShieldCheck className="inline mr-2 w-4 h-4"/> Heroic Abilities</button>
+                   <button onClick={() => setActiveTab('notes')} className={`character-sheet-tab-button flex-1 min-w-[150px] py-3 px-4 font-serif font-bold text-sm md:text-base uppercase tracking-wide whitespace-nowrap touch-manipulation ${activeTab === 'notes' ? 'bg-white text-[#1a472a] border-b-4 border-[#1a472a] -mb-0.5' : 'text-stone-500 hover:text-stone-700 hover:bg-stone-200'}`}><Scroll className="inline mr-2 w-4 h-4"/> Journal</button>
                 </div>
                 <div className="character-sheet-tab-panel p-4 md:p-6 flex-1 bg-white/80">
                    {activeTab === 'equipment' && <EquipmentSection character={character} />}
@@ -1044,6 +1130,20 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
         </div>
 
         <div className="h-4 bg-[#1a472a] border-t-4 border-[#d4c5a3]"></div>
+        <nav className="sticky bottom-0 z-40 grid grid-cols-5 border-t border-[#d4c5a3] bg-[#1a472a] pb-[max(0.25rem,env(safe-area-inset-bottom))] text-[#e8d5b5] shadow-[0_-4px_16px_rgba(0,0,0,0.2)] md:hidden" aria-label="Character actions">
+          {[
+            { label: 'Roll', icon: Dices, action: openGeneralRoll },
+            { label: 'Skills', icon: Book, action: () => setShowSkillsModal(true) },
+            { label: 'Inventory', icon: Package, action: () => setShowInventoryModal(true) },
+            { label: 'Rest', icon: Bed, action: () => setShowRestOptionsModal(true) },
+            { label: 'More', icon: MoreHorizontal, action: () => setShowSecondaryActions((current) => !current) },
+          ].map((action) => (
+            <button key={action.label} type="button" onClick={action.action} className="flex min-h-14 flex-col items-center justify-center gap-1 px-1 text-xs font-bold transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#e8d5b5]">
+              <action.icon size={19} aria-hidden="true" />
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </nav>
         {showBioModal && <BioModal onClose={() => setShowBioModal(false)} />}
         {showSkillsModal && <SkillsModal onClose={() => setShowSkillsModal(false)} />}
         {showSpellcastingModal && <SpellcastingView onClose={() => setShowSpellcastingModal(false)} />}
@@ -1051,41 +1151,27 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
         {showAdvancementSystem && <AdvancementSystem character={character} onClose={() => { setShowAdvancementSystem(false); if (character?.id && character?.user_id) fetchCharacter(character.id, character.user_id); }} />}
         {showPlayerAidModal && <PlayerAidModal onClose={() => setShowPlayerAidModal(false)} />}
         {showSevereInjuriesModal && character.party_id && (
-          <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="severe-injuries-modal-title"
+          <AccessibleDialog
+            onClose={() => setShowSevereInjuriesModal(false)}
+            title="Severe Injuries"
+            icon={<Book size={20} />}
+            size="lg"
+            layer="nested"
+            panelClassName="border-4 border-[#1a472a] bg-[#fdfbf7]"
+            headerClassName="border-b-4 border-[#d4c5a3] bg-[#1a472a] text-[#e8d5b5]"
+            titleClassName="font-serif uppercase tracking-wide text-[#e8d5b5]"
+            bodyClassName="bg-[#fdfbf7] p-4 md:p-6"
           >
-            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded border-4 border-[#1a472a] bg-[#fdfbf7] shadow-2xl">
-              <div className="flex shrink-0 items-center justify-between gap-3 border-b-4 border-[#d4c5a3] bg-[#1a472a] p-4 text-[#e8d5b5]">
-                <h2 id="severe-injuries-modal-title" className="flex items-center gap-2 font-serif text-xl font-bold uppercase tracking-wide">
-                  <Book size={20} aria-hidden="true" /> Severe Injuries
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setShowSevereInjuriesModal(false)}
-                  aria-label="Close severe injuries"
-                  className="rounded bg-white/10 p-1.5 transition-colors hover:bg-white/20 hover:text-white"
-                >
-                  <X size={20} aria-hidden="true" />
-                </button>
-              </div>
-              <div className="overflow-y-auto p-4 md:p-6">
-                <CharacterInjuriesPanel
-                  campaignId={character.party_id}
-                  characterId={character.id}
-                  inActiveCombat={Boolean(activeEncounter)}
-                  onStatus={(message) => setActiveStatusMessage(message, 5000)}
-                />
-              </div>
-            </div>
-          </div>
+            <CharacterInjuriesPanel
+              campaignId={character.party_id}
+              characterId={character.id}
+              inActiveCombat={Boolean(activeEncounter)}
+              onStatus={(message) => setActiveStatusMessage(message, 5000)}
+            />
+          </AccessibleDialog>
         )}
         {editingAttribute && (<AttributeEditModal attribute={editingAttribute.name} value={editingAttribute.value} onClose={() => setEditingAttribute(null)} onSave={handleAttributeUpdate} />)}
         {renderRestModal()}
-        {isSaving && <div className="fixed bottom-4 right-4 bg-[#1a472a] text-[#e8d5b5] px-4 py-2 rounded shadow-lg text-sm z-50 animate-pulse font-serif border border-[#e8d5b5]">Inscribing...</div>}
-        {saveError && <div className="fixed bottom-4 right-4 bg-red-800 text-white px-4 py-2 rounded shadow-lg text-sm z-50 font-serif border border-white">Ink Smudge (Error): {saveError}</div>}
       </div>
       <style>{`
         .clip-path-banner {
@@ -1100,158 +1186,6 @@ export function CharacterSheet({ soloState: providedSoloState }: { soloState?: S
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
-          .character-sheet-root {
-            padding: 0;
-          }
-
-          .character-sheet-shell {
-            border-width: 0;
-            box-shadow: none;
-          }
-
-          .character-sheet-header {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 0.75rem;
-            align-items: center;
-            padding: 0.75rem;
-          }
-
-          .character-sheet-brand {
-            width: auto;
-            min-width: 0;
-            text-align: left;
-          }
-
-          .character-sheet-brand-title {
-            font-size: 2rem;
-            line-height: 1;
-          }
-
-          .character-sheet-meta {
-            justify-content: flex-start;
-            gap: 0.35rem 0.5rem;
-            margin-top: 0.5rem;
-            font-size: 0.7rem;
-          }
-
-          .character-sheet-actions {
-            width: auto;
-            margin-top: 0;
-            padding-bottom: 0;
-          }
-
-          .character-sheet-action-row {
-            gap: 0.35rem;
-          }
-
-          .character-sheet-action-button {
-            width: 3.35rem;
-            height: 3rem;
-            min-height: 3rem;
-          }
-
-          .character-sheet-action-button span {
-            font-size: 0.48rem;
-            margin-top: 0.2rem;
-          }
-
-          .character-sheet-main {
-            padding: 0.75rem;
-          }
-
-          .character-sheet-name-vitals {
-            grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-            gap: 0.75rem;
-            align-items: center;
-          }
-
-          .character-sheet-name-block,
-          .character-sheet-vitals-strip {
-            grid-column: auto;
-          }
-
-          .character-sheet-name-block {
-            text-align: left;
-          }
-
-          .character-sheet-vitals-strip {
-            justify-content: flex-end;
-          }
-
-          .character-sheet-attributes {
-            padding-top: 0.5rem;
-            padding-bottom: 0.75rem;
-          }
-
-          .character-sheet-attributes-grid {
-            grid-template-columns: repeat(6, minmax(0, 1fr));
-            gap: 0.65rem;
-          }
-
-          .attribute-circle-shell {
-            max-width: 5rem;
-          }
-
-          .attribute-circle-button {
-            width: 3.25rem;
-            height: 3.25rem;
-            border-width: 3px;
-          }
-
-          .attribute-circle-value {
-            font-size: 1.35rem;
-            line-height: 1;
-          }
-
-          .attribute-circle-name {
-            top: -0.55rem;
-            font-size: 0.45rem;
-          }
-
-          .attribute-condition-button {
-            margin-top: 0.35rem;
-            min-height: 2rem;
-            padding: 0.35rem 0.25rem;
-            font-size: 0.42rem;
-            line-height: 1.15;
-          }
-
-          .character-sheet-top-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 0.75rem;
-          }
-
-          .paper-section {
-            padding: 0.85rem;
-          }
-
-          .paper-section-title {
-            top: -0.55rem;
-            font-size: 0.62rem;
-            padding-left: 0.9rem;
-            padding-right: 0.9rem;
-          }
-
-          .stat-tracker-shell {
-            padding: 0.45rem;
-          }
-
-          .character-sheet-lower-panel {
-            min-height: 22rem;
-          }
-
-          .character-sheet-tab-button {
-            min-width: 9rem;
-            padding: 0.8rem 1rem;
-            font-size: 0.8rem;
-          }
-
-          .character-sheet-tab-panel {
-            padding: 0.85rem;
-          }
-        }
       `}</style>
     </div>
   );

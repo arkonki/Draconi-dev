@@ -6,11 +6,12 @@ import { useDice } from './useDice';
 // 1. IMPORT NOTIFICATIONS
 import { useNotifications } from '../../contexts/useNotifications';
 import { 
-  Dices, X, History, Trash2, Star, ShieldOff, Skull, HeartPulse, 
+  Dices, History, Trash2, Star, ShieldOff, Skull, HeartPulse,
   ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle,
   AlertTriangle, CheckCircle2, CircleHelp, RotateCcw, Keyboard
 } from 'lucide-react';
 import { Button } from '../shared/Button';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import {
   getAvailablePushRollConditions,
@@ -492,23 +493,19 @@ export function DiceRollerModal() {
   const controlsDisabled = isRolling || isDeathRoll || isRallyRoll || isRecoveryRoll || isAdvancementRoll || isInitiative || isRest;
 
   return (
-    <div className="dice-modal-root fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="dice-modal-shell bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] border border-gray-200 overflow-hidden transform transition-all scale-100">
-        
-        {/* Header */}
-        <div className="dice-modal-header p-4 border-b bg-gray-50 flex justify-between items-center text-lg font-bold text-gray-800">
-          <div className="dice-modal-title flex items-center gap-2 text-indigo-700">
-            {getIconForMode()} {getModalTitle()}
-          </div>
-          <button
-            onClick={handleClose}
-            disabled={pushRollStage === 'ready' || (isManualEntry && isManualPushRoll)}
-            title={pushRollStage === 'ready' || (isManualEntry && isManualPushRoll) ? 'Complete the pushed roll before closing.' : 'Close dice roller'}
-            className="dice-modal-close text-gray-400 hover:text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
+    <AccessibleDialog
+      onClose={handleClose}
+      title={getModalTitle()}
+      icon={getIconForMode()}
+      size="md"
+      layer="critical"
+      closeDisabled={pushRollStage === 'ready' || (isManualEntry && isManualPushRoll)}
+      closeOnBackdrop={false}
+      panelClassName="dice-modal-shell border border-gray-200 sm:max-h-[90dvh]"
+      headerClassName="dice-modal-header bg-gray-50"
+      titleClassName="dice-modal-title text-indigo-700"
+      bodyClassName="flex flex-col overflow-hidden"
+    >
 
         <div className="dice-modal-body p-5 overflow-y-auto flex-grow flex flex-col">
           {showHistory ? (
@@ -943,7 +940,6 @@ export function DiceRollerModal() {
             </div>
           ) : null}
         </div>
-      </div>
       <style>{`
         @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
           .dice-modal-root {
@@ -1125,6 +1121,6 @@ export function DiceRollerModal() {
           }
         }
       `}</style>
-    </div>
+    </AccessibleDialog>
   );
 }

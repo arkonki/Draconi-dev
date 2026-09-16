@@ -6,10 +6,11 @@ import { RollHistoryEntry } from '../dice/DiceContext';
 import { useDice } from '../dice/useDice';
 import { fetchHeroicAbilities } from '../../lib/api/abilities';
 import { fetchSpells, fetchMagicSchools } from '../../lib/api/magic';
-import { GraduationCap, AlertCircle, Check, Info, Dices, BookOpen, ChevronLeft, ChevronRight, Loader2, Award, X, Zap, Wand2, ThumbsUp, ThumbsDown, Dna, CheckSquare, Minus, Plus } from 'lucide-react';
+import { GraduationCap, AlertCircle, Check, Info, Dices, BookOpen, ChevronLeft, ChevronRight, Loader2, Award, Zap, Wand2, ThumbsUp, ThumbsDown, Dna, CheckSquare, Minus, Plus } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 // --- Helper Constants and Functions ---
 type AdvancementStep = 'initial' | 'enterMarks' | 'selectSkills' | 'rollSkills' | 'selectAbility' | 'selectStudyType' | 'studyTeacherSelectSkill' | 'studyTeacherRollSkill' | 'studyMagicSelectSpell' | 'studyMagicSelectSchool' | 'studyMagicRollSchool' | 'finished';
@@ -368,25 +369,42 @@ export function AdvancementSystem({ character: initialCharacter, onClose }: Adva
     }
   };
 
-  const renderManualAdvanceModal = () => { if (!showManualAdvanceModal || !manualAdvanceContext) return null; const { skillName } = manualAdvanceContext; const currentLevel = getSkillLevelFromStore(skillName); return ( <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[60]"> <div className="bg-white rounded-lg max-w-sm w-full p-6 shadow-xl"> <h4 className="text-lg font-semibold text-gray-800">Manual Advancement for <span className="text-blue-600">{skillName}</span></h4> <p className="text-sm text-gray-600 mt-2 mb-4"> A success is counted when the D20 roll is <span className="font-bold">greater than</span> the skill's current level of <span className="font-bold">{currentLevel}</span>. </p> <div className="flex flex-col gap-3"> <Button onClick={() => processManualAdvance(true)} disabled={isSaving} loading={isSaving} className="w-full"> <ThumbsUp className="w-4 h-4 mr-2" /> Success </Button> <Button onClick={() => processManualAdvance(false)} disabled={isSaving} loading={isSaving} variant="outline" className="w-full"> <ThumbsDown className="w-4 h-4 mr-2" /> Failure </Button> </div> <div className="mt-4 text-center"> <button onClick={() => setShowManualAdvanceModal(false)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button> </div> </div> </div> ); };
+  const renderManualAdvanceModal = () => {
+    if (!showManualAdvanceModal || !manualAdvanceContext) return null;
+    const { skillName } = manualAdvanceContext;
+    const currentLevel = getSkillLevelFromStore(skillName);
+    return (
+      <AccessibleDialog
+        onClose={() => setShowManualAdvanceModal(false)}
+        title={`Manual Advancement: ${skillName}`}
+        description={<>A success is counted when the D20 roll is <strong>greater than</strong> the current level of <strong>{currentLevel}</strong>.</>}
+        size="sm"
+        layer="nested"
+        closeDisabled={isSaving}
+        bodyClassName="p-6"
+      >
+        <div className="flex flex-col gap-3">
+          <Button onClick={() => processManualAdvance(true)} disabled={isSaving} loading={isSaving} className="w-full"><ThumbsUp className="w-4 h-4 mr-2" /> Success</Button>
+          <Button onClick={() => processManualAdvance(false)} disabled={isSaving} loading={isSaving} variant="outline" className="w-full"><ThumbsDown className="w-4 h-4 mr-2" /> Failure</Button>
+        </div>
+      </AccessibleDialog>
+    );
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-0 md:p-4 z-50">
-      <div className="bg-white md:rounded-xl w-full md:max-w-2xl h-full md:h-auto md:max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between border-b p-4 flex-shrink-0 bg-white z-10">
-          <h3 className="text-xl font-bold flex items-center gap-2 text-gray-800">
-            <GraduationCap className="w-6 h-6 text-blue-600" />
-            <span className="truncate">Advancement</span>
-          </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 -mr-2" aria-label="Close advancement modal">
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-        <div className="flex-grow overflow-y-auto p-4 md:p-6 custom-scrollbar">
-          {renderStepContent()}
-        </div>
-      </div>
+    <AccessibleDialog
+      onClose={onClose}
+      title="Advancement"
+      description="Resolve end-of-session marks or study progress."
+      icon={<GraduationCap className="h-6 w-6 text-blue-600" />}
+      size="lg"
+      fullScreenMobile
+      closeDisabled={isSaving}
+      panelClassName="md:max-h-[90dvh]"
+      bodyClassName="p-4 md:p-6 custom-scrollbar"
+    >
+      {renderStepContent()}
       {renderManualAdvanceModal()}
-    </div>
+    </AccessibleDialog>
   );
 }

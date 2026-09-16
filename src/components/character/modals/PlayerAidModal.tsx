@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Swords, Heart, Map, X, Wand2, HelpCircle, Info } from 'lucide-react';
+import { Swords, Heart, Map, Wand2, HelpCircle, Info } from 'lucide-react';
+import { AccessibleDialog } from '../../shared/AccessibleDialog';
 
 // --- DATA STRUCTURE ---
 const aidData = {
@@ -170,13 +171,19 @@ type TabKey = keyof typeof aidData;
 
 export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('general');
+  const [searchQuery, setSearchQuery] = useState('');
   const TabIcon = aidData[activeTab].icon;
 
   const renderContent = () => {
     const tabContent = aidData[activeTab];
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const sections = tabContent.sections.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !normalizedQuery || `${section.title} ${item.title} ${item.description}`.toLowerCase().includes(normalizedQuery)),
+    })).filter((section) => !normalizedQuery || section.items.length > 0 || section.title.toLowerCase().includes(normalizedQuery));
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        {tabContent.sections.map(section => (
+        {sections.map(section => (
           <div key={section.title}>
             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-gray-100 pb-1">
               {section.title}
@@ -196,41 +203,32 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
                   className="p-2 rounded border border-gray-200 bg-white hover:border-indigo-300 hover:shadow-sm transition-all"
                 >
                   <div className="font-bold text-indigo-700 text-xs mb-0.5">{item.title}</div>
-                  <div className="text-[11px] text-gray-600 leading-tight">{item.description}</div>
+                  <div className="text-sm text-gray-600 leading-snug">{item.description}</div>
                 </div>
               ))}
             </div>
           </div>
         ))}
+        {sections.length === 0 && <p className="py-12 text-center text-sm text-gray-500">No reference entries match “{searchQuery}”.</p>}
       </div>
     );
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4 z-[90]">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label="Close player aid"
-      />
-      <div className="relative bg-white rounded-xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200">
-        
-        {/* Compact Header */}
-        <div className="bg-white px-4 py-3 border-b flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-100 rounded text-indigo-600">
-              <TabIcon size={18} />
-            </div>
-            <h3 className="text-lg font-bold text-gray-900">Player Aid</h3>
-          </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-        
+    <AccessibleDialog
+      onClose={onClose}
+      title="Player Aid"
+      description={aidData[activeTab].title}
+      icon={<TabIcon className="h-5 w-5 text-indigo-600" />}
+      size="xl"
+      layer="nested"
+      fullScreenMobile
+      panelClassName="sm:h-[88dvh] border border-gray-200"
+      bodyClassName="flex flex-col bg-gray-50/30"
+      actions={<input type="search" aria-label="Search player aid" placeholder="Search rules…" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="h-11 w-32 rounded-lg border border-gray-200 bg-gray-100 px-3 text-sm outline-none focus:w-48 focus:bg-white focus:ring-2 focus:ring-indigo-500 sm:w-48" />}
+    >
         {/* Compact Tabs */}
-        <div className="bg-gray-50 border-b flex overflow-x-auto shrink-0 no-scrollbar px-2 pt-1">
+        <div className="relative flex shrink-0 overflow-x-auto border-b bg-gray-50 px-2 pt-1 after:pointer-events-none after:sticky after:right-0 after:w-8 after:shrink-0 after:bg-gradient-to-l after:from-gray-100 after:to-transparent">
           {(Object.keys(aidData) as TabKey[]).map(key => {
             const Icon = aidData[key].icon;
             const isActive = activeTab === key;
@@ -239,7 +237,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
                 key={key}
                 onClick={() => setActiveTab(key)}
                 className={`
-                  flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold transition-all rounded-t-md border-t border-x border-transparent -mb-px relative whitespace-nowrap
+                  flex min-h-11 items-center justify-center gap-1.5 px-4 py-2 text-sm font-bold transition-all rounded-t-md border-t border-x border-transparent -mb-px relative whitespace-nowrap
                   ${isActive 
                     ? 'bg-white text-indigo-600 border-gray-200 border-b-white z-10' 
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
@@ -254,11 +252,9 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
         </div>
 
         {/* Dense Content Area */}
-        <div className="flex-grow overflow-y-auto p-4 bg-gray-50/30 custom-scrollbar">
+        <div className="flex-grow p-4 custom-scrollbar sm:p-6">
           {renderContent()}
         </div>
-
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

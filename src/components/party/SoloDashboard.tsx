@@ -49,7 +49,6 @@ import {
   searchSoloWaypoint,
   SoloApiError,
   SoloRecordedRoll,
-  SoloState,
   SoloWaypoint,
   startSoloMission,
   resolveSoloDyingAction,
@@ -76,7 +75,7 @@ import {
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import type { Character } from '../../types/character';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { CharacterSheet } from '../character/CharacterSheet';
+import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
@@ -357,62 +356,6 @@ function ActionModal({
                 <span className="mt-1 block text-xs">The campaign changed elsewhere. State was refreshed; review and try again.</span>
               )}
             </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SoloCharacterSheetModal({
-  isOpen,
-  title,
-  soloState,
-  isLoading,
-  isReady,
-  error,
-  onClose,
-  onRetry,
-}: {
-  isOpen: boolean;
-  title: string;
-  soloState: SoloState;
-  isLoading: boolean;
-  isReady: boolean;
-  error: string | null;
-  onClose: () => void;
-  onRetry: () => void;
-}) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm md:p-4">
-      <div role="dialog" aria-modal="true" aria-label={`${title} character sheet`} className="flex h-[96vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-stone-300 bg-white shadow-2xl md:h-[92vh]">
-        <div className="flex items-center justify-between border-b bg-stone-800 p-3 text-white md:p-4">
-          <div className="min-w-0">
-            <h3 className="flex items-center gap-2 text-base font-bold font-serif md:text-lg"><BookOpen className="h-5 w-5" /> Character Sheet</h3>
-            <p className="truncate text-xs text-stone-300">{title}</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-700 hover:text-white" aria-label="Close character sheet">
-            <X className="h-6 w-6" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto bg-[#f5f0e1]">
-          {error ? (
-            <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-              <p className="font-semibold text-red-600">{error}</p>
-              <div className="mt-4 flex gap-2">
-                <Button variant="secondary" onClick={onClose}>Close</Button>
-                <Button onClick={onRetry}>Retry</Button>
-              </div>
-            </div>
-          ) : isLoading || !isReady ? (
-            <div className="flex h-full items-center justify-center gap-3 text-stone-600">
-              <LoadingSpinner />
-              <span className="font-medium">Loading character sheet...</span>
-            </div>
-          ) : (
-            <CharacterSheet soloState={soloState} />
           )}
         </div>
       </div>
@@ -1786,7 +1729,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         </div>
       </div>
 
-      <SoloCharacterSheetModal
+      <CharacterSheetDialog
         isOpen={isCharacterSheetOpen}
         title={state.playerCharacter?.name || 'Solo hero'}
         soloState={state}
@@ -1795,6 +1738,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         error={characterSheetError}
         onClose={handleCloseCharacterSheet}
         onRetry={handleRetryCharacterSheet}
+        layer="nested"
       />
 
       {activeAction && (

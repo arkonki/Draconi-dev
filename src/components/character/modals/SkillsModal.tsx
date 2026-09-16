@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { X, Info, CheckSquare, Target, Swords, GraduationCap, Sparkles, BookOpen, ShieldAlert } from 'lucide-react';
+import { Info, CheckSquare, Target, Swords, GraduationCap, Sparkles, BookOpen, ShieldAlert } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
 import { useDice } from '../../dice/useDice';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
@@ -7,6 +7,7 @@ import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { supabase } from '../../../lib/supabase';
 import { fetchItems, GameItem } from '../../../lib/api/items';
 import { useQuery } from '@tanstack/react-query';
+import { AccessibleDialog } from '../../shared/AccessibleDialog';
 
 interface SkillsModalProps {
   onClose: () => void;
@@ -140,14 +141,6 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     }
   };
   
-  const handleBackgroundClick = () => { setActiveTooltip(null); };
-  const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      action();
-    }
-  };
-  
   const handleMarkSkill = (e: React.ChangeEvent<HTMLInputElement>, skillName: string) => {
     e.stopPropagation();
     const newMarkedSkills = new Set(markedSkills);
@@ -176,32 +169,25 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
       <div
         key={skill.name}
         className={`
-            group relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 cursor-pointer select-none
+            group relative flex min-h-14 items-center gap-2 rounded-lg border p-2 transition-all duration-200
             ${isAffected 
                 ? 'bg-red-50 border-red-200 hover:border-red-300 hover:shadow-sm' 
                 : 'bg-white border-gray-100 hover:border-indigo-200 hover:shadow-md hover:translate-y-[-1px]'
             }
         `}
-        onClick={() => handleSkillClick(skill.name, skillValue, isAffected)}
-        onKeyDown={(event) => handleKeyboardActivate(event, () => handleSkillClick(skill.name, skillValue, isAffected))}
-        role="button"
-        tabIndex={0}
       >
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="relative flex items-center justify-center w-6 h-6 shrink-0">
-             <input type="checkbox" checked={isMarked} onClick={(event) => event.stopPropagation()} onChange={(e) => handleMarkSkill(e, skill.name)} className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-indigo-600 checked:border-indigo-600 focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400 cursor-pointer transition-colors" title="Mark for advancement"/>
+          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+             <input type="checkbox" checked={isMarked} onChange={(e) => handleMarkSkill(e, skill.name)} className="peer h-6 w-6 cursor-pointer appearance-none rounded border-2 border-gray-300 bg-white transition-colors checked:border-indigo-600 checked:bg-indigo-600 focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1" aria-label={`Mark ${skill.name} for advancement`}/>
              <CheckSquare size={14} className="absolute text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" strokeWidth={3} />
           </div>
 
-          <div className="flex flex-col min-w-0">
+        <button type="button" onClick={() => handleSkillClick(skill.name, skillValue, isAffected)} className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+          <div className="flex min-w-0 flex-col">
              <div className="flex items-center gap-1.5">
                 <span className={`text-sm truncate ${isTrained ? 'font-bold text-gray-900' : 'font-medium text-gray-700'}`}>{skill.name}</span>
                 {isTrained && <GraduationCap size={12} className="text-indigo-500 shrink-0" title="Trained Skill"/>}
-                {description && (
-                   <button type="button" onClick={(e) => handleInfoClick(e, skill.name)} className={`p-1 -m-1 rounded-full transition-colors ${activeTooltip === skill.name ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-500'}`}><Info size={14} /></button>
-                )}
              </div>
-             <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-wider text-gray-400">
+             <div className="flex flex-wrap items-center gap-2 text-xs uppercase font-bold tracking-wider text-gray-500">
                 <span>{skill.attr}</span>
                 {/* Visual Indicators for Bane Source */}
                 {hasConditionBane && (
@@ -216,11 +202,13 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
                 )}
              </div>
           </div>
-        </div>
-
-        <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm shrink-0 border ${isAffected ? 'bg-red-100 text-red-700 border-red-200' : 'bg-gray-50 text-gray-900 border-gray-200 group-hover:bg-indigo-50 group-hover:text-indigo-700 group-hover:border-indigo-100'}`}>
+          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${isAffected ? 'bg-red-100 text-red-700 border-red-200' : 'bg-gray-50 text-gray-900 border-gray-200 group-hover:bg-indigo-50 group-hover:text-indigo-700 group-hover:border-indigo-100'}`}>
            {skillValue}
-        </div>
+          </div>
+        </button>
+        {description && (
+          <button type="button" onClick={(e) => handleInfoClick(e, skill.name)} aria-label={`About ${skill.name}`} aria-expanded={activeTooltip === skill.name} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors ${activeTooltip === skill.name ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:text-indigo-600 hover:bg-indigo-50'}`}><Info size={17} /></button>
+        )}
       </div>
     );
   };
@@ -230,117 +218,45 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const filteredSecondary = filterSkills(secondarySkills);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
-      <div className="skills-modal-shell bg-gray-50 rounded-2xl max-w-5xl w-full h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}>
-        <div className="skills-modal-header px-6 py-4 bg-white border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
-          <div className="skills-modal-heading"><h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Target className="text-indigo-600" />Skill Checks</h2><p className="text-sm text-gray-500 mt-1">Select a skill to roll. Target number is your Skill Level.</p></div>
-          <div className="skills-modal-toolbar flex items-center gap-3">
-             <div className="relative hidden md:block"><input type="text" placeholder="Search skills..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-3 pr-8 py-1.5 text-sm bg-gray-100 border-transparent rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all w-48"/></div>
-             <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
+    <AccessibleDialog
+      onClose={onClose}
+      title="Skill Checks"
+      description="Select a skill to roll. The target number is your skill level."
+      icon={<Target className="h-6 w-6 text-indigo-600" />}
+      size="xl"
+      fullScreenMobile
+      panelClassName="sm:h-[88dvh] border border-gray-200 bg-gray-50"
+      bodyClassName="flex flex-col bg-gray-50"
+      actions={(
+        <input
+          type="search"
+          aria-label="Search skills"
+          placeholder="Search skills…"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          className="h-11 w-32 rounded-lg border border-gray-200 bg-gray-100 px-3 text-sm outline-none transition-all focus:w-48 focus:bg-white focus:ring-2 focus:ring-indigo-500 sm:w-48"
+        />
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-center gap-2 border-b border-indigo-100 bg-indigo-50/70 px-4 py-2 text-xs font-medium text-indigo-800 sm:justify-start sm:px-6">
+        <CheckSquare size={14} /><span>Use the checkbox to mark a Dragon or Demon for advancement.</span>
+      </div>
+      {isLoadingInfo ? (
+        <div className="flex flex-1 items-center justify-center"><LoadingSpinner size="lg" /></div>
+      ) : (
+        <div className="flex-1 p-4 sm:p-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3 xl:gap-8">
+            {filteredGeneral.length > 0 && <div className="space-y-3"><h3 className="flex items-center gap-2 border-b border-gray-200 pb-2 text-sm font-bold uppercase tracking-widest text-gray-500"><BookOpen size={16} /> General</h3><div className="space-y-2">{filteredGeneral.map(renderSkillRow)}</div></div>}
+            {(filteredWeapon.length > 0 || filteredSecondary.length > 0) && <div className="space-y-6 xl:col-span-2"><div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:gap-8">{filteredWeapon.length > 0 && <div className="space-y-3"><h3 className="flex items-center gap-2 border-b border-gray-200 pb-2 text-sm font-bold uppercase tracking-widest text-gray-500"><Swords size={16} /> Weapons</h3><div className="space-y-2">{filteredWeapon.map(renderSkillRow)}</div></div>}{filteredSecondary.length > 0 && <div className="space-y-3"><h3 className="flex items-center gap-2 border-b border-gray-200 pb-2 text-sm font-bold uppercase tracking-widest text-gray-500"><Sparkles size={16} /> Magic & Secondary</h3><div className="space-y-2">{filteredSecondary.map(renderSkillRow)}</div></div>}</div></div>}
+            {filteredGeneral.length === 0 && filteredWeapon.length === 0 && filteredSecondary.length === 0 && <div className="col-span-full py-12 text-center text-gray-500"><p>No skills found matching “{searchQuery}”.</p></div>}
           </div>
         </div>
-        <div className="skills-modal-banner bg-indigo-50/50 px-6 py-2 border-b border-indigo-100 flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-indigo-800" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}><CheckSquare size={14} /><span>Rolled a 1 (Dragon) or 20 (Demon)? Check the box to mark for advancement.</span></div>
-        
-        {isLoadingInfo ? <div className="flex-grow flex items-center justify-center"><LoadingSpinner size="lg" /></div> : (
-          <div className="skills-modal-body flex-grow overflow-y-auto p-6 custom-scrollbar" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
-            <div className="skills-modal-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {(filteredGeneral.length > 0) && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><BookOpen size={16} /> General</h3><div className="space-y-2">{filteredGeneral.map(renderSkillRow)}</div></div>)}
-              {(filteredWeapon.length > 0 || filteredSecondary.length > 0) && (<div className="space-y-8 lg:col-span-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8">{filteredWeapon.length > 0 && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><Swords size={16} /> Weapons</h3><div className="space-y-2">{filteredWeapon.map(renderSkillRow)}</div></div>)}{filteredSecondary.length > 0 && (<div className="space-y-3"><h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-200"><Sparkles size={16} /> Magic & Secondary</h3><div className="space-y-2">{filteredSecondary.map(renderSkillRow)}</div></div>)}</div></div>)}
-              {filteredGeneral.length === 0 && filteredWeapon.length === 0 && filteredSecondary.length === 0 && (<div className="col-span-full text-center py-12 text-gray-400"><p>No skills found matching "{searchQuery}"</p></div>)}
-            </div>
-          </div>
-        )}
-        {activeTooltip && tooltipPosition && (<div style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className={`fixed -translate-x-1/2 w-64 max-w-[calc(100vw-1.5rem)] max-h-[min(18rem,calc(100vh-1.5rem))] overflow-y-auto p-3 bg-gray-900 text-white text-xs leading-relaxed rounded-lg shadow-xl z-[70] animate-in fade-in zoom-in-95 duration-200 ${tooltipPosition.placement === 'top' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-[10px]'}`} onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}>{tooltipPosition.placement === 'top' ? <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" /> : <div className="absolute top-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />}{skillInfo[activeTooltip]?.description || "No description available."}</div>)}
-      </div>
-      <style>{`
-        @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
-          .skills-modal-shell {
-            height: 100vh;
-            max-width: 100vw;
-            border-radius: 0;
-            border-width: 0;
-          }
-
-          .skills-modal-header {
-            padding: 0.75rem 0.9rem;
-            gap: 0.65rem;
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: start;
-          }
-
-          .skills-modal-heading h2 {
-            font-size: 1rem;
-            line-height: 1.1;
-          }
-
-          .skills-modal-heading p {
-            margin-top: 0.25rem;
-            font-size: 0.72rem;
-            line-height: 1.2;
-          }
-
-          .skills-modal-toolbar {
-            gap: 0.4rem;
-            align-self: start;
-          }
-
-          .skills-modal-toolbar .hidden.md\\:block {
-            display: block;
-          }
-
-          .skills-modal-toolbar input {
-            width: 10rem;
-            padding-top: 0.45rem;
-            padding-bottom: 0.45rem;
-            font-size: 0.75rem;
-          }
-
-          .skills-modal-banner {
-            padding: 0.45rem 0.9rem;
-            font-size: 0.68rem;
-            line-height: 1.2;
-          }
-
-          .skills-modal-body {
-            padding: 0.9rem;
-          }
-
-          .skills-modal-grid {
-            gap: 0.85rem;
-          }
-
-          .skills-modal-grid h3 {
-            font-size: 0.65rem;
-            padding-bottom: 0.35rem;
-          }
-
-          .skills-modal-grid .space-y-2 > div[role="button"] {
-            padding: 0.55rem 0.65rem;
-            gap: 0.5rem;
-          }
-
-          .skills-modal-grid .space-y-2 > div[role="button"] .text-sm {
-            font-size: 0.78rem;
-            line-height: 1.05rem;
-          }
-
-          .skills-modal-grid .space-y-2 > div[role="button"] .w-8.h-8 {
-            width: 1.8rem;
-            height: 1.8rem;
-            font-size: 0.72rem;
-          }
-
-          .skills-modal-grid .space-y-2 > div[role="button"] .w-5.h-5 {
-            width: 1rem;
-            height: 1rem;
-          }
-
-          .skills-modal-grid .space-y-2 > div[role="button"] .text-\\[10px\\] {
-            font-size: 0.5rem;
-          }
-        }
-      `}</style>
-    </div>
+      )}
+      {activeTooltip && tooltipPosition && (
+        <div role="tooltip" style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className={`fixed z-[110] w-64 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 overflow-y-auto rounded-lg bg-gray-900 p-3 text-sm leading-relaxed text-white shadow-xl ${tooltipPosition.placement === 'top' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-[10px]'}`}>
+          {skillInfo[activeTooltip]?.description || 'No description available.'}
+        </div>
+      )}
+    </AccessibleDialog>
   );
 }

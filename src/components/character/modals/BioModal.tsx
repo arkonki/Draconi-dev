@@ -4,6 +4,7 @@ import {
   X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical
 } from 'lucide-react';
 import { Button } from '../../shared/Button';
+import { AccessibleDialog } from '../../shared/AccessibleDialog';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { supabase } from '../../../lib/supabase';
 
@@ -424,14 +425,16 @@ export function BioModal({ onClose }: BioModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 flex justify-center items-center z-50 p-4 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label="Close biography modal"
-      />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+    <AccessibleDialog
+      onClose={onClose}
+      title={`${character.name} biography`}
+      ariaLabel={`${character.name} biography`}
+      size="xl"
+      fullScreenMobile
+      hideHeader
+      panelClassName="sm:h-[90dvh] sm:max-w-4xl border border-gray-200"
+      bodyClassName="flex flex-col overflow-hidden"
+    >
         
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-white z-10">
@@ -466,7 +469,6 @@ export function BioModal({ onClose }: BioModalProps) {
            {activeTab === 'bio' ? renderBioTab() : renderBackstoryTab()}
         </div>
 
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from './Button';
+import { AccessibleDialog } from './AccessibleDialog';
 
 interface ConfirmationDialogProps {
   isOpen: boolean;
@@ -26,42 +27,20 @@ export function ConfirmationDialog({
   isDestructive = false,
   icon,
 }: ConfirmationDialogProps) {
-  if (!isOpen) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center backdrop-blur-sm"
-      aria-modal="true"
-      role="dialog"
-    >
-      <button
-        type="button"
-        className="absolute inset-0 bg-black bg-opacity-50"
-        onClick={onClose}
-        aria-label="Close dialog"
-      />
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-md m-4 p-6"
-      >
-        <div className="flex items-start space-x-4">
-          {icon && (
-            <div className={`mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full ${isDestructive ? 'bg-red-100' : 'bg-blue-100'}`}>
-              {icon}
-            </div>
-          )}
-          <div className="flex-grow">
-            <h3 className="text-lg font-semibold text-gray-900" id="modal-title">
-              {title}
-            </h3>
-            <div className="mt-2">
-              <p className="text-sm text-gray-600">
-                {description}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3">
+    <AccessibleDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      description={description}
+      icon={icon && <div className={`flex h-12 w-12 items-center justify-center rounded-full ${isDestructive ? 'bg-red-100' : 'bg-blue-100'}`}>{icon}</div>}
+      size="md"
+      layer="critical"
+      closeDisabled={isLoading}
+      bodyClassName="hidden"
+      footerClassName="border-t-0 pt-2 sm:pb-6"
+      footer={(
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button
             variant="secondary"
             onClick={onClose}
@@ -79,7 +58,9 @@ export function ConfirmationDialog({
             {confirmText}
           </Button>
         </div>
-      </div>
-    </div>
+      )}
+    >
+      <span />
+    </AccessibleDialog>
   );
 }

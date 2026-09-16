@@ -1,15 +1,13 @@
 import React, { useMemo, useEffect, useRef, useState } from 'react';
 import { Character, WeaponEntry } from '../../types/character';
-import { Shield, Heart, Zap, Sword, UserX, Users, ExternalLink, Skull, Minus, Plus, Loader2, MoreVertical, XCircle } from 'lucide-react';
-import { Button } from '../shared/Button';
+import { Shield, Heart, Zap, Sword, UserX, Users, ExternalLink, Skull, Minus, Plus, Loader2, MoreVertical } from 'lucide-react';
 import { removePartyMember } from '../../lib/api/parties';
 import { mapCharacterData, updateCharacter } from '../../lib/api/characters';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Party } from '../../lib/api/parties';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../shared/DropdownMenu';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { CharacterSheet } from '../character/CharacterSheet';
-import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 const CONDITION_STYLES: Record<string, string> = {
@@ -33,100 +31,6 @@ interface PartyMemberListProps {
   isDM: boolean;
   currentUserId?: string;
   onUpdate: () => void;
-}
-
-interface CharacterSheetModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  isLoading: boolean;
-  isReady: boolean;
-  error: string | null;
-  onRetry: () => void;
-  members: Character[];
-  selectedMemberId: string | null;
-  onSelectMember: (memberId: string) => void;
-}
-
-function CharacterSheetModal({
-  isOpen,
-  onClose,
-  title,
-  isLoading,
-  isReady,
-  error,
-  onRetry,
-  members,
-  selectedMemberId,
-  onSelectMember,
-}: CharacterSheetModalProps) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[70] p-2 md:p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full h-[96vh] md:h-[92vh] max-w-[1400px] overflow-hidden border border-stone-300 flex flex-col">
-        <div className="p-3 md:p-4 border-b bg-stone-800 text-white flex justify-between items-center">
-          <div className="min-w-0">
-            <h3 className="text-base md:text-lg font-bold font-serif">Character Sheet</h3>
-            <p className="text-xs text-stone-300 truncate">{title}</p>
-          </div>
-          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close character sheet">
-            <XCircle size={24} />
-          </button>
-        </div>
-
-        {members.length > 1 && (
-          <div className="border-b bg-stone-100 px-3 py-2 overflow-x-auto">
-            <div className="flex items-center gap-2 min-w-max" role="tablist" aria-label="Party members">
-              {members.map((member) => (
-                <button
-                  key={member.id}
-                  type="button"
-                  onClick={() => onSelectMember(member.id)}
-                  role="tab"
-                  id={`character-sheet-tab-${member.id}`}
-                  aria-selected={member.id === selectedMemberId}
-                  aria-controls={`character-sheet-panel-${member.id}`}
-                  tabIndex={member.id === selectedMemberId ? 0 : -1}
-                  className={`px-3 py-1.5 rounded-t-lg rounded-b-sm border text-sm font-medium transition-colors whitespace-nowrap ${
-                    member.id === selectedMemberId
-                      ? 'bg-white text-stone-900 border-stone-300 border-b-white shadow-sm'
-                      : 'bg-stone-200/70 text-stone-600 border-transparent hover:bg-white/80 hover:text-stone-800'
-                  }`}
-                >
-                  {member.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div
-          className="flex-1 overflow-y-auto bg-[#f5f0e1]"
-          role="tabpanel"
-          id={`character-sheet-panel-${selectedMemberId ?? 'default'}`}
-          aria-labelledby={selectedMemberId ? `character-sheet-tab-${selectedMemberId}` : undefined}
-        >
-          {error ? (
-            <div className="h-full flex flex-col items-center justify-center p-6 text-center">
-              <p className="text-red-600 font-semibold">{error}</p>
-              <div className="mt-4 flex gap-2">
-                <Button variant="secondary" onClick={onClose}>Close</Button>
-                <Button variant="primary" onClick={onRetry}>Retry</Button>
-              </div>
-            </div>
-          ) : isLoading || !isReady ? (
-            <div className="h-full flex items-center justify-center gap-3 text-stone-600">
-              <LoadingSpinner />
-              <span className="font-medium">Loading character sheet...</span>
-            </div>
-          ) : (
-            <CharacterSheet />
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // --- COMPONENT 1: INTERACTIVE STAT BAR (ANIMATED) ---
@@ -634,7 +538,7 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
             isUpdatingWP={Boolean(updatingStats[`${member.id}:current_wp`])}
         />
         ))}
-      <CharacterSheetModal
+      <CharacterSheetDialog
         isOpen={isCharacterSheetModalOpen}
         onClose={handleCloseCharacterSheetModal}
         title={selectedSheetMember?.name || 'Character'}
