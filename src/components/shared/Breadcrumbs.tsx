@@ -32,8 +32,8 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, maxItems = 4 })
     }
 
     return (
-        <nav aria-label="Breadcrumb" className="mb-4 overflow-hidden">
-            <ol className="flex items-center space-x-1 text-sm overflow-x-auto no-scrollbar whitespace-nowrap pb-1">
+        <nav aria-label="Breadcrumb" className="mb-4 min-w-0 overflow-hidden">
+            <ol className="flex min-w-0 items-center space-x-1 overflow-x-auto whitespace-nowrap pb-1 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {displayItems.map((item, index) => {
                     const isLast = index === displayItems.length - 1;
                     const Icon = item.icon;

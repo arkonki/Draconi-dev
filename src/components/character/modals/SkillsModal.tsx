@@ -234,7 +234,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
           placeholder="Search skills…"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          className="h-11 w-32 rounded-lg border border-gray-200 bg-gray-100 px-3 text-sm outline-none transition-all focus:w-48 focus:bg-white focus:ring-2 focus:ring-indigo-500 sm:w-48"
+          className="h-11 w-full rounded-lg border border-gray-200 bg-gray-100 px-3 text-sm outline-none transition-colors focus:bg-white focus:ring-2 focus:ring-indigo-500 sm:w-48"
         />
       )}
     >

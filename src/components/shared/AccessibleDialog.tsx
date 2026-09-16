@@ -169,16 +169,16 @@ export function AccessibleDialog({
         tabIndex={-1}
         className={`relative flex w-full flex-col overflow-hidden bg-white shadow-2xl outline-none ${sizeClasses[size]} ${mobilePanel} ${panelClassName}`}
       >
-        {!hideHeader && <div className={`flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3 sm:px-6 sm:py-4 ${headerClassName}`}>
-          <div className="flex min-w-0 items-start gap-3">
+        {!hideHeader && <div className={`flex shrink-0 flex-col items-stretch gap-3 border-b px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-4 ${headerClassName}`}>
+          <div className="flex min-w-0 items-start gap-3 sm:flex-1">
             {icon && <div className="shrink-0" aria-hidden="true">{icon}</div>}
             <div className="min-w-0">
               <h2 id={titleId} className={`text-lg font-bold text-stone-900 ${titleClassName}`}>{title}</h2>
               {description && <div id={descriptionId} className="mt-1 text-sm text-stone-600">{description}</div>}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {actions}
+          <div className="flex min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
+            {actions && <div className="min-w-0 flex-1 sm:flex-none">{actions}</div>}
             {showCloseButton && (
               <button
                 type="button"

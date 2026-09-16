@@ -908,9 +908,9 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
       <div className={`character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] border-x-0 md:border-2 border-[#d4c5a3] relative ${embedded ? 'shadow-none md:border-0' : 'shadow-2xl'}`}>
         
         {/* HEADER */}
-        <div className="character-sheet-header bg-[#1a472a] text-[#e8d5b5] p-4 flex flex-col md:flex-row justify-between items-center border-b-4 border-[#d4c5a3] relative">
-          <div className="character-sheet-brand z-10 flex flex-col w-full md:w-auto text-center md:text-left">
-            <h1 className="character-sheet-brand-title text-4xl md:text-5xl font-serif font-black tracking-tighter uppercase drop-shadow-md">Dragonbane</h1>
+        <div className="character-sheet-header relative flex flex-col items-center justify-between border-b-4 border-[#d4c5a3] bg-[#1a472a] p-3 text-[#e8d5b5] md:items-stretch md:p-4 xl:flex-row xl:items-center">
+          <div className="character-sheet-brand z-10 flex w-full flex-col text-center md:text-left xl:w-auto">
+            <h1 className="character-sheet-brand-title font-serif text-2xl font-black uppercase tracking-tighter drop-shadow-md sm:text-3xl md:text-5xl">Dragonbane</h1>
             <div className="character-sheet-meta flex flex-wrap justify-center md:justify-start gap-2 md:gap-4 mt-2 text-xs md:text-sm font-serif tracking-wide opacity-90">
               <span className="bg-[#0f2e1b] px-2 py-0.5 rounded">{character.kin}</span>
               <span className="hidden md:inline">•</span>
@@ -920,8 +920,8 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
             </div>
           </div>
 
-          <div className="character-sheet-actions z-10 mt-4 hidden w-full md:mt-0 md:block md:w-auto">
-            <div className="character-sheet-action-row flex gap-2 px-1">
+          <div className="character-sheet-actions z-10 mt-4 hidden w-full md:block xl:mt-0 xl:w-auto">
+            <div className="character-sheet-action-row flex flex-wrap justify-end gap-2 px-1">
               {[
                 { label: 'Roll', icon: Dices, action: openGeneralRoll },
                 { label: 'Skills', icon: Book, action: () => setShowSkillsModal(true) },
@@ -966,7 +966,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
           
           {/* NAME & VITALS ROW */}
           <div className="character-sheet-name-vitals grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 items-end">
-             <div className="character-sheet-name-block md:col-span-5 border-b-2 border-stone-400 pb-2 text-center md:text-left">
+             <div className="character-sheet-name-block hidden border-b-2 border-stone-400 pb-2 text-center md:col-span-5 md:block md:text-left">
                 <p className="block text-[10px] md:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Character Name</p>
                 <div className="text-3xl md:text-4xl font-serif font-bold text-[#1a472a] leading-none">{character.name}</div>
              </div>

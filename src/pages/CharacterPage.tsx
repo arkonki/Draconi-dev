@@ -125,7 +125,7 @@ export function CharacterPage() {
 
   return (
     <>
-      <Breadcrumbs items={breadcrumbs} />
+      <Breadcrumbs items={breadcrumbs} maxItems={3} />
       <CharacterSheet />
       <EncounterChatView />
     </>
