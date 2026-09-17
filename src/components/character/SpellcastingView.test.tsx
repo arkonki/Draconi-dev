@@ -49,7 +49,7 @@ const spells = [
     duration: 'Instant',
     willpowerCost: 2,
     requirement: 'Gesture',
-    powerLevel: 'yes',
+    powerLevel: '1',
     dice: 'D6',
   },
   {
@@ -132,5 +132,23 @@ describe('SpellcastingView', () => {
       expect(container.querySelector<HTMLDivElement>('.spellcasting-modal-list')?.scrollTop).toBe(180);
       expect(screen.getByRole('button', { name: 'View details for Ember' })).toHaveFocus();
     });
+  });
+
+  it('changes legacy power-level spells between levels and recalculates WP cost', () => {
+    render(<SpellcastingView onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Increase Ember power level' })).toBeEnabled();
+    expect(screen.getByText('Cost 2 WP · 8 available')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cast L1/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Ember power level' }));
+
+    expect(screen.getByText('Cost 4 WP · 8 available')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cast L2/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Decrease Ember power level' }));
+
+    expect(screen.getByText('Cost 2 WP · 8 available')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cast L1/i })).toBeInTheDocument();
   });
 });

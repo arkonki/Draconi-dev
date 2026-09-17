@@ -9,6 +9,7 @@ import { useDice } from '../dice/useDice';
 import type { RollHistoryEntry } from '../dice/diceTypes';
 import { sendMessage } from '../../lib/api/chat';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
+import { hasSpellPowerLevels } from '../../lib/game/spellPowerLevel';
 
 // --- CONFIGURATION ---
 const requirementExplanations: Record<string, string> = {
@@ -181,6 +182,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   const [infoPaneSpell, setInfoPaneSpell] = useState<DetailedSpell | null>(null);
   const [nextCastHasBane, setNextCastHasBane] = useState(false);
   const [pendingDragonCast, setPendingDragonCast] = useState<PendingDragonCast | null>(null);
+  const [spellLevels, setSpellLevels] = useState<Record<string, number>>({});
   const spellListRef = useRef<HTMLDivElement>(null);
   const savedListScrollTopRef = useRef(0);
   const detailTriggerSpellIdRef = useRef<string | null>(null);
@@ -286,7 +288,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 
   const getWpCost = (spell: DetailedSpell, selectedLevel: number) => {
     const baseWpCost = Number(spell.willpowerCost ?? 0);
-    const isPowerLevelSpell = spell.powerLevel === 'yes';
+    const isPowerLevelSpell = hasSpellPowerLevels(spell.powerLevel);
     return isPowerLevelSpell ? baseWpCost + (selectedLevel - 1) * 2 : baseWpCost;
   };
 
@@ -304,7 +306,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     options?: { wpSpent?: number; dragonChoice?: DragonCastChoice | null }
   ) => {
     const actualWpCost = getWpCost(spell, selectedLevel);
-    const isPowerLevelSpell = spell.powerLevel === 'yes';
+    const isPowerLevelSpell = hasSpellPowerLevels(spell.powerLevel);
     const wpSpent = options?.wpSpent ?? actualWpCost;
     const dragonChoice = options?.dragonChoice ?? null;
 
@@ -488,15 +490,20 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   const SpellRow = ({ spell }: { spell: DetailedSpell }) => {
     const isPrepared = preparedSpellIds.has(spell.id);
     const isTrick = spell.rank === 0;
-    const isPowerLevelSpell = spell.powerLevel === 'yes';
-    const [level, setLevel] = useState(1);
+    const isPowerLevelSpell = hasSpellPowerLevels(spell.powerLevel);
+    const level = spellLevels[spell.id] ?? 1;
     const baseWpCost = Number(spell.willpowerCost ?? 0);
     const actualWpCost = isPowerLevelSpell ? baseWpCost + (level - 1) * 2 : baseWpCost;
     const insufficientWp = (character.current_wp ?? character.attributes.WIL) < actualWpCost;
     const isReactionSpell = spell.castingTime === 'Reaction';
     const scaledDice = getScaledDice(spell.dice, level); // Just for display
 
-    const handleLevelChange = (delta: number) => setLevel(c => Math.max(1, Math.min(3, c + delta)));
+    const handleLevelChange = (delta: number) => {
+      setSpellLevels(current => ({
+        ...current,
+        [spell.id]: Math.max(1, Math.min(3, (current[spell.id] ?? 1) + delta)),
+      }));
+    };
 
     return (
       <div className="spell-row flex flex-col sm:flex-row sm:items-center p-3 sm:p-4 border-b border-stone-100 hover:bg-stone-50 transition-colors group">
@@ -551,7 +558,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
               </div>
               <div className="spell-row-cast-controls flex items-center bg-stone-100 rounded-lg p-0.5 shadow-inner">
                {isPowerLevelSpell && (
-                   <button disabled={level<=1} onClick={(e)=>{e.stopPropagation(); handleLevelChange(-1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Minus size={16}/></button>
+                   <button type="button" aria-label={`Decrease ${spell.name} power level`} disabled={level<=1} onClick={(e)=>{e.stopPropagation(); handleLevelChange(-1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Minus size={16}/></button>
                )}
                
 	               <button 
@@ -574,7 +581,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                </button>
                
                {isPowerLevelSpell && (
-                   <button disabled={level>=3} onClick={(e)=>{e.stopPropagation(); handleLevelChange(1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Plus size={16}/></button>
+                   <button type="button" aria-label={`Increase ${spell.name} power level`} disabled={level>=3} onClick={(e)=>{e.stopPropagation(); handleLevelChange(1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Plus size={16}/></button>
                )}
               </div>
             </div>

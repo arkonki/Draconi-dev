@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { useCharacterSheetStore } from '../stores/characterSheetStore';
 import { Breadcrumbs } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
+import { hasSpellPowerLevels } from '../lib/game/spellPowerLevel';
 
 interface BookmarkedEntry extends CompendiumEntry {
   preview: string;
@@ -543,7 +544,7 @@ export function Compendium() {
                   <span className="text-[10px] px-2 py-1 rounded bg-indigo-50 text-indigo-600 font-bold uppercase tracking-wide">
                     {getSpellRankLabel(selectedSpell!.rank)}
                   </span>
-                  {selectedSpell!.power_level === 'yes' && (
+                  {hasSpellPowerLevels(selectedSpell!.power_level) && (
                     <span className="text-[10px] px-2 py-1 rounded bg-amber-50 text-amber-700 font-bold uppercase tracking-wide">
                       Power Levels
                     </span>
@@ -668,7 +669,7 @@ export function Compendium() {
                 </div>
                 <div className="rounded-lg border border-gray-200 p-4 bg-white">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Power-Level Spells</p>
-                  <p className="text-2xl font-black text-gray-900 mt-1">{grimoireSpells.filter((spell) => spell.power_level === 'yes').length}</p>
+                  <p className="text-2xl font-black text-gray-900 mt-1">{grimoireSpells.filter((spell) => hasSpellPowerLevels(spell.power_level)).length}</p>
                 </div>
               </div>
             </div>

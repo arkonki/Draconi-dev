@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { hasSpellPowerLevels } from '../../../lib/game/spellPowerLevel';
 import { GameDataEntry } from '../../../hooks/useGameData';
 import { SpellPrerequisite } from '../../../types/magic';
 
@@ -187,7 +188,7 @@ export function SpellForm({ entry, onChange, magicSchools = [] }: SpellFormProps
          <div className="flex items-center h-11">
            <input
              type="checkbox" name="power_level" id="power_level"
-             checked={entry.power_level === 'yes'}
+             checked={hasSpellPowerLevels(entry.power_level)}
              onChange={handleCheckboxChange}
              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
            />

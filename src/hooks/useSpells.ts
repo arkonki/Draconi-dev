@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useCharacterSheetStore } from '../stores/characterSheetStore';
 import { Spell as DetailedSpell } from '../types/magic'; // Use the detailed type
+import { hasSpellPowerLevels } from '../lib/game/spellPowerLevel';
 
 // Define the shape of the data coming directly from the DB query
-export interface DBSpell extends Omit<DetailedSpell, 'schoolId'> {
-  power_level: 'yes' | null;
+export interface DBSpell extends Omit<DetailedSpell, 'schoolId' | 'power_level'> {
+  power_level: string | boolean | number | null;
   magic_schools: { name: string } | null;
   school_id: string | null;
 }
@@ -107,7 +108,7 @@ export function useSpells(characterId?: string) {
       description: dbSpell.description,
       willpowerCost: dbSpell.willpower_cost,
       createdAt: dbSpell.created_at,
-      powerLevel: dbSpell.power_level,
+      powerLevel: hasSpellPowerLevels(dbSpell.power_level) ? 'yes' : 'none',
 			dice: dbSpell.dice,// Map power_level
     }));
   }, [dbSpells]);
