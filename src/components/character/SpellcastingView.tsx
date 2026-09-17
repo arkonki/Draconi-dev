@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Spell as DetailedSpell } from '../../types/magic';
 import { Character, AttributeName, DiceType } from '../../types/character';
-import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X } from 'lucide-react';
+import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X, Search, ChevronLeft } from 'lucide-react';
 import { useSpells } from '../../hooks/useSpells';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -55,33 +55,34 @@ const calculateFallbackLevel = (character: Character, skillName: string): number
     return isTrained ? baseChance * 2 : baseChance; 
 };
 
-// --- COMPONENT: SPELL DETAIL SLIDER ---
-const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onClose: () => void; }) => {
-  if (!spell) return null;
-
+// --- COMPONENT: INTERNAL SPELL DETAIL VIEW ---
+const SpellDetailView = ({ spell, currentWp, onBack }: { spell: DetailedSpell; currentWp: number; onBack: () => void; }) => {
   const foundRequirements = Object.keys(requirementExplanations).filter(key => spell.requirement?.includes(key));
 
   return (
-    <div className="fixed inset-0 z-[60] overflow-hidden pointer-events-none">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto"
-        onClick={onClose}
-        aria-label="Close spell details"
-      />
-      <div className="spell-detail-pane absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
-        
-        {/* Header */}
-        <div className="spell-detail-pane-header p-4 sm:p-6 border-b bg-stone-50 flex justify-between items-start">
-            <div className="spell-detail-pane-heading">
-                <div className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">Spell Details</div>
-                <h3 className="text-2xl font-serif font-bold text-stone-900 leading-none">{spell.name}</h3>
+    <section className="spell-detail-view flex min-h-0 flex-1 flex-col bg-white" aria-label={`${spell.name} spell details`}>
+        <div className="spell-detail-pane-header flex shrink-0 items-center gap-3 border-b bg-stone-50 p-4 sm:px-6">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex min-h-11 items-center gap-1 rounded-lg border border-stone-200 bg-white px-3 text-sm font-bold text-stone-700 shadow-sm transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 touch-manipulation"
+              aria-label="Back to spell list"
+            >
+              <ChevronLeft size={18} aria-hidden="true" />
+              Back
+            </button>
+            <div className="spell-detail-pane-heading min-w-0">
+                <div className="text-xs font-bold uppercase tracking-wider text-stone-500">Spell details</div>
+                <h3 className="truncate font-serif text-xl font-bold leading-tight text-stone-900 sm:text-2xl">{spell.name}</h3>
             </div>
-            <button onClick={onClose} className="spell-detail-pane-close text-stone-400 hover:text-stone-600 transition-colors p-2 -m-2 rounded-full touch-manipulation"><X size={24} /></button>
+            <div className="ml-auto shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-right text-xs text-indigo-900">
+              <span className="block font-bold">{currentWp} WP available</span>
+              <span>{Number(spell.willpowerCost ?? 0)} WP base cost</span>
+            </div>
         </div>
 
         {/* Content */}
-        <div className="spell-detail-pane-body flex-grow overflow-y-auto p-6 space-y-6 bg-white">
+        <div className="spell-detail-pane-body flex-grow overflow-y-auto p-4 sm:p-6 space-y-6 bg-white">
             
             {/* Description Box */}
             <div className="spell-detail-pane-description prose prose-stone prose-sm max-w-none text-stone-600 leading-relaxed italic border-l-4 border-stone-300 pl-4">
@@ -150,8 +151,7 @@ const SpellDetailPane = ({ spell, onClose }: { spell: DetailedSpell | null; onCl
             </div>
 
         </div>
-      </div>
-    </div>
+    </section>
   );
 };
 
@@ -177,9 +177,13 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   const [castingSpellId, setCastingSpellId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('prepared');
   const [selectedRankFilter, setSelectedRankFilter] = useState<RankFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [infoPaneSpell, setInfoPaneSpell] = useState<DetailedSpell | null>(null);
   const [nextCastHasBane, setNextCastHasBane] = useState(false);
   const [pendingDragonCast, setPendingDragonCast] = useState<PendingDragonCast | null>(null);
+  const spellListRef = useRef<HTMLDivElement>(null);
+  const savedListScrollTopRef = useRef(0);
+  const detailTriggerSpellIdRef = useRef<string | null>(null);
 
   const { toggleDiceRoller, closeDiceRoller } = useDice();
   const { character, updateCharacterData, isSaving, setActiveStatusMessage } = useCharacterSheetStore();
@@ -204,9 +208,20 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   
   const spellsToDisplay = useMemo(() => { 
       const baseList = activeTab === 'prepared' ? preparedSpellsList : grimoireSpellsList; 
-      if (selectedRankFilter === 'all') return baseList; 
-      return baseList.filter(spell => spell.rank === selectedRankFilter); 
-  }, [activeTab, preparedSpellsList, grimoireSpellsList, selectedRankFilter]);
+      const rankFiltered = selectedRankFilter === 'all'
+        ? baseList
+        : baseList.filter(spell => spell.rank === selectedRankFilter);
+      const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+      if (!normalizedQuery) return rankFiltered;
+      return rankFiltered.filter(spell => [
+        spell.name,
+        spell.description,
+        spell.castingTime,
+        spell.range,
+        spell.duration,
+        spell.requirement,
+      ].some(value => String(value ?? '').toLocaleLowerCase().includes(normalizedQuery)));
+  }, [activeTab, preparedSpellsList, grimoireSpellsList, selectedRankFilter, searchQuery]);
 
   const { actualMagicSkillName, magicSkillValue, isMagicSkillAffected } = useMemo(() => { 
       if (!character) return { actualMagicSkillName: null, magicSkillValue: null, isMagicSkillAffected: false }; 
@@ -226,6 +241,25 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   }, [character]);
 
   if (!character) return null;
+
+  const currentWp = character.current_wp ?? character.attributes.WIL;
+
+  const openSpellDetails = (spell: DetailedSpell) => {
+    savedListScrollTopRef.current = spellListRef.current?.scrollTop ?? 0;
+    detailTriggerSpellIdRef.current = spell.id;
+    setInfoPaneSpell(spell);
+  };
+
+  const closeSpellDetails = () => {
+    const triggerSpellId = detailTriggerSpellIdRef.current;
+    setInfoPaneSpell(null);
+    window.requestAnimationFrame(() => {
+      if (spellListRef.current) spellListRef.current.scrollTop = savedListScrollTopRef.current;
+      if (triggerSpellId) {
+        document.querySelector<HTMLButtonElement>(`[data-spell-detail-trigger="${triggerSpellId}"]`)?.focus();
+      }
+    });
+  };
 
   const logCombatEvent = async (content: string) => {
     if (!character.party_id || !character.user_id) return;
@@ -475,7 +509,9 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
         <button
           type="button"
           className="spell-row-main flex-grow min-w-0 cursor-pointer text-left bg-transparent rounded-md touch-manipulation min-h-[44px]"
-          onClick={() => setInfoPaneSpell(spell)}
+          onClick={() => openSpellDetails(spell)}
+          data-spell-detail-trigger={spell.id}
+          aria-label={`View details for ${spell.name}`}
         >
           <div className="spell-row-title flex items-center gap-2 mb-1">
              <h3 className="font-bold text-stone-800 group-hover:text-indigo-700 transition-colors truncate">{spell.name}</h3>
@@ -509,7 +545,11 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             )}
             
             {/* Cast Button Group */}
-            <div className="spell-row-cast-controls flex items-center bg-stone-100 rounded-lg p-0.5 shadow-inner">
+            <div className="flex flex-col items-end gap-1">
+              <div className={`px-1 text-[11px] font-semibold ${insufficientWp ? 'text-red-700' : 'text-stone-500'}`}>
+                Cost {actualWpCost} WP · {currentWp} available
+              </div>
+              <div className="spell-row-cast-controls flex items-center bg-stone-100 rounded-lg p-0.5 shadow-inner">
                {isPowerLevelSpell && (
                    <button disabled={level<=1} onClick={(e)=>{e.stopPropagation(); handleLevelChange(-1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Minus size={16}/></button>
                )}
@@ -528,7 +568,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                   {castingSpellId === spell.id ? <LoadingSpinner size="sm"/> : (
                       <>
                         {spell.dice && <Dices size={12} />}
-                        {isPowerLevelSpell ? `Lvl ${level}` : 'Cast'}
+                        {isPowerLevelSpell ? `Cast L${level}` : 'Cast'}
                       </>
                   )}
                </button>
@@ -536,6 +576,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
                {isPowerLevelSpell && (
                    <button disabled={level>=3} onClick={(e)=>{e.stopPropagation(); handleLevelChange(1)}} className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30 touch-manipulation"><Plus size={16}/></button>
                )}
+              </div>
             </div>
         </div>
       </div>
@@ -627,23 +668,43 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
 	            </div>
 	         )}
 
+         {infoPaneSpell ? (
+           <SpellDetailView spell={infoPaneSpell} currentWp={currentWp} onBack={closeSpellDetails} />
+         ) : (
+         <>
          {/* Tabs & Filters */}
-         <div className="spellcasting-modal-controls bg-white px-4 sm:px-6 py-2 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3">
+         <div className="spellcasting-modal-controls shrink-0 bg-white px-4 sm:px-6 py-2 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3">
             <div className="spellcasting-modal-tabs flex gap-1 bg-stone-100 p-1 rounded-lg overflow-x-auto no-scrollbar">
-               <button onClick={() => setActiveTab('prepared')} className={`px-4 py-2 min-h-[40px] text-sm font-bold rounded-md transition-all whitespace-nowrap touch-manipulation ${activeTab === 'prepared' ? 'bg-white text-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>
+               <button onClick={() => { setActiveTab('prepared'); if (spellListRef.current) spellListRef.current.scrollTop = 0; }} className={`px-4 py-2 min-h-[40px] text-sm font-bold rounded-md transition-all whitespace-nowrap touch-manipulation ${activeTab === 'prepared' ? 'bg-white text-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>
                   Prepared ({preparedSpellsList.length})
                </button>
-               <button onClick={() => setActiveTab('grimoire')} className={`px-4 py-2 min-h-[40px] text-sm font-bold rounded-md transition-all whitespace-nowrap touch-manipulation ${activeTab === 'grimoire' ? 'bg-white text-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>
+               <button onClick={() => { setActiveTab('grimoire'); if (spellListRef.current) spellListRef.current.scrollTop = 0; }} className={`px-4 py-2 min-h-[40px] text-sm font-bold rounded-md transition-all whitespace-nowrap touch-manipulation ${activeTab === 'grimoire' ? 'bg-white text-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>
                   Grimoire ({grimoireSpellsList.length})
                </button>
             </div>
+
+            <label className="relative order-last w-full sm:order-none sm:w-64">
+               <span className="sr-only">Search spells</span>
+               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+               <input
+                 type="search"
+                 value={searchQuery}
+                 onChange={(event) => {
+                   setSearchQuery(event.target.value);
+                   if (spellListRef.current) spellListRef.current.scrollTop = 0;
+                 }}
+                 placeholder="Search spells…"
+                 aria-label="Search spells"
+                 className="min-h-10 w-full rounded-lg border border-stone-300 bg-white py-2 pl-9 pr-3 text-sm text-stone-800 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+               />
+            </label>
             
             {availableRanks.length > 0 && (
                <div className="spellcasting-modal-filters flex items-center gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto pb-1 sm:pb-0">
                   <Filter size={14} className="text-stone-400"/>
-                  <button onClick={() => setSelectedRankFilter('all')} className={`text-xs px-3 py-2 min-h-[36px] rounded border whitespace-nowrap touch-manipulation ${selectedRankFilter === 'all' ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'}`}>All</button>
+                  <button onClick={() => { setSelectedRankFilter('all'); if (spellListRef.current) spellListRef.current.scrollTop = 0; }} className={`text-xs px-3 py-2 min-h-[36px] rounded border whitespace-nowrap touch-manipulation ${selectedRankFilter === 'all' ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'}`}>All</button>
                   {availableRanks.map(r => (
-                     <button key={r} onClick={() => setSelectedRankFilter(r as RankFilter)} className={`text-xs px-3 py-2 min-h-[36px] rounded border whitespace-nowrap touch-manipulation ${selectedRankFilter === r ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'}`}>
+                     <button key={r} onClick={() => { setSelectedRankFilter(r as RankFilter); if (spellListRef.current) spellListRef.current.scrollTop = 0; }} className={`text-xs px-3 py-2 min-h-[36px] rounded border whitespace-nowrap touch-manipulation ${selectedRankFilter === r ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'}`}>
                         {r === 0 ? 'T' : `R${r}`}
                      </button>
                   ))}
@@ -652,7 +713,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          </div>
 
          {/* Spell List */}
-         <div className="spellcasting-modal-list flex-grow overflow-y-auto bg-stone-50/30">
+         <div ref={spellListRef} className="spellcasting-modal-list flex-grow overflow-y-auto bg-stone-50/30">
             {spellsToDisplay.length > 0 ? (
                <div className="divide-y divide-stone-100">
                   {spellsToDisplay.map(spell => <SpellRow key={spell.id} spell={spell} />)}
@@ -660,7 +721,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             ) : (
                <div className="flex flex-col items-center justify-center h-64 text-stone-400">
                   <BookOpen size={48} className="mb-4 opacity-20"/>
-                  <p>No spells found.</p>
+                  <p>{searchQuery ? 'No spells match your search.' : 'No spells found.'}</p>
                </div>
             )}
          </div>
@@ -669,8 +730,8 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          <div className="spellcasting-modal-footer p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
             Prep Limit: {preparedRankedSpellCount} / {preparationLimit} • Tricks don't count against limit
          </div>
-      {/* Detail Panel Overlay */}
-      <SpellDetailPane spell={infoPaneSpell} onClose={() => setInfoPaneSpell(null)} />
+         </>
+         )}
       <style>{`
         @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
           .spellcasting-modal-shell {
@@ -831,10 +892,6 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
             padding: 0.45rem 0.9rem;
             font-size: 0.64rem;
             line-height: 1.2;
-          }
-
-          .spell-detail-pane {
-            max-width: min(24rem, 60vw);
           }
 
           .spell-detail-pane-header {
