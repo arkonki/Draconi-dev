@@ -33,6 +33,7 @@ const shopGroups = [
 type ItemDetails = (GameItem & Partial<InventoryItem> & { encumbrance_modifier?: number | string }) | undefined;
 type ShopGroup = (typeof shopGroups)[number];
 type SlotItem = string | InventoryItem | EquippedWeapon;
+type InventoryPanel = 'main' | 'wallet' | 'forage';
 
 // --- HELPER FUNCTIONS ---
 
@@ -381,12 +382,12 @@ const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: R
     );
 };
 
-export const MoneyManagementModal = ({
-    onClose,
+export const MoneyManagementPanel = ({
+    onBack,
     currentMoney,
     onUpdateMoney,
 }: {
-    onClose: () => void;
+    onBack: () => void;
     currentMoney: Character['equipment']['money'];
     onUpdateMoney: (money: Character['equipment']['money']) => void;
 }) => {
@@ -399,7 +400,7 @@ export const MoneyManagementModal = ({
             copper: copper * multiplier,
         });
         if (!success) { setError("Cannot remove more money than is available."); return; }
-        onUpdateMoney(newMoney); onClose();
+        onUpdateMoney(newMoney); onBack();
     };
     const CoinInput = ({
         label,
@@ -415,20 +416,22 @@ export const MoneyManagementModal = ({
         <div className="flex flex-col items-center"><label className={`text-xs font-bold uppercase tracking-wider mb-2 ${color}`}>{label}</label><div className="flex items-center gap-3"><button onClick={() => setter(Math.max(0, value - 1))} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Minus size={20} strokeWidth={3} /></button><div className="w-16 h-12 flex items-center justify-center bg-gray-50 border-2 border-gray-200 rounded-xl"><span className="text-xl font-mono font-bold">{value}</span></div><button onClick={() => setter(value + 1)} className="w-12 h-12 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors active:scale-95 touch-manipulation"><Plus size={20} strokeWidth={3} /></button></div><div className="flex gap-1 mt-2">{[5, 10].map(amt => (<button key={amt} onClick={() => setter(value + amt)} className="px-2 py-1 text-[10px] bg-gray-50 border border-gray-200 rounded text-gray-500 hover:bg-gray-100">+{amt}</button>))}</div></div>
     );
     return (
-        <AccessibleDialog
-            onClose={onClose}
-            title="Wallet"
-            description={`Current balance: ${formatCost(currentMoney)}`}
-            size="sm"
-            layer="nested"
-            panelClassName="rounded-2xl"
-            bodyClassName="p-6"
-        >
-            <div className="mb-8 rounded-xl border border-yellow-100 bg-yellow-50 p-4 text-center shadow-sm">
+        <section className="inventory-internal-panel flex min-h-full flex-col bg-white" aria-label="Wallet">
+            <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 sm:px-6">
+                <button type="button" onClick={onBack} className="flex min-h-11 items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-100" aria-label="Back to inventory">
+                    <ArrowLeft size={18} /> Back
+                </button>
+                <div>
+                    <h3 className="font-serif text-xl font-bold text-gray-900">Wallet</h3>
+                    <p className="text-xs text-gray-500">Add or spend coins without leaving your inventory.</p>
+                </div>
+            </div>
+            <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="mb-6 rounded-xl border border-yellow-100 bg-yellow-50 p-4 text-center shadow-sm">
                 <p className="text-sm font-bold uppercase tracking-widest text-yellow-700">Current Balance</p>
                 <p className="font-serif text-3xl font-bold text-yellow-900">{formatCost(currentMoney)}</p>
             </div>
-            <div className="mb-8 space-y-6">
+            <div className="mb-6 space-y-5">
                 <CoinInput label="Gold" value={gold} setter={setGold} color="text-yellow-600" />
                 <CoinInput label="Silver" value={silver} setter={setSilver} color="text-gray-500" />
                 <CoinInput label="Copper" value={copper} setter={setCopper} color="text-orange-700" />
@@ -438,22 +441,25 @@ export const MoneyManagementModal = ({
                 <button type="button" onClick={() => handleTransaction(-1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-100 py-3 font-bold text-red-800 transition-colors hover:bg-red-200"><MinusCircle size={20} /> Spend</button>
                 <button type="button" onClick={() => handleTransaction(1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-green-100 py-3 font-bold text-green-800 transition-colors hover:bg-green-200"><Plus size={20} /> Add</button>
             </div>
-        </AccessibleDialog>
+            </div>
+        </section>
     );
 };
 
-const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: number) => void; }) => {
+const ForagePanel = ({ onBack, onAdd }: { onBack: () => void; onAdd: (amount: number) => void; }) => {
     const [amount, setAmount] = useState<number>(1);
     return (
-        <AccessibleDialog
-            onClose={onClose}
-            title="Forage & Hunt"
-            description="Enter the number of rations obtained."
-            icon={<Utensils className="h-5 w-5 text-green-700" />}
-            size="sm"
-            layer="nested"
-            bodyClassName="p-6"
-        >
+        <section className="inventory-internal-panel flex min-h-full flex-col bg-white" aria-label="Forage and hunt">
+            <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 sm:px-6">
+                <button type="button" onClick={onBack} className="flex min-h-11 items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-100" aria-label="Back to inventory">
+                    <ArrowLeft size={18} /> Back
+                </button>
+                <div>
+                    <h3 className="flex items-center gap-2 font-serif text-xl font-bold text-gray-900"><Utensils className="h-5 w-5 text-green-700" /> Forage &amp; Hunt</h3>
+                    <p className="text-xs text-gray-500">Enter the number of rations obtained.</p>
+                </div>
+            </div>
+            <div className="mx-auto w-full max-w-lg flex-1 overflow-y-auto p-4 sm:p-6">
             <div className="mb-6 space-y-1 rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
                 <p><strong>Fishing:</strong> Rod (D4), Net (D6)</p>
                 <p><strong>Hunting:</strong> Squirrel/Crow (1), Rabbit (D3), Fox (D4), Boar (2D6), Deer (2D8)</p>
@@ -465,7 +471,8 @@ const ForageModal = ({ onClose, onAdd }: { onClose: () => void; onAdd: (amount: 
                 <button type="button" aria-label="Add one ration" onClick={() => setAmount(amount + 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 hover:bg-gray-100"><Plus size={20} /></button>
             </div>
             <Button variant="primary" className="w-full bg-green-700 hover:bg-green-800" onClick={() => onAdd(amount)}>Add {amount} Ration{amount !== 1 ? 's' : ''}</Button>
-        </AccessibleDialog>
+            </div>
+        </section>
     );
 };
 
@@ -482,9 +489,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
     const [inventorySearch, setInventorySearch] = useState('');
     const [shopSearch, setShopSearch] = useState('');
 
-    const [isMoneyModalOpen, setIsMoneyModalOpen] = useState(false);
-    const [isForageModalOpen, setIsForageModalOpen] = useState(false);
+    const [activePanel, setActivePanel] = useState<InventoryPanel>('main');
     const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
+    const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
     // Shop Navigation
     const [selectedShopGroup, setSelectedShopGroup] = useState<ShopGroup | null>(null);
@@ -547,7 +554,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         if (existingPlural) rationItem.name = "Field Rations";
         const newInventory = mergeIntoInventory(character.equipment!.inventory!, rationItem);
         handleUpdateEquipment({ ...character.equipment, inventory: newInventory });
-        setIsForageModalOpen(false);
+        setActivePanel('main');
     };
 
     const handleBuyItem = (item: GameItem) => {
@@ -824,6 +831,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         const isEquippable = isItemEquippable(itemDetails);
         const isUsable = isItemConsumable(item, itemDetails);
         const isMenuOpen = menuOpenId === item.id;
+        const isDetailsExpanded = expandedItemId === item.id;
         const toggleMenu = (e: React.MouseEvent) => { e.stopPropagation(); setMenuOpenId(isMenuOpen ? null : item.id); };
         const description = itemDetails?.effect || itemDetails?.description;
 
@@ -844,12 +852,12 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         const canMoveToMain = !!currentContainerId;
 
         return (
-            <div key={item.id} className="p-3 border border-gray-200 rounded-xl flex flex-col gap-3 bg-white relative shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between gap-3">
+            <div key={item.id} className="inventory-item-row p-2.5 sm:p-3 border border-gray-200 rounded-xl flex flex-col gap-2 bg-white relative shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between gap-2">
                     <div className="flex flex-col min-w-0 flex-1">
-                        <h3 className="font-bold text-sm text-gray-900">{formatInventoryItemName(item)}</h3>
+                        <h3 className="truncate font-bold text-sm text-gray-900" title={formatInventoryItemName(item)}>{formatInventoryItemName(item)}</h3>
 
-                        <div className="flex flex-wrap gap-2 mt-1.5">
+                        <div className="flex flex-wrap gap-1.5 mt-1">
                             {itemDetails?.weight !== undefined && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium" title="Weight">
                                     <Weight size={10} /> {itemDetails.weight}
@@ -885,40 +893,54 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             </Button>
                         ) : null}
 
+                        {description && (
+                            <button
+                                type="button"
+                                onClick={() => setExpandedItemId(isDetailsExpanded ? null : item.id)}
+                                aria-expanded={isDetailsExpanded}
+                                aria-label={`${isDetailsExpanded ? 'Hide' : 'Show'} details for ${item.name}`}
+                                className="flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
+                            >
+                                Details <ChevronDown size={14} className={`transition-transform ${isDetailsExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                        )}
+
                         <div className="relative">
-                            <button onClick={toggleMenu} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                            <button type="button" onClick={toggleMenu} aria-expanded={isMenuOpen} aria-label={`More actions for ${item.name}`} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
                                 <MoreVertical size={16} />
                             </button>
-                            {isMenuOpen && (
-                                <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-20 py-1 flex flex-col overflow-hidden ring-1 ring-black/5">
-                                    {/* Move Actions */}
-                                    {(moveTargets.length > 0 || canMoveToMain) && (
-                                        <>
-                                            <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
-                                                Move To...
-                                            </div>
-                                            {canMoveToMain && (
-                                                <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, null); }} className="w-full text-left px-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 font-medium transition-colors">
-                                                    <Package size={14} /> Main Inventory
-                                                </button>
-                                            )}
-                                            {moveTargets.map((c: InventoryItem) => (
-                                                <button key={c.id} onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, c.id!); }} className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2 font-medium transition-colors">
-                                                    <Backpack size={14} /> {c.name}
-                                                </button>
-                                            ))}
-                                            <div className="h-px bg-gray-100 my-1"></div>
-                                        </>
-                                    )}
-
-                                    <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleDropItem(item); }} className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium transition-colors"><Trash2 size={14} /> Drop Item</button>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
 
-                {description && (
+                {isMenuOpen && (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-1.5 shadow-inner">
+                        <div className="flex flex-wrap gap-1">
+                                    {/* Move Actions */}
+                                    {(moveTargets.length > 0 || canMoveToMain) && (
+                                        <>
+                                            <div className="w-full px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                                Move To...
+                                            </div>
+                                            {canMoveToMain && (
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, null); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50">
+                                                    <Package size={14} /> Main Inventory
+                                                </button>
+                                            )}
+                                            {moveTargets.map((c: InventoryItem) => (
+                                                <button type="button" key={c.id} onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, c.id!); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-indigo-50">
+                                                    <Backpack size={14} /> {c.name}
+                                                </button>
+                                            ))}
+                                        </>
+                                    )}
+
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleDropItem(item); }} className="ml-auto flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"><Trash2 size={14} /> Drop</button>
+                        </div>
+                    </div>
+                )}
+
+                {description && isDetailsExpanded && (
                     <div className="text-xs text-gray-600 leading-relaxed italic border-t border-gray-100 pt-2">
                         {description}
                     </div>
@@ -929,9 +951,6 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
     return (
         <>
-            {isMoneyModalOpen && <MoneyManagementModal onClose={() => setIsMoneyModalOpen(false)} currentMoney={character.equipment?.money || {}} onUpdateMoney={(newMoney: Character['equipment']['money']) => handleUpdateEquipment({ ...character.equipment, money: newMoney })} />}
-            {isForageModalOpen && <ForageModal onClose={() => setIsForageModalOpen(false)} onAdd={handleAddRations} />}
-
             {/* Animal Selector Modal */}
             {animalSelector && (
                 <AccessibleDialog
@@ -1009,13 +1028,22 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             >
                     <div className="inventory-modal-header px-4 py-3 border-b flex items-center justify-between bg-white z-20">
                         <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 rounded font-bold">HEAVY</span>}</div></div></div>
-                        <div className="inventory-modal-toolbar flex items-center gap-2"><button onClick={() => setIsMoneyModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button onClick={onClose} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
+                        <div className="inventory-modal-toolbar flex items-center gap-2"><button type="button" onClick={() => setActivePanel('wallet')} aria-label="Open wallet" className="flex min-h-10 items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button type="button" onClick={onClose} aria-label="Close inventory" className="flex h-10 w-10 items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
                     </div>
-                    <div className="inventory-modal-tabs px-4 py-2 bg-white border-b flex gap-2"><button onClick={() => setActiveTab('inventory')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'inventory' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>My Gear</button><button onClick={() => setActiveTab('shop')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>Shop</button></div>
+                    {activePanel === 'main' ? (
+                    <>
+                    <div className="inventory-modal-tabs px-4 py-2 bg-white border-b flex gap-2" role="tablist" aria-label="Inventory sections"><button type="button" role="tab" aria-selected={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'inventory' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>My Gear</button><button type="button" role="tab" aria-selected={activeTab === 'shop'} onClick={() => setActiveTab('shop')} className={`inventory-main-tab flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>Shop</button></div>
                     <div className="inventory-modal-body flex-1 overflow-y-auto bg-gray-50/50 relative">
                         {activeTab === 'inventory' && (
-                            <div className="inventory-tab-body pb-20">
+                            <div className="inventory-tab-body pb-4">
                                 {renderLoadout()}
+
+                                <div className="inventory-quick-actions flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2">
+                                    <p className="text-xs text-gray-500">Record provisions gathered during play.</p>
+                                    <button type="button" onClick={() => setActivePanel('forage')} className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-green-700">
+                                        <Utensils size={16} /> Forage
+                                    </button>
+                                </div>
 
                                 {/* STORAGE TABS */}
                                 <div className="inventory-storage-tabs px-4 pb-0 pt-2 bg-slate-50 border-b border-gray-200 overflow-x-auto flex gap-2 no-scrollbar">
@@ -1296,13 +1324,18 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             </div>
                         )}
                     </div>
-
-                    {/* --- FLOATING ACTION BUTTON --- */}
-                    {activeTab === 'inventory' && (
-                        <div className="inventory-floating-action absolute bottom-6 right-6 z-50">
-                            <button onClick={() => setIsForageModalOpen(true)} className="flex items-center gap-2 bg-green-600 text-white px-5 py-3 rounded-full shadow-lg hover:bg-green-700 transition-transform hover:scale-105 active:scale-95 font-bold">
-                                <Utensils size={18} /> Forage
-                            </button>
+                    </>
+                    ) : (
+                        <div className="min-h-0 flex-1 overflow-hidden">
+                            {activePanel === 'wallet' ? (
+                                <MoneyManagementPanel
+                                    onBack={() => setActivePanel('main')}
+                                    currentMoney={character.equipment?.money || {}}
+                                    onUpdateMoney={(newMoney: Character['equipment']['money']) => handleUpdateEquipment({ ...character.equipment, money: newMoney })}
+                                />
+                            ) : (
+                                <ForagePanel onBack={() => setActivePanel('main')} onAdd={handleAddRations} />
+                            )}
                         </div>
                     )}
             </AccessibleDialog>
@@ -1402,16 +1435,6 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
                 .shop-subtabs {
                   margin-bottom: 0.7rem;
-                }
-
-                .inventory-floating-action {
-                  right: 0.9rem;
-                  bottom: 0.9rem;
-                }
-
-                .inventory-floating-action button {
-                  padding: 0.7rem 1rem;
-                  font-size: 0.78rem;
                 }
 
                 .inventory-modal-body .grid.grid-cols-2.md\\:grid-cols-5 {
