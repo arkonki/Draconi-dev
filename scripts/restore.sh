@@ -93,7 +93,9 @@ compose exec -T db psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
   -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" >/dev/null
 compose exec -T db dropdb -U "$DB_USER" --if-exists "$DB_NAME"
 compose exec -T db createdb -U "$DB_USER" "$DB_NAME"
-compose exec -T db pg_restore \
+pg_restore_client \
+  -h db \
+  -p 5432 \
   -U "$DB_USER" \
   -d "$DB_NAME" \
   --no-owner \

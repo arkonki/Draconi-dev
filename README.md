@@ -4,7 +4,7 @@ Dragonbane Character Manager is a self-hosted React application for characters, 
 
 The application now runs without Supabase, Netlify, or another hosted backend. Its runtime is four local containers:
 
-- PostgreSQL 16 stores application, identity, and session data.
+- PostgreSQL 17 stores application, identity, and session data and matches the production backup format.
 - A Node.js API provides authentication, authorization, data access, RPC operations, collaboration events, and local file storage.
 - A thin MCP server exposes controlled Dragonbane tools and resources through the versioned API.
 - Nginx serves the production React build and proxies `/api` to Node.

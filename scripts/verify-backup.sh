@@ -41,7 +41,7 @@ require_database
 require_command tar
 
 echo "Checking PostgreSQL archive structure..."
-compose exec -T db pg_restore --list < "$backup_dir/database.dump" >/dev/null
+pg_restore_client --list < "$backup_dir/database.dump" >/dev/null
 
 echo "Checking storage archive structure..."
 validate_storage_archive "$backup_dir/storage.tar.gz"
@@ -80,7 +80,9 @@ trap cleanup 0 1 2 15
 echo "Restoring into temporary database '$verify_database'..."
 compose exec -T db createdb -U "$DB_USER" "$verify_database"
 verify_database_created=true
-compose exec -T db pg_restore \
+pg_restore_client \
+  -h db \
+  -p 5432 \
   -U "$DB_USER" \
   -d "$verify_database" \
   --no-owner \

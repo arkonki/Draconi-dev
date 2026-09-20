@@ -297,6 +297,20 @@ async function validateBackupPackage(packagePath, { keepExtracted = false } = {}
     try {
       restoreCatalog = await runCommand('pg_restore', ['--list', path.join(extractedDirectory, 'database.dump')]);
     } catch (error) {
+      const archiveVersion = error.message.match(/unsupported version \(([^)]+)\) in file header/i)?.[1];
+      if (archiveVersion) {
+        let installedVersion = 'the installed pg_restore version';
+        try {
+          const version = await runCommand('pg_restore', ['--version']);
+          installedVersion = version.stdout.trim() || installedVersion;
+        } catch {
+          // Preserve the original validation failure when version probing fails.
+        }
+        throw new HttpError(
+          400,
+          `PostgreSQL backup format ${archiveVersion} is newer than ${installedVersion} supports. Upgrade the application's PostgreSQL client before importing this backup.`,
+        );
+      }
       throw new HttpError(400, `PostgreSQL backup is unreadable: ${error.message}`);
     }
     for (const requiredTable of ['users', 'app_credentials', 'app_sessions']) {

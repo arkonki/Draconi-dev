@@ -38,9 +38,19 @@ require_database() {
 
   DB_USER=$(compose exec -T db sh -c 'printf %s "$POSTGRES_USER"')
   DB_NAME=$(compose exec -T db sh -c 'printf %s "$POSTGRES_DB"')
+  DB_PASSWORD=$(compose exec -T db sh -c 'printf %s "$POSTGRES_PASSWORD"')
 
   validate_database_name "$DB_USER" "database user"
   validate_database_name "$DB_NAME" "database name"
+}
+
+# Run pg_restore from the API image. Its PostgreSQL client version is kept in
+# sync with production and may be newer than the local database container.
+pg_restore_client() {
+  compose run --rm --no-deps -T \
+    -e PGPASSWORD="$DB_PASSWORD" \
+    --entrypoint pg_restore \
+    api "$@"
 }
 
 reject_system_database() {

@@ -2,7 +2,9 @@ FROM node:22-alpine
 WORKDIR /app
 
 ENV NODE_ENV=production
-RUN apk add --no-cache postgresql16-client
+# Production backups are created with PostgreSQL 17. The restore client must be
+# at least as new as the pg_dump version that produced the custom archive.
+RUN apk add --no-cache postgresql17-client
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY package.json ./application-package.json
