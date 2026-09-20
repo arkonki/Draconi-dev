@@ -1395,31 +1395,6 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                     )
                 }
 
-                {/* Explorer Legend */}
-                {
-                    isLegendOpen && (
-                        <MapLegend
-                            pins={pins}
-                            onPinClick={openPinFromLegend}
-                        />
-                    )
-                }
-
-                {/* Pin Detail Sidebar */}
-                {
-                    selectedPin && (
-                        <PinDetailsSidebar
-                            pin={selectedPin}
-                            isDM={isDM}
-                            partyId={partyId}
-                            onClose={() => setSelectedPinId(null)}
-                            onUpdate={(updates) => updatePinMutation.mutate({ id: selectedPin.id, updates, noteId: selectedPin.note_id })}
-                            onDelete={() => deletePinMutation.mutate(selectedPin.id)}
-                        />
-                    )
-                }
-
-
                 {/* ZOOM CONTROLS */}
                 {
                     activeMap && (
@@ -1494,6 +1469,26 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
 
             </div >
+
+            {/* Keep interactive overlays outside the map gesture surface so their clicks
+                cannot be intercepted or cleared by canvas mouse handlers. */}
+            {isLegendOpen && (
+                <MapLegend
+                    pins={pins}
+                    onPinClick={openPinFromLegend}
+                />
+            )}
+
+            {selectedPin && (
+                <PinDetailsSidebar
+                    pin={selectedPin}
+                    isDM={isDM}
+                    partyId={partyId}
+                    onClose={() => setSelectedPinId(null)}
+                    onUpdate={(updates) => updatePinMutation.mutate({ id: selectedPin.id, updates, noteId: selectedPin.note_id })}
+                    onDelete={() => deletePinMutation.mutate(selectedPin.id)}
+                />
+            )}
 
             {/* Name Prompt Modal */}
             {
