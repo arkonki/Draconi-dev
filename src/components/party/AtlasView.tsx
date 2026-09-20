@@ -104,7 +104,7 @@ function MapDrawingLayer({ drawings, currentPath, width, height, isEraser, onDra
                     points={draw.points.map(p => `${p.x},${p.y}`).join(' ')}
                     fill="none"
                     stroke={draw.color}
-                    strokeWidth={draw.thickness + (isEraser ? 4 : 0)} // Increase hit area in eraser mode
+                    strokeWidth={(Number(draw.thickness) || 3) + (isEraser ? 4 : 0)} // Increase hit area in eraser mode
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     className={isEraser ? "cursor-crosshair hover:opacity-50 transition-opacity" : ""}
@@ -144,14 +144,19 @@ function MapPinLayer({ pins, onPinClick, onPinMouseDown, width, height }: {
             className="absolute top-0 left-0 pointer-events-none z-30 overflow-visible"
             style={{ width, height }}
         >
-            {pins.map((pin) => (
-                <button
+            {pins.map((pin) => {
+                const x = Number(pin.x);
+                const y = Number(pin.y);
+                if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+                return (
+                    <button
                     type="button"
                     key={pin.id}
                     className="absolute pointer-events-auto cursor-pointer group"
                     style={{
-                        left: pin.x,
-                        top: pin.y,
+                        left: x,
+                        top: y,
                         transform: 'translate(-50%, -100%)',
                         zIndex: 40
                     }}
@@ -182,8 +187,9 @@ function MapPinLayer({ pins, onPinClick, onPinMouseDown, width, height }: {
                             </div>
                         )}
                     </div>
-                </button>
-            ))}
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -345,7 +351,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
     );
 }
 
-function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin: MapPinType) => void }) {
+export function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin: MapPinType) => void }) {
     const locations = pins.filter(p => p.type === 'location');
     const characters = pins.filter(p => p.type === 'character');
     const notes = pins.filter(p => p.type === 'note');
@@ -360,8 +366,13 @@ function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin:
                 <div className="space-y-1">
                     {items.map(pin => (
                         <button
+                            type="button"
                             key={pin.id}
-                            onClick={() => onPinClick(pin)}
+                            aria-label={`Open ${pin.label || 'Untitled Pin'} from map legend`}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onPinClick(pin);
+                            }}
                             className="w-full flex items-center gap-3 p-2 hover:bg-indigo-50 rounded-lg text-left transition-all group"
                         >
                             <div className={`w-1.5 h-1.5 rounded-full ${color.replace('text-', 'bg-')} opacity-40 group-hover:opacity-100 transition-opacity`} />
@@ -618,6 +629,12 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                 behavior: 'smooth'
             });
         }, 200 + (retryCount * 100));
+    };
+
+    const openPinFromLegend = (pin: MapPinType) => {
+        setSelectedPinId(pin.id);
+        setIsLegendOpen(false);
+        focusOnPin(pin);
     };
 
     useEffect(() => {
@@ -1108,12 +1125,12 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
             )}
 
             {/* --- MAP CANVAS --- */}
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the region supports map pointer gestures and contains separate accessible controls */}
             <div
                 ref={containerRef}
                 className="flex-1 relative overflow-hidden bg-slate-100 cursor-crosshair select-none"
-                role="button"
+                role="region"
                 aria-label="Atlas map canvas"
-                tabIndex={0}
                 onContextMenu={handleContextMenu}
                 onMouseDown={handleMapMouseDown}
                 onMouseMove={handleMapMouseMove}
@@ -1383,10 +1400,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                     isLegendOpen && (
                         <MapLegend
                             pins={pins}
-                            onPinClick={(pin) => {
-                                setSelectedPinId(pin.id);
-                                focusOnPin(pin);
-                            }}
+                            onPinClick={openPinFromLegend}
                         />
                     )
                 }

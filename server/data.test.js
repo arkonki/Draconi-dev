@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { applyOrders } from './data.js';
+import { applyOrders, normalizeNumericOutput } from './data.js';
 
 describe('local data ordering', () => {
   const rows = [
@@ -29,5 +29,28 @@ describe('local data ordering', () => {
       { column: 'created_at', ascending: false },
       { column: 'id', ascending: false },
     ]).map((row) => row.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('PostgreSQL numeric output compatibility', () => {
+  it('returns Atlas pin coordinates as JavaScript numbers', () => {
+    expect(normalizeNumericOutput('party_map_pins', { id: 'pin-1', x: '742.5', y: '318.25' }))
+      .toEqual({ id: 'pin-1', x: 742.5, y: 318.25 });
+  });
+
+  it('normalizes map configuration and drawing thickness values', () => {
+    expect(normalizeNumericOutput('party_maps', {
+      grid_opacity: '0.35',
+      grid_offset_x: '12.5',
+      grid_offset_y: '8',
+      grid_rotation: '15',
+    })).toEqual({
+      grid_opacity: 0.35,
+      grid_offset_x: 12.5,
+      grid_offset_y: 8,
+      grid_rotation: 15,
+    });
+    expect(normalizeNumericOutput('party_map_drawings', { thickness: '3.5' }))
+      .toEqual({ thickness: 3.5 });
   });
 });

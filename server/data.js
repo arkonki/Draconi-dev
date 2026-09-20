@@ -60,10 +60,32 @@ function aliasesFor(table, value) {
   return result;
 }
 
+const NUMERIC_OUTPUT_FIELDS = new Map([
+  ['party_maps', ['grid_opacity', 'grid_offset_x', 'grid_offset_y', 'grid_rotation']],
+  ['party_map_pins', ['x', 'y']],
+  ['party_map_drawings', ['thickness']],
+]);
+
+export function normalizeNumericOutput(table, row) {
+  if (!row) return row;
+  const fields = NUMERIC_OUTPUT_FIELDS.get(table);
+  if (!fields) return row;
+
+  const normalized = { ...row };
+  for (const field of fields) {
+    if (normalized[field] === null || normalized[field] === undefined) continue;
+    const value = Number(normalized[field]);
+    if (Number.isFinite(value)) normalized[field] = value;
+  }
+  return normalized;
+}
+
 function outwardAliases(table, row) {
-  if (table === 'monsters' && row) return { ...row, effectsSummary: row.effects_summary };
-  if (table === 'users' && row) return { ...row, last_login: row.last_login_at };
-  return row;
+  if (!row) return row;
+  let aliased = row;
+  if (table === 'monsters') aliased = { ...row, effectsSummary: row.effects_summary };
+  if (table === 'users') aliased = { ...row, last_login: row.last_login_at };
+  return normalizeNumericOutput(table, aliased);
 }
 
 function encodeValue(value, column) {
