@@ -84,6 +84,8 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['messages', partyId],
     queryFn: () => getPartyMessages(partyId),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   // ... (triggerShake, scrollToBottom, handleScroll logic remains the same) ...

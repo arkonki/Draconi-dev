@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/useAuth';
 import { useNotifications } from '../../contexts/useNotifications';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { appendMessageIfMissing, type Message } from '../../lib/api/chat';
 
-type MessagePayload = {
-  id: string;
-  party_id: string;
-  user_id: string;
-  content: string;
-};
+type MessagePayload = Message;
 
 type EncounterPayload = {
   id: string;
@@ -145,6 +142,7 @@ function buildEncounterNotificationCopy(encounter: EncounterPayload, partyName: 
 export function NotificationController() {
   const { user } = useAuth();
   const { playSound, sendDesktopNotification } = useNotifications();
+  const queryClient = useQueryClient();
   const partyCacheRef = useRef(new Map<string, string>());
   const senderCacheRef = useRef(new Map<string, string>());
 
@@ -197,6 +195,12 @@ export function NotificationController() {
             table: 'messages',
           },
           {
+            bindingId: 'message-delete',
+            event: 'DELETE' as const,
+            schema: 'public' as const,
+            table: 'messages',
+          },
+          {
             bindingId: 'encounter-insert',
             event: 'INSERT' as const,
             schema: 'public' as const,
@@ -232,6 +236,11 @@ export function NotificationController() {
 
       if (bindingId === 'message-insert') {
         const newMessage = payload.new as MessagePayload;
+
+        queryClient.setQueryData(
+          ['messages', newMessage.party_id],
+          (oldData: Message[] = []) => appendMessageIfMissing(oldData, newMessage),
+        );
 
         if (newMessage.user_id === user.id || isViewingActivePartyChat(newMessage.party_id)) {
           return;
@@ -271,6 +280,15 @@ export function NotificationController() {
         return;
       }
 
+      if (bindingId === 'message-delete') {
+        const deletedMessage = payload.old as Pick<Message, 'id' | 'party_id'>;
+        queryClient.setQueryData(
+          ['messages', deletedMessage.party_id],
+          (oldData: Message[] = []) => oldData.filter((message) => message.id !== deletedMessage.id),
+        );
+        return;
+      }
+
       if (bindingId === 'campaign-member-insert') {
         playSound('notification');
         await sendDesktopNotification({
@@ -301,6 +319,9 @@ export function NotificationController() {
         url: buildPartyEncounterUrl(encounter.party_id),
         tag: `party-encounter-${encounter.party_id}`,
       });
+    },
+    onReconnect: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['messages'] });
     },
   });
 
