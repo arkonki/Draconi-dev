@@ -14,16 +14,21 @@ export function appendMessageIfMissing(messages: Message[], incoming: Message) {
     : [...messages, incoming];
 }
 
+export function orderNewestMessagePageChronologically(messages: Message[]) {
+  return [...messages].reverse();
+}
+
 export async function getPartyMessages(partyId: string) {
   const { data, error } = await supabase
     .from('messages')
     .select('*')
     .eq('party_id', partyId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(50);
 
   if (error) throw error;
-  return data as Message[];
+  return orderNewestMessagePageChronologically((data || []) as Message[]);
 }
 
 export async function sendMessage(partyId: string, userId: string, content: string) {

@@ -253,7 +253,20 @@ function applyFilters(rows, filters = []) {
   return rows.filter((row) => filters.every((filter) => matchesFilter(row, filter)));
 }
 
-function applyOrders(rows, orders = []) {
+function compareOrderValues(left, right) {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() - right.getTime();
+  }
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right;
+  }
+  if (typeof left === 'boolean' && typeof right === 'boolean') {
+    return Number(left) - Number(right);
+  }
+  return String(left).localeCompare(String(right), undefined, { numeric: true });
+}
+
+export function applyOrders(rows, orders = []) {
   if (!orders.length) return rows;
   return [...rows].sort((left, right) => {
     for (const order of orders) {
@@ -262,7 +275,8 @@ function applyOrders(rows, orders = []) {
       if (a === b) continue;
       if (a === null || a === undefined) return order.nullsLast === false ? -1 : 1;
       if (b === null || b === undefined) return order.nullsLast === false ? 1 : -1;
-      const compared = String(a).localeCompare(String(b), undefined, { numeric: true });
+      const compared = compareOrderValues(a, b);
+      if (compared === 0) continue;
       return order.ascending === false ? -compared : compared;
     }
     return 0;

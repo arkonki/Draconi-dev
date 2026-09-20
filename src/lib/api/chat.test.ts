@@ -1,4 +1,4 @@
-import { appendMessageIfMissing, type Message } from './chat';
+import { appendMessageIfMissing, orderNewestMessagePageChronologically, type Message } from './chat';
 
 const message: Message = {
   id: 'message-1',
@@ -16,5 +16,14 @@ describe('appendMessageIfMissing', () => {
   it('does not append a message already delivered by realtime', () => {
     const messages = [message];
     expect(appendMessageIfMissing(messages, { ...message })).toBe(messages);
+  });
+});
+
+describe('orderNewestMessagePageChronologically', () => {
+  it('turns the newest-first database page into chronological display order', () => {
+    const older = { ...message, id: 'older', created_at: '2026-01-10T21:22:18.102Z' };
+    const newer = { ...message, id: 'newer', created_at: '2026-09-17T16:03:32.396Z' };
+
+    expect(orderNewestMessagePageChronologically([newer, older])).toEqual([older, newer]);
   });
 });
