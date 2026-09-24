@@ -21,6 +21,7 @@ import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 import { rollDiceExpression } from '../../lib/game/diceExpression';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 
 interface SessionManagerProps {
   isOpen: boolean;
@@ -60,10 +61,10 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   const [notificationRoll, setNotificationRoll] = useState<{ notificationId: string; dice: number[]; total: number } | null>(null);
 
   const stateQuery = useQuery({
-    queryKey: ['campaign-time', partyId],
+    queryKey: queryKeys.campaignTime(partyId),
     queryFn: () => fetchCampaignTimeState(partyId),
     enabled: isOpen,
-    refetchInterval: isOpen ? 15000 : false,
+    staleTime: QUERY_STALE_TIME.live,
   });
   const state = stateQuery.data;
   const clock = useMemo(() => formatCampaignClock(state?.gameTime.elapsedSeconds || 0), [state?.gameTime.elapsedSeconds]);
@@ -92,10 +93,10 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
     enabled: isOpen,
     fallbackRefetchMs: 15000,
     onEvent: () => {
-      void queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.campaignTime(partyId), exact: true });
     },
     onReconnect: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.campaignTime(partyId), exact: true });
     },
   });
 
@@ -106,8 +107,10 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   };
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
-    await queryClient.invalidateQueries({ queryKey: ['timeTracker', partyId] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.campaignTime(partyId), exact: true }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.timeTracker(partyId), exact: true }),
+    ]);
   };
   const mutation = useMutation({
     mutationFn: async (action: () => Promise<unknown>) => action(),

@@ -13,6 +13,7 @@ import {
 import { Button } from '../../shared/Button';
 import { PlusCircle, Search, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { QUERY_STALE_TIME, queryKeys } from '../../../lib/queryKeys';
 import { fetchItems, GameItem } from '../../../lib/api/items';
 import { supabase } from '../../../lib/supabase';
 import { fetchHeroicAbilities } from '../../../lib/api/abilities';
@@ -138,7 +139,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
   const [skillSearch, setSkillSearch] = useState('');
   const [abilitySearch, setAbilitySearch] = useState('');
   const { data: allItems = [], isLoading: isLoadingItems } = useQuery<GameItem[]>({
-    queryKey: ['gameItems'],
+    queryKey: queryKeys.gameItems,
     queryFn: fetchItems,
     staleTime: 1000 * 60 * 10,
   });
@@ -157,9 +158,9 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
     staleTime: 1000 * 60 * 10,
   });
   const { data: allHeroicAbilities = [], isLoading: isLoadingAbilities } = useQuery<Ability[]>({
-    queryKey: ['monsterFormHeroicAbilities'],
+    queryKey: queryKeys.heroicAbilities,
     queryFn: fetchHeroicAbilities,
-    staleTime: 1000 * 60 * 10,
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   useEffect(() => {

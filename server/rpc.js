@@ -1,5 +1,6 @@
 import { withTransaction } from './db.js';
 import { loadCampaignAccess } from './campaignRoles.js';
+import { invalidateAccessContextCache } from './data.js';
 import { HttpError } from './http.js';
 
 async function requirePartyAccess(client, user, partyId, gmOnly = false) {
@@ -17,7 +18,7 @@ async function requireEncounterAccess(client, user, encounterId, ownerOnly = fal
 }
 
 export async function executeRpc(user, name, args = {}) {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     if (name === 'test_connection') return { connected: true, database: 'postgresql' };
 
     if (name === 'join_party_with_character' || name === 'join_party_secure') {
@@ -223,4 +224,8 @@ export async function executeRpc(user, name, args = {}) {
 
     throw new HttpError(404, `Unknown RPC: ${name}`);
   });
+  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'duplicate_encounter_with_combatants') {
+    invalidateAccessContextCache();
+  }
+  return result;
 }

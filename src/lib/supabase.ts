@@ -251,6 +251,20 @@ interface LocalRealtimeBinding {
   callback: (payload: RealtimePostgresChangesPayload<QueryRow>) => void;
 }
 
+type RealtimeSubscriptionBinding = Omit<LocalRealtimeBinding, 'callback'>;
+
+export function minimizeRealtimeBindings(bindings: RealtimeSubscriptionBinding[]) {
+  const unique = [...new Map(bindings.map((binding) => [JSON.stringify(binding), binding])).values()];
+
+  return unique.filter((candidate, candidateIndex) => !unique.some((covering, coveringIndex) => (
+    candidateIndex !== coveringIndex
+    && covering.table === candidate.table
+    && (covering.event === '*' || covering.event === candidate.event)
+    && (!covering.filter || covering.filter === candidate.filter)
+    && (covering.event !== candidate.event || covering.filter !== candidate.filter)
+  )));
+}
+
 const REALTIME_POLL_MS = 4000;
 const REALTIME_RETRY_BASE_MS = 500;
 const REALTIME_MAX_RETRY_MS = 5_000;
@@ -582,19 +596,15 @@ class LocalRealtimeTransport {
   }
 
   private activeBindings() {
-    const bindings = new Map<string, Omit<LocalRealtimeBinding, 'callback'>>();
+    const bindings: RealtimeSubscriptionBinding[] = [];
 
     this.channels.forEach((channel) => {
       channel.getBindings().forEach(({ event, table, filter }) => {
-        const binding = { event, table, filter };
-        const key = JSON.stringify(binding);
-        if (!bindings.has(key)) {
-          bindings.set(key, binding);
-        }
+        bindings.push({ event, table, filter });
       });
     });
 
-    return [...bindings.values()];
+    return minimizeRealtimeBindings(bindings);
   }
 
   private dispatch(event: LocalRealtimeEvent) {

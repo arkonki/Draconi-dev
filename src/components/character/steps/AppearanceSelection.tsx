@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { User, Ruler, Palette, Sparkles, Save, AlertCircle, Dices, CheckCircle2, ToggleLeft, ToggleRight, Shirt, HeartCrack, Gem, Eye } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { QUERY_STALE_TIME, queryKeys } from '../../../lib/queryKeys';
 import { fetchBioData } from '../../../lib/api/compendium';
 import { Button } from '../../shared/Button';
 
@@ -102,9 +103,9 @@ export function AppearanceSelection() {
   const { character, updateCharacter } = useCharacterCreation();
 
   const { data: bioOptions, isLoading: isLoadingBio } = useQuery({
-    queryKey: ['bioData'],
+    queryKey: queryKeys.bioData,
     queryFn: fetchBioData,
-    staleTime: 1000 * 60 * 5,
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   const [appearance, setAppearance] = useState<AppearanceDetails>({

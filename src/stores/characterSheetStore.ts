@@ -10,6 +10,8 @@ import { queryClient } from '../lib/queryClient';
 import type { Party } from '../lib/api/parties';
 import type { Encounter, EncounterCombatant } from '../types/encounter';
 import { supabase } from '../lib/supabase';
+import { fetchHeroicAbilities } from '../lib/api/abilities';
+import { QUERY_STALE_TIME, queryKeys } from '../lib/queryKeys';
 
 export interface HeroicAbility {
   id: string;
@@ -33,6 +35,8 @@ const mergeCharacterState = (existing: Character, updated: Character): Character
 });
 
 const syncCharacterCaches = (updatedCharacter: Character) => {
+  queryClient.setQueryData(queryKeys.character(updatedCharacter.id), updatedCharacter);
+
   queryClient.setQueryData<Character[]>(['characters', updatedCharacter.user_id], (characters) => {
     if (!characters) {
       return characters;
@@ -44,7 +48,7 @@ const syncCharacterCaches = (updatedCharacter: Character) => {
   });
 
   if (updatedCharacter.party_id) {
-    queryClient.setQueryData<Party>(['party', updatedCharacter.party_id], (party) => {
+    queryClient.setQueryData<Party>(queryKeys.party(updatedCharacter.party_id), (party) => {
       if (!party) {
         return party;
       }
@@ -178,8 +182,15 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   fetchCharacter: async (id, userId) => {
     set({ isLoading: true, error: null });
     try {
-      await Promise.all([get()._loadGameItems(), get()._loadAllHeroicAbilities()]);
-      const characterData = await fetchCharacterById(id, userId);
+      const [, , characterData] = await Promise.all([
+        get()._loadGameItems(),
+        get()._loadAllHeroicAbilities(),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.character(id),
+          queryFn: () => fetchCharacterById(id, userId),
+          staleTime: QUERY_STALE_TIME.live,
+        }),
+      ]);
       if (!characterData) {
         throw new Error(`Character with ID ${id} not found.`);
       }
@@ -204,11 +215,19 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     set({ isLoadingEncounter: true });
     try {
       // 1. Fetch ONLY the active encounter (using the new API function)
-      const activeEncounter = await fetchActiveEncounterForParty(partyId);
+      const activeEncounter = await queryClient.fetchQuery({
+        queryKey: queryKeys.activeEncounter(partyId),
+        queryFn: () => fetchActiveEncounterForParty(partyId),
+        staleTime: QUERY_STALE_TIME.live,
+      });
 
       // 2. Check if an active encounter exists
       if (activeEncounter) {
-        const allCombatants = await fetchEncounterCombatants(activeEncounter.id);
+        const allCombatants = await queryClient.fetchQuery({
+          queryKey: queryKeys.encounterCombatants(activeEncounter.id),
+          queryFn: () => fetchEncounterCombatants(activeEncounter.id),
+          staleTime: QUERY_STALE_TIME.live,
+        });
         const characterCombatant = allCombatants.find(c => c.character_id === characterId);
         
         // Sort by initiative (nulls last)
@@ -293,6 +312,12 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         c.id === currentCombatant.id ? { ...c, ...updates } : c
       )
     });
+    queryClient.setQueryData<EncounterCombatant[]>(
+      queryKeys.encounterCombatants(activeEncounter.id),
+      (combatants) => combatants?.map((combatant) => (
+        combatant.id === currentCombatant.id ? { ...combatant, ...updates } : combatant
+      )),
+    );
 
     // B. API Update (Background)
     try {
@@ -306,7 +331,11 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (get().isLoadingGameItems || get().allGameItems.length > 0) return;
     set({ isLoadingGameItems: true });
     try {
-      const items = await fetchItems();
+      const items = await queryClient.ensureQueryData({
+        queryKey: queryKeys.gameItems,
+        queryFn: fetchItems,
+        staleTime: QUERY_STALE_TIME.reference,
+      });
       set({ allGameItems: items, isLoadingGameItems: false });
     } catch (err) {
       const errorMessage = err instanceof Error
@@ -323,9 +352,12 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (get().isLoadingAbilities || get().allHeroicAbilities.length > 0) return;
     set({ isLoadingAbilities: true });
     try {
-      const { data, error } = await supabase.from('heroic_abilities').select('*').order('name');
-      if (error) throw error;
-      set({ allHeroicAbilities: data || [], isLoadingAbilities: false });
+      const abilities = await queryClient.ensureQueryData({
+        queryKey: queryKeys.heroicAbilities,
+        queryFn: fetchHeroicAbilities,
+        staleTime: QUERY_STALE_TIME.reference,
+      });
+      set({ allHeroicAbilities: abilities, isLoadingAbilities: false });
     } catch (err) {
       const errorMessage = err instanceof Error
         ? err.message

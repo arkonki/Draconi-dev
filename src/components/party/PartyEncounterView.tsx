@@ -33,6 +33,7 @@ import {
   Sword, Swords, RefreshCw, Crosshair, Target, Link as LinkIcon, Check, Hourglass, AlertCircle
 } from 'lucide-react';
 import { useDice } from '../dice/useDice';
+import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 import type { Encounter, EncounterCombatant } from '../../types/encounter';
 import type { Character } from '../../types/character';
 import {
@@ -1942,17 +1943,33 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     };
   }, [partyId]);
 
-  const { data: allEncounters, isLoading: loadingEnc } = useQuery<Encounter[]>({ queryKey: ['allEncounters', partyId], queryFn: () => fetchAllEncountersForParty(partyId), enabled: !!partyId });
+  const { data: allEncounters, isLoading: loadingEnc } = useQuery<Encounter[]>({
+    queryKey: queryKeys.encounters(partyId),
+    queryFn: () => fetchAllEncountersForParty(partyId),
+    enabled: !!partyId,
+  });
   const { data: allMonsters } = useQuery<MonsterData[]>({
-    queryKey: ['allMonsters'], queryFn: async () => {
+    queryKey: queryKeys.monsters,
+    queryFn: async () => {
       const monsters = await fetchAllMonsters();
       return monsters as MonsterData[];
-    }
+    },
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   const currentEncounterId = useMemo(() => selectedEncounterId || allEncounters?.[0]?.id || null, [selectedEncounterId, allEncounters]);
-  const { data: encounterDetails } = useQuery<Encounter | null>({ queryKey: ['encounterDetails', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)), enabled: !!currentEncounterId });
-  const { data: combatantsData } = useQuery<EncounterCombatant[]>({ queryKey: ['encounterCombatants', currentEncounterId], queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])), enabled: !!currentEncounterId });
+  const { data: encounterDetails } = useQuery<Encounter | null>({
+    queryKey: queryKeys.encounter(currentEncounterId),
+    queryFn: () => (currentEncounterId ? fetchEncounterDetails(currentEncounterId) : Promise.resolve(null)),
+    enabled: !!currentEncounterId,
+    staleTime: QUERY_STALE_TIME.live,
+  });
+  const { data: combatantsData } = useQuery<EncounterCombatant[]>({
+    queryKey: queryKeys.encounterCombatants(currentEncounterId),
+    queryFn: () => (currentEncounterId ? fetchEncounterCombatants(currentEncounterId) : Promise.resolve([])),
+    enabled: !!currentEncounterId,
+    staleTime: QUERY_STALE_TIME.live,
+  });
 
   useEncounterRealtime(currentEncounterId, partyId);
 
@@ -2135,20 +2152,23 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   }, [combatants, encounterDetails?.status, selectedActorId]);
 
-  const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
-  const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['allEncounters'] }) });
-  const duplicateEncounterMu = useMutation({ mutationFn: ({ id, name }: { id: string; name: string }) => duplicateEncounter(id, name), onSuccess: (newEnc) => { queryClient.invalidateQueries({ queryKey: ['allEncounters'] }); setSelectedEncounterId(newEnc.id); } });
-  const updateEncounterMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<Encounter> }) => updateEncounter(id, updates), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }); setIsEditingEncounter(false); } });
-  const addCharacterMu = useMutation({ mutationFn: addCharacterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
-  const updateCombatantMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<EncounterCombatant> }) => updateCombatant(id, updates), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }) });
+  const invalidateEncounterList = () => queryClient.invalidateQueries({ queryKey: queryKeys.encounters(partyId), exact: true });
+  const invalidateEncounter = () => queryClient.invalidateQueries({ queryKey: queryKeys.encounter(currentEncounterId), exact: true });
+  const invalidateCombatants = () => queryClient.invalidateQueries({ queryKey: queryKeys.encounterCombatants(currentEncounterId), exact: true });
+  const createEncounterMu = useMutation({ mutationFn: (name: string) => createEncounter(partyId, name), onSuccess: (newEnc) => { void invalidateEncounterList(); setSelectedEncounterId(newEnc.id); setViewMode('details'); } });
+  const deleteEncounterMu = useMutation({ mutationFn: deleteEncounter, onSuccess: invalidateEncounterList });
+  const duplicateEncounterMu = useMutation({ mutationFn: ({ id, name }: { id: string; name: string }) => duplicateEncounter(id, name), onSuccess: (newEnc) => { void invalidateEncounterList(); setSelectedEncounterId(newEnc.id); } });
+  const updateEncounterMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<Encounter> }) => updateEncounter(id, updates), onSuccess: () => { void Promise.all([invalidateEncounter(), invalidateEncounterList()]); setIsEditingEncounter(false); } });
+  const addCharacterMu = useMutation({ mutationFn: addCharacterToEncounter, onSuccess: invalidateCombatants });
+  const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: invalidateCombatants });
+  const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: invalidateCombatants });
+  const updateCombatantMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<EncounterCombatant> }) => updateCombatant(id, updates), onSuccess: invalidateCombatants });
 
   // FIX: Explicitly handle object destructuring for mutation
   const swapInitiativeMu = useMutation({
     mutationFn: (vars: { id1: string, id2: string }) => swapInitiative(vars),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] });
+      void invalidateCombatants();
       setSwapSourceId(null);
       setFeedbackToast({ id: Date.now(), text: 'Initiative Swapped!', type: 'success' });
       setTimeout(() => setFeedbackToast(null), 3000);
@@ -2159,10 +2179,10 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   });
 
-  const appendLogMu = useMutation({ mutationFn: (entry: CombatLogEntry) => appendEncounterLog(currentEncounterId!, entry), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['encounterDetails'] }) });
-  const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { queryClient.invalidateQueries(); setIsInitModalOpen(true); } });
-  const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => queryClient.invalidateQueries() });
-  const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false, completed_initiative_slots: [] }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); queryClient.invalidateQueries(); } });
+  const appendLogMu = useMutation({ mutationFn: (entry: CombatLogEntry) => appendEncounterLog(currentEncounterId!, entry), onSuccess: invalidateEncounter });
+  const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { void Promise.all([invalidateEncounter(), invalidateEncounterList()]); setIsInitModalOpen(true); } });
+  const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => Promise.all([invalidateEncounter(), invalidateEncounterList()]) });
+  const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false, completed_initiative_slots: [] }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); void Promise.all([invalidateEncounter(), invalidateCombatants()]); } });
 
   const handleAddMonster = (id: string, count: number, customName: string) => {
     const m = id ? monstersById.get(id) : null;
@@ -2387,7 +2407,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     }
   };
 
-  const handleInitApply = async (updates: InitiativeUpdate[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { initiative_roll: u.initiative_roll, initiative_slots: u.initiative_slots, completed_initiative_slots: [], has_acted: false }))); setIsInitModalOpen(false); queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
+  const handleInitApply = async (updates: InitiativeUpdate[]) => { await Promise.all(updates.map(u => updateCombatant(u.id, { initiative_roll: u.initiative_roll, initiative_slots: u.initiative_slots, completed_initiative_slots: [], has_acted: false }))); setIsInitModalOpen(false); void invalidateCombatants(); appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: 'Initiative drawn.' }); };
 
   const handleFlip = (id: string, current: boolean) => {
     const combatant = combatants.find((entry) => entry.id === id);

@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import type { PartyDisplaySession, PartyDisplaySlot, PlayerDisplayState } from '../../types/projectorDisplay';
+import type { PartyMap } from '../../types/atlas';
 import { getAbsoluteAppUrl } from '../appUrl';
 
 const DISPLAY_TOKEN_STORAGE_PREFIX = 'party-display-token';
@@ -236,7 +237,7 @@ export async function deleteProjectorImage(path: string) {
 export async function fetchPartyMaps(partyId: string) {
   const { data, error } = await supabase
     .from('party_maps')
-    .select('id, name, image_url, is_active')
+    .select('*')
     .eq('party_id', partyId)
     .order('created_at', { ascending: false });
 
@@ -244,7 +245,7 @@ export async function fetchPartyMaps(partyId: string) {
     throw new Error(error.message || 'Failed to fetch party maps');
   }
 
-  return (data || []) as Array<{ id: string; name: string; image_url: string | null; is_active: boolean }>;
+  return (data || []) as PartyMap[];
 }
 
 export async function updatePartyDisplayLayout(

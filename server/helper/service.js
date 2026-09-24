@@ -896,6 +896,14 @@ async function loadSoloRuleTable(client, tableKey, version) {
   };
 }
 
+async function loadSoloRuleTables(client, tableKeys, version) {
+  const tables = [];
+  for (const tableKey of tableKeys) {
+    tables.push(await loadSoloRuleTable(client, tableKey, version));
+  }
+  return tables;
+}
+
 async function insertRecordedRoll(client, {
   campaignId,
   sessionId,
@@ -1110,24 +1118,22 @@ export async function getSessionHistory(user, campaignId, {
       )`;
     }
     checkpointValues.push(limit + 1);
-    const [{ rows }, { rows: checkpoints }] = await Promise.all([
-      client.query(
-        `SELECT * FROM game_sessions
-         WHERE campaign_id = $1
-           ${sessionCursorClause}
-         ORDER BY created_at DESC, id DESC
-         LIMIT $${sessionValues.length}`,
-        sessionValues,
-      ),
-      client.query(
-        `SELECT * FROM game_session_checkpoints
-         WHERE campaign_id = $1
-           ${checkpointCursorClause}
-         ORDER BY created_at DESC, id DESC
-         LIMIT $${checkpointValues.length}`,
-        checkpointValues,
-      ),
-    ]);
+    const { rows } = await client.query(
+      `SELECT * FROM game_sessions
+       WHERE campaign_id = $1
+         ${sessionCursorClause}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${sessionValues.length}`,
+      sessionValues,
+    );
+    const { rows: checkpoints } = await client.query(
+      `SELECT * FROM game_session_checkpoints
+       WHERE campaign_id = $1
+         ${checkpointCursorClause}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${checkpointValues.length}`,
+      checkpointValues,
+    );
     const sessionPage = rows.slice(0, limit);
     const checkpointPage = checkpoints.slice(0, limit);
     const checkpointOutput = checkpointPage.map((row) => checkpointForOutput(
@@ -2539,9 +2545,11 @@ export async function drawInspiration(user, input, { sourceClient } = {}) {
     assertCampaignWritable(access.campaign);
     const previousRevision = assertRevision(access.campaign, input.expected_revision);
     const state = requireEnabledSoloState(await loadSoloState(client, input.campaign_id, { forUpdate: true }));
-    const tableList = await Promise.all(input.columns.map((column) => (
-      loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
-    )));
+    const tableList = await loadSoloRuleTables(
+      client,
+      input.columns.map((column) => `inspiration_${column}`),
+      ACTIVE_SOLO_PROMPT_TABLE_VERSION,
+    );
     const tables = Object.fromEntries(tableList.map((table, index) => [input.columns[index], table]));
     const resolution = resolveInspiration({ columns: input.columns, tables });
     const resultingRevision = previousRevision + 1;
@@ -2810,9 +2818,11 @@ export async function resolveSoloNpcBehavior(user, input, { sourceClient } = {})
       keptValues = [...attack.keptValues];
       if (Array.isArray(attack.action.inspiration_columns)) {
         const columns = attack.action.inspiration_columns;
-        const tableList = await Promise.all(columns.map((column) => (
-          loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
-        )));
+        const tableList = await loadSoloRuleTables(
+          client,
+          columns.map((column) => `inspiration_${column}`),
+          ACTIVE_SOLO_PROMPT_TABLE_VERSION,
+        );
         const tables = Object.fromEntries(tableList.map((tableEntry, index) => [columns[index], tableEntry]));
         const inspiration = resolveInspiration({ columns, tables });
         const offset = dice.length;
@@ -2826,9 +2836,11 @@ export async function resolveSoloNpcBehavior(user, input, { sourceClient } = {})
       if (new Set(input.inspiration_columns).size !== input.inspiration_columns.length) {
         throw new HelperError(400, 'VALIDATION_ERROR', 'Each Inspiration column may be selected only once.');
       }
-      const tableList = await Promise.all(input.inspiration_columns.map((column) => (
-        loadSoloRuleTable(client, `inspiration_${column}`, ACTIVE_SOLO_PROMPT_TABLE_VERSION)
-      )));
+      const tableList = await loadSoloRuleTables(
+        client,
+        input.inspiration_columns.map((column) => `inspiration_${column}`),
+        ACTIVE_SOLO_PROMPT_TABLE_VERSION,
+      );
       const tables = Object.fromEntries(tableList.map((tableEntry, index) => [input.inspiration_columns[index], tableEntry]));
       const inspiration = resolveInspiration({ columns: input.inspiration_columns, tables });
       resolution = { behavior: 'intent', oracle: 'inspiration', question: input.question || `What does ${npc.name} intend?`, ...inspiration };
@@ -4252,9 +4264,7 @@ function explorationFindingSummary(groups) {
 }
 
 async function loadExplorationTables(client, keys) {
-  const tables = await Promise.all(keys.map((key) => (
-    loadSoloRuleTable(client, key, ACTIVE_SOLO_EXPLORATION_TABLE_VERSION)
-  )));
+  const tables = await loadSoloRuleTables(client, keys, ACTIVE_SOLO_EXPLORATION_TABLE_VERSION);
   return Object.fromEntries(tables.map((table) => [table.tableKey, table]));
 }
 
@@ -6352,10 +6362,14 @@ export async function claimSoloAdvancementAbility(user, input, { sourceClient } 
     if (!advancement || advancement.status !== 'claiming_abilities' || Number(advancement.pending_heroic_abilities) < 1) {
       throw new HelperError(409, 'INVALID_STATE', 'There is no heroic ability advancement reward to claim.');
     }
-    const [{ rows: characters }, { rows: abilities }] = await Promise.all([
-      client.query(`SELECT id, name, heroic_ability FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`, [advancement.character_id, input.campaign_id]),
-      client.query(`SELECT id, name, rule_key FROM heroic_abilities WHERE id = $1`, [input.ability_id]),
-    ]);
+    const { rows: characters } = await client.query(
+      `SELECT id, name, heroic_ability FROM characters WHERE id = $1 AND party_id = $2 FOR UPDATE`,
+      [advancement.character_id, input.campaign_id],
+    );
+    const { rows: abilities } = await client.query(
+      `SELECT id, name, rule_key FROM heroic_abilities WHERE id = $1`,
+      [input.ability_id],
+    );
     const character = characters[0];
     const ability = abilities[0];
     if (!character || !ability) throw new HelperError(404, 'NOT_FOUND', 'The Solo hero or heroic ability was not found.');
@@ -6393,23 +6407,24 @@ export async function claimSoloAdvancementAbility(user, input, { sourceClient } 
 export async function getCampaignTimeState(user, campaignId) {
   return withReadSnapshot(async (client) => {
     const access = await requireCampaignAccess(client, user, campaignId, { gm: true });
-    const [{ rows: sessions }, { rows: reminders }, { rows: notifications }, { rows: trackers }] = await Promise.all([
-      access.campaign.active_session_id
-        ? client.query('SELECT * FROM game_sessions WHERE id = $1', [access.campaign.active_session_id])
-        : Promise.resolve({ rows: [] }),
-      client.query(
-        `SELECT * FROM campaign_time_roll_reminders
-         WHERE campaign_id = $1 ORDER BY active DESC, created_at DESC`,
-        [campaignId],
-      ),
-      client.query(
-        `SELECT * FROM campaign_time_roll_notifications
-         WHERE campaign_id = $1 AND status = 'pending'
-         ORDER BY created_at ASC`,
-        [campaignId],
-      ),
-      client.query('SELECT current_day, current_shift, grid_state FROM time_trackers WHERE party_id = $1', [campaignId]),
-    ]);
+    const { rows: sessions } = access.campaign.active_session_id
+      ? await client.query('SELECT * FROM game_sessions WHERE id = $1', [access.campaign.active_session_id])
+      : { rows: [] };
+    const { rows: reminders } = await client.query(
+      `SELECT * FROM campaign_time_roll_reminders
+       WHERE campaign_id = $1 ORDER BY active DESC, created_at DESC`,
+      [campaignId],
+    );
+    const { rows: notifications } = await client.query(
+      `SELECT * FROM campaign_time_roll_notifications
+       WHERE campaign_id = $1 AND status = 'pending'
+       ORDER BY created_at ASC`,
+      [campaignId],
+    );
+    const { rows: trackers } = await client.query(
+      'SELECT current_day, current_shift, grid_state FROM time_trackers WHERE party_id = $1',
+      [campaignId],
+    );
     const gameTime = gameTimeReconciledWithLegacyTracker(access.campaign.game_time, trackers[0]);
     return {
       campaignRevision: Number(access.campaign.helper_revision || 0),

@@ -22,6 +22,7 @@ import {
 } from '../../lib/api/projectorDisplay';
 import type { PartyDisplaySlot } from '../../types/projectorDisplay';
 import type { Character } from '../../types/character';
+import { queryKeys } from '../../lib/queryKeys';
 
 interface ProjectorDisplayManagerProps {
   isOpen: boolean;
@@ -523,7 +524,7 @@ export function ProjectorDisplayManager({
   const [copied, setCopied] = useState(false);
 
   const activeSessionQuery = useQuery({
-    queryKey: ['party-display-session', partyId],
+    queryKey: queryKeys.displaySession(partyId),
     queryFn: () => fetchActivePartyDisplaySession(partyId),
     enabled: isOpen,
   });
@@ -531,18 +532,18 @@ export function ProjectorDisplayManager({
   const activeSession = activeSessionQuery.data;
 
   const mapsQuery = useQuery({
-    queryKey: ['party-projector-maps', partyId],
+    queryKey: queryKeys.partyMaps(partyId),
     queryFn: () => fetchPartyMaps(partyId),
     enabled: isOpen,
   });
   const projectorImagesQuery = useQuery({
-    queryKey: ['party-projector-images', partyId],
+    queryKey: queryKeys.projectorImages(partyId),
     queryFn: () => listProjectorImages(partyId),
     enabled: isOpen,
   });
 
   const slotsQuery = useQuery({
-    queryKey: ['party-display-slots', activeSession?.id],
+    queryKey: queryKeys.displaySlots(activeSession?.id),
     queryFn: () => fetchPartyDisplaySlots(activeSession!.id),
     enabled: isOpen && !!activeSession?.id,
   });
@@ -587,8 +588,8 @@ export function ProjectorDisplayManager({
     onSuccess: (result) => {
       setLocalError(null);
       setShowQr(false);
-      queryClient.setQueryData(['party-display-session', partyId], result.session);
-      queryClient.setQueryData(['party-display-slots', result.session.id], result.slots);
+      queryClient.setQueryData(queryKeys.displaySession(partyId), result.session);
+      queryClient.setQueryData(queryKeys.displaySlots(result.session.id), result.slots);
       setEditableSlots(result.slots);
       setDisplayMapId(result.session.display_map_id || null);
       setDisplayImageUrl(result.session.display_image_url || '');
@@ -602,7 +603,7 @@ export function ProjectorDisplayManager({
     mutationFn: () => renewPartyDisplaySession(activeSession!.id),
     onSuccess: (session) => {
       setLocalError(null);
-      queryClient.setQueryData(['party-display-session', partyId], session);
+      queryClient.setQueryData(queryKeys.displaySession(partyId), session);
     },
     onError: (error: Error) => {
       setLocalError(error.message);
@@ -614,8 +615,8 @@ export function ProjectorDisplayManager({
     onSuccess: () => {
       setLocalError(null);
       setShowQr(false);
-      queryClient.setQueryData(['party-display-session', partyId], null);
-      queryClient.removeQueries({ queryKey: ['party-display-slots', activeSession?.id] });
+      queryClient.setQueryData(queryKeys.displaySession(partyId), null);
+      queryClient.removeQueries({ queryKey: queryKeys.displaySlots(activeSession?.id), exact: true });
       setEditableSlots(DEFAULT_DISPLAY_SLOTS);
       setDisplayMapId(null);
       setDisplayImageUrl('');
@@ -635,8 +636,8 @@ export function ProjectorDisplayManager({
     ),
     onSuccess: (result) => {
       setLocalError(null);
-      queryClient.setQueryData(['party-display-session', partyId], result.session);
-      queryClient.setQueryData(['party-display-slots', activeSession?.id], result.slots);
+      queryClient.setQueryData(queryKeys.displaySession(partyId), result.session);
+      queryClient.setQueryData(queryKeys.displaySlots(activeSession?.id), result.slots);
       setEditableSlots(result.slots);
       setDisplayMapId(result.session.display_map_id || null);
       setDisplayImageUrl(result.session.display_image_url || '');
@@ -715,7 +716,7 @@ export function ProjectorDisplayManager({
     try {
       setLocalError(null);
       const uploadedImages = await uploadProjectorImages(partyId, files);
-      await queryClient.invalidateQueries({ queryKey: ['party-projector-images', partyId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectorImages(partyId), exact: true });
       if (uploadedImages[0]) {
         setDisplayImageUrl(uploadedImages[0].publicUrl);
       }
@@ -735,7 +736,7 @@ export function ProjectorDisplayManager({
     try {
       setLocalError(null);
       await deleteProjectorImage(image.path);
-      await queryClient.invalidateQueries({ queryKey: ['party-projector-images', partyId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectorImages(partyId), exact: true });
 
       if (displayImageUrl === image.publicUrl) {
         setDisplayImageUrl('');

@@ -3,7 +3,7 @@ import type { Character } from '../types/character';
 const mocks = vi.hoisted(() => ({
   fetchCharacterById: vi.fn(),
   fetchItems: vi.fn(),
-  heroicAbilitiesOrder: vi.fn(),
+  fetchHeroicAbilities: vi.fn(),
   rpc: vi.fn(),
 }));
 
@@ -16,6 +16,10 @@ vi.mock('../lib/api/items', () => ({
   fetchItems: mocks.fetchItems,
 }));
 
+vi.mock('../lib/api/abilities', () => ({
+  fetchHeroicAbilities: mocks.fetchHeroicAbilities,
+}));
+
 vi.mock('../lib/api/encounters', () => ({
   fetchActiveEncounterForParty: vi.fn(),
   fetchEncounterCombatants: vi.fn(),
@@ -25,22 +29,19 @@ vi.mock('../lib/api/encounters', () => ({
 vi.mock('../lib/supabase', () => ({
   supabase: {
     rpc: mocks.rpc,
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        order: mocks.heroicAbilitiesOrder,
-      })),
-    })),
   },
 }));
 
 import { useCharacterSheetStore } from './characterSheetStore';
+import { queryClient } from '../lib/queryClient';
 
 describe('characterSheetStore', () => {
   beforeEach(() => {
     mocks.fetchCharacterById.mockReset();
     mocks.fetchItems.mockReset();
-    mocks.heroicAbilitiesOrder.mockReset();
+    mocks.fetchHeroicAbilities.mockReset();
     mocks.rpc.mockReset();
+    queryClient.clear();
 
     useCharacterSheetStore.setState({
       character: null,
@@ -64,10 +65,7 @@ describe('characterSheetStore', () => {
     } as unknown as Character;
 
     mocks.fetchItems.mockResolvedValue([]);
-    mocks.heroicAbilitiesOrder.mockResolvedValue({
-      data: null,
-      error: { message: 'Catalogue request failed' },
-    });
+    mocks.fetchHeroicAbilities.mockRejectedValue(new Error('Catalogue request failed'));
     mocks.fetchCharacterById.mockResolvedValue(character);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -85,6 +83,29 @@ describe('characterSheetStore', () => {
     );
 
     consoleError.mockRestore();
+  });
+
+  it('coalesces concurrent requests for the same character and reference data', async () => {
+    const character = {
+      id: 'character-1',
+      user_id: 'user-1',
+      name: 'Anemone',
+      party_id: null,
+      marked_skills: [],
+    } as unknown as Character;
+
+    mocks.fetchItems.mockResolvedValue([]);
+    mocks.fetchHeroicAbilities.mockResolvedValue([]);
+    mocks.fetchCharacterById.mockResolvedValue(character);
+
+    await Promise.all([
+      useCharacterSheetStore.getState().fetchCharacter(character.id, character.user_id),
+      useCharacterSheetStore.getState().fetchCharacter(character.id, character.user_id),
+    ]);
+
+    expect(mocks.fetchItems).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHeroicAbilities).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchCharacterById).toHaveBeenCalledTimes(1);
   });
 
   it('spends Sole Survivor WP atomically and updates local character state', async () => {

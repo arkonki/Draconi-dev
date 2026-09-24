@@ -8,6 +8,7 @@ import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { CharacterCreationData } from '../../../types/character';
 import { Info, CheckCircle2, ChevronRight, ArrowLeft, Search, AlertCircle, Package, ChevronDown } from 'lucide-react';
+import { QUERY_STALE_TIME, queryKeys } from '../../../lib/queryKeys';
 
 type HeroicAbility = {
   id: number;
@@ -34,19 +35,21 @@ export function ProfessionSelection() {
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number; placement: 'top' | 'bottom' } | null>(null);
 
   const { data: professionList = [], isLoading: loadingProfessions, error: errorProfessions } = useQuery<Profession[], Error>({
-    queryKey: ['professions'],
+    queryKey: queryKeys.professions,
     queryFn: fetchProfessionList,
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   const { data: magicSchools = [], isLoading: loadingSchools, error: errorSchools } = useQuery<MagicSchool[], Error>({
-    queryKey: ['magicSchools'],
+    queryKey: queryKeys.magicSchools,
     queryFn: fetchMagicSchools,
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   const { data: allItems = [] } = useQuery<GameItem[], Error>({
-    queryKey: ['gameItems'],
+    queryKey: queryKeys.gameItems,
     queryFn: () => fetchItems(),
-    staleTime: 10 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME.reference,
   });
 
   useEffect(() => {

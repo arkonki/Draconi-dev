@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { minimizeRealtimeBindings, supabase } from './supabase';
 
 function jsonResponse(payload: unknown, ok = true) {
   return {
@@ -452,5 +452,21 @@ describe('local realtime transport', () => {
       code: 1000,
       reason: 'No realtime subscribers',
     }]);
+  });
+});
+
+describe('realtime subscription consolidation', () => {
+  it('removes filtered bindings already covered by an unfiltered subscription', () => {
+    expect(minimizeRealtimeBindings([
+      { event: 'INSERT', table: 'messages' },
+      { event: 'INSERT', table: 'messages', filter: 'party_id=eq.party-1' },
+      { event: 'DELETE', table: 'messages', filter: 'party_id=eq.party-1' },
+      { event: '*', table: 'encounters', filter: 'party_id=eq.party-1' },
+      { event: 'UPDATE', table: 'encounters', filter: 'party_id=eq.party-1' },
+    ])).toEqual([
+      { event: 'INSERT', table: 'messages' },
+      { event: 'DELETE', table: 'messages', filter: 'party_id=eq.party-1' },
+      { event: '*', table: 'encounters', filter: 'party_id=eq.party-1' },
+    ]);
   });
 });

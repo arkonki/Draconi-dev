@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/useAuth';
 import { useNotifications } from '../../contexts/useNotifications';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { appendMessageIfMissing, type Message } from '../../lib/api/chat';
+import { queryKeys } from '../../lib/queryKeys';
 
 type MessagePayload = Message;
 
@@ -238,9 +239,16 @@ export function NotificationController() {
         const newMessage = payload.new as MessagePayload;
 
         queryClient.setQueryData(
-          ['messages', newMessage.party_id],
+          queryKeys.messages(newMessage.party_id),
           (oldData: Message[] = []) => appendMessageIfMissing(oldData, newMessage),
         );
+
+        const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
+        if (pokeMatch?.[1] === user.id) {
+          window.dispatchEvent(new CustomEvent('party-chat-poke', {
+            detail: { partyId: newMessage.party_id, messageId: newMessage.id },
+          }));
+        }
 
         if (newMessage.user_id === user.id || isViewingActivePartyChat(newMessage.party_id)) {
           return;
@@ -254,7 +262,6 @@ export function NotificationController() {
           resolveSenderName(newMessage.user_id),
         ]);
 
-        const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
         if (pokeMatch) {
           const targetId = pokeMatch[1];
           if (targetId === user.id) {
@@ -283,7 +290,7 @@ export function NotificationController() {
       if (bindingId === 'message-delete') {
         const deletedMessage = payload.old as Pick<Message, 'id' | 'party_id'>;
         queryClient.setQueryData(
-          ['messages', deletedMessage.party_id],
+          queryKeys.messages(deletedMessage.party_id),
           (oldData: Message[] = []) => oldData.filter((message) => message.id !== deletedMessage.id),
         );
         return;
@@ -321,7 +328,7 @@ export function NotificationController() {
       });
     },
     onReconnect: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['messages'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.messages() });
     },
   });
 

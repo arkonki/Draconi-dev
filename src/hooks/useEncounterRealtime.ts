@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useRealtimeChannel } from './useRealtimeChannel';
+import { queryKeys } from '../lib/queryKeys';
 
 export function useEncounterRealtime(encounterId: string | null, partyId: string | null) {
   const queryClient = useQueryClient();
@@ -37,11 +38,11 @@ export function useEncounterRealtime(encounterId: string | null, partyId: string
       }
 
       if (bindingId === 'encounter') {
-        await queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.encounter(encounterId), exact: true });
         return;
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.encounterCombatants(encounterId), exact: true });
     },
     onReconnect: async () => {
       if (!encounterId) {
@@ -49,8 +50,8 @@ export function useEncounterRealtime(encounterId: string | null, partyId: string
       }
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['encounterDetails', encounterId] }),
-        queryClient.invalidateQueries({ queryKey: ['encounterCombatants', encounterId] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.encounter(encounterId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.encounterCombatants(encounterId), exact: true }),
       ]);
     },
   });

@@ -2,6 +2,7 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { authorizationCacheSnapshot } from './data.js';
 import { databaseMetricsSnapshot, pool } from './db.js';
 import { HttpError } from './http.js';
+import { realtimeMetricsSnapshot } from './realtime.js';
 
 function integerSetting(name, fallback, minimum, maximum) {
   const raw = process.env[name];
@@ -44,6 +45,9 @@ function percentile(samples, requestedPercentile) {
 function normalizePath(pathname) {
   if (!pathname.startsWith('/api/') && !pathname.startsWith('/oauth/') && pathname !== '/mcp'
     && !pathname.startsWith('/health/')) return 'frontend';
+  if (pathname.startsWith('/api/storage/public/')) return '/api/storage/public/:bucket/:path';
+  if (pathname.startsWith('/api/storage/')) return '/api/storage/:bucket/:path';
+  if (pathname.startsWith('/api/admin/recovery/backups/')) return '/api/admin/recovery/backups/:filename';
   return pathname
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, ':id')
     .replace(/\/[A-Za-z0-9_-]{25,}(?=\/|$)/g, '/:token')
@@ -143,7 +147,7 @@ async function postgresSnapshot() {
      FROM pg_stat_database stats
      CROSS JOIN LATERAL (
        SELECT
-         COUNT(*) FILTER (WHERE wait_event IS NOT NULL)::integer AS waiting_connections,
+         COUNT(*) FILTER (WHERE state = 'active' AND wait_event IS NOT NULL)::integer AS waiting_connections,
          COUNT(*) FILTER (WHERE state = 'active')::integer AS active_connections
        FROM pg_stat_activity
        WHERE datname = current_database()
@@ -209,6 +213,7 @@ export async function performanceStatus(user) {
       postgres,
     },
     authorizationCache: authorizationCacheSnapshot(),
+    realtime: realtimeMetricsSnapshot(),
   };
 }
 

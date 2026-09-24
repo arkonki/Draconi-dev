@@ -34,6 +34,7 @@ if (!Number.isInteger(AUTH_CONTEXT_CACHE_MS) || AUTH_CONTEXT_CACHE_MS < 0 || AUT
 }
 
 const accessContextCache = new Map();
+let accessContextGeneration = 0;
 const accessContextMetrics = {
   hits: 0,
   misses: 0,
@@ -217,11 +218,14 @@ async function accessContext(user, client = pool) {
   }
 
   accessContextMetrics.misses += 1;
+  const generation = accessContextGeneration;
   const promise = loadAccessContext(user.id, pool);
   accessContextCache.set(user.id, { promise, expiresAt: 0 });
   try {
     const value = await promise;
-    accessContextCache.set(user.id, { value, expiresAt: Date.now() + AUTH_CONTEXT_CACHE_MS });
+    if (generation === accessContextGeneration && accessContextCache.get(user.id)?.promise === promise) {
+      accessContextCache.set(user.id, { value, expiresAt: Date.now() + AUTH_CONTEXT_CACHE_MS });
+    }
     return { user, admin: user.role === 'admin', ...value };
   } catch (error) {
     if (accessContextCache.get(user.id)?.promise === promise) accessContextCache.delete(user.id);
@@ -231,11 +235,16 @@ async function accessContext(user, client = pool) {
 
 export function invalidateAccessContextCache(userIds = null) {
   accessContextMetrics.invalidations += 1;
+  accessContextGeneration += 1;
   if (!userIds) {
     accessContextCache.clear();
     return;
   }
   for (const userId of userIds) accessContextCache.delete(userId);
+}
+
+export function changeInvalidatesAccessContext(table) {
+  return ACCESS_CONTEXT_TABLES.has(table);
 }
 
 export function authorizationCacheSnapshot() {
@@ -347,40 +356,6 @@ function parseList(value) {
   return String(value || '').replace(/^\(/, '').replace(/\)$/, '').split(',').map((entry) => entry.trim());
 }
 
-function scalarMatches(actual, operator, expected) {
-  if (operator === 'eq') return String(actual) === String(expected);
-  if (operator === 'gt') return actual !== null && actual !== undefined && actual > expected;
-  if (operator === 'is') return expected === null ? actual === null || actual === undefined : actual === expected;
-  if (operator === 'in') return parseList(expected).includes(String(actual));
-  if (operator === 'ilike') {
-    const pattern = String(expected).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll('%', '.*');
-    return new RegExp(`^${pattern}$`, 'i').test(String(actual ?? ''));
-  }
-  return false;
-}
-
-function matchesFilter(row, filter) {
-  if (filter.operator === 'match') {
-    return Object.entries(filter.value || {}).every(([key, value]) =>
-      getValues(row, key.split('.')).some((actual) => scalarMatches(actual, 'eq', value)));
-  }
-  if (filter.operator === 'or') {
-    return String(filter.value || '').split(',').some((clause) => {
-      const [column, operator, ...rest] = clause.split('.');
-      let expected = rest.join('.');
-      if (operator === 'is' && expected === 'null') expected = null;
-      return getValues(row, column.split('.')).some((actual) => scalarMatches(actual, operator, expected));
-    });
-  }
-  const values = getValues(row, String(filter.column).split('.'));
-  const matched = values.some((actual) => scalarMatches(actual, filter.operator, filter.value));
-  return filter.operator === 'not' ? !values.some((actual) => scalarMatches(actual, filter.notOperator, filter.value)) : matched;
-}
-
-function applyFilters(rows, filters = []) {
-  return rows.filter((row) => filters.every((filter) => matchesFilter(row, filter)));
-}
-
 function compareOrderValues(left, right) {
   if (left instanceof Date && right instanceof Date) {
     return left.getTime() - right.getTime();
@@ -411,11 +386,188 @@ export function applyOrders(rows, orders = []) {
   });
 }
 
+function sqlIdentifier(value) {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(String(value))) {
+    throw new HttpError(400, `Invalid query column: ${value}`);
+  }
+  return `"${value}"`;
+}
+
+function canonicalQueryColumn(table, column) {
+  const parts = String(column || '').split('.');
+  if (table === 'users' && parts[0] === 'last_login') parts[0] = 'last_login_at';
+  if (table === 'monsters' && parts[0] === 'effectsSummary') parts[0] = 'effects_summary';
+  return parts;
+}
+
+function queryColumnExpression(table, column, columns) {
+  const parts = canonicalQueryColumn(table, column);
+  const root = parts[0];
+  const metadata = columns.get(root);
+  if (!metadata) throw new HttpError(400, `Unknown column for ${table}: ${root}`);
+  const rootExpression = `t.${sqlIdentifier(root)}`;
+  if (parts.length === 1) return { expression: rootExpression, metadata, jsonPath: false };
+  if (metadata.data_type !== 'json' && metadata.data_type !== 'jsonb') {
+    throw new HttpError(400, `Nested filtering is only supported for JSON columns: ${column}`);
+  }
+  const path = parts.slice(1);
+  path.forEach(sqlIdentifier);
+  return {
+    expression: `${rootExpression} #>> '{${path.join(',')}}'`,
+    metadata: { data_type: 'text', udt_name: 'text' },
+    jsonPath: true,
+  };
+}
+
+function createSqlState() {
+  return {
+    values: [],
+    bind(value, cast = '') {
+      this.values.push(value);
+      return `$${this.values.length}${cast ? `::${cast}` : ''}`;
+    },
+  };
+}
+
+function uuidArrayPredicate(expression, values, state) {
+  return `${expression} = ANY(${state.bind([...values], 'uuid[]')})`;
+}
+
+function authorizationSql(table, ctx, state) {
+  if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return 'TRUE';
+  const partyIds = [...ctx.partyIds];
+
+  if (table === 'campaign_events') {
+    const gmPartyIds = partyIds.filter((partyId) => partyGmAccess(ctx, partyId));
+    const campaignAccess = uuidArrayPredicate('t."campaign_id"', partyIds, state);
+    const gmAccess = uuidArrayPredicate('t."campaign_id"', gmPartyIds, state);
+    const assignedUser = state.bind(ctx.user.id, 'uuid');
+    return `(${campaignAccess} AND (${gmAccess} OR t."visibility" IN ('public', 'players') OR (t."visibility" = 'assigned' AND t."payload"->>'assignedUserId' = ${assignedUser}::text)))`;
+  }
+  if (table === 'characters') {
+    return `(t."user_id" = ${state.bind(ctx.user.id, 'uuid')} OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  }
+  if (table === 'parties') return uuidArrayPredicate('t."id"', partyIds, state);
+  if (table === 'party_members') {
+    return `(t."user_id" = ${state.bind(ctx.user.id, 'uuid')} OR ${uuidArrayPredicate('t."character_id"', ctx.characterIds, state)} OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  }
+  if (table === 'campaign_memberships' || PARTY_SCOPED.has(table) || table === 'party_display_sessions') {
+    return uuidArrayPredicate('t."party_id"', partyIds, state);
+  }
+  if (table === 'notes') {
+    return `(t."user_id" = ${state.bind(ctx.user.id, 'uuid')} OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  }
+  if (table === 'compendium') {
+    return `(t."is_public" = true OR t."created_by" = ${state.bind(ctx.user.id, 'uuid')} OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  }
+  if (table === 'compendium_templates') {
+    return `(t."is_public" = true OR t."created_by" = ${state.bind(ctx.user.id, 'uuid')})`;
+  }
+  if (table === 'encounter_combatants') {
+    return uuidArrayPredicate('t."encounter_id"', ctx.encounterParty.keys(), state);
+  }
+  if (table === 'party_map_pins' || table === 'party_map_drawings') {
+    return uuidArrayPredicate('t."map_id"', ctx.mapParty.keys(), state);
+  }
+  if (table === 'party_display_slots') {
+    return uuidArrayPredicate('t."session_id"', ctx.sessionParty.keys(), state);
+  }
+  if (table === 'push_subscriptions' || table === 'user_notification_settings') {
+    return `t."user_id" = ${state.bind(ctx.user.id, 'uuid')}`;
+  }
+  return 'FALSE';
+}
+
+function inPredicate(expression, metadata, values, state) {
+  const list = parseList(values);
+  if (metadata.udt_name === 'uuid') return `${expression} = ANY(${state.bind(list, 'uuid[]')})`;
+  if (metadata.udt_name === 'int2') return `${expression} = ANY(${state.bind(list, 'smallint[]')})`;
+  if (metadata.udt_name === 'int4') return `${expression} = ANY(${state.bind(list, 'integer[]')})`;
+  if (metadata.udt_name === 'int8') return `${expression} = ANY(${state.bind(list, 'bigint[]')})`;
+  if (metadata.udt_name === 'bool') return `${expression} = ANY(${state.bind(list, 'boolean[]')})`;
+  return `${expression}::text = ANY(${state.bind(list, 'text[]')})`;
+}
+
+function scalarFilterSql(table, column, operator, value, columns, state) {
+  const { expression, metadata } = queryColumnExpression(table, column, columns);
+  if (operator === 'eq') {
+    return value === null ? `${expression} IS NULL` : `${expression} = ${state.bind(value)}`;
+  }
+  if (operator === 'gt') return `${expression} > ${state.bind(value)}`;
+  if (operator === 'is') {
+    if (value === null || value === 'null') return `${expression} IS NULL`;
+    return `${expression} IS NOT DISTINCT FROM ${state.bind(value)}`;
+  }
+  if (operator === 'in') return inPredicate(expression, metadata, value, state);
+  if (operator === 'ilike') return `${expression}::text ILIKE ${state.bind(String(value ?? ''))}`;
+  throw new HttpError(400, `Unsupported query operator: ${operator}`);
+}
+
+function filterSql(table, filter, columns, state) {
+  if (filter.operator === 'match') {
+    const entries = Object.entries(filter.value || {});
+    if (entries.length === 0) return 'TRUE';
+    return entries
+      .map(([column, value]) => `(${scalarFilterSql(table, column, 'eq', value, columns, state)})`)
+      .join(' AND ');
+  }
+  if (filter.operator === 'or') {
+    const clauses = String(filter.value || '').split(',').filter(Boolean);
+    if (clauses.length === 0) return 'FALSE';
+    return clauses.map((clause) => {
+      const [column, operator, ...rest] = clause.split('.');
+      let value = rest.join('.');
+      if (operator === 'is' && value === 'null') value = null;
+      return `(${scalarFilterSql(table, column, operator, value, columns, state)})`;
+    }).join(' OR ');
+  }
+  if (filter.operator === 'not') {
+    const inner = scalarFilterSql(table, filter.column, filter.notOperator, filter.value, columns, state);
+    return `NOT COALESCE((${inner}), false)`;
+  }
+  return scalarFilterSql(table, filter.column, filter.operator, filter.value, columns, state);
+}
+
+export function buildAuthorizedSelectQuery(table, ctx, columns, options = {}) {
+  const { filters = [], orders = [], limit } = options;
+  const state = createSqlState();
+  const predicates = [`(${authorizationSql(table, ctx, state)})`];
+  for (const filter of filters) predicates.push(`(${filterSql(table, filter, columns, state)})`);
+
+  let text = `SELECT t.* FROM ${sqlIdentifier(table)} AS t WHERE ${predicates.join(' AND ')}`;
+  if (orders.length) {
+    const orderSql = orders.map((order) => {
+      const { expression } = queryColumnExpression(table, order.column, columns);
+      const direction = order.ascending === false ? 'DESC' : 'ASC';
+      const nulls = order.nullsLast === false ? 'NULLS FIRST' : 'NULLS LAST';
+      return `${expression} ${direction} ${nulls}`;
+    });
+    text += ` ORDER BY ${orderSql.join(', ')}`;
+  }
+  if (Number.isFinite(limit)) {
+    text += ` LIMIT ${state.bind(Math.max(0, Math.trunc(limit)), 'integer')}`;
+  }
+  return { text, values: state.values };
+}
+
+function uniqueRowValues(rows, column) {
+  return [...new Set(rows.map((row) => row[column]).filter(Boolean))];
+}
+
 async function enrichRows(table, rows, client = pool, ctx = null) {
   if (rows.length === 0) return rows;
   if (table === 'characters') {
-    const schools = await client.query('SELECT * FROM magic_schools');
-    const members = await client.query('SELECT party_id, character_id FROM party_members');
+    const characterIds = uniqueRowValues(rows, 'id');
+    const schoolIds = uniqueRowValues(rows, 'magic_school');
+    const [schools, members] = await Promise.all([
+      schoolIds.length
+        ? client.query('SELECT * FROM magic_schools WHERE id = ANY($1::uuid[])', [schoolIds])
+        : { rows: [] },
+      client.query(
+        'SELECT party_id, character_id FROM party_members WHERE character_id = ANY($1::uuid[])',
+        [characterIds],
+      ),
+    ]);
     const schoolMap = new Map(schools.rows.map((row) => [row.id, row]));
     return rows.map((row) => ({
       ...row,
@@ -424,10 +576,13 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
     }));
   }
   if (table === 'parties') {
+    const partyIds = uniqueRowValues(rows, 'id');
     const [memberResult, membershipResult] = await Promise.all([
       client.query(
       `SELECT pm.*, row_to_json(c) AS characters
-       FROM party_members pm JOIN characters c ON c.id = pm.character_id`,
+       FROM party_members pm JOIN characters c ON c.id = pm.character_id
+       WHERE pm.party_id = ANY($1::uuid[])`,
+      [partyIds],
       ),
       client.query(
         `SELECT cm.*, jsonb_build_object(
@@ -438,7 +593,9 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
            'avatar_url', u.avatar_url
          ) AS users
          FROM campaign_memberships cm
-         JOIN users u ON u.id = cm.user_id`,
+         JOIN users u ON u.id = cm.user_id
+         WHERE cm.party_id = ANY($1::uuid[])`,
+        [partyIds],
       ),
     ]);
     return rows.map((row) => ({
@@ -449,8 +606,10 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
     }));
   }
   if (table === 'party_members') {
-    const parties = await client.query('SELECT * FROM parties');
-    const characters = await client.query('SELECT * FROM characters');
+    const [parties, characters] = await Promise.all([
+      client.query('SELECT * FROM parties WHERE id = ANY($1::uuid[])', [uniqueRowValues(rows, 'party_id')]),
+      client.query('SELECT * FROM characters WHERE id = ANY($1::uuid[])', [uniqueRowValues(rows, 'character_id')]),
+    ]);
     const partyMap = new Map(parties.rows.map((row) => [row.id, row]));
     const characterMap = new Map(characters.rows.map((row) => [row.id, row]));
     return rows.map((row) => ({
@@ -462,35 +621,48 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
   }
   if (table === 'campaign_memberships') {
     const users = await client.query(
-      'SELECT id, username, first_name, last_name, avatar_url FROM users',
+      `SELECT id, username, first_name, last_name, avatar_url
+       FROM users WHERE id = ANY($1::uuid[])`,
+      [uniqueRowValues(rows, 'user_id')],
     );
     const userMap = new Map(users.rows.map((row) => [row.id, row]));
     return rows.map((row) => ({ ...row, users: userMap.get(row.user_id) || null }));
   }
   if (table === 'notes') {
-    const characters = await client.query('SELECT id, name FROM characters');
-    const parties = await client.query('SELECT id, name FROM parties');
+    const [characters, parties] = await Promise.all([
+      client.query('SELECT id, name FROM characters WHERE id = ANY($1::uuid[])', [uniqueRowValues(rows, 'character_id')]),
+      client.query('SELECT id, name FROM parties WHERE id = ANY($1::uuid[])', [uniqueRowValues(rows, 'party_id')]),
+    ]);
     const characterMap = new Map(characters.rows.map((row) => [row.id, row]));
     const partyMap = new Map(parties.rows.map((row) => [row.id, row]));
     return rows.map((row) => ({ ...row, character: characterMap.get(row.character_id) || null, party: partyMap.get(row.party_id) || null }));
   }
   if (table === 'game_spells') {
-    const { rows: schools } = await client.query('SELECT * FROM magic_schools');
+    const { rows: schools } = await client.query(
+      'SELECT * FROM magic_schools WHERE id = ANY($1::uuid[])',
+      [uniqueRowValues(rows, 'school_id')],
+    );
     const map = new Map(schools.map((row) => [row.id, row]));
     return rows.map((row) => ({ ...row, magic_schools: map.get(row.school_id) || null }));
   }
   if (table === 'encounter_combatants') {
-    const { rows: characters } = await client.query('SELECT id, current_hp, max_hp, current_wp, max_wp, heroic_ability FROM characters');
+    const { rows: characters } = await client.query(
+      `SELECT id, current_hp, max_hp, current_wp, max_wp, heroic_ability
+       FROM characters WHERE id = ANY($1::uuid[])`,
+      [uniqueRowValues(rows, 'character_id')],
+    );
     const map = new Map(characters.map((row) => [row.id, row]));
     return rows.map((row) => ({ ...row, character: map.get(row.character_id) || null }));
   }
   return rows;
 }
 
-async function allAuthorizedRows(table, ctx, client = pool) {
-  const { rows } = await client.query(`SELECT * FROM "${table}"`);
-  const visible = rows.filter((row) => canRead(table, row, ctx)).map((row) => outwardAliases(table, row));
-  return enrichRows(table, visible, client, ctx);
+async function authorizedRows(table, ctx, client = pool, options = {}) {
+  const columns = await columnsFor(table, client);
+  const query = buildAuthorizedSelectQuery(table, ctx, columns, options);
+  const { rows } = await client.query(query.text, query.values);
+  const visible = rows.map((row) => outwardAliases(table, row));
+  return options.enrich === false ? visible : enrichRows(table, visible, client, ctx);
 }
 
 function applyOwnership(table, payload, user) {
@@ -572,11 +744,7 @@ export async function executeDataQuery(user, request) {
 
   if (action === 'select') {
     const ctx = await accessContext(user);
-    let rows = await allAuthorizedRows(table, ctx);
-    rows = applyFilters(rows, filters);
-    rows = applyOrders(rows, orders);
-    if (Number.isFinite(limit)) rows = rows.slice(0, Math.max(0, limit));
-    return rows;
+    return authorizedRows(table, ctx, pool, { filters, orders, limit });
   }
 
   const result = await withTransaction(async (client) => {
@@ -593,8 +761,7 @@ export async function executeDataQuery(user, request) {
       return inserted.filter(Boolean);
     }
 
-    let candidates = await allAuthorizedRows(table, transactionCtx, client);
-    candidates = applyFilters(candidates, filters);
+    const candidates = await authorizedRows(table, transactionCtx, client, { filters, enrich: false });
     if (!candidates.every((row) => canWrite(table, row, transactionCtx))) throw new HttpError(403, 'Permission denied');
     const ids = candidates.map((row) => row.id);
     if (ids.length === 0) return [];
@@ -622,31 +789,88 @@ export async function executeDataQuery(user, request) {
   return result;
 }
 
+function realtimeTables(bindings) {
+  return [...new Set((bindings || []).map((binding) => binding.table).filter((table) => TABLES.has(table)))];
+}
+
+export function bindingMatchesChange(binding, event, row) {
+  if (binding.table !== event.table_name) return false;
+  if (binding.event && binding.event !== '*' && binding.event !== event.event_type) return false;
+  if (!binding.filter) return true;
+  const separator = '=eq.';
+  const separatorIndex = String(binding.filter).indexOf(separator);
+  if (separatorIndex === -1) return true;
+  const column = String(binding.filter).slice(0, separatorIndex);
+  const expected = String(binding.filter).slice(separatorIndex + separator.length);
+  return expected === undefined || String(row[column]) === expected;
+}
+
+export async function latestChangeEventId(client = pool) {
+  const { rows } = await client.query('SELECT COALESCE(MAX(id), 0) AS last_id FROM app_change_events');
+  return Number(rows[0].last_id);
+}
+
+export async function readChangeEventBatch(afterId, tables, throughId = null, limit = 250, client = pool) {
+  const cursor = Number(afterId);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) throw new HttpError(400, 'Invalid realtime event cursor');
+  const allowedTables = [...new Set((tables || []).filter((table) => TABLES.has(table)))];
+  if (allowedTables.length === 0) return { events: [], lastId: cursor, hasMore: false };
+  const boundedLimit = Math.min(1_000, Math.max(1, Math.trunc(Number(limit) || 250)));
+  const values = [cursor, allowedTables];
+  let throughPredicate = '';
+  if (throughId !== null && throughId !== undefined) {
+    const maximum = Number(throughId);
+    if (!Number.isSafeInteger(maximum) || maximum < cursor) {
+      throw new HttpError(400, 'Invalid realtime event upper cursor');
+    }
+    values.push(maximum);
+    throughPredicate = ` AND id <= $${values.length}`;
+  }
+  values.push(boundedLimit);
+  const { rows } = await client.query(
+    `SELECT * FROM app_change_events
+     WHERE id > $1 AND table_name = ANY($2::text[])${throughPredicate}
+     ORDER BY id ASC LIMIT $${values.length}`,
+    values,
+  );
+  return {
+    events: rows,
+    lastId: Number(rows.at(-1)?.id ?? cursor),
+    hasMore: rows.length === boundedLimit,
+  };
+}
+
+export async function authorizeChangeEventBatch(user, events, bindings) {
+  const ctx = await accessContext(user);
+  const authorized = [];
+  let rejectedByAuthorization = 0;
+  let rejectedByBinding = 0;
+  for (const event of events || []) {
+    const row = event.new_record || event.old_record;
+    if (!row || !canRead(event.table_name, row, ctx)) {
+      rejectedByAuthorization += 1;
+      continue;
+    }
+    if (!(bindings || []).some((binding) => bindingMatchesChange(binding, event, row))) {
+      rejectedByBinding += 1;
+      continue;
+    }
+    authorized.push(event);
+  }
+  return { events: authorized, rejectedByAuthorization, rejectedByBinding };
+}
+
 export async function authorizedChangeEvents(user, afterId, bindings) {
-  const tables = [...new Set((bindings || []).map((binding) => binding.table).filter((table) => TABLES.has(table)))];
+  const tables = realtimeTables(bindings);
   if (afterId === null || afterId === undefined) {
-    const { rows } = await pool.query('SELECT COALESCE(MAX(id), 0) AS last_id FROM app_change_events');
-    return { events: [], lastId: Number(rows[0].last_id) };
+    return { events: [], lastId: await latestChangeEventId() };
   }
 
   const cursor = Number(afterId);
   if (!Number.isSafeInteger(cursor) || cursor < 0) throw new HttpError(400, 'Invalid realtime event cursor');
   if (tables.length === 0) return { events: [], lastId: cursor };
 
-  const ctx = await accessContext(user);
-  const { rows } = await pool.query(
-    `SELECT * FROM app_change_events WHERE id > $1 AND table_name = ANY($2::text[]) ORDER BY id ASC LIMIT 250`,
-    [cursor, tables],
-  );
-  const events = rows.filter((event) => {
-    const row = event.new_record || event.old_record;
-    if (!row || !canRead(event.table_name, row, ctx)) return false;
-    return bindings.some((binding) => {
-      if (binding.table !== event.table_name) return false;
-      if (!binding.filter) return true;
-      const [column, expected] = String(binding.filter).split('=eq.');
-      return expected === undefined || String(row[column]) === expected;
-    });
-  });
-  return { events, lastId: Number(rows.at(-1)?.id ?? cursor) };
+  const batch = await readChangeEventBatch(cursor, tables);
+  const filtered = await authorizeChangeEventBatch(user, batch.events, bindings);
+  return { events: filtered.events, lastId: batch.lastId };
 }

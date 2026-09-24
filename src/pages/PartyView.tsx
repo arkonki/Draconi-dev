@@ -26,6 +26,7 @@ import { fetchSoloCampaignStatus } from '../lib/api/solo';
 import { TrustedRollFeed } from '../components/party/TrustedRollFeed';
 import { SessionManager } from '../components/party/SessionManager';
 import { fetchCampaignTimeState } from '../lib/api/campaignTime';
+import { QUERY_STALE_TIME, queryKeys } from '../lib/queryKeys';
 
 type Tab = 'members' | 'solo' | 'rolls' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
 const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'rolls', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
@@ -125,7 +126,7 @@ export function PartyView() {
   }, [noteIdFromUrl, tabFromUrl]);
 
   const { data: party, isLoading, error } = useQuery({
-    queryKey: ['party', partyId],
+    queryKey: queryKeys.party(partyId),
     queryFn: () => fetchPartyById(partyId),
     enabled: !!partyId,
   });
@@ -140,11 +141,11 @@ export function PartyView() {
   const isPartyOwner = Boolean(user && party && (user.id === party.created_by || isAdmin()));
   const isCampaignGM = Boolean(isPartyOwner || party?.campaign_role === 'gm');
   const { data: campaignTimeState } = useQuery({
-    queryKey: ['campaign-time', partyId],
+    queryKey: queryKeys.campaignTime(partyId),
     queryFn: () => fetchCampaignTimeState(partyId!),
     enabled: Boolean(partyId && isCampaignGM),
     retry: false,
-    refetchInterval: isCampaignGM ? 30000 : false,
+    staleTime: QUERY_STALE_TIME.live,
   });
 
   const badgeBindings = useMemo(() => (
@@ -179,13 +180,13 @@ export function PartyView() {
     fallbackRefetchMs: 20000,
     onEvent: (bindingId) => {
       if (bindingId === 'campaign-role-change') {
-        void queryClient.invalidateQueries({ queryKey: ['party', partyId] });
-        void queryClient.invalidateQueries({ queryKey: ['parties'] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.party(partyId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.parties });
         return;
       }
       if (bindingId === 'campaign-time-event') {
-        void queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
-        void queryClient.invalidateQueries({ queryKey: ['timeTracker', partyId] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.campaignTime(partyId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.timeTracker(partyId), exact: true });
         return;
       }
       setActiveTab((currentTab) => {
@@ -196,8 +197,10 @@ export function PartyView() {
       });
     },
     onReconnect: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['messages', partyId] });
-      await queryClient.invalidateQueries({ queryKey: ['campaign-time', partyId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.messages(partyId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.campaignTime(partyId), exact: true }),
+      ]);
     },
   });
 
@@ -210,12 +213,12 @@ export function PartyView() {
 
   const removeMemberMutation = useMutation({
     mutationFn: (characterId: string) => { if (!partyId) throw new Error('Party ID is missing'); return removePartyMember(partyId, characterId); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['party', partyId] }); queryClient.invalidateQueries({ queryKey: ['availableCharacters'] }); setDialogOpen(null); setMemberToRemove(null); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: queryKeys.party(partyId), exact: true }); queryClient.invalidateQueries({ queryKey: queryKeys.availableCharacters }); setDialogOpen(null); setMemberToRemove(null); },
   });
 
   const deletePartyMutation = useMutation({
     mutationFn: () => { if (!partyId) throw new Error('Party ID is missing'); return deleteParty(partyId); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['parties'] }); navigate('/adventure-party'); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: queryKeys.parties }); navigate('/adventure-party'); },
   });
 
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };

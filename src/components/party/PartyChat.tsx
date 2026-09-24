@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
@@ -16,7 +16,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MessageContent } from './MessageContent';
 import type { Character } from '../../types/character';
 import type { CampaignMembership } from '../../lib/api/parties';
-import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -82,58 +82,21 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   };
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['messages', partyId],
+    queryKey: queryKeys.messages(partyId),
     queryFn: () => getPartyMessages(partyId),
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: QUERY_STALE_TIME.live,
   });
 
   // ... (triggerShake, scrollToBottom, handleScroll logic remains the same) ...
   const triggerShake = () => { setIsShaking(true); setTimeout(() => setIsShaking(false), 500); };
-  const chatBindings = useMemo(() => ([
-    {
-      bindingId: 'message-insert',
-      event: 'INSERT' as const,
-      schema: 'public' as const,
-      table: 'messages',
-      filter: `party_id=eq.${partyId}`,
-    },
-    {
-      bindingId: 'message-delete',
-      event: 'DELETE' as const,
-      schema: 'public' as const,
-      table: 'messages',
-      filter: `party_id=eq.${partyId}`,
-    },
-  ]), [partyId]);
-
-  useRealtimeChannel({
-    key: `chat:${partyId}`,
-    scope: `party:${partyId}`,
-    bindings: chatBindings,
-    fallbackRefetchMs: 15000,
-    onEvent: (bindingId, payload) => {
-      if (bindingId === 'message-insert') {
-        const incoming = payload.new as Message;
-        if (incoming.content.includes(`<<<POKE:${user?.id}>>>`)) triggerShake();
-
-        queryClient.setQueryData(
-          ['messages', partyId],
-          (oldData: Message[] = []) => appendMessageIfMissing(oldData, incoming),
-        );
-        return;
-      }
-
-      const deletedId = String(payload.old.id);
-      queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => (
-        oldData.filter((msg) => msg.id !== deletedId)
-      ));
-    },
-    onReconnect: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['messages', partyId] });
-    },
-  });
-
+  useEffect(() => {
+    const handlePoke = (event: Event) => {
+      const detail = (event as CustomEvent<{ partyId?: string }>).detail;
+      if (detail?.partyId === partyId) triggerShake();
+    };
+    window.addEventListener('party-chat-poke', handlePoke);
+    return () => window.removeEventListener('party-chat-poke', handlePoke);
+  }, [partyId]);
   const scrollToBottom = (smooth = true) => { messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' }); setShowScrollButton(false); };
   useEffect(() => { scrollToBottom(); }, [messages.length]);
   const handleScroll = () => {
@@ -200,11 +163,11 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     if (!confirm("Delete this message?")) return;
     try {
       // Optimistic delete from UI
-      queryClient.setQueryData(['messages', partyId], (oldData: Message[] = []) => oldData.filter(m => m.id !== messageId));
+      queryClient.setQueryData(queryKeys.messages(partyId), (oldData: Message[] = []) => oldData.filter(m => m.id !== messageId));
       await deleteMessage(messageId);
     } catch (error) {
       console.error("Failed to delete", error);
-      queryClient.invalidateQueries({ queryKey: ['messages', partyId] }); // Revert on fail
+      queryClient.invalidateQueries({ queryKey: queryKeys.messages(partyId), exact: true }); // Revert on fail
     }
   };
 
@@ -234,7 +197,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     try {
       const sentMessage = await sendMessage(partyId, user.id, finalContent);
       queryClient.setQueryData(
-        ['messages', partyId],
+        queryKeys.messages(partyId),
         (oldData: Message[] = []) => appendMessageIfMissing(oldData, sentMessage),
       );
       scrollToBottom();

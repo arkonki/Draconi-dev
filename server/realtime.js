@@ -1,7 +1,14 @@
 import pg from 'pg';
 import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateAccessToken } from './auth.js';
-import { authorizedChangeEvents } from './data.js';
+import {
+  authorizeChangeEventBatch,
+  authorizedChangeEvents,
+  changeInvalidatesAccessContext,
+  invalidateAccessContextCache,
+  latestChangeEventId,
+  readChangeEventBatch,
+} from './data.js';
 import { HttpError } from './http.js';
 
 const { Client } = pg;
@@ -12,6 +19,49 @@ const AUTHENTICATION_TIMEOUT_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const LISTENER_RECONNECT_MS = 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
+const EVENT_BATCH_LIMIT = 250;
+const EVENT_BATCH_DELAY_MS = 10;
+
+const realtimeMetrics = {
+  connectionsOpened: 0,
+  currentConnections: 0,
+  authenticatedConnections: 0,
+  subscribedConnections: 0,
+  listenerSignals: 0,
+  notificationsReceived: 0,
+  notificationBatches: 0,
+  coalescedSignals: 0,
+  sharedEventQueries: 0,
+  catchUpQueries: 0,
+  eventsFetched: 0,
+  clientBatchesConsidered: 0,
+  clientsSkippedByTable: 0,
+  eventsRejectedByAuthorization: 0,
+  eventsRejectedByBinding: 0,
+  deliveryMessages: 0,
+  eventsDelivered: 0,
+  deliveryErrors: 0,
+  listenerRestarts: 0,
+};
+
+export function realtimeMetricsSnapshot() {
+  return { ...realtimeMetrics };
+}
+
+export function parseChangeNotification(payload) {
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload);
+    const id = Number(parsed?.id);
+    if (Number.isSafeInteger(id) && id >= 0) {
+      return { id, table: typeof parsed.table === 'string' ? parsed.table : null };
+    }
+  } catch {
+    // Legacy notifications contain only the numeric change-event ID.
+  }
+  const id = Number(payload);
+  return Number.isSafeInteger(id) && id >= 0 ? { id, table: null } : null;
+}
 
 function sendMessage(socket, message) {
   if (socket.readyState === WebSocket.OPEN) {
@@ -85,11 +135,13 @@ async function startPostgresChangeListener(onChange, onUnavailable, logger = con
       };
 
       nextClient.on('notification', (notification) => {
-        if (notification.channel === 'app_change_events') onChange();
+        if (notification.channel === 'app_change_events') {
+          onChange(parseChangeNotification(notification.payload));
+        }
       });
       nextClient.on('error', handleFailure);
       nextClient.on('end', () => handleFailure(new Error('PostgreSQL realtime listener ended')));
-      onChange();
+      onChange(null);
     } catch (error) {
       await nextClient.end().catch(() => {});
       if (required) throw error;
@@ -120,6 +172,9 @@ async function startPostgresChangeListener(onChange, onUnavailable, logger = con
 export async function attachRealtimeServer(server, options = {}) {
   const authenticate = options.authenticate || authenticateAccessToken;
   const readEvents = options.readEvents || authorizedChangeEvents;
+  const readEventBatch = options.readEventBatch || readChangeEventBatch;
+  const authorizeEvents = options.authorizeEvents || authorizeChangeEventBatch;
+  const getLatestEventId = options.latestEventId || latestChangeEventId;
   const startChangeListener = options.startChangeListener || startPostgresChangeListener;
   const logger = options.logger || console;
   const webSocketServer = new WebSocketServer({
@@ -129,7 +184,13 @@ export async function attachRealtimeServer(server, options = {}) {
   });
   const clients = new Set();
   let listenerReady = false;
-  let flushScheduled = false;
+  let closing = false;
+  let batchTimer = null;
+  let sharedFlushPromise = null;
+  let pendingSignal = false;
+  let pendingUnknownTable = false;
+  let pendingMaximumId = null;
+  const pendingTables = new Set();
 
   const flushClient = async (state) => {
     if (!state.user || !state.bindings || state.socket.readyState !== WebSocket.OPEN) return;
@@ -142,6 +203,7 @@ export async function attachRealtimeServer(server, options = {}) {
     try {
       do {
         state.flushAgain = false;
+        realtimeMetrics.catchUpQueries += 1;
         const result = await readEvents(state.user, state.afterId, state.bindings);
         state.afterId = result.lastId;
         sendMessage(state.socket, {
@@ -149,8 +211,11 @@ export async function attachRealtimeServer(server, options = {}) {
           events: result.events,
           lastId: result.lastId,
         });
+        realtimeMetrics.deliveryMessages += 1;
+        realtimeMetrics.eventsDelivered += result.events.length;
       } while (state.flushAgain && state.socket.readyState === WebSocket.OPEN);
     } catch (error) {
+      realtimeMetrics.deliveryErrors += 1;
       logger.error('Unable to deliver realtime events:', error);
       closeWithError(state.socket, error);
     } finally {
@@ -158,23 +223,140 @@ export async function attachRealtimeServer(server, options = {}) {
     }
   };
 
-  const flushAll = () => {
-    if (flushScheduled) return;
-    flushScheduled = true;
-    setTimeout(() => {
-      flushScheduled = false;
-      clients.forEach((state) => void flushClient(state));
-    }, 10);
+  const deliverSharedPage = async (state, events, pageLastId) => {
+    if (!state.user || !state.bindings || state.socket.readyState !== WebSocket.OPEN) return;
+    if (Number(state.afterId) >= pageLastId) return;
+    if (state.flushing) {
+      state.flushAgain = true;
+      return;
+    }
+
+    const candidateEvents = events.filter((event) => Number(event.id) > Number(state.afterId || 0)
+      && state.bindings.some((binding) => binding.table === event.table_name
+        && (!binding.event || binding.event === '*' || binding.event === event.event_type)));
+    if (candidateEvents.length === 0) {
+      state.afterId = pageLastId;
+      realtimeMetrics.clientsSkippedByTable += 1;
+      return;
+    }
+
+    state.flushing = true;
+    realtimeMetrics.clientBatchesConsidered += 1;
+    try {
+      const filtered = await authorizeEvents(state.user, candidateEvents, state.bindings);
+      state.afterId = pageLastId;
+      realtimeMetrics.eventsRejectedByAuthorization += filtered.rejectedByAuthorization || 0;
+      realtimeMetrics.eventsRejectedByBinding += filtered.rejectedByBinding || 0;
+      sendMessage(state.socket, {
+        type: 'events',
+        events: filtered.events,
+        lastId: pageLastId,
+      });
+      realtimeMetrics.deliveryMessages += 1;
+      realtimeMetrics.eventsDelivered += filtered.events.length;
+    } catch (error) {
+      realtimeMetrics.deliveryErrors += 1;
+      logger.error('Unable to authorize realtime event batch:', error);
+      closeWithError(state.socket, error);
+    } finally {
+      state.flushing = false;
+      if (state.flushAgain && state.socket.readyState === WebSocket.OPEN) void flushClient(state);
+    }
+  };
+
+  const flushSharedEvents = async () => {
+    if (sharedFlushPromise || closing) return;
+    sharedFlushPromise = (async () => {
+      while (pendingSignal && !closing) {
+        pendingSignal = false;
+        const unknownTable = pendingUnknownTable;
+        pendingUnknownTable = false;
+        const signaledMaximum = pendingMaximumId;
+        pendingMaximumId = null;
+        const signaledTables = new Set(pendingTables);
+        pendingTables.clear();
+
+        const states = [...clients].filter((state) => state.user && state.bindings
+          && state.socket.readyState === WebSocket.OPEN);
+        if (states.length === 0) continue;
+
+        const targetId = signaledMaximum ?? await getLatestEventId();
+        const minimumCursor = Math.min(...states.map((state) => Number(state.afterId || 0)));
+        if (!Number.isSafeInteger(targetId) || targetId <= minimumCursor) continue;
+
+        const subscribedTables = new Set(states.flatMap((state) => state.bindings.map((binding) => binding.table)));
+        const tables = unknownTable
+          ? [...subscribedTables]
+          : [...signaledTables].filter((table) => subscribedTables.has(table));
+        realtimeMetrics.notificationBatches += 1;
+
+        if (tables.length === 0) {
+          states.forEach((state) => {
+            state.afterId = Math.max(Number(state.afterId || 0), targetId);
+          });
+          realtimeMetrics.clientsSkippedByTable += states.length;
+          continue;
+        }
+
+        let cursor = minimumCursor;
+        while (cursor < targetId && !closing) {
+          realtimeMetrics.sharedEventQueries += 1;
+          const batch = await readEventBatch(cursor, tables, targetId, EVENT_BATCH_LIMIT);
+          realtimeMetrics.eventsFetched += batch.events.length;
+          const pageLastId = batch.events.length === EVENT_BATCH_LIMIT
+            ? batch.lastId
+            : targetId;
+          await Promise.all(states.map((state) => deliverSharedPage(state, batch.events, pageLastId)));
+          if (pageLastId <= cursor) break;
+          cursor = pageLastId;
+        }
+      }
+    })().catch((error) => {
+      realtimeMetrics.deliveryErrors += 1;
+      logger.error('Unable to flush shared realtime events:', error);
+      clients.forEach((state) => state.socket.close(1011, 'Realtime delivery failed'));
+    }).finally(() => {
+      sharedFlushPromise = null;
+      if (pendingSignal && !closing) scheduleSharedFlush(null);
+    });
+    await sharedFlushPromise;
+  };
+
+  const scheduleSharedFlush = (change) => {
+    if (closing) return;
+    realtimeMetrics.listenerSignals += 1;
+    pendingSignal = true;
+    if (change?.id !== undefined) {
+      realtimeMetrics.notificationsReceived += 1;
+      pendingMaximumId = Math.max(pendingMaximumId ?? 0, change.id);
+    } else {
+      pendingUnknownTable = true;
+    }
+    if (change?.table) pendingTables.add(change.table);
+    else pendingUnknownTable = true;
+    if (!change?.table || changeInvalidatesAccessContext(change.table)) {
+      invalidateAccessContextCache();
+    }
+    if (batchTimer !== null || sharedFlushPromise) {
+      realtimeMetrics.coalescedSignals += 1;
+      return;
+    }
+    batchTimer = setTimeout(() => {
+      batchTimer = null;
+      void flushSharedEvents();
+    }, EVENT_BATCH_DELAY_MS);
+    batchTimer.unref?.();
   };
 
   const closeClientsForListenerRestart = () => {
     listenerReady = false;
+    realtimeMetrics.listenerRestarts += 1;
     clients.forEach((state) => state.socket.close(1012, 'Realtime listener restarting'));
   };
 
-  const stopChangeListener = await startChangeListener(() => {
+  const stopChangeListener = await startChangeListener((change) => {
     listenerReady = true;
-    flushAll();
+    scheduleSharedFlush(change);
   }, closeClientsForListenerRestart, logger);
   listenerReady = true;
 
@@ -205,8 +387,12 @@ export async function attachRealtimeServer(server, options = {}) {
       flushing: false,
       flushAgain: false,
       alive: true,
+      subscribed: false,
+      closed: false,
     };
     clients.add(state);
+    realtimeMetrics.connectionsOpened += 1;
+    realtimeMetrics.currentConnections += 1;
 
     const authenticationTimer = setTimeout(() => {
       if (!state.user) socket.close(1008, 'Authentication timeout');
@@ -225,6 +411,7 @@ export async function attachRealtimeServer(server, options = {}) {
             throw new HttpError(401, 'Authenticate before subscribing', 'AUTH_REQUIRED');
           }
           state.user = await authenticate(message.accessToken);
+          realtimeMetrics.authenticatedConnections += 1;
           clearTimeout(authenticationTimer);
           sendMessage(socket, { type: 'authenticated' });
           return;
@@ -238,9 +425,14 @@ export async function attachRealtimeServer(server, options = {}) {
         }
 
         const bindings = Array.isArray(message.bindings) ? message.bindings : [];
+        realtimeMetrics.catchUpQueries += 1;
         const result = await readEvents(state.user, message.afterId, bindings);
         state.bindings = bindings;
         state.afterId = result.lastId;
+        if (!state.subscribed) {
+          state.subscribed = true;
+          realtimeMetrics.subscribedConnections += 1;
+        }
         sendMessage(socket, {
           type: 'subscribed',
           events: message.afterId === null || message.afterId === undefined ? [] : result.events,
@@ -252,6 +444,16 @@ export async function attachRealtimeServer(server, options = {}) {
 
     socket.on('close', () => {
       clearTimeout(authenticationTimer);
+      if (!state.closed) {
+        state.closed = true;
+        realtimeMetrics.currentConnections = Math.max(0, realtimeMetrics.currentConnections - 1);
+        if (state.user) {
+          realtimeMetrics.authenticatedConnections = Math.max(0, realtimeMetrics.authenticatedConnections - 1);
+        }
+        if (state.subscribed) {
+          realtimeMetrics.subscribedConnections = Math.max(0, realtimeMetrics.subscribedConnections - 1);
+        }
+      }
       clients.delete(state);
     });
     socket.on('error', (error) => {
@@ -273,6 +475,12 @@ export async function attachRealtimeServer(server, options = {}) {
 
   return {
     close: async () => {
+      closing = true;
+      if (batchTimer !== null) {
+        clearTimeout(batchTimer);
+        batchTimer = null;
+      }
+      await sharedFlushPromise;
       clearInterval(heartbeatTimer);
       server.off('upgrade', upgradeHandler);
       clients.forEach((state) => state.socket.terminate());

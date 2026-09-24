@@ -6,6 +6,7 @@ import { fetchKinList, fetchAbilityDetailsByNames, getKinAbilityNames, Kin } fro
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { ChevronRight, ArrowLeft, CheckCircle2, User, Sparkles, Footprints } from 'lucide-react';
+import { QUERY_STALE_TIME } from '../../../lib/queryKeys';
 
 // Helper to determine movement speed based on Dragonbane Rules
 const getMovementSpeed = (kinName: string) => {
@@ -26,6 +27,7 @@ export function KinSelection() {
   const { data: kinList = [], isLoading: kinLoading, error: kinError } = useQuery<Kin[], Error>({
     queryKey: ['kinListWithHeroicAbility'],
     queryFn: fetchKinList,
+    staleTime: QUERY_STALE_TIME.reference,
     retry: false,
   });
 
@@ -72,7 +74,7 @@ export function KinSelection() {
     queryKey: ['abilityDetails', [...abilityNamesFromStore].sort().join(',')],
     queryFn: () => fetchAbilityDetailsByNames(abilityNamesFromStore),
     enabled: abilityNamesFromStore.length > 0,
-    staleTime: 10 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME.reference,
     retry: false,
   });
 

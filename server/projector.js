@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { pool, withTransaction } from './db.js';
 import { loadCampaignAccess } from './campaignRoles.js';
+import { invalidateAccessContextCache } from './data.js';
 import { HttpError } from './http.js';
 
 const DEFAULT_SLOTS = [
@@ -55,7 +56,7 @@ export async function projectorFunction(user, name, body) {
     return { sent: 0, skipped: 'Push delivery is disabled in the self-hosted local stack' };
   }
 
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     if (name === 'create-party-display-session') {
       const party = await requireOwner(client, user, body.partyId);
       const latest = await client.query(
@@ -129,6 +130,8 @@ export async function projectorFunction(user, name, body) {
     }
     throw new HttpError(404, `Unknown function: ${name}`);
   });
+  if (name === 'create-party-display-session') invalidateAccessContextCache();
+  return result;
 }
 
 export async function getPlayerDisplayState(token) {
@@ -140,7 +143,12 @@ export async function getPlayerDisplayState(token) {
   );
   const session = sessions[0];
   if (!session) throw new HttpError(410, 'Display session is invalid, expired, or revoked');
-  await pool.query('UPDATE party_display_sessions SET last_seen_at = now() WHERE id = $1', [session.id]);
+  await pool.query(
+    `UPDATE party_display_sessions SET last_seen_at = now()
+     WHERE id = $1
+       AND (last_seen_at IS NULL OR last_seen_at < now() - interval '30 seconds')`,
+    [session.id],
+  );
   const [partyResult, mapResult, encounterResult, slotsResult, rollHistoryResult] = await Promise.all([
     pool.query('SELECT id, name FROM parties WHERE id = $1', [session.party_id]),
     session.display_map_id

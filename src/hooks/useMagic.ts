@@ -5,6 +5,7 @@ import {
   fetchMagicSchools
 } from '../lib/api/magic';
 import { Spell, MagicSchool } from '../types/magic';
+import { QUERY_STALE_TIME, queryKeys } from '../lib/queryKeys';
 
 /**
  * Hook to fetch spells.
@@ -44,8 +45,8 @@ export function useSpells(schoolId: number | string | null | undefined) {
  */
 export function useMagicSchools() {
   return useQuery<MagicSchool[], Error>({
-    queryKey: ['magicSchools'],
+    queryKey: queryKeys.magicSchools,
     queryFn: fetchMagicSchools,
-    staleTime: 15 * 60 * 1000, // Cache schools for 15 minutes
+    staleTime: QUERY_STALE_TIME.reference,
   });
 }
