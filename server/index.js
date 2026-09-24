@@ -31,6 +31,7 @@ import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
+import { performanceStatus, stopPerformanceMonitoring, trackHttpRequest } from './performance.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const host = process.env.ELKDATA_APP_IP?.trim() || process.env.DRACONI_HOST?.trim() || '0.0.0.0';
@@ -50,6 +51,7 @@ const server = http.createServer(async (request, response) => {
   const suppliedRequestId = String(request.headers['x-request-id'] || '');
   request.requestId = /^[0-9a-f-]{36}$/i.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
   response.setHeader('x-request-id', request.requestId);
+  trackHttpRequest(request, response, pathname);
   let trackedRequest = false;
   try {
     const maintenance = maintenanceStatus();
@@ -112,6 +114,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/admin/housekeeping/run' && request.method === 'POST') {
       sendJson(response, 200, await runHousekeepingNow(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/performance' && request.method === 'GET') {
+      sendJson(response, 200, await performanceStatus(await currentUser(request)));
       return;
     }
 
@@ -270,6 +276,7 @@ async function shutdown(signal) {
       server.close((error) => error ? reject(error) : resolve());
       server.closeIdleConnections?.();
     }), stopHousekeeping(), realtimeServer.close()]);
+    stopPerformanceMonitoring();
     await pool.end();
     clearTimeout(forceExit);
     process.exit(0);

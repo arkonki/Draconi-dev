@@ -23,6 +23,25 @@ const PARTY_SCOPED = new Set([
   'random_tables', 'story_ideas', 'encounters', 'party_maps',
 ]);
 
+const ACCESS_CONTEXT_TABLES = new Set([
+  'parties', 'party_members', 'campaign_memberships', 'characters', 'party_maps',
+  'encounters', 'party_display_sessions',
+]);
+
+const AUTH_CONTEXT_CACHE_MS = Number(process.env.AUTH_CONTEXT_CACHE_MS || 5_000);
+if (!Number.isInteger(AUTH_CONTEXT_CACHE_MS) || AUTH_CONTEXT_CACHE_MS < 0 || AUTH_CONTEXT_CACHE_MS > 60_000) {
+  throw new Error('AUTH_CONTEXT_CACHE_MS must be an integer between 0 and 60000');
+}
+
+const accessContextCache = new Map();
+const accessContextMetrics = {
+  hits: 0,
+  misses: 0,
+  coalesced: 0,
+  loads: 0,
+  invalidations: 0,
+};
+
 const columnCache = new Map();
 
 export function clearDataSchemaCache() {
@@ -106,46 +125,133 @@ async function preparePayload(table, input, client = pool) {
   return prepared;
 }
 
-async function accessContext(user, client = pool) {
-  const ownedParties = await client.query('SELECT id FROM parties WHERE created_by = $1', [user.id]);
-  const memberships = await client.query(
-    `SELECT p.id AS party_id,
-       CASE WHEN p.created_by = $1 THEN 'owner' ELSE cm.role END AS role
-     FROM parties p
-     LEFT JOIN campaign_memberships cm
-       ON cm.party_id = p.id AND cm.user_id = $1
-     WHERE p.created_by = $1 OR cm.user_id = $1`,
-    [user.id],
-  );
-  const characters = await client.query('SELECT id FROM characters WHERE user_id = $1', [user.id]);
-  const maps = await client.query(
-      `SELECT m.id, m.party_id FROM party_maps m
-       WHERE m.party_id IN (
-         SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
-       )`, [user.id]);
-  const encounters = await client.query(
-      `SELECT e.id, e.party_id FROM encounters e
-       WHERE e.party_id IN (
-         SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
-       )`, [user.id]);
-  const sessions = await client.query(
-      `SELECT s.id, s.party_id FROM party_display_sessions s
-       WHERE s.party_id IN (
-         SELECT id FROM parties WHERE created_by = $1
-         UNION SELECT party_id FROM campaign_memberships WHERE user_id = $1
-       )`, [user.id]);
+function arrayValue(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function contextBase(row) {
+  const partyAccessRows = arrayValue(row.party_access);
+  return {
+    ownedPartyIds: new Set(partyAccessRows.filter((party) => party.owned).map((party) => party.party_id)),
+    partyIds: new Set(partyAccessRows.map((party) => party.party_id)),
+    partyRoles: new Map(partyAccessRows.map((party) => [party.party_id, party.role])),
+    characterIds: new Set(arrayValue(row.character_ids)),
+    mapParty: new Map(arrayValue(row.maps).map((map) => [map.id, map.party_id])),
+    encounterParty: new Map(arrayValue(row.encounters).map((encounter) => [encounter.id, encounter.party_id])),
+    sessionParty: new Map(arrayValue(row.sessions).map((session) => [session.id, session.party_id])),
+  };
+}
+
+export function materializeAccessContext(user, row) {
   return {
     user,
     admin: user.role === 'admin',
-    ownedPartyIds: new Set(ownedParties.rows.map((row) => row.id)),
-    partyIds: new Set(memberships.rows.map((row) => row.party_id)),
-    partyRoles: new Map(memberships.rows.map((row) => [row.party_id, row.role])),
-    characterIds: new Set(characters.rows.map((row) => row.id)),
-    mapParty: new Map(maps.rows.map((row) => [row.id, row.party_id])),
-    encounterParty: new Map(encounters.rows.map((row) => [row.id, row.party_id])),
-    sessionParty: new Map(sessions.rows.map((row) => [row.id, row.party_id])),
+    ...contextBase(row),
+  };
+}
+
+async function loadAccessContext(userId, client) {
+  accessContextMetrics.loads += 1;
+  const { rows } = await client.query(
+    `WITH party_access AS MATERIALIZED (
+       SELECT p.id AS party_id, 'owner'::text AS role, true AS owned
+       FROM parties p
+       WHERE p.created_by = $1
+       UNION ALL
+       SELECT cm.party_id, cm.role, false AS owned
+       FROM campaign_memberships cm
+       JOIN parties p ON p.id = cm.party_id
+       WHERE cm.user_id = $1 AND p.created_by <> $1
+     )
+     SELECT
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object(
+           'party_id', party_id,
+           'role', role,
+           'owned', owned
+         ) ORDER BY party_id)
+         FROM party_access
+       ), '[]'::jsonb) AS party_access,
+       COALESCE((
+         SELECT array_agg(c.id ORDER BY c.id) FROM characters c WHERE c.user_id = $1
+       ), '{}'::uuid[]) AS character_ids,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('id', m.id, 'party_id', m.party_id) ORDER BY m.id)
+         FROM party_maps m JOIN party_access pa ON pa.party_id = m.party_id
+       ), '[]'::jsonb) AS maps,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('id', e.id, 'party_id', e.party_id) ORDER BY e.id)
+         FROM encounters e JOIN party_access pa ON pa.party_id = e.party_id
+       ), '[]'::jsonb) AS encounters,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('id', s.id, 'party_id', s.party_id) ORDER BY s.id)
+         FROM party_display_sessions s JOIN party_access pa ON pa.party_id = s.party_id
+       ), '[]'::jsonb) AS sessions`,
+    [userId],
+  );
+  return contextBase(rows[0] || {});
+}
+
+async function accessContext(user, client = pool) {
+  if (client !== pool || AUTH_CONTEXT_CACHE_MS === 0) {
+    return { user, admin: user.role === 'admin', ...await loadAccessContext(user.id, client) };
+  }
+
+  const now = Date.now();
+  const cached = accessContextCache.get(user.id);
+  if (cached?.value && cached.expiresAt > now) {
+    accessContextMetrics.hits += 1;
+    return { user, admin: user.role === 'admin', ...cached.value };
+  }
+  if (cached?.promise) {
+    accessContextMetrics.hits += 1;
+    accessContextMetrics.coalesced += 1;
+    return { user, admin: user.role === 'admin', ...await cached.promise };
+  }
+
+  accessContextMetrics.misses += 1;
+  const promise = loadAccessContext(user.id, pool);
+  accessContextCache.set(user.id, { promise, expiresAt: 0 });
+  try {
+    const value = await promise;
+    accessContextCache.set(user.id, { value, expiresAt: Date.now() + AUTH_CONTEXT_CACHE_MS });
+    return { user, admin: user.role === 'admin', ...value };
+  } catch (error) {
+    if (accessContextCache.get(user.id)?.promise === promise) accessContextCache.delete(user.id);
+    throw error;
+  }
+}
+
+export function invalidateAccessContextCache(userIds = null) {
+  accessContextMetrics.invalidations += 1;
+  if (!userIds) {
+    accessContextCache.clear();
+    return;
+  }
+  for (const userId of userIds) accessContextCache.delete(userId);
+}
+
+export function authorizationCacheSnapshot() {
+  const now = Date.now();
+  let activeEntries = 0;
+  let pendingEntries = 0;
+  for (const entry of accessContextCache.values()) {
+    if (entry.promise) pendingEntries += 1;
+    if (entry.value && entry.expiresAt > now) activeEntries += 1;
+  }
+  return {
+    ttlMs: AUTH_CONTEXT_CACHE_MS,
+    entries: accessContextCache.size,
+    activeEntries,
+    pendingEntries,
+    ...accessContextMetrics,
   };
 }
 
@@ -463,9 +569,9 @@ async function insertOne(table, input, ctx, client, onConflict) {
 export async function executeDataQuery(user, request) {
   const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict } = request;
   assertTable(table);
-  const ctx = await accessContext(user);
 
   if (action === 'select') {
+    const ctx = await accessContext(user);
     let rows = await allAuthorizedRows(table, ctx);
     rows = applyFilters(rows, filters);
     rows = applyOrders(rows, orders);
@@ -473,7 +579,7 @@ export async function executeDataQuery(user, request) {
     return rows;
   }
 
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     await client.query(
       `SELECT set_config('draconi.source_user_id', $1, true),
          set_config('draconi.source_client', 'dragonbane-web', true)`,
@@ -512,6 +618,8 @@ export async function executeDataQuery(user, request) {
     }
     throw new HttpError(400, `Unsupported action: ${action}`);
   });
+  if (ACCESS_CONTEXT_TABLES.has(table)) invalidateAccessContextCache();
+  return result;
 }
 
 export async function authorizedChangeEvents(user, afterId, bindings) {

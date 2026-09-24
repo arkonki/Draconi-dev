@@ -4,6 +4,11 @@ import { pool, withTransaction } from './db.js';
 import { getBearerToken, HttpError } from './http.js';
 
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 14);
+const SESSION_TOUCH_INTERVAL_SECONDS = Number(process.env.SESSION_TOUCH_INTERVAL_SECONDS || 300);
+
+if (!Number.isInteger(SESSION_TOUCH_INTERVAL_SECONDS) || SESSION_TOUCH_INTERVAL_SECONDS < 0 || SESSION_TOUCH_INTERVAL_SECONDS > 86_400) {
+  throw new Error('SESSION_TOUCH_INTERVAL_SECONDS must be an integer between 0 and 86400');
+}
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -87,18 +92,32 @@ export async function authenticateAccessToken(token, required = true) {
     if (required) throw new HttpError(401, 'Authentication required', 'AUTH_REQUIRED');
     return null;
   }
+  const tokenHash = hashToken(token);
   const { rows } = await pool.query(
-    `SELECT u.* FROM app_sessions s
+    `SELECT u.*,
+       (s.last_seen_at IS NULL OR s.last_seen_at < now() - ($2::integer * interval '1 second')) AS session_touch_due
+     FROM app_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active = true`,
-    [hashToken(token)],
+    [tokenHash, SESSION_TOUCH_INTERVAL_SECONDS],
   );
   if (!rows[0]) {
     if (required) throw new HttpError(401, 'Session has expired', 'SESSION_EXPIRED');
     return null;
   }
-  await pool.query('UPDATE app_sessions SET last_seen_at = now() WHERE token_hash = $1', [hashToken(token)]);
-  return rows[0];
+  const user = rows[0];
+  const touchDue = user.session_touch_due;
+  delete user.session_touch_due;
+  if (SESSION_TOUCH_INTERVAL_SECONDS > 0 && touchDue) {
+    await pool.query(
+      `UPDATE app_sessions
+       SET last_seen_at = now()
+       WHERE token_hash = $1
+         AND (last_seen_at IS NULL OR last_seen_at < now() - ($2::integer * interval '1 second'))`,
+      [tokenHash, SESSION_TOUCH_INTERVAL_SECONDS],
+    );
+  }
+  return user;
 }
 
 export async function verifyUserPassword(userId, password) {
