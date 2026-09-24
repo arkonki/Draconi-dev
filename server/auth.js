@@ -137,23 +137,45 @@ export async function signIn({ email, password }) {
   return { user: publicUser(user), session };
 }
 
+export function resolveSignUpRole(actor, requestedRole, registrationAllowed) {
+  if (!actor) {
+    if (!registrationAllowed) {
+      throw new HttpError(
+        403,
+        'Public registration is disabled. Ask an administrator to create the account.',
+        'REGISTRATION_DISABLED',
+      );
+    }
+    return 'player';
+  }
+
+  if (actor.role !== 'admin') {
+    throw new HttpError(403, 'Administrator access is required', 'ADMIN_REQUIRED');
+  }
+
+  return ['player', 'dm', 'admin'].includes(requestedRole) ? requestedRole : 'player';
+}
+
 export async function signUp(actor, { email, password, options = {} }) {
   const registrationAllowed = process.env.ALLOW_REGISTRATION === 'true';
-  if (!actor && !registrationAllowed) {
-    throw new HttpError(403, 'Public registration is disabled. Ask an administrator to create the account.');
-  }
   const requestedRole = options?.data?.role;
-  const role = actor?.role === 'admin' && ['player', 'dm', 'admin'].includes(requestedRole)
-    ? requestedRole
-    : 'player';
-  const username = String(options?.data?.username || normalizeEmail(email).split('@')[0]).trim();
-  if (!username) throw new HttpError(400, 'Username is required');
+  const role = resolveSignUpRole(actor, requestedRole, registrationAllowed);
+
+  const normalizedEmail = normalizeEmail(email);
+  if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+    throw new HttpError(400, 'Email address is invalid', 'INVALID_EMAIL');
+  }
+
+  const username = String(options?.data?.username || normalizedEmail.split('@')[0]).trim();
+  if (username.length < 3 || username.length > 50) {
+    throw new HttpError(400, 'Username must contain between 3 and 50 characters', 'INVALID_USERNAME');
+  }
 
   const user = await withTransaction(async (client) => {
     const result = await client.query(
       `INSERT INTO users (email, username, role)
        VALUES ($1, $2, $3) RETURNING *`,
-      [normalizeEmail(email), username, role],
+      [normalizedEmail, username, role],
     );
     await client.query(
       'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',

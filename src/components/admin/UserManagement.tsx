@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, AlertCircle, Edit3, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, Search, Filter, AlertCircle, Edit3, Trash2, CheckCircle, XCircle, Users } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { UserCreationModal } from './UserCreationModal';
 import { supabase } from '../../lib/supabase'; // Import Supabase client
@@ -34,13 +34,14 @@ export function UserManagement() {
       const { data, error: supabaseError } = await supabase
         .from('users') // Assuming your table is named 'users' in the public schema
         .select('id, email, username, role, created_at, last_login, first_name, last_name, is_active')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .returns<User[]>();
 
       if (supabaseError) {
         throw supabaseError;
       }
       
-      setUsers(data as User[] || []); // Ensure data is cast to User[] and handle null
+      setUsers(data || []);
     } catch (err: unknown) {
       console.error("Error fetching users:", err);
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -56,8 +57,7 @@ export function UserManagement() {
   }, [fetchUsers]);
 
   const handleUserCreated = () => {
-    setShowCreateModal(false);
-    fetchUsers(); // Reload user list after a new user is created
+    fetchUsers(); // Keep the modal open so the administrator can copy the credentials.
   };
 
   // const handleEditUser = (user: User) => {
@@ -229,8 +229,8 @@ export function UserManagement() {
                   <td className="px-5 py-4 whitespace-nowrap text-sm">
                     <div className="flex items-center gap-2">
                       <Button
-                        variant="icon"
-                        size="sm"
+                        variant="ghost"
+                        size="icon"
                         // onClick={() => handleEditUser(user)} // Uncomment when edit is implemented
                         title="Edit User"
                         className="text-gray-500 hover:text-blue-600"
@@ -238,8 +238,8 @@ export function UserManagement() {
                         <Edit3 className="w-4 h-4" />
                       </Button>
                       <Button
-                        variant="icon"
-                        size="sm"
+                        variant="ghost"
+                        size="icon"
                         // onClick={() => handleDeleteUser(user.id)} // Uncomment when delete is implemented
                         title="Delete User"
                         className="text-gray-500 hover:text-red-600"
