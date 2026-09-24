@@ -181,7 +181,7 @@ export function AppearanceSelection() {
   const isComplete = () => Object.values(appearance).every(value => value.trim() !== '');
 
   return (
-    <div className="space-y-6 pb-20"> {/* pb-20 for fixed footer clearance */}
+    <div className="space-y-6">
       <div className="text-center md:text-left">
         <h2 className="text-xl font-bold text-gray-800">Character Appearance</h2>
         <p className="mt-1 text-sm text-gray-600">Describe your character's physical look, clothing, and traits.</p>

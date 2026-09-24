@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useCharacterCreation } from '../../../stores/characterCreation';
 import { fetchProfessionList, fetchHeroicAbilitiesByProfession, Profession } from '../../../lib/api/professions';
 import { fetchMagicSchools, MagicSchool } from '../../../lib/api/magic';
+import { fetchItems, GameItem } from '../../../lib/api/items';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { CharacterCreationData } from '../../../types/character';
-import { Info, CheckCircle2, ChevronRight, ArrowLeft, Search, AlertCircle } from 'lucide-react';
+import { Info, CheckCircle2, ChevronRight, ArrowLeft, Search, AlertCircle, Package, ChevronDown } from 'lucide-react';
 
 type HeroicAbility = {
   id: number;
@@ -40,6 +41,12 @@ export function ProfessionSelection() {
   const { data: magicSchools = [], isLoading: loadingSchools, error: errorSchools } = useQuery<MagicSchool[], Error>({
     queryKey: ['magicSchools'],
     queryFn: fetchMagicSchools,
+  });
+
+  const { data: allItems = [] } = useQuery<GameItem[], Error>({
+    queryKey: ['gameItems'],
+    queryFn: () => fetchItems(),
+    staleTime: 10 * 60 * 1000,
   });
 
   useEffect(() => {
@@ -179,14 +186,72 @@ export function ProfessionSelection() {
     );
   };
 
+  const findItemDetails = (rawName: string) => {
+    const normalized = rawName
+      .replace(/^\d*D\d+\s+/i, '')
+      .replace(/^\d+\s+/, '')
+      .replace(/\s*\([^)]*\)\s*$/, '')
+      .trim()
+      .toLowerCase();
+    return allItems.find(item => item.name.toLowerCase() === normalized);
+  };
+
+  const renderEquipmentPackages = (packages: string[]) => (
+    <div className="space-y-2">
+      {packages.map((equipmentPackage, packageIndex) => {
+        const packageItems = equipmentPackage.split(',').map(item => item.trim()).filter(Boolean);
+        return (
+          <details key={`${packageIndex}-${equipmentPackage}`} className="group overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <summary className="flex cursor-pointer list-none items-center gap-2 bg-gray-50 px-3 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100">
+              <Package className="h-4 w-4 text-indigo-500" />
+              <span className="flex-1">Package {packageIndex + 1}</span>
+              <span className="text-xs font-normal text-gray-400">{packageItems.length} entries</span>
+              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" />
+            </summary>
+            <ul className="divide-y divide-gray-100">
+              {packageItems.map((itemName, itemIndex) => {
+                const alternatives = itemName.split(/\s+or\s+/i).map(name => findItemDetails(name)).filter((item): item is GameItem => !!item);
+                return (
+                  <li key={`${itemIndex}-${itemName}`} className="px-3 py-2.5 text-sm text-gray-700">
+                    <div className="font-medium">{itemName}</div>
+                    {alternatives.length > 0 && (
+                      <details className="mt-1.5">
+                        <summary className="cursor-pointer text-xs font-semibold text-indigo-600 hover:text-indigo-800">View item details</summary>
+                        <div className="mt-2 space-y-2">
+                          {alternatives.map(item => (
+                            <div key={item.id} className="rounded-md bg-indigo-50/70 p-2 text-xs text-indigo-950">
+                              <div className="flex flex-wrap items-center justify-between gap-2"><strong>{item.name}</strong><span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-indigo-600">{item.category}</span></div>
+                              {(item.effect || item.description) && <p className="mt-1 leading-relaxed text-indigo-800">{item.effect || item.description}</p>}
+                              <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-indigo-700">
+                                {item.damage && <span>Damage: {item.damage}</span>}
+                                {item.armor_rating != null && <span>Armor: {item.armor_rating}</span>}
+                                {item.range != null && <span>Range: {item.range}</span>}
+                                {item.weight != null && <span>Weight: {item.weight}</span>}
+                                {item.cost && <span>Cost: {item.cost}</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        );
+      })}
+    </div>
+  );
+
   if (loadingProfessions || loadingSchools) return <LoadingSpinner size="lg" />;
   if (errorProfessions || errorSchools) return <ErrorMessage message="Failed to load professions." />;
 
   return (
-    <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6" onClick={() => setActiveTooltip(null)} onKeyDown={(event) => handleKeyboardActivate(event, () => setActiveTooltip(null))} role="button" tabIndex={0}>
+    <div className="flex min-h-[32rem] flex-col gap-4 lg:h-full lg:min-h-0 lg:flex-row">
       
       {/* Left Column: List */}
-      <div className={`w-full md:w-1/3 flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden h-full ${isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full lg:w-[34%] lg:max-w-sm flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden min-h-[28rem] lg:min-h-0 lg:h-full ${isMobileDetailView ? 'hidden lg:flex' : 'flex'}`}>
         <div className="bg-gray-50 p-3 border-b font-bold text-gray-700 sticky top-0 flex justify-between items-center">
             <span>Professions</span>
             <span className="text-xs font-normal text-gray-400">{professionList.length} available</span>
@@ -213,10 +278,10 @@ export function ProfessionSelection() {
       </div>
 
       {/* Right Column: Details */}
-      <div className={`w-full md:w-2/3 flex flex-col h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full lg:flex-1 flex flex-col min-h-[28rem] lg:min-h-0 lg:h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden lg:flex' : 'flex'}`}>
         
         {/* Mobile Back Button */}
-        <div className="md:hidden bg-gray-50 p-2 border-b flex items-center gap-2">
+        <div className="lg:hidden bg-gray-50 p-2 border-b flex items-center gap-2">
             <button onClick={handleBackToList} className="p-2 hover:bg-gray-200 rounded-full text-gray-600">
                 <ArrowLeft size={20} />
             </button>
@@ -247,13 +312,13 @@ export function ProfessionSelection() {
 
                 <div>
                 <h4 className="font-bold text-sm text-gray-700 mb-2 uppercase tracking-wide">Skills</h4>
-                {renderStringList(selectedProfession.skills, 'Skills')}
+                {renderStringList(selectedProfession.skills)}
                 </div>
 
                 {selectedProfession.starting_equipment && (
                 <div>
                     <h4 className="font-bold text-sm text-gray-700 mb-2 uppercase tracking-wide">Starting Gear</h4>
-                    {renderStringList(selectedProfession.starting_equipment, 'Gear')}
+                    {renderEquipmentPackages(selectedProfession.starting_equipment)}
                 </div>
                 )}
 
@@ -298,7 +363,7 @@ export function ProfessionSelection() {
                         
                         {/* Info Button */}
                         <button 
-                            onClick={(e) => handleInfoClick(e, `ha-${ability.id}`, ability.description)}
+                            onClick={(e) => handleInfoClick(e, `ha-${ability.id}`)}
                             className="absolute bottom-3 right-3 text-gray-400 hover:text-blue-500"
                         >
                             <Info size={16} />

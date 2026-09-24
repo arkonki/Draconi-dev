@@ -196,7 +196,7 @@ export function AttributesSelection() {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="prose">
@@ -215,14 +215,14 @@ export function AttributesSelection() {
       </div>
 
       {/* Main Attributes Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
         {Object.entries(attributes).map(([attr, { value }]) => {
           const modifier = getAgeModifier(attr);
           const finalValue = getFinalValue(attr, value);
           const isKey = character.key_attribute === attr;
 
           return (
-            <div key={attr} className={`p-4 border rounded-lg shadow-sm bg-white relative ${isKey ? 'ring-2 ring-yellow-400 border-yellow-400 bg-yellow-50' : ''}`}>
+            <div key={attr} className={`p-3 sm:p-4 border rounded-lg shadow-sm bg-white relative ${isKey ? 'ring-2 ring-yellow-400 border-yellow-400 bg-yellow-50' : ''}`}>
               {isKey && <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">KEY</div>}
               
               <div className="flex justify-between items-center mb-3">
@@ -231,8 +231,8 @@ export function AttributesSelection() {
                   <HelpCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
                   <RenderTooltip text={tooltips[attr]} />
                 </div>
-                <div className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                  Base Chance: <strong>{calculateBaseChance(finalValue)}</strong>
+                <div className="text-[10px] sm:text-xs font-medium text-gray-500 bg-gray-100 px-1.5 sm:px-2 py-0.5 rounded">
+                  <span className="hidden sm:inline">Base Chance: </span><strong>{calculateBaseChance(finalValue)}</strong>
                 </div>
               </div>
 

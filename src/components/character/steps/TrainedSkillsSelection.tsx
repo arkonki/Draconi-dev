@@ -143,9 +143,6 @@ export function TrainedSkillsSelection() {
     }
   };
 
-  const handleBackgroundClick = () => {
-    setActiveTooltip(null);
-  };
   const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -228,7 +225,7 @@ export function TrainedSkillsSelection() {
   const canContinueProfession = profSkillsCount === professionSkillLimit; const canContinueAdditional = addSkillsCount === additionalSkillLimit;
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+    <div className="space-y-5">
       {/* Header and Progress */}
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Select Skills</h3>
@@ -264,7 +261,7 @@ export function TrainedSkillsSelection() {
       </div>
 
       {/* --- List-based Rendering with Separated Skill Categories --- */}
-      <div className="border rounded-lg bg-white shadow-sm overflow-hidden" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => handleKeyboardActivate(event, () => {})} role="button" tabIndex={0}>
+      <div className="grid overflow-hidden rounded-lg border bg-white shadow-sm md:grid-cols-2 lg:max-h-[calc(100dvh-31rem)] lg:min-h-72 lg:overflow-y-auto">
         {step === 'profession' ? (
           <>
             {professionGeneralSkills.length > 0 && (

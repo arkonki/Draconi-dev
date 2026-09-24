@@ -194,6 +194,9 @@ export interface Character {
 
   // Basic Info
   name: string;
+  given_name?: string;
+  nickname?: string;
+  family_name?: string;
   kin: string;
   profession: string;
   age?: AgeCategory;

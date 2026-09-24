@@ -80,10 +80,10 @@ export function KinSelection() {
   if (kinError) return <ErrorMessage title="Error Loading Kin" message={kinError.message} />;
 
   return (
-    <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-6">
+    <div className="flex min-h-[32rem] flex-col gap-4 lg:h-full lg:min-h-0 lg:flex-row">
       
       {/* LEFT COLUMN: LIST */}
-      <div className={`w-full md:w-1/3 flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden h-full ${isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full lg:w-[34%] lg:max-w-sm flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden min-h-[28rem] lg:min-h-0 lg:h-full ${isMobileDetailView ? 'hidden lg:flex' : 'flex'}`}>
         <div className="bg-gray-50 p-3 border-b font-bold text-gray-700 sticky top-0 flex justify-between items-center">
             <span>Kins</span>
             <span className="text-xs font-normal text-gray-400">{kinList.length} available</span>
@@ -107,10 +107,10 @@ export function KinSelection() {
       </div>
 
       {/* RIGHT COLUMN: DETAILS */}
-      <div className={`w-full md:w-2/3 flex flex-col h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full lg:flex-1 flex flex-col min-h-[28rem] lg:min-h-0 lg:h-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm relative ${!isMobileDetailView ? 'hidden lg:flex' : 'flex'}`}>
         
         {/* Mobile Back Header */}
-        <div className="md:hidden bg-gray-50 p-2 border-b flex items-center gap-2 sticky top-0 z-10">
+        <div className="lg:hidden bg-gray-50 p-2 border-b flex items-center gap-2 sticky top-0 z-10">
             <button onClick={handleBack} className="p-2 hover:bg-gray-200 rounded-full text-gray-600">
                 <ArrowLeft size={20} />
             </button>

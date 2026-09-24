@@ -57,11 +57,40 @@ const PROFESSION_NICKNAMES: Record<string, string[]> = {
 export function NameAgeSelection() {
   const { character, updateCharacter } = useCharacterCreation();
 
+  React.useEffect(() => {
+    if (!character.name || character.given_name !== undefined) return;
+    const nicknameMatch = character.name.match(/"([^"]+)"/);
+    const legacyGivenName = character.name.replace(/"[^"]+"/, '').trim();
+    updateCharacter({
+      given_name: legacyGivenName,
+      nickname: character.nickname ?? nicknameMatch?.[1] ?? '',
+      family_name: character.family_name ?? '',
+    });
+  }, [character.family_name, character.given_name, character.name, character.nickname, updateCharacter]);
+
+  const givenName = character.given_name ?? character.name ?? '';
+  const nickname = character.nickname ?? '';
+  const familyName = character.family_name ?? '';
+
+  const composeName = (given: string, nick: string, family: string) => (
+    [given.trim(), nick.trim() ? `"${nick.trim()}"` : '', family.trim()].filter(Boolean).join(' ')
+  );
+
+  const updateNameParts = (parts: { given_name?: string; nickname?: string; family_name?: string }) => {
+    const nextGiven = parts.given_name ?? givenName;
+    const nextNickname = parts.nickname ?? nickname;
+    const nextFamily = parts.family_name ?? familyName;
+    updateCharacter({
+      ...parts,
+      name: composeName(nextGiven, nextNickname, nextFamily),
+    });
+  };
+
   const generateName = () => {
     if (!character.kin) return;
     const names = KIN_NAMES[character.kin] || KIN_NAMES['Human'];
     const randomName = names[Math.floor(Math.random() * names.length)];
-    updateCharacter({ name: randomName });
+    updateNameParts({ given_name: randomName });
   };
 
   const generateNickname = () => {
@@ -71,17 +100,7 @@ export function NameAgeSelection() {
     
     const randomNickname = nicknames[Math.floor(Math.random() * nicknames.length)];
     
-    // Append to existing name if it exists, otherwise just set it
-    const currentName = character.name || "";
-    // If name already contains a quote (nickname), replace it
-    if (currentName.includes('"') || currentName.includes("'")) {
-        const baseName = currentName.split(/["']/)[0].trim();
-        updateCharacter({ name: `${baseName} "${randomNickname}"` });
-    } else if (currentName) {
-        updateCharacter({ name: `${currentName} "${randomNickname}"` });
-    } else {
-        updateCharacter({ name: `"${randomNickname}"` });
-    }
+    updateNameParts({ nickname: randomNickname });
   };
 
   return (
@@ -96,42 +115,38 @@ export function NameAgeSelection() {
       <div className="grid grid-cols-1 gap-6">
         
         {/* Name Input Section */}
-        <div className="space-y-2">
-          <label htmlFor="character-name" className="block text-sm font-medium text-gray-700">Character Name</label>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative rounded-md shadow-sm flex-grow">
+        <div className="space-y-3">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="space-y-1.5">
+              <label htmlFor="character-name" className="block text-sm font-medium text-gray-700">Given name</label>
+              <div className="relative rounded-md shadow-sm">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <User className="h-5 w-5 text-gray-400" />
               </div>
               <input
                 id="character-name"
                 type="text"
-                value={character.name || ''}
-                onChange={(e) => updateCharacter({ name: e.target.value })}
+                value={givenName}
+                onChange={(e) => updateNameParts({ given_name: e.target.value })}
                 className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter or generate name"
+                placeholder="Given name"
               />
+              </div>
+              <Button variant="secondary" onClick={generateName} disabled={!character.kin} title={!character.kin ? "Select Kin first" : "Generate Name based on Kin"} className="w-full justify-center">
+                <RefreshCw className="w-4 h-4 mr-2" /> Generate name
+              </Button>
             </div>
-            
-            <div className="flex gap-2 shrink-0">
-                <Button 
-                    variant="secondary" 
-                    onClick={generateName} 
-                    disabled={!character.kin}
-                    title={!character.kin ? "Select Kin first" : "Generate Name based on Kin"}
-                    className="flex-1 sm:flex-none"
-                >
-                    <RefreshCw className="w-4 h-4 mr-2" /> Name
-                </Button>
-                <Button 
-                    variant="outline" 
-                    onClick={generateNickname} 
-                    disabled={!character.profession}
-                    title={!character.profession ? "Select Profession first" : "Add Nickname based on Profession"}
-                    className="flex-1 sm:flex-none text-purple-700 border-purple-200 hover:bg-purple-50"
-                >
-                    <Sparkles className="w-4 h-4 mr-2" /> Nickname
-                </Button>
+            <div className="space-y-1.5">
+              <label htmlFor="character-nickname" className="block text-sm font-medium text-gray-700">Nickname <span className="font-normal text-gray-400">(optional)</span></label>
+              <input id="character-nickname" type="text" value={nickname} onChange={(e) => updateNameParts({ nickname: e.target.value })} className="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-transparent focus:ring-2 focus:ring-purple-500" placeholder="The Swift" />
+              <Button variant="outline" onClick={generateNickname} disabled={!character.profession} title={!character.profession ? "Select Profession first" : "Generate Nickname based on Profession"} className="w-full justify-center text-purple-700 border-purple-200 hover:bg-purple-50">
+                <Sparkles className="w-4 h-4 mr-2" /> Generate nickname
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="character-family-name" className="block text-sm font-medium text-gray-700">Family name <span className="font-normal text-gray-400">(optional)</span></label>
+              <input id="character-family-name" type="text" value={familyName} onChange={(e) => updateNameParts({ family_name: e.target.value })} className="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-transparent focus:ring-2 focus:ring-blue-500" placeholder="Family or clan name" />
+              <div className="flex h-10 items-center rounded-md bg-gray-50 px-3 text-xs text-gray-500">Displayed after the nickname</div>
             </div>
           </div>
           {(!character.kin || !character.profession) && (
@@ -151,7 +166,7 @@ export function NameAgeSelection() {
              </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {(['Young', 'Adult', 'Old'] as const).map((age) => {
               const mods = ageModifiers[age];
               const isSelected = character.age === age;
@@ -217,25 +232,6 @@ export function NameAgeSelection() {
         </div>
       </div>
 
-      {/* Selection Summary */}
-      {(character.name || character.age) && (
-        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg animate-in fade-in slide-in-from-bottom-2">
-          <h4 className="text-sm font-bold text-green-800 uppercase tracking-wide mb-2">Summary</h4>
-          <div className="space-y-1 text-sm text-green-900">
-            {character.name && (
-              <p>Name: <span className="font-semibold">{character.name}</span></p>
-            )}
-            {character.age && (
-              <p>
-                Age: <span className="font-semibold">{character.age}</span> 
-                <span className="text-green-700 opacity-75 ml-2">
-                   (6 Profession + {ageModifiers[character.age].electiveSkills} Elective = {6 + ageModifiers[character.age].electiveSkills} Skills)
-                </span>
-              </p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

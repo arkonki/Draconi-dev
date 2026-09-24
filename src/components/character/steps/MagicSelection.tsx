@@ -18,6 +18,7 @@ export function MagicSelection() {
   const [isInitialized, setIsInitialized] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'general' | 'school'>('all');
+  const [mobileSection, setMobileSection] = useState<'tricks' | 'spells'>('tricks');
   
   // Tooltip State (Mobile Friendly)
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null); // Store spell ID/Name
@@ -171,9 +172,6 @@ export function MagicSelection() {
     }
   };
 
-  const handleBackgroundClick = () => {
-    setActiveTooltip(null);
-  };
   const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -241,7 +239,7 @@ export function MagicSelection() {
   };
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+    <div className="space-y-5">
       <div className="prose">
         <h3 className="text-xl font-bold mb-2">Select Magic</h3>
         <p className="text-gray-600 text-sm">
@@ -250,22 +248,27 @@ export function MagicSelection() {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 rounded-lg bg-gray-100 p-1 md:hidden">
+        <button type="button" onClick={(event) => { event.stopPropagation(); setMobileSection('tricks'); }} className={`rounded-md px-3 py-2 text-sm font-semibold ${mobileSection === 'tricks' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500'}`}>Tricks {selectedTricks.length}/3</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); setMobileSection('spells'); }} className={`rounded-md px-3 py-2 text-sm font-semibold ${mobileSection === 'spells' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500'}`}>Spells {selectedSpells.length}/3</button>
+      </div>
+
+      <div className="grid min-h-0 gap-5 md:grid-cols-2">
         {/* Tricks Column */}
-        <div className="space-y-3">
+        <div className={`min-h-0 space-y-3 ${mobileSection === 'tricks' ? 'block' : 'hidden md:block'}`}>
           <div className="flex items-center justify-between bg-gray-50 p-2 rounded border border-gray-200">
              <h4 className="font-semibold text-gray-700">Magic Tricks</h4>
              <span className={`text-xs font-bold px-2 py-1 rounded ${selectedTricks.length === 3 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>
                {selectedTricks.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+          <div className="h-[min(26rem,55dvh)] overflow-y-auto rounded-lg border bg-white shadow-sm lg:h-[calc(100dvh-27rem)] lg:min-h-72">
             {filteredTricks.map((trick) => renderSpellRow(trick, 'trick'))}
           </div>
         </div>
 
         {/* Spells Column */}
-        <div className="space-y-3">
+        <div className={`min-h-0 space-y-3 ${mobileSection === 'spells' ? 'block' : 'hidden md:block'}`}>
            <div className="flex items-center justify-between bg-gray-50 p-2 rounded border border-gray-200">
              <div className="flex items-center gap-2">
                 <h4 className="font-semibold text-gray-700">Rank 1 Spells</h4>
@@ -286,7 +289,7 @@ export function MagicSelection() {
                {selectedSpells.length}/3
              </span>
           </div>
-          <div className="border rounded-lg bg-white shadow-sm overflow-hidden h-96 overflow-y-auto" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+          <div className="h-[min(26rem,55dvh)] overflow-y-auto rounded-lg border bg-white shadow-sm lg:h-[calc(100dvh-27rem)] lg:min-h-72">
             {filteredSpells.length > 0 ? (
               filteredSpells.map((spell) => renderSpellRow(spell, 'spell'))
             ) : (

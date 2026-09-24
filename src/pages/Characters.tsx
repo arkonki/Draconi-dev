@@ -77,10 +77,10 @@ export function Characters() {
   if (!user) return <div className="p-8"><EmptyState icon={AlertCircle} title="Authentication Required" description="Please sign in." /></div>;
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8 min-h-[calc(100vh-4rem)] relative pb-28 md:pb-12">
+    <div className={`mx-auto min-h-[calc(100vh-4rem)] p-3 sm:p-4 md:p-8 relative ${isCreating ? 'max-w-[1600px] pb-6' : 'max-w-7xl space-y-6 pb-28 md:space-y-8 md:pb-12'}`}>
       
       {/* --- HEADER --- */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {!isCreating && <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight">My Characters</h1>
           <p className="text-sm md:text-base text-gray-500 mt-1">Manage your roster or create a new hero.</p>
@@ -132,15 +132,15 @@ export function Characters() {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* --- CONTENT --- */}
       {isCreating ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+        <div className="animate-in fade-in slide-in-from-bottom-4">
           <CharacterCreationWizard onComplete={() => {
             setIsCreating(false);
             queryClient.invalidateQueries({ queryKey: ['characters', user?.id] });
-          }} />
+          }} onCancel={() => setIsCreating(false)} />
         </div>
       ) : characters.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">

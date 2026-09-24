@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useCharacterCreation } from '../../../stores/characterCreation';
-import { Package, Info, CheckCircle2, Backpack, Dice4, Spline, X, Coins, Utensils, Swords } from 'lucide-react';
+import { Package, Info, CheckCircle2, Backpack, Dice4, Spline, Coins, Utensils, Swords, ArrowDown } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
-import { Button } from '../../shared/Button';
 import { GameItem, fetchItems } from '../../../lib/api/items';
 import { normalizeCurrency } from '../../../lib/equipment';
 import { Money } from '../../../types/character';
@@ -43,15 +42,14 @@ const parseDiceNotation = (item: string) => {
 
 export function GearSelection() {
   const { character, updateCharacter } = useCharacterCreation();
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [selectedOption, setSelectedOption] = useState<number | null>(character.startingEquipment?.option ?? null);
   const [availableOptions, setAvailableOptions] = useState<EquipmentOption[]>([]);
-  const [equipmentConfirmed, setEquipmentConfirmed] = useState(false);
+  const [equipmentConfirmed, setEquipmentConfirmed] = useState(!!character.startingEquipment);
   
   // Stores choices for "Item A or Item B" -> { "optionIndex-itemIndex": "Selected String" }
   const [itemChoices, setItemChoices] = useState<Record<string, string>>({});
 
   // Dice Resolution State
-  const [showDiceModal, setShowDiceModal] = useState(false);
   const [diceResults, setDiceResults] = useState<{ [key: number]: string }>({});
   
   // Loading State
@@ -140,6 +138,7 @@ export function GearSelection() {
     setSelectedOption(optionId);
     setEquipmentConfirmed(false);
     setDiceResults({}); // Reset dice if switching options
+    updateCharacter({ startingEquipment: undefined });
     
     // Initialize default choices for this option
     const option = availableOptions.find(o => o.option === optionId);
@@ -190,9 +189,6 @@ export function GearSelection() {
     }
   };
 
-  const handleBackgroundClick = () => {
-    setActiveTooltip(null);
-  };
   const handleKeyboardActivate = (event: React.KeyboardEvent, action: () => void) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -214,7 +210,7 @@ export function GearSelection() {
     const requiresRoll = selectedGear.items.some(item => !!parseDiceNotation(item));
 
     if (requiresRoll) {
-      setShowDiceModal(true);
+      handleConfirmDice();
     } else {
       // Build final list immediately
       const finalItems = selectedGear.items.map((item, idx) => {
@@ -261,7 +257,6 @@ export function GearSelection() {
       }
     });
 
-    setShowDiceModal(false);
     finalizeSelection(finalItems, calculatedMoney);
   };
 
@@ -317,19 +312,23 @@ export function GearSelection() {
       return count;
   };
 
-  const allDiceModalFilled = selectedOption !== null && availableOptions
+  const allRequiredRollsFilled = selectedOption !== null && availableOptions
     .find(g => g.option === selectedOption)
     ?.items.every((item, idx) => {
       if (!parseDiceNotation(item)) return true; // Skip non-dice items
       return diceResults[idx] !== undefined && diceResults[idx] !== '';
     });
 
+  const selectedOptionHasRolls = selectedOption !== null && !!availableOptions
+    .find(option => option.option === selectedOption)
+    ?.items.some(item => !!parseDiceNotation(item));
+
   if (loadingOptions || isLoadingItems) return <LoadingSpinner />;
   if (errorOptions || errorItems) return <ErrorMessage message={errorOptions || errorItems?.message || 'Failed to load data.'} />;
   if (!character.profession) return <div className="p-6 text-center"><p className="text-gray-600">Please select a profession first.</p></div>;
 
   return (
-    <div className="space-y-6" onClick={handleBackgroundClick} onKeyDown={(event) => handleKeyboardActivate(event, handleBackgroundClick)} role="button" tabIndex={0}>
+    <div className="space-y-5">
       <div className="prose max-w-none">
         <h3 className="text-xl font-bold mb-2">Starting Equipment</h3>
         <p className="text-gray-600 text-sm">
@@ -367,12 +366,20 @@ export function GearSelection() {
           </div>
       </div>
 
+      <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+        <ArrowDown className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
+        <div><strong>Select a package below.</strong> Any ration or money rolls appear directly inside the selected package. Roll them or enter the result manually, then confirm the package.</div>
+      </div>
+
       {/* OPTIONS GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3">
         {availableOptions.map((option) => (
           <div 
             key={option.option} 
-            onClick={(e) => { e.stopPropagation(); handleOptionSelect(option.option); }} 
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest('button, input, select, details, summary')) return;
+              handleOptionSelect(option.option);
+            }}
             onKeyDown={(event) => {
               handleKeyboardActivate(event, () => handleOptionSelect(option.option));
             }}
@@ -462,6 +469,59 @@ export function GearSelection() {
                   );
                 })}
             </ul>
+
+            {selectedOption === option.option && (
+              <div className="mt-4 space-y-3 border-t border-blue-200 pt-3">
+                {option.items.map((item, index) => {
+                  const diceInfo = parseDiceNotation(item);
+                  if (!diceInfo) return null;
+                  const currentValue = diceResults[index] || '';
+                  return (
+                    <div key={`roll-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-bold text-amber-900">
+                        <span className="flex items-center gap-1.5"><Dice4 className="h-4 w-4" /> {item}</span>
+                        <span className="font-normal text-amber-700">{diceInfo.count}–{diceInfo.count * diceInfo.sides}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setDiceResults(previous => ({ ...previous, [index]: String(rollDice(diceInfo.count, diceInfo.sides)) }))} className="rounded-md border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">Roll {diceInfo.count === 1 ? '' : diceInfo.count}D{diceInfo.sides}</button>
+                        <label className="min-w-0 flex-1">
+                          <span className="sr-only">Manual result for {item}</span>
+                          <input
+                            type="number"
+                            min={diceInfo.count}
+                            max={diceInfo.count * diceInfo.sides}
+                            value={currentValue}
+                            onChange={(event) => {
+                              const rawValue = event.target.value;
+                              if (!rawValue) {
+                                setDiceResults(previous => ({ ...previous, [index]: '' }));
+                                return;
+                              }
+                              const numericValue = Number(rawValue);
+                              if (Number.isFinite(numericValue)) {
+                                const clampedValue = Math.max(diceInfo.count, Math.min(diceInfo.count * diceInfo.sides, numericValue));
+                                setDiceResults(previous => ({ ...previous, [index]: String(clampedValue) }));
+                              }
+                            }}
+                            className="w-full rounded-md border border-amber-300 px-3 py-2 text-center font-mono font-bold focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                            placeholder="Manual result"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={handleConfirmEquipment}
+                  disabled={equipmentConfirmed || (selectedOptionHasRolls && !allRequiredRollsFilled)}
+                  className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-bold transition-colors ${equipmentConfirmed ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : selectedOptionHasRolls && !allRequiredRollsFilled ? 'cursor-not-allowed bg-gray-200 text-gray-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                >
+                  <CheckCircle2 className="h-5 w-5" />
+                  {equipmentConfirmed ? 'Package confirmed' : selectedOptionHasRolls && !allRequiredRollsFilled ? 'Resolve rolls to confirm' : 'Confirm this package'}
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -499,28 +559,6 @@ export function GearSelection() {
                 </div>
             </div>
             
-            <div className="mt-4">
-                 <button 
-                    onClick={handleConfirmEquipment} 
-                    disabled={equipmentConfirmed} 
-                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-bold transition-all shadow-md active:scale-95 ${
-                        equipmentConfirmed 
-                        ? 'bg-gray-100 text-gray-400 cursor-default border border-gray-200' 
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                >
-                    {equipmentConfirmed ? (
-                        <><CheckCircle2 className="w-5 h-5" /> Equipment Confirmed</>
-                    ) : (
-                        <><Dice4 className="w-5 h-5" /> Confirm & Roll for Stats</>
-                    )}
-                 </button>
-                 {!equipmentConfirmed && (
-                     <p className="text-center text-xs text-gray-500 mt-2">
-                        Clicking confirm will resolve any dice rolls for money or items.
-                     </p>
-                 )}
-            </div>
         </div>
       )}
 
@@ -549,77 +587,6 @@ export function GearSelection() {
         </div>
       )}
 
-      {/* Dice Resolution Modal (Only for Rolls now) */}
-      {showDiceModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full max-h-[85vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
-              <h3 className="text-xl font-bold text-gray-800">Resolve Rolls</h3>
-               <button onClick={() => setShowDiceModal(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100"><X className="w-6 h-6" /></button>
-            </div>
-            
-            <div className="space-y-4">
-                {(availableOptions.find(gear => gear.option === selectedOption)?.items || []).map((item, index) => {
-                
-                // Only show if it's a dice roll item (ignore choices/static items)
-                const diceInfo = parseDiceNotation(item);
-                if (diceInfo) {
-                    return (
-                        <div key={index} className="p-4 border rounded-lg bg-amber-50 border-amber-200">
-                            <div className="flex justify-between items-center mb-3">
-                                <span className="font-bold text-amber-900 text-sm flex items-center gap-2">
-                                    <Dice4 className="w-4 h-4" /> {item}
-                                </span>
-                            </div>
-                            
-                            <div className="flex gap-2">
-                                <Button 
-                                    size="sm" 
-                                    variant="secondary" 
-                                    className="flex-shrink-0 bg-white border-amber-300 text-amber-800 hover:bg-amber-100"
-                                    onClick={() => { 
-                                        const roll = rollDice(diceInfo.count, diceInfo.sides); 
-                                        setDiceResults(prev => ({ ...prev, [index]: roll.toString() })); 
-                                    }}
-                                >
-                                    Roll
-                                </Button>
-                                <input 
-                                    type="number" 
-                                    min={diceInfo.count} 
-                                    max={diceInfo.count * diceInfo.sides} 
-                                    value={diceResults[index] || ''}
-                                    onChange={(e) => {
-                                        const valStr = e.target.value;
-                                        if (valStr === '') { setDiceResults(prev => ({ ...prev, [index]: '' })); }
-                                        else { 
-                                            const val = parseInt(valStr); 
-                                            if (!isNaN(val)) { 
-                                                const clampedVal = Math.max(diceInfo.count, Math.min(diceInfo.count * diceInfo.sides, val)); 
-                                                setDiceResults(prev => ({ ...prev, [index]: clampedVal.toString() })); 
-                                            } 
-                                        }
-                                    }}
-                                    className="w-full border-amber-300 rounded-md text-center font-mono font-bold focus:ring-amber-500 focus:border-amber-500" 
-                                    placeholder="?" 
-                                />
-                            </div>
-                        </div>
-                    );
-                }
-                return null;
-                })}
-            </div>
-
-            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
-              <Button variant="secondary" onClick={() => setShowDiceModal(false)} className="w-full sm:w-auto">Cancel</Button>
-              <Button variant="primary" onClick={handleConfirmDice} disabled={!allDiceModalFilled} className="w-full sm:w-auto">
-                Confirm Results
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -18,6 +18,9 @@ interface CharacterRow {
   id: string;
   user_id: string;
   name?: string | null;
+  given_name?: string | null;
+  nickname?: string | null;
+  family_name?: string | null;
   kin?: string | null;
   profession?: string | null;
   age?: AgeCategory | null;
@@ -96,6 +99,9 @@ export const mapCharacterData = (char: unknown): Character => {
     id: row.id,
     user_id: row.user_id,
     name: row.name || 'Unnamed Character',
+    given_name: row.given_name ?? undefined,
+    nickname: row.nickname ?? undefined,
+    family_name: row.family_name ?? undefined,
     kin: row.kin || 'Unknown',
     profession: row.profession || 'Unknown',
     age: row.age ?? undefined,
