@@ -1,8 +1,8 @@
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { authorizationCacheSnapshot } from './data.js';
-import { databaseMetricsSnapshot, pool } from './db.js';
+import { databaseMetricsSnapshot, pool, resetDatabaseMetrics } from './db.js';
 import { HttpError } from './http.js';
-import { realtimeMetricsSnapshot } from './realtime.js';
+import { realtimeMetricsSnapshot, resetRealtimeMetrics } from './realtime.js';
 
 function integerSetting(name, fallback, minimum, maximum) {
   const raw = process.env[name];
@@ -15,7 +15,7 @@ function integerSetting(name, fallback, minimum, maximum) {
 }
 
 const SLOW_REQUEST_MS = integerSetting('SLOW_REQUEST_MS', 500, 1, 300_000);
-const SAMPLE_SIZE = integerSetting('PERFORMANCE_SAMPLE_SIZE', 256, 32, 4_096);
+const SAMPLE_SIZE = integerSetting('PERFORMANCE_SAMPLE_SIZE', 1_024, 32, 4_096);
 const startedAt = new Date();
 const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
 eventLoopDelay.enable();
@@ -64,6 +64,7 @@ function routeSnapshot(route) {
     averageMs: route.count ? Number((route.totalMs / route.count).toFixed(2)) : 0,
     p50Ms: percentile(route.milliseconds, 50),
     p95Ms: percentile(route.milliseconds, 95),
+    p99Ms: percentile(route.milliseconds, 99),
     maxMs: Number(route.maxMs.toFixed(2)),
   };
 }
@@ -190,6 +191,7 @@ export async function performanceStatus(user) {
       eventLoopDelay: {
         p50Ms: finiteMilliseconds(eventLoopDelay.percentile(50)),
         p95Ms: finiteMilliseconds(eventLoopDelay.percentile(95)),
+        p99Ms: finiteMilliseconds(eventLoopDelay.percentile(99)),
         maxMs: finiteMilliseconds(eventLoopDelay.max),
       },
     },
@@ -203,6 +205,7 @@ export async function performanceStatus(user) {
       sampleCount: requestSamples.length,
       p50Ms: percentile(requestSamples, 50),
       p95Ms: percentile(requestSamples, 95),
+      p99Ms: percentile(requestSamples, 99),
       maxMs: Number(Math.max(0, ...requestSamples).toFixed(2)),
       routes: [...requestState.routes.values()]
         .map(routeSnapshot)
@@ -215,6 +218,20 @@ export async function performanceStatus(user) {
     authorizationCache: authorizationCacheSnapshot(),
     realtime: realtimeMetricsSnapshot(),
   };
+}
+
+export function resetPerformanceMetrics(user) {
+  if (user?.role !== 'admin') throw new HttpError(403, 'Administrator access is required');
+  requestState.total = 0;
+  requestState.completed = 0;
+  requestState.failed = 0;
+  requestState.slow = 0;
+  requestState.milliseconds.length = 0;
+  requestState.routes.clear();
+  resetDatabaseMetrics();
+  resetRealtimeMetrics();
+  eventLoopDelay.reset();
+  return { resetAt: new Date().toISOString() };
 }
 
 export function stopPerformanceMonitoring() {

@@ -19,7 +19,7 @@ const config = Object.freeze({
   queryTimeoutMillis: integerSetting('DB_QUERY_TIMEOUT_MS', 15_000, 250, 300_000),
   statementTimeoutMillis: integerSetting('DB_STATEMENT_TIMEOUT_MS', 15_000, 250, 300_000),
   slowQueryMillis: integerSetting('DB_SLOW_QUERY_MS', 500, 1, 300_000),
-  sampleSize: integerSetting('PERFORMANCE_SAMPLE_SIZE', 256, 32, 4_096),
+  sampleSize: integerSetting('PERFORMANCE_SAMPLE_SIZE', 1_024, 32, 4_096),
 });
 
 const metrics = {
@@ -176,6 +176,7 @@ export function databaseMetricsSnapshot() {
       sampleCount: acquisitionSamples.length,
       p50Ms: percentile(acquisitionSamples, 50),
       p95Ms: percentile(acquisitionSamples, 95),
+      p99Ms: percentile(acquisitionSamples, 99),
       maxMs: Number(Math.max(0, ...acquisitionSamples).toFixed(2)),
     },
     queries: {
@@ -186,9 +187,20 @@ export function databaseMetricsSnapshot() {
       sampleCount: querySamples.length,
       p50Ms: percentile(querySamples, 50),
       p95Ms: percentile(querySamples, 95),
+      p99Ms: percentile(querySamples, 99),
       maxMs: Number(Math.max(0, ...querySamples).toFixed(2)),
     },
   };
+}
+
+export function resetDatabaseMetrics() {
+  metrics.acquisitionCount = 0;
+  metrics.acquisitionErrors = 0;
+  metrics.acquisitionWaitMilliseconds.length = 0;
+  metrics.queryCount = 0;
+  metrics.queryErrors = 0;
+  metrics.slowQueryCount = 0;
+  metrics.queryMilliseconds.length = 0;
 }
 
 export async function withTransaction(callback) {

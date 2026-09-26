@@ -21,6 +21,10 @@ const LISTENER_RECONNECT_MS = 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EVENT_BATCH_LIMIT = 250;
 const EVENT_BATCH_DELAY_MS = 10;
+const METRIC_SAMPLE_SIZE = (() => {
+  const parsed = Number(process.env.PERFORMANCE_SAMPLE_SIZE || 1_024);
+  return Number.isInteger(parsed) && parsed >= 32 && parsed <= 4_096 ? parsed : 1_024;
+})();
 
 const realtimeMetrics = {
   connectionsOpened: 0,
@@ -42,10 +46,58 @@ const realtimeMetrics = {
   eventsDelivered: 0,
   deliveryErrors: 0,
   listenerRestarts: 0,
+  deliveryLatencyMilliseconds: [],
 };
 
 export function realtimeMetricsSnapshot() {
-  return { ...realtimeMetrics };
+  const { deliveryLatencyMilliseconds: samples, ...counters } = realtimeMetrics;
+  return {
+    ...counters,
+    deliveryLatency: {
+      sampleCount: samples.length,
+      p50Ms: percentile(samples, 50),
+      p95Ms: percentile(samples, 95),
+      p99Ms: percentile(samples, 99),
+      maxMs: Number(Math.max(0, ...samples).toFixed(2)),
+    },
+  };
+}
+
+export function resetRealtimeMetrics() {
+  const gauges = {
+    currentConnections: realtimeMetrics.currentConnections,
+    authenticatedConnections: realtimeMetrics.authenticatedConnections,
+    subscribedConnections: realtimeMetrics.subscribedConnections,
+  };
+  Object.keys(realtimeMetrics).forEach((key) => {
+    if (Array.isArray(realtimeMetrics[key])) realtimeMetrics[key].length = 0;
+    else realtimeMetrics[key] = 0;
+  });
+  Object.assign(realtimeMetrics, gauges);
+}
+
+function percentile(samples, requestedPercentile) {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.ceil((requestedPercentile / 100) * sorted.length) - 1);
+  return Number(sorted[Math.max(0, index)].toFixed(2));
+}
+
+function recordDeliveryLatency(events) {
+  const now = Date.now();
+  for (const event of events || []) {
+    const createdAt = event.created_at instanceof Date
+      ? event.created_at.getTime()
+      : Date.parse(event.created_at);
+    if (!Number.isFinite(createdAt)) continue;
+    realtimeMetrics.deliveryLatencyMilliseconds.push(Math.max(0, now - createdAt));
+  }
+  if (realtimeMetrics.deliveryLatencyMilliseconds.length > METRIC_SAMPLE_SIZE) {
+    realtimeMetrics.deliveryLatencyMilliseconds.splice(
+      0,
+      realtimeMetrics.deliveryLatencyMilliseconds.length - METRIC_SAMPLE_SIZE,
+    );
+  }
 }
 
 export function parseChangeNotification(payload) {
@@ -213,6 +265,7 @@ export async function attachRealtimeServer(server, options = {}) {
         });
         realtimeMetrics.deliveryMessages += 1;
         realtimeMetrics.eventsDelivered += result.events.length;
+        recordDeliveryLatency(result.events);
       } while (state.flushAgain && state.socket.readyState === WebSocket.OPEN);
     } catch (error) {
       realtimeMetrics.deliveryErrors += 1;
@@ -254,6 +307,7 @@ export async function attachRealtimeServer(server, options = {}) {
       });
       realtimeMetrics.deliveryMessages += 1;
       realtimeMetrics.eventsDelivered += filtered.events.length;
+      recordDeliveryLatency(filtered.events);
     } catch (error) {
       realtimeMetrics.deliveryErrors += 1;
       logger.error('Unable to authorize realtime event batch:', error);

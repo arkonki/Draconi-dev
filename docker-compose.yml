@@ -4,6 +4,12 @@ services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-dragonbane}
       POSTGRES_USER: ${POSTGRES_USER:-dragonbane}
@@ -43,7 +49,7 @@ services:
       DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
       DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-500}
       SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-500}
-      PERFORMANCE_SAMPLE_SIZE: ${PERFORMANCE_SAMPLE_SIZE:-256}
+      PERFORMANCE_SAMPLE_SIZE: ${PERFORMANCE_SAMPLE_SIZE:-1024}
       HOUSEKEEPING_INTERVAL_MINUTES: ${HOUSEKEEPING_INTERVAL_MINUTES:-360}
       EXPIRED_SESSION_RETENTION_HOURS: ${EXPIRED_SESSION_RETENTION_HOURS:-24}
       CHANGE_EVENT_RETENTION_DAYS: ${CHANGE_EVENT_RETENTION_DAYS:-14}

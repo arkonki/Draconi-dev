@@ -4,7 +4,7 @@
 
 Keep the self-hosted Node.js/PostgreSQL app responsive when several players, a GM, realtime clients, and the MCP helper are active at the same time. Preserve all current authorization and API behavior while reducing avoidable database round trips and making stalls observable.
 
-## Status — 2026-09-24
+## Status — 2026-09-25
 
 ### Phase 1 — Telemetry and safeguards (complete)
 
@@ -69,18 +69,27 @@ Keep the self-hosted Node.js/PostgreSQL app responsive when several players, a G
 | `DB_STATEMENT_TIMEOUT_MS` | `15000` | PostgreSQL statement timeout |
 | `DB_SLOW_QUERY_MS` | `500` | Slow-query warning threshold |
 | `SLOW_REQUEST_MS` | `500` | Slow-HTTP-request warning threshold |
-| `PERFORMANCE_SAMPLE_SIZE` | `256` | Bounded timing samples kept in memory |
+| `PERFORMANCE_SAMPLE_SIZE` | `1024` | Bounded timing samples kept in memory |
 | `SESSION_TOUCH_INTERVAL_SECONDS` | `300` | Minimum interval between session activity writes |
 | `AUTH_CONTEXT_CACHE_MS` | `5000` | Authorization-context cache lifetime; `0` disables it |
 
-## Remaining phase
+### Phase 6 — Load verification and production tuning (complete)
 
-### Phase 6 — Load verification and production tuning
+- `npm run test:performance` creates a disposable campaign with configurable concurrent users, connects one authenticated WebSocket per user, and exercises party view, chat reads/writes, character updates, encounter reads, public projector reads, and real MCP `get_resume_state` calls.
+- The rehearsal is local-only by default, writes an optional JSON report, and removes its temporary sessions, users, campaign, encounters, projector session, and change events when it finishes.
+- Client and server reports include request p50/p95/p99, error rate, pool-acquisition wait, query latency, event-loop delay, realtime delivery p50/p95/p99, authorization-cache activity, and the most expensive PostgreSQL statements.
+- Admins can clear only the bounded in-memory performance counters with `POST /api/admin/performance/reset`, allowing one load interval to be measured without earlier traffic.
+- Local Docker PostgreSQL preloads and creates `pg_stat_statements`. Existing Docker volumes need `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;` once. A managed production host must enable the extension at the provider level; the application continues normally when it is unavailable.
+- The sample window default increased from 256 to 1,024 after the rehearsal showed that a shorter trailing window made p95/p99 overly sensitive to brief host contention.
+- The measured pool size remains 10. Raising it was not justified: the accepted run had no queued requests, no acquisition errors, and a 0.22 ms acquisition-wait p95. The 5-second connection timeout and 15-second query/statement timeouts also remain unchanged because there were no timeout or query errors.
 
-- Add a repeatable multi-user scenario covering party view, chat, character updates, encounters, projector, and MCP reads.
-- Record request p50/p95/p99, database acquisition wait, query p95, error rate, and realtime delivery latency.
-- Tune pool size and timeouts from measurements rather than increasing connection counts blindly.
-- Enable and use `pg_stat_statements` when the hosting environment permits it.
+Run the local rehearsal after the Docker stack is healthy:
+
+```sh
+PERF_TEST_OUTPUT=/tmp/draconi-performance.json npm run test:performance
+```
+
+The environment overrides are documented in `.env.example`. Set `PERF_TEST_ALLOW_REMOTE=true` only for an intentional run against an isolated non-production target; the scenario creates and deletes data.
 
 ## Phase 1–5 acceptance evidence
 
@@ -100,3 +109,14 @@ Keep the self-hosted Node.js/PostgreSQL app responsive when several players, a G
 - Automated tests verify concurrent character-sheet loads perform one character, item, and heroic-ability request each.
 - The frontend contains no unscoped `invalidateQueries()` calls; the only remaining fixed refetch interval is the token-based public projector display.
 - After the local container refresh, an already-mounted party view performed one campaign-time request during startup and no periodic campaign-time requests afterward.
+
+## Phase 6 acceptance evidence — 2026-09-25
+
+- Six concurrent users completed a 20-second mixed workload with 1,040 measured client operations and zero HTTP, PostgreSQL, MCP, or realtime delivery errors.
+- Client request latency was 9.84 ms p50, 25.12 ms p95, 38.50 ms p99, and 65.53 ms maximum.
+- Server request latency over 1,024 samples was 3.87 ms p50, 15.83 ms p95, and 24.61 ms p99; no request crossed the 500 ms slow-request threshold.
+- Pool acquisition wait was 0.02 ms p50, 0.22 ms p95, and 0.53 ms p99, with no queued requests at snapshot time.
+- Query latency was 0.71 ms p50, 2.53 ms p95, and 8.11 ms p99, with no query errors, slow queries, temporary files, waiting connections, or deadlocks.
+- All 864 expected chat deliveries arrived across six WebSockets. Client-observed realtime latency was 19.54 ms p50, 28.41 ms p95, and 30.60 ms p99; server-observed delivery latency was 19 ms p50, 32 ms p95, and 36 ms p99.
+- PostgreSQL reported a 99.76% cache-hit ratio, and `pg_stat_statements` identified synchronized character-WP updates and their campaign-revision trigger as the largest measured SQL cost without exposing credentials.
+- The rehearsal cleanup was verified afterward: zero disposable `performance-*` users and zero `Performance Party *` campaigns remained.

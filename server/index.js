@@ -31,7 +31,12 @@ import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
-import { performanceStatus, stopPerformanceMonitoring, trackHttpRequest } from './performance.js';
+import {
+  performanceStatus,
+  resetPerformanceMetrics,
+  stopPerformanceMonitoring,
+  trackHttpRequest,
+} from './performance.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const host = process.env.ELKDATA_APP_IP?.trim() || process.env.DRACONI_HOST?.trim() || '0.0.0.0';
@@ -118,6 +123,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/admin/performance' && request.method === 'GET') {
       sendJson(response, 200, await performanceStatus(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/performance/reset' && request.method === 'POST') {
+      sendJson(response, 200, resetPerformanceMetrics(await currentUser(request)));
       return;
     }
 
