@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { supabase } from '../../lib/supabase';
+import { optimizedImageUrl } from '../../lib/images';
 
 interface ImagePickerModalProps {
   onClose: () => void;
@@ -101,7 +102,7 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
         .getPublicUrl(filePath);
 
       // Success - Insert immediately or switch to select tab
-      onSelectImage(urlData.publicUrl, width, height, alignment);
+      onSelectImage(optimizedImageUrl(urlData.publicUrl, 'large'), width, height, alignment);
       onClose();
 
     } catch (error: unknown) {
@@ -339,8 +340,10 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
                         {file.url ? (
                           <div className="w-full h-full relative">
                             <img
-                              src={file.url}
+                              src={optimizedImageUrl(file.url, 'thumbnail')}
                               alt={file.name}
+                              loading="lazy"
+                              decoding="async"
                               className="w-full h-full object-contain p-1"
                             />
                             {/* Overlay name on hover */}
@@ -421,7 +424,7 @@ export function ImagePickerModal({ onClose, onSelectImage }: ImagePickerModalPro
                 variant="primary"
                 onClick={() => {
                   if (selectedUrl) {
-                    onSelectImage(selectedUrl, width, height, alignment);
+                    onSelectImage(optimizedImageUrl(selectedUrl, 'large'), width, height, alignment);
                     onClose();
                   }
                 }}

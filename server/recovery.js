@@ -177,7 +177,13 @@ async function createBackupPackage(prefix) {
       '--no-acl',
       '--file', databaseDump,
     ]);
-    await runCommand('tar', ['-C', STORAGE_ROOT, '-czf', storageArchive, '.']);
+    await runCommand('tar', [
+      '-C', STORAGE_ROOT,
+      '--exclude=./.variants',
+      '--exclude=./.uploads',
+      '-czf', storageArchive,
+      '.',
+    ]);
 
     const [databaseDetails, storageDetails, userResult, version] = await Promise.all([
       stat(databaseDump),

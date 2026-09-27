@@ -23,6 +23,7 @@ import {
 import type { PartyDisplaySlot } from '../../types/projectorDisplay';
 import type { Character } from '../../types/character';
 import { queryKeys } from '../../lib/queryKeys';
+import { optimizedImageUrl } from '../../lib/images';
 
 interface ProjectorDisplayManagerProps {
   isOpen: boolean;
@@ -65,7 +66,13 @@ function ProjectorSeatPreviewCard({ member, rotation }: { member: Character; rot
     >
       <div className="flex items-center gap-2 p-2.5 border-b border-white/10">
         {member.portrait_url ? (
-          <img src={member.portrait_url} alt={member.name} className="h-9 w-9 rounded-full object-cover border border-white/20 bg-black/40 shrink-0" />
+          <img
+            src={optimizedImageUrl(member.portrait_url, 'thumbnail')}
+            alt={member.name}
+            loading="lazy"
+            decoding="async"
+            className="h-9 w-9 rounded-full object-cover border border-white/20 bg-black/40 shrink-0"
+          />
         ) : (
           <div className="h-9 w-9 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-xs font-bold shrink-0">
             {member.name.slice(0, 2).toUpperCase()}
@@ -424,7 +431,13 @@ function ProjectorImageLibraryModal({
                           className="w-full text-left"
                         >
                           <div className="aspect-[4/3] bg-stone-100 relative">
-                            <img src={image.publicUrl} alt={image.name} className="w-full h-full object-cover" />
+                            <img
+                              src={optimizedImageUrl(image.publicUrl, 'thumbnail')}
+                              alt={image.name}
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-full object-cover"
+                            />
                             {isSelected ? (
                               <div className="absolute top-2 right-2 rounded-full bg-white/95 p-1 text-stone-800 shadow">
                                 <Check className="w-4 h-4" />
@@ -476,7 +489,12 @@ function ProjectorImageLibraryModal({
                   {previewImage ? (
                     <>
                       <div className="aspect-[4/3] overflow-hidden rounded-xl border border-stone-200 bg-white">
-                        <img src={previewImage.publicUrl} alt={previewImage.name} className="w-full h-full object-contain bg-stone-100" />
+                        <img
+                          src={optimizedImageUrl(previewImage.publicUrl, 'medium')}
+                          alt={previewImage.name}
+                          decoding="async"
+                          className="w-full h-full object-contain bg-stone-100"
+                        />
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-stone-800 truncate">{previewImage.name}</div>
@@ -892,7 +910,13 @@ export function ProjectorDisplayManager({
                       <p className="mt-1 text-sm text-stone-600">{displaySourceSummary}</p>
                     </div>
                     {displaySourceMode === 'custom_image' && displayImageUrl ? (
-                      <img src={displayImageUrl} alt="Selected projector artwork" className="h-16 w-24 rounded-lg object-cover border border-stone-200 bg-white shrink-0" />
+                      <img
+                        src={optimizedImageUrl(displayImageUrl, 'thumbnail')}
+                        alt="Selected projector artwork"
+                        loading="lazy"
+                        decoding="async"
+                        className="h-16 w-24 rounded-lg object-cover border border-stone-200 bg-white shrink-0"
+                      />
                     ) : null}
                   </div>
 

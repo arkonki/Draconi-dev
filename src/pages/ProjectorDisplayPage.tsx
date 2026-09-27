@@ -5,6 +5,7 @@ import { AlertTriangle, Dices, Heart, Maximize, Minimize, Minus, Monitor, Rotate
 import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
+import { optimizedImageUrl } from '../lib/images';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-100 text-amber-900 border-amber-200',
@@ -141,7 +142,12 @@ function SlotCard({
         <>
           <div className="flex items-center gap-3 p-3 border-b border-white/10">
             {character.portraitUrl ? (
-              <img src={character.portraitUrl} alt={character.name} className="h-12 w-12 rounded-full object-cover border border-white/20 bg-black/40 shrink-0" />
+              <img
+                src={optimizedImageUrl(character.portraitUrl, 'thumbnail')}
+                alt={character.name}
+                decoding="async"
+                className="h-12 w-12 rounded-full object-cover border border-white/20 bg-black/40 shrink-0"
+              />
             ) : (
               <div className="h-12 w-12 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-lg font-bold shrink-0">
                 {character.name.slice(0, 2).toUpperCase()}
@@ -703,9 +709,11 @@ export function ProjectorDisplayPage() {
           >
             <img
               ref={imageRef}
-              src={displayImageUrl}
+              src={displayMap ? displayImageUrl : optimizedImageUrl(displayImageUrl, 'large')}
               alt="Projector display"
               onLoad={measureImage}
+              decoding="async"
+              fetchPriority="high"
               draggable={false}
               className="block max-w-screen max-h-screen object-contain select-none"
             />

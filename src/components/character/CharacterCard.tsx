@@ -1,6 +1,7 @@
 import React from 'react';
 import { Character } from '../../types/character';
 import { Dumbbell, Heart, Feather, Brain, Zap, UserCog, User } from 'lucide-react';
+import { optimizedImageUrl } from '../../lib/images';
 
 interface CharacterCardProps {
   character: Character;
@@ -31,8 +32,10 @@ export function CharacterCard({ character }: CharacterCardProps) {
       <div className="relative h-32 bg-gray-100 overflow-hidden shrink-0">
         {character.portrait_url ? (
           <img 
-            src={character.portrait_url} 
+            src={optimizedImageUrl(character.portrait_url, 'medium')}
             alt={character.name} 
+            loading="lazy"
+            decoding="async"
             // UPDATED: Added 'object-top' to ensure faces (usually at the top) are not cut off
             className="w-full h-full object-cover object-top transition-transform duration-700 group-hover:scale-110"
           />

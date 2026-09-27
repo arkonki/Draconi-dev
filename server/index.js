@@ -218,8 +218,8 @@ const server = http.createServer(async (request, response) => {
     }
 
     const publicObjectMatch = matchPath(pathname, /^\/api\/storage\/public\/([^/]+)\/(.+)$/);
-    if (publicObjectMatch && request.method === 'GET') {
-      await servePublicObject(response, publicObjectMatch[0], publicObjectMatch[1]);
+    if (publicObjectMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+      await servePublicObject(request, response, publicObjectMatch[0], publicObjectMatch[1]);
       return;
     }
     const storageMatch = matchPath(pathname, /^\/api\/storage\/([^/]+)(?:\/(.*))?$/);

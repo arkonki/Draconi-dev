@@ -7,6 +7,7 @@ import { Button } from '../../shared/Button';
 import { AccessibleDialog } from '../../shared/AccessibleDialog';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { supabase } from '../../../lib/supabase';
+import { optimizedImageUrl } from '../../../lib/images';
 
 interface BioModalProps {
   onClose: () => void;
@@ -77,8 +78,9 @@ const PortraitEditor = ({
         <div className="relative w-24 h-32 bg-gray-200 rounded-lg overflow-hidden border border-gray-300 shadow-inner flex-shrink-0">
           {tempUrl ? (
             <img 
-              src={tempUrl} 
+              src={optimizedImageUrl(tempUrl, 'medium')}
               alt="Preview" 
+              decoding="async"
               className="w-full h-full object-cover transition-none"
               style={{ objectPosition: `center ${tempPos}%` }}
             />
@@ -265,8 +267,9 @@ export function BioModal({ onClose }: BioModalProps) {
                     <div className="relative aspect-[3/4] bg-gray-100 rounded-xl border-2 border-gray-200 overflow-hidden shadow-sm group-hover:border-indigo-300 transition-all">
                         {portraitUrl ? (
                             <img 
-                                src={portraitUrl} 
+                                src={optimizedImageUrl(portraitUrl, 'medium')}
                                 alt={character.name} 
+                                decoding="async"
                                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                                 style={{ objectPosition: `center ${portraitPos}%` }}
                                 onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x400/f3f4f6/9ca3af?text=No+Image'; }} 

@@ -10,6 +10,7 @@ import { Party, fetchParties, fetchAvailableCharacters } from '../lib/api/partie
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { EmptyState } from '../components/shared/EmptyState';
+import { optimizedImageUrl } from '../lib/images';
 
 export function AdventureParty() {
   const { user, isDM } = useAuth();
@@ -250,7 +251,13 @@ export function AdventureParty() {
                           className="inline-flex min-w-0 max-w-28 items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 py-1 pl-1 pr-2"
                         >
                           {member.portrait_url ? (
-                            <img src={member.portrait_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                            <img
+                              src={optimizedImageUrl(member.portrait_url, 'thumbnail')}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              className="w-6 h-6 rounded-full object-cover shrink-0"
+                            />
                           ) : (
                             <span className="w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0">
                               <Sword className="w-3 h-3 text-gray-400" />

@@ -36,6 +36,22 @@ clientsClaim();
 const APP_BASE = import.meta.env.BASE_URL;
 const APP_ICON = `${APP_BASE}icons/icon-192x192.png`;
 
+// Uploaded images use unique object names and server-side ETags. Keep a
+// bounded offline copy so portraits and map previews do not cross the proxy on
+// every return visit. Dynamic API/game state is deliberately not cached here.
+registerRoute(
+  ({ request, url }) => request.destination === 'image'
+    && url.origin === self.location.origin
+    && url.pathname.startsWith(`${APP_BASE}api/storage/public/images/`),
+  new CacheFirst({
+    cacheName: 'uploaded-images-v1',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [200] }),
+      new ExpirationPlugin({ maxEntries: 250, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true }),
+    ],
+  }),
+);
+
 // 2. Google Fonts Caching (Migrated from your vite config)
 // Cache Google Fonts Stylesheets
 registerRoute(

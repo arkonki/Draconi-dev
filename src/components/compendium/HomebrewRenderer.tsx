@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import { optimizedImageUrl } from '../../lib/images';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import remarkHomebrewery from '../../lib/remark-homebrewery';
@@ -162,13 +163,14 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
             if (hasCustomStyle) {
               return (
                 <img
-                  src={src as string}
+                  src={optimizedImageUrl(src as string, 'large')}
                   alt={alt as string}
                   style={style}
                   width={width}
                   height={height}
                   className="rounded shadow-sm border border-stone-200 bg-white p-1 max-w-full"
                   loading="lazy"
+                  decoding="async"
                 />
               );
             }
@@ -176,10 +178,11 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
             return (
               <figure className="my-6 md:my-8 flex flex-col items-center break-inside-avoid">
                 <img
-                  src={src as string}
+                  src={optimizedImageUrl(src as string, 'large')}
                   alt={alt as string}
                   className="max-w-full h-auto max-h-[500px] object-contain rounded shadow-md border border-stone-200 bg-white p-1"
                   loading="lazy"
+                  decoding="async"
                 />
                 {alt && <figcaption className="text-xs text-gray-500 mt-2 italic text-center">{alt}</figcaption>}
               </figure>

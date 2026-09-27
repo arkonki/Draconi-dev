@@ -71,7 +71,10 @@ mv "$backup_dir/database.dump.partial" "$backup_dir/database.dump"
 
 echo "Archiving uploaded files..."
 compose run --rm --no-deps --entrypoint tar api \
-  -C /data/storage -czf - . > "$backup_dir/storage.tar.gz.partial"
+  -C /data/storage \
+  --exclude=./.variants \
+  --exclude=./.uploads \
+  -czf - . > "$backup_dir/storage.tar.gz.partial"
 mv "$backup_dir/storage.tar.gz.partial" "$backup_dir/storage.tar.gz"
 
 database_bytes=$(file_size "$backup_dir/database.dump")

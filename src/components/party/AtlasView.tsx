@@ -9,6 +9,7 @@ import { PartyMap, MapPin as MapPinType, MapDrawing } from '../../types/atlas';
 import { useAuth } from '../../contexts/useAuth';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../../lib/appUrl';
+import { localImageObjectPath } from '../../lib/images';
 
 interface AtlasViewProps {
     partyId: string;
@@ -742,10 +743,13 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
         mutationFn: async (map: PartyMap) => {
             if (!confirm(`Are you sure you want to delete "${map.name}"? This will also remove the image file.`)) return;
 
-            // 1. Delete from storage if it's a supabase URL
-            if (map.image_url?.includes('storage/v1/object/public/images/Atlas/')) {
-                const path = map.image_url.split('Atlas/')[1];
-                await supabase.storage.from('images').remove([`Atlas/${path}`]);
+            // 1. Delete locally hosted images and their generated variants.
+            const localObjectPath = localImageObjectPath(map.image_url);
+            if (localObjectPath) {
+                await supabase.storage.from('images').remove([localObjectPath]);
+            } else if (map.image_url?.includes('storage/v1/object/public/images/Atlas/')) {
+                const legacyPath = map.image_url.split('Atlas/')[1];
+                await supabase.storage.from('images').remove([`Atlas/${legacyPath}`]);
             }
 
             // 2. Delete from DB

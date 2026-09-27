@@ -6,6 +6,7 @@ import { Button } from '../shared/Button';
 import { PasswordChangeForm } from './PasswordChangeForm';
 import { getUserProfile, updateUserProfile, updateUserAuthEmail, UserProfile, UserProfileUpdate } from '../../lib/api/users';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { optimizedImageUrl } from '../../lib/images';
 
 export function ProfileSettings() {
   const { user: authUser } = useAuth();
@@ -167,8 +168,9 @@ export function ProfileSettings() {
             <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-white shadow-sm flex items-center justify-center overflow-hidden border-4 border-white ring-1 ring-gray-200">
                {!imageError && formData.avatar_url ? (
                  <img
-                   src={formData.avatar_url}
+                   src={optimizedImageUrl(formData.avatar_url, 'thumbnail')}
                    alt="Profile"
+                   decoding="async"
                    className="w-full h-full object-cover"
                    onError={() => setImageError(true)}
                  />
