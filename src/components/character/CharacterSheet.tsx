@@ -699,6 +699,8 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   const [isSoloRestSaving, setIsSoloRestSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'equipment' | 'abilities' | 'notes'>('equipment');
   const lowerPanelRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const characterInjuriesQuery = useQuery({
     queryKey: ['character-injuries', character?.party_id, character?.id],
@@ -744,6 +746,11 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
 
   useEffect(() => {
     if (!showSecondaryActions) return undefined;
+    const focusFrame = window.requestAnimationFrame(() => {
+      moreMenuRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')
+        ?.focus();
+    });
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target?.closest('[data-character-more-menu]') && !target?.closest('[data-character-more-trigger]')) {
@@ -751,7 +758,10 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
       }
     };
     document.addEventListener('pointerdown', closeOnOutsidePointer);
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+    };
   }, [showSecondaryActions]);
 
   if (isLoading) return <div className={`${embedded ? 'min-h-[24rem]' : 'min-h-screen'} flex items-center justify-center bg-[#f5f0e1]`}><LoadingSpinner size="lg" /><span className="ml-3 font-serif text-xl text-[#1a472a]">Unrolling Scroll...</span></div>;
@@ -919,13 +929,21 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
     window.setTimeout(() => lowerPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
+  const toggleSecondaryActions = (event: React.MouseEvent<HTMLButtonElement>) => {
+    moreMenuTriggerRef.current = event.currentTarget;
+    setShowSecondaryActions((current) => !current);
+  };
+
   const handleMoreMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      '[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled])',
+    ));
     const currentIndex = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       setShowSecondaryActions(false);
+      window.setTimeout(() => moreMenuTriggerRef.current?.focus(), 0);
       return;
     }
     if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key) || items.length === 0) return;
@@ -977,13 +995,13 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
                   <span className="mt-1 text-xs font-bold uppercase">{btn.label}</span>
                 </button>
               ))}
-              <button type="button" data-character-more-trigger onClick={() => setShowSecondaryActions((current) => !current)} aria-haspopup="menu" aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
+              <button type="button" data-character-more-trigger onClick={toggleSecondaryActions} aria-haspopup="menu" aria-controls="character-more-menu" aria-expanded={showSecondaryActions} className="character-sheet-action-button flex min-h-14 w-20 flex-col items-center justify-center rounded border border-[#4a8a62] bg-[#2c5e3f] text-[#e8d5b5] shadow-sm transition-colors hover:bg-[#3a7a52] touch-manipulation">
                 <MoreHorizontal size={18} /><span className="mt-1 text-xs font-bold uppercase">More</span>
               </button>
             </div>
           </div>
           {showSecondaryActions && (
-            <div data-character-more-menu className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-[#d4c5a3] bg-[#fdfbf7] text-stone-800 shadow-[0_18px_50px_rgba(28,25,23,0.28)] md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.25rem)]" role="menu" aria-label="More character actions" onKeyDown={handleMoreMenuKeyDown}>
+            <div ref={moreMenuRef} id="character-more-menu" data-character-more-menu className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-[#d4c5a3] bg-[#fdfbf7] text-stone-800 shadow-[0_18px_50px_rgba(28,25,23,0.28)] md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.25rem)]" role="menu" aria-label="More character actions" tabIndex={-1} onKeyDown={handleMoreMenuKeyDown}>
               <div className="border-b border-[#d4c5a3] bg-[#1a472a] px-4 py-3 text-left font-serif text-sm font-bold uppercase tracking-wider text-[#e8d5b5]">Character options</div>
               <div className="grid grid-cols-1 gap-1 p-2">
                 {[
@@ -997,7 +1015,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
                     <span>{item.label}</span>
                   </button>
                 ))}
-                <button type="button" role="menuitem" aria-pressed={isAttributeEditMode} onClick={() => { setIsAttributeEditMode((current) => !current); setShowSecondaryActions(false); }} className={`group flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a472a] ${isAttributeEditMode ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-transparent text-stone-700 hover:border-[#d4c5a3] hover:bg-[#f0e6d2] hover:text-[#1a472a]'}`}>
+                <button type="button" role="menuitemcheckbox" aria-checked={isAttributeEditMode} onClick={() => { setIsAttributeEditMode((current) => !current); setShowSecondaryActions(false); }} className={`group flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a472a] ${isAttributeEditMode ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-transparent text-stone-700 hover:border-[#d4c5a3] hover:bg-[#f0e6d2] hover:text-[#1a472a]'}`}>
                   <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${isAttributeEditMode ? 'bg-amber-200 text-amber-900' : 'bg-stone-100 text-[#1a472a] group-hover:bg-[#1a472a] group-hover:text-[#e8d5b5]'}`}><Pencil size={17} /></span>
                   <span>{isAttributeEditMode ? 'Finish editing attributes' : 'Edit attributes'}</span>
                 </button>
@@ -1197,7 +1215,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
             { label: 'Rest', icon: Bed, action: () => setShowRestOptionsModal(true) },
             { label: 'More', icon: MoreHorizontal, action: () => setShowSecondaryActions((current) => !current) },
           ].map((action) => (
-            <button key={action.label} type="button" data-character-more-trigger={action.label === 'More' ? '' : undefined} aria-haspopup={action.label === 'More' ? 'menu' : undefined} aria-expanded={action.label === 'More' ? showSecondaryActions : undefined} onClick={action.action} className="flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-bold transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#e8d5b5] sm:text-xs">
+            <button key={action.label} type="button" data-character-more-trigger={action.label === 'More' ? '' : undefined} aria-haspopup={action.label === 'More' ? 'menu' : undefined} aria-controls={action.label === 'More' ? 'character-more-menu' : undefined} aria-expanded={action.label === 'More' ? showSecondaryActions : undefined} onClick={(event) => action.label === 'More' ? toggleSecondaryActions(event) : action.action()} className="flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-bold transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#e8d5b5] sm:text-xs">
               <action.icon size={19} aria-hidden="true" />
               <span>{action.label}</span>
             </button>

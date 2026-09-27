@@ -20,7 +20,7 @@ type CopiedField = 'email' | 'password' | 'credentials' | null;
 
 const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
 
-export function generateTemporaryPassword(length = 18) {
+function generateTemporaryPassword(length = 18) {
   const randomValues = new Uint32Array(length);
   window.crypto.getRandomValues(randomValues);
   return Array.from(randomValues, (value) => PASSWORD_ALPHABET[value % PASSWORD_ALPHABET.length]).join('');
