@@ -138,6 +138,7 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
         name,
         kin,
         profession,
+        portrait_url,
         attributes,
         max_hp,
         current_hp,

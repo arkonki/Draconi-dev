@@ -9,7 +9,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
-import { optimizedImageUrl } from '../../lib/images';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -163,10 +162,8 @@ const MemberCard = React.memo(({
     if (member.portrait_url) {
         return (
             <img
-              src={optimizedImageUrl(member.portrait_url, 'thumbnail')}
+              src={member.portrait_url}
               alt={member.name}
-              loading="lazy"
-              decoding="async"
               className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md bg-gray-100"
             />
         );
