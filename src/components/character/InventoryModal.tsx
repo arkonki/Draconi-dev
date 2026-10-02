@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-    Package, Search, Coins, Shield, Sword,
+    Package, Search, Coins, Shield, Sword, ShoppingCart,
     ArrowLeft, Plus, X, Wrench, Trash2, CheckSquare, MinusCircle,
     Target, Star, Zap, Weight, ChevronDown,
     Feather, Utensils, MoreVertical, Flame, Anchor, MinusSquare, Minus, Shirt, Backpack,
@@ -10,7 +10,7 @@ import { Button } from '../shared/Button';
 import { GameItem, fetchItems } from '../../lib/api/items';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
-import { applyMoneyDelta, formatCost, subtractCost, parseCost } from '../../lib/equipment';
+import { applyMoneyDelta, formatCost, subtractCost, parseCost, copperToCurrency } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
 import { formatItemAttackRange } from '../../lib/itemRange';
@@ -18,11 +18,12 @@ import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { calculateEncumbrance, getStrengthFromCharacter } from '../../lib/encumbrance';
 import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
 import { findItemDefinition, resolveItemSlots } from '../../../shared/encumbrance.js';
+import { shopCartTotal, shopPriceInCopper, shopPurchaseContents, type ShopCartLine } from '../../lib/shopCart';
+import { ShopCartPanel } from './ShopCartPanel';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
 const CONSUMABLE_KEYWORDS = ['ration', 'food', 'bread', 'meat', 'drink', 'potion', 'elixir', 'salve', 'antidote', 'torch', 'lamp oil', 'tinder', 'bandage', 'kit', 'arrow', 'bolt', 'stone', 'rope', 'chalk', 'parchment', 'ink'];
-const MEASUREMENT_UNITS = ['m', 'meter', 'meters', 'ft', 'feet', 'kg', 'l', 'liter', 'liters', 'dose', 'doses'];
 
 const shopGroups = [
     { name: 'Armor & Weapons', categories: ['ARMOR & HELMETS', 'MELEE WEAPONS', 'RANGED WEAPONS'], Icon: Shield },
@@ -36,7 +37,7 @@ const shopGroups = [
 type ItemDetails = (GameItem & Partial<InventoryItem> & { encumbrance_modifier?: number | string }) | undefined;
 type ShopGroup = (typeof shopGroups)[number];
 type SlotItem = string | InventoryItem | EquippedWeapon;
-type InventoryPanel = 'main' | 'wallet' | 'forage';
+type InventoryPanel = 'main' | 'wallet' | 'forage' | 'cart';
 
 // --- HELPER FUNCTIONS ---
 
@@ -65,20 +66,6 @@ const isItemConsumable = (item: InventoryItem, details?: ItemDetails): boolean =
     if (isItemEquippable(details)) return false;
     const name = item.name.toLowerCase();
     return CONSUMABLE_KEYWORDS.some(k => name.includes(k));
-};
-
-const parsePackName = (name: string, dbQuantity?: number): { name: string, quantity: number } => {
-    const packMatch = name.match(/^(.*?)\s*\((\d+)(?:\s*\w*)?\)$/);
-    if (packMatch) {
-        const itemName = packMatch[1].trim();
-        const number = parseInt(packMatch[2], 10);
-        const unit = name.match(/\d+\s*([a-zA-Z]+)/)?.[1]?.toLowerCase();
-        if (unit && MEASUREMENT_UNITS.includes(unit) && !['dose', 'doses', 'unit', 'units'].includes(unit)) {
-            return { name, quantity: dbQuantity || 1 };
-        }
-        return { name: itemName, quantity: number };
-    }
-    return { name, quantity: dbQuantity || 1 };
 };
 
 const generateId = (): string => {
@@ -137,9 +124,10 @@ const getCompactStats = (item: GameItem, characterStrength?: number | null) => {
 
 // --- COMPONENTS ---
 
-const ShopItemCard = ({ item, onBuy, characterStrength }: { item: GameItem, onBuy: (item: GameItem) => void, characterStrength?: number | null }) => {
+const ShopItemCard = ({ item, onAdd, characterStrength }: { item: GameItem, onAdd: (item: GameItem) => void, characterStrength?: number | null }) => {
     const stats = getCompactStats(item, characterStrength);
-    const cleanCost = formatCleanCost(item.cost);
+    const price = shopPriceInCopper(item);
+    const cleanCost = price === null ? 'N/A' : price === 0 ? 'Free' : formatCleanCost(item.cost);
     const featuresList = Array.isArray(item.features) ? item.features.join(', ') : item.features;
 
     return (
@@ -178,7 +166,7 @@ const ShopItemCard = ({ item, onBuy, characterStrength }: { item: GameItem, onBu
 
             <div className="mt-auto pt-2 border-t border-gray-100 flex justify-between items-center">
                 <span className="text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded">{cleanCost}</span>
-                <Button variant="primary" size="sm" onClick={() => onBuy(item)} disabled={!item.cost || cleanCost === 'N/A'} className="h-7 text-xs px-2">Buy</Button>
+                <Button type="button" variant="primary" size="sm" aria-label={`Add ${item.name} to cart`} onClick={() => onAdd(item)} disabled={price === null} className="min-h-9 text-xs px-2">Add to cart</Button>
             </div>
         </div>
     );
@@ -325,6 +313,18 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
     const [animalSelector, setAnimalSelector] = useState<{ item: InventoryItem, candidates: InventoryItem[] } | null>(null);
     const [activeInventoryTab, setActiveInventoryTab] = useState<string>('main'); // 'main' or containerID
+    const [cart, setCart] = useState<ShopCartLine[]>([]);
+    const [checkoutBusy, setCheckoutBusy] = useState(false);
+    const checkoutInProgress = useRef(false);
+    const [checkoutError, setCheckoutError] = useState<string | null>(null);
+    const [purchaseNotice, setPurchaseNotice] = useState<string | null>(null);
+
+    useEffect(() => {
+        setCart([]);
+        setCheckoutError(null);
+        setPurchaseNotice(null);
+        setActivePanel('main');
+    }, [rawCharacter?.id]);
 
     // Clearing
     const clearInventorySearch = () => setInventorySearch('');
@@ -377,19 +377,49 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         setActivePanel('main');
     };
 
-    const handleBuyItem = (item: GameItem) => {
-        const itemCost = parseCost(item.cost);
-        if (!itemCost) return;
-        const { success, newMoney } = subtractCost(character.equipment!.money!, itemCost);
-        if (!success) return;
-        const { name, quantity } = parsePackName(item.name, typeof item.quantity === 'number' ? item.quantity : undefined);
-        // Ensure we add a brand new item if it's unique equipment
-        const newItem: InventoryItem = {
-            name, quantity, weight: resolveItemSlots({ name }, item).unitWeight,
-            weightBasis: 'unit', definitionId: item.id, originalName: item.name, id: generateId(),
-        };
-        const newInventory = mergeIntoInventory(character.equipment!.inventory!, newItem);
-        handleUpdateEquipment({ ...character.equipment, inventory: newInventory, money: newMoney });
+    const handleAddToCart = (item: GameItem) => {
+        if (shopPriceInCopper(item) === null) return;
+        setCheckoutError(null);
+        setPurchaseNotice(null);
+        setCart(lines => {
+            const existing = lines.find(line => line.item.id === item.id);
+            return existing ? lines.map(line => line.item.id === item.id ? { ...line, quantity: Math.min(999, line.quantity + 1) } : line) : [...lines, { item, quantity: 1 }];
+        });
+    };
+
+    const handleConfirmPurchase = async () => {
+        if (checkoutInProgress.current || !cart.length) return;
+        const total = shopCartTotal(cart);
+        if (total === null) { setCheckoutError('Some items have an unavailable price. Remove them before purchasing.'); return; }
+        const { success, newMoney } = subtractCost(character.equipment.money || { gold: 0, silver: 0, copper: 0 }, copperToCurrency(total));
+        if (!success) { setCheckoutError('Not enough money to purchase this cart.'); return; }
+        checkoutInProgress.current = true;
+        setCheckoutBusy(true);
+        setCheckoutError(null);
+        try {
+            const equipment = structuredClone(character.equipment);
+            for (const line of cart) {
+                const contents = shopPurchaseContents(line.item);
+                const newItem: InventoryItem = {
+                    name: contents.name, quantity: contents.quantity * line.quantity,
+                    weight: resolveItemSlots({ name: contents.name }, line.item).unitWeight,
+                    weightBasis: 'unit', definitionId: line.item.id, originalName: line.item.name, id: generateId(),
+                };
+                equipment.inventory = mergeIntoInventory(equipment.inventory || [], newItem);
+            }
+            equipment.money = newMoney;
+            await handleUpdateEquipment(equipment);
+            setCart([]);
+            setPurchaseNotice(`Purchase complete. Spent ${formatCost(copperToCurrency(total))}.`);
+            setActivePanel('main');
+            setActiveTab('inventory');
+            setActiveInventoryTab('main');
+        } catch (error) {
+            setCheckoutError(error instanceof Error ? error.message : 'Purchase could not be saved. Your cart has been kept.');
+        } finally {
+            checkoutInProgress.current = false;
+            setCheckoutBusy(false);
+        }
     };
 
     const handleEquipItem = (itemToEquip: InventoryItem) => {
@@ -848,6 +878,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             )}
             <AccessibleDialog
                 onClose={onClose}
+                closeDisabled={checkoutBusy}
                 title="Inventory"
                 ariaLabel="Character inventory"
                 size="xl"
@@ -859,7 +890,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             >
                     <div className="inventory-modal-header px-4 py-3 border-b flex items-center justify-between bg-white z-20">
                         <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <HeavyEncumbranceIndicator load={encumbrance.load} capacity={encumbrance.capacity} />}</div></div></div>
-                        <div className="inventory-modal-toolbar flex items-center gap-2"><button type="button" onClick={() => setActivePanel('wallet')} aria-label="Open wallet" className="flex min-h-10 items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close inventory" className="flex h-10 w-10 items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
+                        <div className="inventory-modal-toolbar flex items-center gap-2"><button type="button" disabled={checkoutBusy} onClick={() => setActivePanel('wallet')} aria-label="Open wallet" className="flex min-h-10 items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors disabled:opacity-50"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button ref={closeButtonRef} type="button" disabled={checkoutBusy} onClick={onClose} aria-label="Close inventory" className="flex h-10 w-10 items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors disabled:opacity-50"><X size={20} /></button></div>
                     </div>
                     {activePanel === 'main' ? (
                     <>
@@ -1055,7 +1086,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                         {allGameItems
                                             .filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase()))
                                             .sort((a, b) => a.name.localeCompare(b.name))
-                                            .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} characterStrength={getStrengthFromCharacter(character)} />)
+                                            .map(item => <ShopItemCard key={item.id} item={item} onAdd={handleAddToCart} characterStrength={getStrengthFromCharacter(character)} />)
                                         }
                                         {allGameItems.filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase())).length === 0 && (
                                             <div className="col-span-full text-center py-10 text-gray-400">
@@ -1139,8 +1170,8 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                             return true;
                                                         })
                                                         .sort((a, b) => {
-                                                            const costA = parseCost(a.cost)?.totalCopper || 0;
-                                                            const costB = parseCost(b.cost)?.totalCopper || 0;
+                                                            const costA = shopPriceInCopper(a) ?? Infinity;
+                                                            const costB = shopPriceInCopper(b) ?? Infinity;
                                                             switch (sortOrder) {
                                                                 case 'cost-asc': return costA - costB;
                                                                 case 'cost-desc': return costB - costA;
@@ -1148,7 +1179,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                                 case 'name-asc': default: return a.name.localeCompare(b.name);
                                                             }
                                                         })
-                                                        .map(item => <ShopItemCard key={item.id} item={item} onBuy={handleBuyItem} characterStrength={getStrengthFromCharacter(character)} />)
+                                                        .map(item => <ShopItemCard key={item.id} item={item} onAdd={handleAddToCart} characterStrength={getStrengthFromCharacter(character)} />)
                                                     }
                                                 </div>
                                             </div>
@@ -1158,10 +1189,22 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             </div>
                         )}
                     </div>
+                    {activeTab === 'shop' && <div className="flex shrink-0 items-center justify-between gap-3 border-t bg-white px-4 py-3">
+                        <div aria-live="polite" className="min-w-0 text-xs text-gray-500"><p className="font-bold text-gray-800">Cart · {cart.reduce((sum, line) => sum + line.quantity, 0)} purchases</p><p>{formatCost(copperToCurrency(shopCartTotal(cart) ?? 0))} total · not purchased yet</p></div>
+                        <Button type="button" icon={ShoppingCart} onClick={() => { setCheckoutError(null); setActivePanel('cart'); }}>Review cart</Button>
+                    </div>}
+                    {purchaseNotice && <p role="status" className="shrink-0 border-t bg-green-50 px-4 py-2 text-xs text-green-800">{purchaseNotice}</p>}
                     </>
                     ) : (
                         <div className="min-h-0 flex-1 overflow-hidden">
-                            {activePanel === 'wallet' ? (
+                            {activePanel === 'cart' ? (
+                                <ShopCartPanel lines={cart} money={character.equipment.money || { gold: 0, silver: 0, copper: 0 }} busy={checkoutBusy} error={checkoutError}
+                                    onBack={() => setActivePanel('main')}
+                                    onQuantity={(id, quantity) => { setCheckoutError(null); setCart(lines => lines.map(line => line.item.id === id ? { ...line, quantity: Math.min(999, Math.max(1, quantity)) } : line)); }}
+                                    onRemove={id => { setCheckoutError(null); setCart(lines => lines.filter(line => line.item.id !== id)); }}
+                                    onClear={() => { setCheckoutError(null); setCart([]); }}
+                                    onConfirm={handleConfirmPurchase} />
+                            ) : activePanel === 'wallet' ? (
                                 <MoneyManagementPanel
                                     onBack={() => setActivePanel('main')}
                                     currentMoney={character.equipment?.money || {}}
@@ -1175,6 +1218,31 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             </AccessibleDialog>
             <style>{`
               @media (orientation: landscape) and (max-width: 932px) and (max-height: 540px) {
+                .shop-cart-header {
+                  padding: 0.45rem 0.8rem;
+                }
+
+                .shop-cart-footer {
+                  display: grid;
+                  grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.7fr);
+                  gap: 0.4rem 1rem;
+                  align-items: center;
+                  padding: 0.45rem 0.8rem;
+                }
+
+                .shop-cart-footer > * {
+                  margin-top: 0;
+                }
+
+                .shop-cart-footer > button {
+                  grid-column: 2;
+                  grid-row: 1;
+                }
+
+                .shop-cart-footer > [role="alert"] {
+                  grid-column: 1 / -1;
+                }
+
                 .inventory-modal-shell {
                   border-radius: 0;
                 }

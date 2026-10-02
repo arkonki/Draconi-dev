@@ -82,6 +82,7 @@ describe('InventoryModal', () => {
     character.equipment = structuredClone(initialEquipment);
     character.attributes.STR = 12;
     mocks.updateCharacterData.mockClear();
+    mocks.updateCharacterData.mockResolvedValue(undefined);
     mocks.fetchItems.mockReset();
     mocks.fetchItems.mockResolvedValue(gameItems);
   });
@@ -201,8 +202,101 @@ describe('InventoryModal', () => {
     const card = name.closest('.bg-white');
     expect(card).not.toBeNull();
     fireEvent.click(within(card as HTMLElement).getByRole('button'));
+    expect(mocks.updateCharacterData).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    expect(screen.getByText('Adds 20 × Arrows')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    await waitFor(() => expect(mocks.updateCharacterData).toHaveBeenCalledOnce());
     const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
     expect(equipment.inventory).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Arrows', quantity: 20, weight: 0.05, weightBasis: 'unit', definitionId: 'game-arrows' })]));
+  });
+
+  it('reviews and adjusts multiple selections, then saves all gear and money in one purchase', async () => {
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    const search = screen.getByPlaceholderText('Search everything in shop...');
+    fireEvent.change(search, { target: { value: 'Rope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rope to cart' }));
+    fireEvent.change(search, { target: { value: 'Arrows' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Arrows (20) to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Arrows (20) quantity' }));
+    expect(screen.getByText('Adds 40 × Arrows')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Shopping cart' })).toHaveTextContent('Total3 silver');
+    expect(mocks.updateCharacterData).not.toHaveBeenCalled();
+    expect(character.equipment.inventory[0].quantity).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue shopping' }));
+    expect(screen.getByPlaceholderText('Search everything in shop...')).toHaveValue('Arrows');
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    expect(screen.getByLabelText('Arrows (20) purchase quantity')).toHaveValue(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    await screen.findByText('Purchase complete. Spent 3 silver.');
+    expect(mocks.updateCharacterData).toHaveBeenCalledOnce();
+    const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
+    expect(equipment.money).toEqual({ gold: 1, silver: 1, copper: 2 });
+    expect(equipment.inventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Rope', quantity: 2 }),
+      expect.objectContaining({ name: 'Arrows', quantity: 40 }),
+    ]));
+    expect(character.equipment.inventory[0].quantity).toBe(1);
+  });
+
+  it('blocks unaffordable checkout and supports removing items and clearing the cart', async () => {
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    fireEvent.change(screen.getByPlaceholderText('Search everything in shop...'), { target: { value: 'Horse' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Horse to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    expect(screen.getByRole('button', { name: 'Confirm purchase' })).toBeDisabled();
+    expect(screen.getByText(/Not enough money/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Horse from cart' }));
+    expect(screen.getByText(/Your cart is empty/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue shopping' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Horse to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear cart' }));
+    expect(screen.getByText(/Your cart is empty/)).toBeVisible();
+    expect(mocks.updateCharacterData).not.toHaveBeenCalled();
+  });
+
+  it('keeps the cart and existing inventory untouched after a failed purchase', async () => {
+    mocks.updateCharacterData.mockRejectedValueOnce(new Error('Could not save purchase'));
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    fireEvent.change(screen.getByPlaceholderText('Search everything in shop...'), { target: { value: 'Rope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rope to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save purchase');
+    expect(screen.getByLabelText('Rope purchase quantity')).toHaveValue(1);
+    expect(character.equipment.inventory[0].quantity).toBe(1);
+    expect(character.equipment.money).toEqual(initialEquipment.money);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    await screen.findByText('Purchase complete. Spent 1 silver.');
+    expect(mocks.updateCharacterData).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents duplicate checkout and closing while the purchase is saving', async () => {
+    let complete!: () => void;
+    mocks.updateCharacterData.mockReturnValueOnce(new Promise<void>(resolve => { complete = resolve; }));
+    const onClose = vi.fn();
+    renderInventory(onClose);
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    fireEvent.change(screen.getByPlaceholderText('Search everything in shop...'), { target: { value: 'Rope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rope to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Purchasing…' }));
+    expect(mocks.updateCharacterData).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Close inventory' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    complete();
+    await screen.findByText('Purchase complete. Spent 1 silver.');
   });
 
   it('shows items left elsewhere separately without counting their load', async () => {
