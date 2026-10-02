@@ -1,8 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useContext, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { X, Zap, AlertCircle } from 'lucide-react';
+import { DialogLayerContext } from '../shared/dialogLayer';
 
 export function StatusPanelView() {
+  const dialogLayer = useContext(DialogLayerContext);
   const activeStatusMessage = useCharacterSheetStore((state) => state.activeStatusMessage);
   const clearActiveStatusMessage = useCharacterSheetStore((state) => state.clearActiveStatusMessage);
   const saveError = useCharacterSheetStore((state) => state.saveError);
@@ -23,8 +26,8 @@ export function StatusPanelView() {
     return null;
   }
 
-  return (
-    <div className="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-3 right-3 z-[110] flex flex-col gap-3 sm:bottom-4 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm" aria-live="polite">
+  return createPortal(
+    <div style={{ zIndex: Math.max(160, dialogLayer + 10) }} className="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-3 right-3 flex flex-col gap-3 sm:bottom-4 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm" aria-live="polite">
       
       {/* 1. ERROR TOAST (High Priority) */}
       {saveError && (
@@ -66,6 +69,7 @@ export function StatusPanelView() {
         </div>
       )}
 
-    </div>
+    </div>,
+    document.body,
   );
 }

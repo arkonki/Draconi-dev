@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useCharacterSheetStore, HeroicAbility } from '../../stores/characterSheetStore';
 import { isSkillNameRequirement } from '../../types/character';
-import { Zap, X, ShieldCheck, Info } from 'lucide-react';
+import { Zap, ShieldCheck, Info } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 // --- HELPER FUNCTIONS ---
 const formatRequirementObject = (req: { [skillName: string]: number | null }): string => { return Object.entries(req).map(([skillName, level]) => level !== null ? `${skillName} (Lvl ${level})` : skillName).join(', '); };
@@ -16,26 +17,19 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
   const requirementText = renderRequirement(ability.requirement);
   
   return (
-    <div className="fixed inset-0 z-[60] overflow-hidden pointer-events-none">
-      {/* Backdrop */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto transition-opacity"
-        onClick={onClose}
-        aria-label="Close heroic ability details"
-      />
-      
-      {/* Pane */}
-      <div className="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col pointer-events-auto border-l border-stone-200 animate-in slide-in-from-right duration-300">
-        <div className="p-4 sm:p-6 border-b bg-stone-50 flex justify-between items-start">
-            <div>
-                <div className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">Heroic Ability</div>
-                <h3 className="text-2xl font-serif font-bold text-stone-900 leading-none">{ability.name}</h3>
-            </div>
-            <button onClick={onClose} className="text-stone-400 hover:text-stone-600 transition-colors p-2 -m-2 rounded-full touch-manipulation"><X size={24} /></button>
-        </div>
-
-        <div className="flex-grow overflow-y-auto p-6 space-y-6 bg-white text-stone-800">
+    <AccessibleDialog
+      onClose={onClose}
+      title={ability.name}
+      description="Heroic Ability"
+      size="md"
+      layer="nested"
+      fullScreenMobile
+      panelClassName="sm:ml-auto sm:h-[90dvh] sm:max-w-md border-l border-stone-200"
+      headerClassName="bg-stone-50"
+      titleClassName="font-serif text-2xl"
+      bodyClassName="p-6 space-y-6 text-stone-800"
+      footer={<div className="flex justify-end"><Button variant="ghost" onClick={onClose} className="min-h-[44px] touch-manipulation">Close</Button></div>}
+    >
             <div className="prose prose-stone prose-sm max-w-none leading-relaxed italic border-l-4 border-orange-300 pl-4 text-stone-600">
                 {ability.description}
             </div>
@@ -64,13 +58,7 @@ const AbilityDetailPane = ({ ability, onClose }: { ability: HeroicAbility | null
                   {requirementText}
                </div>
             )}
-        </div>
-        
-        <div className="p-4 border-t bg-stone-50 flex justify-end">
-           <Button variant="ghost" onClick={onClose} className="min-h-[44px] touch-manipulation">Close</Button>
-        </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 };
 

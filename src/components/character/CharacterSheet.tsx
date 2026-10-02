@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useContext, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
 import { calculateEncumbrance } from '../../lib/encumbrance';
 import { fetchItems } from '../../lib/api/items';
 import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
+import { DialogLayerContext } from '../shared/dialogLayer';
 import {
   HelpCircle, Swords, Bed, Award, ShieldCheck, Plus, Trash2, Minus,
   Bold, Italic, List, Pencil, Package, Sparkles, Book, UserSquare,
@@ -681,6 +683,7 @@ export interface CharacterSheetProps {
 }
 
 export function CharacterSheet({ soloState: providedSoloState, embedded = false }: CharacterSheetProps = {}) {
+  const dialogLayer = useContext(DialogLayerContext);
   const queryClient = useQueryClient();
   const { toggleDiceRoller } = useDice();
   const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
@@ -714,6 +717,37 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   const lowerPanelRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [moreMenuPosition, setMoreMenuPosition] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!showSecondaryActions) return;
+    const positionMenu = () => {
+      const rect = moreMenuTriggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(288, window.innerWidth - 24);
+      const maxHeight = Math.max(64, window.innerHeight - 24);
+      const height = Math.min(moreMenuRef.current?.scrollHeight || 360, maxHeight);
+      const below = rect.bottom + 6;
+      const above = rect.top - height - 6;
+      setMoreMenuPosition({
+        top: below + height <= window.innerHeight - 12 ? below : above >= 12 ? above : 12,
+        left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
+        width,
+        maxHeight,
+      });
+    };
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && moreMenuRef.current?.contains(event.target)) return;
+      positionMenu();
+    };
+    positionMenu();
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', positionMenu);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [showSecondaryActions]);
 
   const characterInjuriesQuery = useQuery({
     queryKey: ['character-injuries', character?.party_id, character?.id],
@@ -959,6 +993,11 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
       window.setTimeout(() => moreMenuTriggerRef.current?.focus(), 0);
       return;
     }
+    if (event.key === 'Tab') {
+      setShowSecondaryActions(false);
+      moreMenuTriggerRef.current?.focus({ preventScroll: true });
+      return;
+    }
     if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key) || items.length === 0) return;
     event.preventDefault();
     const nextIndex = event.key === 'Home'
@@ -978,7 +1017,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   });
 
   return (
-    <div className={`character-sheet-root ${embedded ? 'character-sheet-embedded min-h-0' : 'character-sheet-standalone min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-hidden`}>
+    <div className={`character-sheet-root ${embedded ? 'character-sheet-embedded min-h-0' : 'character-sheet-standalone min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-clip`}>
       <div className={`character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] border-x-0 md:border-2 border-[#d4c5a3] relative ${embedded ? 'shadow-none md:border-0' : 'shadow-2xl'}`}>
         
         {/* HEADER */}
@@ -1013,8 +1052,8 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
               </button>
             </div>
           </div>
-          {showSecondaryActions && (
-            <div ref={moreMenuRef} id="character-more-menu" data-character-more-menu className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-[#d4c5a3] bg-[#fdfbf7] text-stone-800 shadow-[0_18px_50px_rgba(28,25,23,0.28)] md:absolute md:bottom-auto md:right-4 md:top-[calc(100%-0.25rem)]" role="menu" aria-label="More character actions" tabIndex={-1} onKeyDown={handleMoreMenuKeyDown}>
+          {showSecondaryActions && createPortal(
+            <div ref={moreMenuRef} id="character-more-menu" data-character-more-menu style={{ ...moreMenuPosition, visibility: moreMenuPosition ? 'visible' : 'hidden', zIndex: Math.max(90, dialogLayer + 10) }} className="fixed overflow-y-auto overscroll-contain rounded-xl border-2 border-[#d4c5a3] bg-[#fdfbf7] text-stone-800 shadow-[0_18px_50px_rgba(28,25,23,0.28)]" role="menu" aria-label="More character actions" tabIndex={-1} onKeyDown={handleMoreMenuKeyDown}>
               <div className="border-b border-[#d4c5a3] bg-[#1a472a] px-4 py-3 text-left font-serif text-sm font-bold uppercase tracking-wider text-[#e8d5b5]">Character options</div>
               <div className="grid grid-cols-1 gap-1 p-2">
                 {[
@@ -1035,7 +1074,8 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
                 <div className="my-1 h-px bg-[#d4c5a3]" aria-hidden="true" />
                 <PdfExportButton character={character} variant="menu" />
               </div>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
 

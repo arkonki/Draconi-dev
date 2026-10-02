@@ -111,9 +111,10 @@ describe('SpellcastingView', () => {
   });
 
   it('returns from internal spell details with query and scroll position intact', async () => {
-    const { container } = render(<SpellcastingView onClose={vi.fn()} />);
+    render(<SpellcastingView onClose={vi.fn()} />);
+    const dialog = screen.getByRole('dialog');
     const search = screen.getByRole('searchbox', { name: 'Search spells' });
-    const list = container.querySelector<HTMLDivElement>('.spellcasting-modal-list');
+    const list = dialog.querySelector<HTMLDivElement>('.spellcasting-modal-list');
     expect(list).not.toBeNull();
     if (!list) return;
 
@@ -129,7 +130,7 @@ describe('SpellcastingView', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('searchbox', { name: 'Search spells' })).toHaveValue('ember');
-      expect(container.querySelector<HTMLDivElement>('.spellcasting-modal-list')?.scrollTop).toBe(180);
+      expect(dialog.querySelector<HTMLDivElement>('.spellcasting-modal-list')?.scrollTop).toBe(180);
       expect(screen.getByRole('button', { name: 'View details for Ember' })).toHaveFocus();
     });
   });

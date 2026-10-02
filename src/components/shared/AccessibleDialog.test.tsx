@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AccessibleDialog } from './AccessibleDialog';
 
@@ -79,5 +79,52 @@ describe('AccessibleDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(closeNested).toHaveBeenCalledTimes(1);
     expect(closeBase).not.toHaveBeenCalled();
+  });
+
+  it('escapes transformed and clipped sheet containers with correctly layered nested dialogs', async () => {
+    const closeBase = vi.fn();
+    const closeNested = vi.fn();
+    const { container } = render(
+      <div style={{ overflow: 'hidden', transform: 'translateY(10px)' }}>
+        <AccessibleDialog onClose={closeBase} title="Party character">
+          <div style={{ overflow: 'hidden' }}>
+            <AccessibleDialog onClose={closeNested} title="Character inventory" showCloseButton={false}>
+              <button type="button">Inventory action</button>
+            </AccessibleDialog>
+          </div>
+        </AccessibleDialog>
+      </div>,
+    );
+    const base = screen.getByRole('dialog', { name: 'Party character' });
+    const nested = screen.getByRole('dialog', { name: 'Character inventory' });
+    expect(container).not.toContainElement(base);
+    expect(base).not.toContainElement(nested);
+    expect(Number(nested.parentElement?.style.zIndex)).toBeGreaterThan(Number(base.parentElement?.style.zIndex));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Inventory action' })).toHaveFocus());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(closeNested).toHaveBeenCalledOnce();
+    expect(closeBase).not.toHaveBeenCalled();
+  });
+
+  it('keeps focus and scroll position on live rerenders and uses the latest close callback', async () => {
+    const oldClose = vi.fn();
+    const newClose = vi.fn();
+    const content = <><button type="button">First</button><button type="button">Focused sheet control</button></>;
+    const { rerender } = render(<AccessibleDialog onClose={oldClose} title="Live sheet">{content}</AccessibleDialog>);
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Close dialog' })).toHaveFocus());
+    const control = screen.getByRole('button', { name: 'Focused sheet control' });
+    control.focus();
+    const focus = vi.spyOn(control, 'focus');
+    const closeFocus = vi.spyOn(within(dialog).getByRole('button', { name: 'Close dialog' }), 'focus');
+    rerender(<AccessibleDialog onClose={newClose} title="Live sheet">{content}</AccessibleDialog>);
+    // Let initial-focus timers run; a live update must not schedule another.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(control).toHaveFocus();
+    expect(focus).not.toHaveBeenCalled();
+    expect(closeFocus).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(newClose).toHaveBeenCalledOnce();
+    expect(oldClose).not.toHaveBeenCalled();
   });
 });

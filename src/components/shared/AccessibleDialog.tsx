@@ -1,5 +1,7 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useContext, useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { DialogLayerContext } from './dialogLayer';
 
 type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'sheet';
 type DialogLayer = 'base' | 'nested' | 'critical';
@@ -12,15 +14,23 @@ const sizeClasses: Record<DialogSize, string> = {
   sheet: 'sm:max-w-[1400px]',
 };
 
-const layerClasses: Record<DialogLayer, string> = {
-  base: 'z-[80]',
-  nested: 'z-[100]',
-  critical: 'z-[120]',
+const layerIndices: Record<DialogLayer, number> = {
+  base: 80,
+  nested: 100,
+  critical: 120,
 };
 
 let dialogSequence = 0;
-const openDialogs: number[] = [];
+const openDialogs: { id: number; layer: number }[] = [];
 let bodyOverflowBeforeDialogs = '';
+
+function isTopDialog(id: number) {
+  const top = openDialogs.reduce<(typeof openDialogs)[number] | undefined>((current, dialog) => (
+    !current || dialog.layer > current.layer || (dialog.layer === current.layer && dialog.id > current.id)
+      ? dialog : current
+  ), undefined);
+  return top?.id === id;
+}
 
 function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>([
@@ -88,31 +98,34 @@ export function AccessibleDialog({
   const titleId = `${generatedId}-title`;
   const descriptionId = `${generatedId}-description`;
   const panelRef = useRef<HTMLDivElement>(null);
-  const dialogIdRef = useRef(0);
+  const parentLayer = useContext(DialogLayerContext);
+  const layerIndex = Math.max(layerIndices[layer], parentLayer + 20);
+  const latestOptionsRef = useRef({ onClose, closeDisabled, initialFocusRef });
+  latestOptionsRef.current = { onClose, closeDisabled, initialFocusRef };
 
   useEffect(() => {
     if (!isOpen) return undefined;
 
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialogId = ++dialogSequence;
-    dialogIdRef.current = dialogId;
     if (openDialogs.length === 0) {
       bodyOverflowBeforeDialogs = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
     }
-    openDialogs.push(dialogId);
+    openDialogs.push({ id: dialogId, layer: layerIndex });
 
     const focusTimer = window.setTimeout(() => {
-      const target = initialFocusRef?.current || focusableElements(panelRef.current!)[0] || panelRef.current;
-      target?.focus();
+      if (!isTopDialog(dialogId) || !panelRef.current) return;
+      const target = latestOptionsRef.current.initialFocusRef?.current || focusableElements(panelRef.current)[0] || panelRef.current;
+      target?.focus({ preventScroll: true });
     }, 0);
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (openDialogs[openDialogs.length - 1] !== dialogId || !panelRef.current) return;
+      if (!isTopDialog(dialogId) || !panelRef.current) return;
       if (event.key === 'Escape') {
-        if (!closeDisabled) {
+        if (!latestOptionsRef.current.closeDisabled) {
           event.preventDefault();
-          onClose();
+          latestOptionsRef.current.onClose();
         }
         return;
       }
@@ -139,12 +152,16 @@ export function AccessibleDialog({
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', handleKeyDown);
-      const index = openDialogs.lastIndexOf(dialogId);
+      const index = openDialogs.findIndex(dialog => dialog.id === dialogId);
       if (index >= 0) openDialogs.splice(index, 1);
       if (openDialogs.length === 0) document.body.style.overflow = bodyOverflowBeforeDialogs;
-      window.setTimeout(() => previousFocus?.focus(), 0);
+      window.setTimeout(() => {
+        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      }, 0);
     };
-  }, [closeDisabled, initialFocusRef, isOpen, onClose]);
+  // Live sheet updates often create a new callback. They must not re-register
+  // the dialog, steal focus, or scroll the sheet back to its first control.
+  }, [isOpen, layerIndex]);
 
   if (!isOpen) return null;
 
@@ -152,8 +169,9 @@ export function AccessibleDialog({
     ? 'h-[100dvh] rounded-none pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:h-auto sm:max-h-[92dvh] sm:rounded-xl sm:p-0'
     : 'max-h-[calc(100dvh-1rem)] rounded-xl sm:max-h-[90dvh]';
 
-  return (
-    <div className={`fixed inset-0 ${layerClasses[layer]} flex items-center justify-center p-0 sm:p-4`}>
+  return createPortal(
+    <DialogLayerContext.Provider value={layerIndex}>
+    <div style={{ zIndex: layerIndex }} data-dialog-layer={layerIndex} className="fixed inset-0 flex items-center justify-center p-0 sm:p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -194,7 +212,7 @@ export function AccessibleDialog({
             )}
           </div>
         </div>}
-        <div className={`min-h-0 flex-1 ${bodyScrollable ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'} ${bodyClassName}`}>
+        <div data-dialog-scroll={bodyScrollable ? '' : undefined} className={`min-h-0 flex-1 ${bodyScrollable ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'} ${bodyClassName}`}>
           {children}
         </div>
         {footer && (
@@ -204,5 +222,7 @@ export function AccessibleDialog({
         )}
       </div>
     </div>
+    </DialogLayerContext.Provider>,
+    document.body,
   );
 }

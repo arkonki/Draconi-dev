@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Info, CheckSquare, Target, Swords, GraduationCap, Sparkles, BookOpen, ShieldAlert } from 'lucide-react';
 import { Character, AttributeName } from '../../../types/character';
 import { useDice } from '../../dice/useDice';
@@ -262,10 +263,11 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
           </div>
         </div>
       )}
-      {activeTooltip && tooltipPosition && (
-        <div role="tooltip" style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className={`fixed z-[110] w-64 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 overflow-y-auto rounded-lg bg-gray-900 p-3 text-sm leading-relaxed text-white shadow-xl ${tooltipPosition.placement === 'top' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-[10px]'}`}>
+      {activeTooltip && tooltipPosition && createPortal(
+        <div role="tooltip" style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }} className={`fixed z-[220] w-64 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 overflow-y-auto rounded-lg bg-gray-900 p-3 text-sm leading-relaxed text-white shadow-xl ${tooltipPosition.placement === 'top' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-[10px]'}`}>
           {skillInfo[activeTooltip]?.description || 'No description available.'}
-        </div>
+        </div>,
+        document.body,
       )}
     </AccessibleDialog>
   );

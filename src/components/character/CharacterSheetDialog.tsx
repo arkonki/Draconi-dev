@@ -78,6 +78,7 @@ export function CharacterSheetDialog({
       )}
 
       <div
+        data-dialog-scroll
         className="min-h-0 flex-1 overflow-y-auto"
         role={members.length > 1 ? 'tabpanel' : undefined}
         id={members.length > 1 ? `character-sheet-panel-${selectedMemberId ?? 'default'}` : undefined}

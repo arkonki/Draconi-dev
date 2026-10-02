@@ -46,4 +46,24 @@ describe('heavy movement rules', () => {
     act(() => vi.advanceTimersByTime(150));
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
+
+  it('repositions without flashing when the enclosing sheet scrolls, then hides once its badge leaves view', () => {
+    vi.useFakeTimers();
+    render(<div data-dialog-scroll><HeavyEncumbranceIndicator load={7} capacity={6} /></div>);
+    const trigger = screen.getByRole('button', { name: /Over-encumbered/ });
+    const scroller = trigger.parentElement!;
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 500 } as DOMRect);
+    const rect = vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({ top: 200, bottom: 228, left: 100, height: 28 } as DOMRect);
+    fireEvent.mouseEnter(trigger);
+    const tooltip = screen.getByRole('tooltip');
+    rect.mockReturnValue({ top: 160, bottom: 188, left: 100, height: 28 } as DOMRect);
+    fireEvent.scroll(scroller);
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('tooltip')).toBe(tooltip);
+    expect(tooltip.style.top).toBe('196px');
+    rect.mockReturnValue({ top: 50, bottom: 78, left: 100, height: 28 } as DOMRect);
+    fireEvent.scroll(scroller);
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
 });
