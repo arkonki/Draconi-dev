@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Character } from '../../types/character';
 import { InventoryModal } from './InventoryModal';
@@ -28,6 +28,7 @@ const character = {
     },
   },
 } as unknown as Character;
+const initialEquipment = structuredClone(character.equipment);
 
 const gameItems = [
   {
@@ -39,6 +40,10 @@ const gameItems = [
     cost: '1 silver',
     is_custom: false,
   },
+  { id: 'game-pack', name: 'Backpack', category: 'CONTAINERS', weight: 1, cost: '2 silver', is_container: false, encumbrance_modifier: 2, description: 'A worn pack.' },
+  { id: 'game-horse', name: 'Horse', category: 'ANIMALS', weight: 0, cost: '10 gold', is_container: true, container_capacity: 20 },
+  { id: 'game-bag', name: 'Saddle bag', category: 'CONTAINERS', weight: 1, cost: '2 silver', is_container: true, container_capacity: 4, encumbrance_modifier: 2 },
+  { id: 'game-arrows', name: 'Arrows (20)', category: 'RANGED WEAPONS', weight: 1, cost: '1 silver', description: 'A bundle of arrows.' },
   {
     id: 'game-tent',
     name: 'Tent, Large',
@@ -72,7 +77,7 @@ function renderInventory(onClose = vi.fn()) {
 
 describe('InventoryModal', () => {
   beforeEach(() => {
-    character.equipment.inventory[0].quantity = 1;
+    character.equipment = structuredClone(initialEquipment);
     mocks.updateCharacterData.mockClear();
     mocks.fetchItems.mockReset();
     mocks.fetchItems.mockResolvedValue(gameItems);
@@ -136,5 +141,75 @@ describe('InventoryModal', () => {
 
     await waitFor(() => expect(mocks.updateCharacterData).toHaveBeenCalled());
     expect(screen.getByRole('tab', { name: 'My Gear' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows and unequips a worn backpack even when it is not flagged as separate storage', async () => {
+    character.equipment.equipped.containers = [{ id: 'pack', name: 'Backpack', quantity: 1 }];
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    expect(screen.getByText('+2 carrying slots')).toBeVisible();
+    expect(screen.getByLabelText('Encumbrance breakdown')).toHaveTextContent('6 base + 2 Backpack');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Unequip Backpack' })[0]);
+    const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
+    expect(equipment.equipped.containers).toEqual([]);
+    expect(equipment.inventory).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Backpack' })]));
+  });
+
+  it('shows carried backpack contents and keeps their load in the character total', async () => {
+    character.equipment.equipped.containers = [{ id: 'pack', name: 'Backpack', quantity: 1 }];
+    character.equipment.inventory[0].containerId = 'pack';
+    character.equipment.inventory[0].quantity = 7;
+    renderInventory();
+    await screen.findByText('7 / 8 Load');
+    expect(screen.queryByRole('button', { name: 'Show details for Rope' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Backpack storage' }));
+    expect(screen.getByRole('button', { name: 'Show details for Rope' })).toBeVisible();
+    expect(screen.getByText('These contents also count toward your total carried load.')).toBeVisible();
+  });
+
+  it('shows orphaned container items in Main Inventory instead of hiding them', async () => {
+    character.equipment.inventory[0].containerId = 'missing';
+    character.equipment.inventory[0].quantity = 7;
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    expect(screen.getByText('7 / 6 Load')).toBeVisible();
+    expect(screen.getByText(/Some items reference missing containers/)).toBeVisible();
+  });
+
+  it('normalizes bundle purchases to explicit unit weights', async () => {
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    fireEvent.change(screen.getByPlaceholderText('Search everything in shop...'), { target: { value: 'Arrows' } });
+    const name = screen.getByText('Arrows (20)');
+    const card = name.closest('.bg-white');
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card as HTMLElement).getByRole('button'));
+    const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
+    expect(equipment.inventory).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Arrows', quantity: 20, weight: 0.05, weightBasis: 'unit', definitionId: 'game-arrows' })]));
+  });
+
+  it('shows items left elsewhere separately without counting their load', async () => {
+    character.equipment.inventory[0].temporarilyPlaced = true;
+    renderInventory();
+    await screen.findByText('0 / 6 Load');
+    expect(screen.queryByRole('button', { name: 'Show details for Rope' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Items stored elsewhere' }));
+    expect(screen.getByRole('button', { name: 'Show details for Rope' })).toBeVisible();
+    expect(screen.getByText('Excluded from carried load')).toBeVisible();
+  });
+
+  it('releases saddlebag cargo when the mount is unequipped', async () => {
+    character.equipment.equipped.animals = [{ id: 'horse', name: 'Horse', quantity: 1 }];
+    character.equipment.equipped.containers = [{ id: 'bag', name: 'Saddle bag', quantity: 1, equippedOn: 'horse' }];
+    character.equipment.inventory[0].containerId = 'bag';
+    renderInventory();
+    await screen.findByText('0 / 6 Load');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Unequip Horse' })[0]);
+    const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
+    expect(equipment.equipped.animals).toEqual([]);
+    expect(equipment.equipped.containers).toEqual([]);
+    expect(equipment.inventory.find((item: { name: string }) => item.name === 'Rope').containerId).toBeUndefined();
+    expect(equipment.inventory.find((item: { name: string }) => item.name === 'Saddle bag').equippedOn).toBeUndefined();
   });
 });

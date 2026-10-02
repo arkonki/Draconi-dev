@@ -17,6 +17,7 @@ import { formatItemAttackRange } from '../../lib/itemRange';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { calculateEncumbrance, getStrengthFromCharacter } from '../../lib/encumbrance';
 import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
+import { findItemDefinition, resolveItemSlots } from '../../../shared/encumbrance.js';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
@@ -55,6 +56,7 @@ const formatCategoryLabel = (cat: string) => {
 const isItemEquippable = (details?: ItemDetails): boolean => {
     if (details?.equippable === true) return true;
     const cat = details?.category?.toUpperCase();
+    if (cat === 'CONTAINERS' || cat === 'ANIMALS' || details?.is_container) return true;
     return cat ? DEFAULT_EQUIPPABLE_CATEGORIES.includes(cat) : false;
 };
 
@@ -63,17 +65,6 @@ const isItemConsumable = (item: InventoryItem, details?: ItemDetails): boolean =
     if (isItemEquippable(details)) return false;
     const name = item.name.toLowerCase();
     return CONSUMABLE_KEYWORDS.some(k => name.includes(k));
-};
-
-const parseComplexItemName = (name: string): { baseName: string, quantity: number | null, unit: string | null } => {
-    if (!name) return { baseName: '', quantity: null, unit: null };
-    const bracketRegex = /^(.*)\s\((\d+)\)$/;
-    const unitRegex = /^(.*)\s(\d+)\s([a-zA-Z\s]+)$/;
-    let match = name.match(bracketRegex);
-    if (match) return { baseName: match[1].trim(), quantity: parseInt(match[2]), unit: null };
-    match = name.match(unitRegex);
-    if (match) return { baseName: match[1].trim(), quantity: parseInt(match[2]), unit: match[3].trim() };
-    return { baseName: name, quantity: null, unit: null };
 };
 
 const parsePackName = (name: string, dbQuantity?: number): { name: string, quantity: number } => {
@@ -206,7 +197,7 @@ const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: R
             {name ? (
                 <div className="flex justify-between items-start">
                     <span className="text-xs font-bold text-gray-800 line-clamp-2 leading-tight pr-4">{name}</span>
-                    <button onClick={onUnequip} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors" title="Unequip"><MinusSquare size={14} /></button>
+                    <button type="button" onClick={onUnequip} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors" title="Unequip" aria-label={`Unequip ${name}`}><MinusSquare size={14} /></button>
                 </div>
             ) : <span className="text-xs text-gray-400 italic">Empty</span>}
             {subItems}
@@ -364,14 +355,10 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
     const getItemData = (item: InventoryItem | string): ItemDetails => {
         const name = typeof item === 'string' ? item : item.name;
         if (!name) return undefined;
-        const parsedQuery = parseComplexItemName(name);
-        const searchName = parsedQuery.baseName || name;
-        const staticDetails = allGameItems.find(i =>
-            i.name?.toLowerCase() === searchName.toLowerCase() ||
-            parseComplexItemName(i.name).baseName.toLowerCase() === searchName.toLowerCase()
-        );
-        if (typeof item !== 'string') { return { ...staticDetails, ...item }; }
-        return staticDetails;
+        const staticDetails = findItemDefinition(item, allGameItems);
+        const slots = resolveItemSlots(item, staticDetails);
+        if (typeof item !== 'string') { return { ...staticDetails, ...item, weight: slots.unitWeight } as ItemDetails; }
+        return staticDetails ? { ...staticDetails, weight: slots.unitWeight } : undefined;
     };
 
     const encumbrance = useMemo(() => calculateEncumbrance(character, allGameItems), [character, allGameItems]);
@@ -395,9 +382,12 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         if (!itemCost) return;
         const { success, newMoney } = subtractCost(character.equipment!.money!, itemCost);
         if (!success) return;
-        const { name, quantity } = parsePackName(item.name, item.quantity);
+        const { name, quantity } = parsePackName(item.name, typeof item.quantity === 'number' ? item.quantity : undefined);
         // Ensure we add a brand new item if it's unique equipment
-        const newItem = { name, quantity, weight: item.weight, id: generateId() };
+        const newItem: InventoryItem = {
+            name, quantity, weight: resolveItemSlots({ name }, item).unitWeight,
+            weightBasis: 'unit', definitionId: item.id, originalName: item.name, id: generateId(),
+        };
         const newInventory = mergeIntoInventory(character.equipment!.inventory!, newItem);
         handleUpdateEquipment({ ...character.equipment, inventory: newInventory, money: newMoney });
     };
@@ -412,9 +402,13 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         if (invItemIndex === -1) return;
 
         // Remove ONE count of the item from inventory
-        const itemToMove = { ...inventory[invItemIndex], quantity: 1 };
+        const itemToMove = {
+            ...inventory[invItemIndex], quantity: 1, containerId: undefined,
+            temporarilyPlaced: false, carriedByActorId: character.id, locationId: undefined,
+        };
 
         if (inventory[invItemIndex].quantity > 1) {
+            itemToMove.id = generateId();
             inventory[invItemIndex].quantity -= 1;
         } else {
             inventory.splice(invItemIndex, 1);
@@ -548,25 +542,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                 // For weapons/clothing stored as strings, we recreate object. For objects, we strip equippedOn.
                 itemToReturn = (typeof removed === 'string') ? itemToReturn : { ...removed, quantity: 1, equippedOn: undefined };
 
-                if (type === 'animal' && itemId) {
-                    newEquipment.equipped.containers = newEquipment.equipped.containers.filter((c: InventoryItem) => {
-                        if (c.equippedOn === itemId) {
-                            newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, c);
-                            return false;
-                        }
-                        return true;
-                    });
-                }
-
                 // If unequipping a container OR animal, release all items inside it to the main inventory
                 if ((type === 'container' || type === 'animal') && itemId) {
-                    // 1. Move items stored INSIDE this container/animal back to main inventory
-                    newEquipment.inventory = (newEquipment.inventory || []).map((i: InventoryItem) => {
-                        if (i.containerId === itemId) {
-                            return { ...i, containerId: undefined };
-                        }
-                        return i;
-                    });
+                    const releasedIds = new Set([itemId]);
 
                     // 2. If it's an animal, also unequip any attached items (like Saddle Bags)
                     if (type === 'animal') {
@@ -575,7 +553,8 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
                         newEquipment.equipped.containers.forEach((c: InventoryItem) => {
                             if (c.equippedOn === itemId) {
-                                returnedContainers.push({ ...c, equippedOn: undefined });
+                                if (c.id) releasedIds.add(c.id);
+                                returnedContainers.push({ ...c, equippedOn: undefined, containerId: undefined });
                             } else {
                                 keptContainers.push(c);
                             }
@@ -586,6 +565,11 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             newEquipment.inventory = mergeIntoInventory(newEquipment.inventory, rc);
                         });
                     }
+                    newEquipment.inventory = (newEquipment.inventory || []).map((i: InventoryItem) => (
+                        i.containerId && releasedIds.has(i.containerId)
+                            ? { ...i, containerId: undefined, temporarilyPlaced: false, carriedByActorId: character.id, locationId: undefined }
+                            : i
+                    ));
                 }
             }
         }
@@ -623,6 +607,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         // If we want to move partial stack, we'd need a modal. For now, move ENTIRE stack.
 
         const [movedItem] = inventory.splice(invItemIndex, 1);
+        movedItem.temporarilyPlaced = false;
+        movedItem.carriedByActorId = character.id;
+        delete movedItem.locationId;
 
         // 2. Update containerId
         if (targetContainerId) {
@@ -650,6 +637,19 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                     <LoadoutSlot icon={Shield} label="Head" item={eq.helmet} onUnequip={() => handleUnequipItem(eq.helmet!, 'helmet')} />
                     {[0, 1, 2].map(idx => (<LoadoutSlot key={idx} icon={Sword} label={`Hand ${idx + 1}`} item={eq.weapons[idx]} onUnequip={() => handleUnequipItem(eq.weapons[idx]?.name, 'weapon', undefined, idx)} />))}
                 </div>
+                {((eq.containers?.length || 0) > 0 || (eq.animals?.length || 0) > 0) && (
+                    <div className="mt-3 border-t border-slate-200 pt-3">
+                        <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Worn packs & mounts</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {(eq.containers || []).map((container: InventoryItem, index: number) => {
+                                const bonus = encumbrance.capacityBonuses.find(entry => entry.id === container.id && entry.name === container.name)?.slots;
+                                const storage = container.id ? encumbrance.containerStats[container.id] : undefined;
+                                return <LoadoutSlot key={container.id || `container-${index}`} icon={Backpack} label={storage?.storageKind === 'mount' ? 'Mount bag' : storage?.storageKind === 'external' ? 'Stored container' : 'Worn pack'} item={container} onUnequip={() => handleUnequipItem(container.name, 'container', container.id)} subItems={<span className="mt-1 text-[10px] text-gray-500">{bonus ? `+${bonus} carrying slots` : storage?.storageKind === 'mount' ? 'Contents carried by mount' : storage?.storageKind === 'external' ? 'Contents stored elsewhere' : 'Contents count toward carried load'}</span>} />;
+                            })}
+                            {(eq.animals || []).map((animal: InventoryItem, index: number) => <LoadoutSlot key={animal.id || `animal-${index}`} icon={Anchor} label="Mount / pack animal" item={animal} onUnequip={() => handleUnequipItem(animal.name, 'animal', animal.id)} subItems={<span className="mt-1 text-[10px] text-gray-500">Cargo does not count toward your load</span>} />)}
+                        </div>
+                    </div>
+                )}
                 {/* Worn Clothes (Just display chips, not tabs) */}
                 {clothes.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar mt-2 border-t pt-2 border-gray-100">
@@ -674,10 +674,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             ...(character.equipment?.equipped?.animals || [])
         ];
 
-        const equippedContainers = allEquippedStorage.filter((c: InventoryItem) => {
-            const d = getItemData(c);
-            return !!d?.is_container;
-        });
+        const equippedContainers = allEquippedStorage.filter((c: InventoryItem) => c.id && encumbrance.containerStats[c.id]);
         // Filter out the container we are currently in (if any)
         const currentContainerId = item.containerId;
         const moveTargets = equippedContainers.filter((c: InventoryItem) => c.id !== currentContainerId);
@@ -693,7 +690,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                         <div className="flex flex-wrap gap-1.5 mt-1">
                             {itemDetails?.weight !== undefined && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium" title="Weight">
-                                    <Weight size={10} /> {itemDetails.weight}
+                                    <Weight size={10} /> {/ration/i.test(item.name) ? '4 rations/slot' : `${itemDetails.weight} slots/unit`}
                                 </span>
                             )}
 
@@ -871,6 +868,11 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                         {activeTab === 'inventory' && (
                             <div className="inventory-tab-body pb-4">
                                 {renderLoadout()}
+                                <div className="border-b bg-indigo-50/50 px-4 py-2 text-xs text-gray-600" aria-label="Encumbrance breakdown">
+                                    <p><strong>{encumbrance.load} carried slots / {encumbrance.capacity} capacity</strong> · STR {getStrengthFromCharacter(character)} → {encumbrance.baseCapacity} base{encumbrance.capacityBonuses.map((bonus, index) => <span key={bonus.id || index}> + {bonus.slots} {bonus.name}</span>)}</p>
+                                    <p className="mt-1">Worn equipment is excluded. Contents of carried packs still count; mount cargo and items left elsewhere do not.</p>
+                                    {encumbrance.unresolvedContainerItemIds.length > 0 && <p className="mt-1 text-amber-800">Some items reference missing containers. They are shown in Main Inventory and still count unless explicitly stored elsewhere.</p>}
+                                </div>
 
                                 <div className="inventory-quick-actions flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2">
                                     <p className="text-xs text-gray-500">Record provisions gathered during play.</p>
@@ -887,6 +889,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                     >
                                         <Package size={14} /> Main Inventory
                                     </button>
+                                    {(character.equipment.inventory || []).some(item => item.id && encumbrance.itemLocations[item.id] === 'external' && (!item.containerId || !encumbrance.containerStats[item.containerId])) && (
+                                        <button type="button" onClick={() => setActiveInventoryTab('external')} className={`flex items-center gap-2 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 ${activeInventoryTab === 'external' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500'}`}><Anchor size={14} /> Items stored elsewhere</button>
+                                    )}
 
                                     {/* Render tabs for all storage providers (Containers + Animals) */}
                                     {(() => {
@@ -895,10 +900,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                         const storageTabs = [
                                             ...(eq?.containers || []),
                                             ...(eq?.animals || [])
-                                        ].filter(c => {
-                                            const d = getItemData(c);
-                                            return !!d?.is_container;
-                                        });
+                                        ].filter(c => c.id && encumbrance.containerStats[c.id]);
 
                                         return storageTabs.map(tab => {
                                             const isActive = activeInventoryTab === tab.id;
@@ -907,19 +909,13 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                             return (
                                                 <div
                                                     key={tab.id}
-                                                    onClick={() => setActiveInventoryTab(tab.id!)}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === 'Enter' || event.key === ' ') {
-                                                            event.preventDefault();
-                                                            setActiveInventoryTab(tab.id!);
-                                                        }
-                                                    }}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    className={`group relative flex items-center gap-2 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition-all pr-8 ${isActive ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'}`}
+                                                    className={`group relative flex items-center text-xs font-bold whitespace-nowrap border-b-2 transition-all ${isActive ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'}`}
                                                 >
+                                                    <button type="button" onClick={() => setActiveInventoryTab(tab.id!)} aria-label={`Open ${tab.name} storage`} aria-pressed={isActive} className="flex items-center gap-2 pl-3 pr-8 py-2">
                                                     {unequipType === 'animal' ? <Anchor size={14} /> : <Backpack size={14} />}
                                                     {tab.name}
+                                                    <span className="text-[9px] font-normal opacity-70">{encumbrance.containerStats[tab.id!]?.storageKind === 'carried' ? 'Carried' : encumbrance.containerStats[tab.id!]?.storageKind === 'mount' ? 'Mount' : 'Stored'}</span>
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={(e) => {
@@ -962,13 +958,16 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
                                             // FILTER LIST BASED ON ACTIVE TAB
                                             const currentItems = allItems.filter(item => {
-                                                if (activeInventoryTab === 'main') return !item.containerId;
+                                                const looseItem = !item.containerId || !encumbrance.containerStats[item.containerId];
+                                                const external = item.id && encumbrance.itemLocations[item.id] === 'external';
+                                                if (activeInventoryTab === 'main') return looseItem && !external;
+                                                if (activeInventoryTab === 'external') return looseItem && external;
                                                 return item.containerId === activeInventoryTab;
                                             });
 
                                             // Get stats for current tab
                                             let currentStats = { load: encumbrance.load, capacity: encumbrance.capacity };
-                                            if (activeInventoryTab !== 'main') {
+                                            if (activeInventoryTab !== 'main' && activeInventoryTab !== 'external') {
                                                 currentStats = encumbrance.containerStats?.[activeInventoryTab] || { load: 0, capacity: 10 };
                                             }
 
@@ -977,12 +976,13 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                     {/* Context Header for Current View */}
                                                     <div className="flex items-center justify-between mb-4">
                                                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                                                            {activeInventoryTab === 'main' ? "Items Carried" : "Container Contents"}
+                                                            {activeInventoryTab === 'main' ? "Items Carried" : activeInventoryTab === 'external' ? 'Items stored elsewhere' : "Container Contents"}
                                                         </h3>
                                                         <div className={`px-2 py-0.5 rounded text-[10px] font-bold border ${currentStats.load > currentStats.capacity ? 'bg-red-50 text-red-600 border-red-100' : 'bg-white text-gray-500 border-gray-200'}`}>
-                                                            LOAD: {currentStats.load} / {currentStats.capacity}
+                                                            {activeInventoryTab === 'external' ? 'Excluded from carried load' : `LOAD: ${currentStats.load} / ${currentStats.capacity}`}
                                                         </div>
                                                     </div>
+                                                    {activeInventoryTab !== 'main' && activeInventoryTab !== 'external' && <p className="mb-3 text-xs text-gray-500">{encumbrance.containerStats[activeInventoryTab]?.countsTowardCarriedLoad ? 'These contents also count toward your total carried load.' : 'These contents are carried by a mount or stored elsewhere and do not count toward your load.'}</p>}
 
                                                     {currentItems.length === 0 ? (
                                                         <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-lg">
@@ -997,7 +997,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                             const carriedItems: InventoryItem[] = [];
                                                             currentItems.forEach(item => {
                                                                 const details = getItemData(item);
-                                                                if (details && (Number(details.weight) === 0 || details.weight === "0")) {
+                                                                if (details?.weight === 0) {
                                                                     tinyItems.push(item);
                                                                 } else {
                                                                     carriedItems.push(item);

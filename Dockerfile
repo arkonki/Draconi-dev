@@ -8,6 +8,7 @@ COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json ./
 COPY vite.config.ts tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src
+COPY shared ./shared
 RUN npm run build
 
 FROM nginx:1.27-alpine

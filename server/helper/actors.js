@@ -1,5 +1,6 @@
 import { conditionId, equipmentItemId, inventoryItemId } from './identifiers.js';
 import { HelperError } from './errors.js';
+import { calculateSlotEncumbrance, findItemDefinition, itemBundle, resolveItemSlots } from '../../shared/encumbrance.js';
 
 function conditionRecord(actorId, key, entry = {}) {
   return {
@@ -50,8 +51,7 @@ function finiteNumber(value) {
 }
 
 function definitionForItem(item, definitionsByName) {
-  const name = nullableString(item.name || item.originalName);
-  return name ? definitionsByName.get(name.toLowerCase()) || null : null;
+  return findItemDefinition(item, [...definitionsByName.values()]) || null;
 }
 
 function itemPlacement(actorId, item, { equipped = false, held = false } = {}) {
@@ -84,6 +84,7 @@ function normalizedItem(actorId, value, index, {
   const definitionId = nullableString(item.definitionId || item.definition_id) || definition?.id || null;
   const notes = definitionId ? itemNotes?.[definitionId] || null : null;
   const placement = itemPlacement(actorId, item, { equipped, held });
+  const slots = resolveItemSlots(item, definition);
   const storedInstanceId = identityKeys
     .map((key) => instanceIds[key])
     .find(Boolean);
@@ -103,7 +104,9 @@ function normalizedItem(actorId, value, index, {
     description: item.description ?? definition?.description ?? null,
     category: item.category ?? definition?.category ?? null,
     quantity: finiteNumber(item.quantity) ?? 1,
-    weight: item.weight ?? definition?.weight ?? null,
+    weight: slots.unknownWeight ? null : slots.unitWeight,
+    weightBasis: 'unit',
+    equippedOn: nullableString(item.equippedOn || item.equipped_on),
     damage: item.damage ?? definition?.damage ?? null,
     range: item.range ?? definition?.range ?? null,
     grip: item.grip ?? definition?.grip ?? null,
@@ -133,6 +136,7 @@ function normalizedItem(actorId, value, index, {
       isContainer: Boolean(item.is_container ?? definition?.is_container),
       containerCapacity: item.container_capacity ?? definition?.container_capacity ?? null,
       encumbranceModifier: item.encumbrance_modifier ?? definition?.encumbrance_modifier ?? null,
+      unknownWeight: slots.unknownWeight,
     },
     _stored: value,
   };
@@ -237,9 +241,27 @@ export function normalizeCharacterEquipment(actorId, equipment, {
     ...containers,
     ...animals,
   ]);
+  const canonicalIds = new Map(allEquipment.filter(item => item._stored?.id).map(item => [item._stored.id, item.id]));
+  for (const item of allEquipment) {
+    if (canonicalIds.has(item.placement.containerId)) item.placement.containerId = canonicalIds.get(item.placement.containerId);
+    if (canonicalIds.has(item.equippedOn)) item.equippedOn = canonicalIds.get(item.equippedOn);
+    item.location = item.placement.containerId || item.placement.locationId;
+  }
   const specialCategories = new Set(['SPECIAL', 'MAGIC', 'QUEST', 'MEMENTO', 'ARTIFACT']);
+  const storedProvider = item => ({
+    ...storedItemObject(item._stored), id: item.id,
+    equippedOn: item.equippedOn || undefined,
+    containerId: item.placement.containerId || undefined,
+  });
   return {
-    document: { ...document, schemaVersion: 'equipment-v2', instanceIds },
+    document: {
+      ...document, schemaVersion: 'equipment-v2', instanceIds,
+      equipped: {
+        ...equipped,
+        ...(Array.isArray(equipped.containers) ? { containers: containers.map(storedProvider) } : {}),
+        ...(Array.isArray(equipped.animals) ? { animals: animals.map(storedProvider) } : {}),
+      },
+    },
     inventory: normalizedInventory,
     weapons,
     armor,
@@ -262,58 +284,32 @@ export function normalizeCharacterEquipment(actorId, equipment, {
 export function calculateEncumbrance(actor) {
   const strength = finiteNumber(actor?.attributes?.STR ?? actor?.attributes?.str);
   if (strength === null) return null;
-  const equipment = Array.isArray(actor.equipment) ? actor.equipment : [];
-  const inventory = Array.isArray(actor.inventory) ? actor.inventory : [];
-  let capacity = Math.ceil(strength / 2);
-  for (const item of equipment) {
-    if (item.equipped && !item.properties?.isContainer) {
-      const modifier = Number(item.properties?.encumbranceModifier);
-      if (Number.isFinite(modifier)) capacity += modifier;
-    }
-  }
-  const storageProviders = equipment.filter((item) => (
-    item.properties?.isContainer && ['container', 'animal'].includes(item.slot)
-  ));
-  const containerLoads = Object.fromEntries(storageProviders.map((item) => [item.id, {
-    id: item.id,
-    name: item.name,
-    load: 0,
-    capacity: finiteNumber(item.properties.containerCapacity) ?? 10,
-    isOverloaded: false,
-  }]));
-  let totalCarriedLoad = 0;
-  let rationCount = 0;
-  const unknownWeightItemIds = [];
-  for (const item of inventory) {
-    const quantity = finiteNumber(item.quantity) ?? 1;
-    const explicitWeight = finiteNumber(item.weight);
-    const weight = item.name.toLowerCase().includes('ration')
-      ? 0.25
-      : explicitWeight ?? 1;
-    if (item.weight === null || item.weight === undefined || item.weight === '') {
-      unknownWeightItemIds.push(item.id);
-    }
-    const load = weight * quantity;
-    const container = item.placement?.containerId
-      ? containerLoads[item.placement.containerId]
-      : null;
-    if (container) container.load += load;
-    else if (item.name.toLowerCase().includes('ration')) rationCount += quantity;
-    else totalCarriedLoad += load;
-  }
-  totalCarriedLoad += Math.ceil(rationCount / 4);
-  for (const container of Object.values(containerLoads)) {
-    container.load = Math.ceil(container.load * 10) / 10;
-    container.isOverloaded = container.load > container.capacity;
-  }
+  const mapItem = item => ({
+    id: item.id, name: item.name, quantity: item.quantity, weight: item.weight,
+    slot: item.slot, equipped: item.equipped,
+    containerId: item.placement?.containerId, equippedOn: item.equippedOn,
+    carriedByActorId: item.placement?.carriedByActorId,
+    temporarilyPlaced: item.placement?.temporarilyPlaced,
+    isContainer: item.properties?.isContainer,
+    containerCapacity: item.properties?.containerCapacity,
+    encumbranceModifier: item.properties?.encumbranceModifier,
+    unknownWeight: item.properties?.unknownWeight,
+  });
+  const result = calculateSlotEncumbrance({
+    strength, actorId: actor.id,
+    inventory: (actor.inventory || []).map(mapItem),
+    equipped: (actor.equipment || []).filter(item => item.slot !== 'inventory').map(mapItem),
+  });
   return {
     schemaVersion: 'encumbrance-v1',
-    capacity,
-    totalCarriedLoad,
-    threshold: capacity,
-    isEncumbered: totalCarriedLoad > capacity,
-    containerLoads: Object.values(containerLoads),
-    unknownWeightItemIds,
+    capacity: result.capacity, baseCapacity: result.baseCapacity,
+    capacityBonuses: result.capacityBonuses,
+    totalCarriedLoad: result.load, threshold: result.capacity,
+    isEncumbered: result.isEncumbered,
+    containerLoads: Object.values(result.containerStats),
+    externalLoad: result.externalLoad,
+    unknownWeightItemIds: result.unknownWeightItemIds,
+    unresolvedContainerItemIds: result.unresolvedContainerItemIds,
   };
 }
 
@@ -556,7 +552,7 @@ export async function loadActor(client, campaignId, actorId, { forUpdate = false
     const equippedDocument = equipmentDocument.equipped && typeof equipmentDocument.equipped === 'object'
       ? equipmentDocument.equipped
       : {};
-    const equipmentNames = [
+    const equipmentEntries = [
       ...(Array.isArray(equipmentDocument.inventory) ? equipmentDocument.inventory : []),
       ...(Array.isArray(equippedDocument.weapons) ? equippedDocument.weapons : []),
       equippedDocument.armor,
@@ -565,18 +561,22 @@ export async function loadActor(client, campaignId, actorId, { forUpdate = false
       ...(Array.isArray(equippedDocument.wornClothes) ? equippedDocument.wornClothes : []),
       ...(Array.isArray(equippedDocument.containers) ? equippedDocument.containers : []),
       ...(Array.isArray(equippedDocument.animals) ? equippedDocument.animals : []),
-    ].flatMap((item) => {
+    ];
+    const equipmentDefinitionIds = equipmentEntries.map(item => storedItemObject(item).definitionId || storedItemObject(item).definition_id).filter(Boolean);
+    const equipmentNames = equipmentEntries.flatMap((item) => {
       const stored = storedItemObject(item);
       const name = nullableString(stored.name || stored.originalName);
-      return name ? [name.toLowerCase()] : [];
+      return name ? [name.toLowerCase(), itemBundle(name).name.toLowerCase()] : [];
     });
     let definitions = [];
     if (equipmentNames.length > 0) {
       const { rows } = await client.query(
         `SELECT * FROM game_items
          WHERE lower(name) = ANY($1::text[])
+            OR lower(regexp_replace(name, '\\s*\\([0-9]+\\s*[a-zA-Z]*\\)$', '')) = ANY($1::text[])
+            OR id::text = ANY($2::text[])
          ORDER BY lower(name), COALESCE(is_custom, false), created_at`,
-        [[...new Set(equipmentNames)]],
+        [[...new Set(equipmentNames)], [...new Set(equipmentDefinitionIds)]],
       );
       definitions = rows;
     }
@@ -617,6 +617,7 @@ function storedInventory(actor) {
     description: entry.description ?? undefined,
     quantity: entry.quantity,
     weight: entry.weight ?? undefined,
+    weightBasis: 'unit',
     ownerId: entry.placement?.ownerId ?? undefined,
     carriedByActorId: entry.placement?.carriedByActorId ?? undefined,
     locationId: entry.placement?.locationId ?? undefined,

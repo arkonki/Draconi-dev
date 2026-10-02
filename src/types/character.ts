@@ -23,6 +23,15 @@ export interface InventoryItem {
   description?: string;
   category?: string; // 'WEAPON', 'ARMOR', 'LOOT', etc.
   weight?: number;
+  weightBasis?: 'unit' | 'bundle'; // Encumbrance slots per unit, or legacy bundle
+  definitionId?: string;
+  originalName?: string;
+  temporarilyPlaced?: boolean;
+  carriedByActorId?: string | null;
+  locationId?: string;
+  is_container?: boolean;
+  container_capacity?: number;
+  encumbrance_modifier?: number;
   cost?: string | number; // Support text like "10 gold" or numbers
   containerId?: string; // ID of the container this item is inside
   equippedOn?: string; // ID of the entity (like Animal) this item is equipped on

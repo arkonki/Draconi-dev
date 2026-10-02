@@ -248,7 +248,7 @@ describe('Dragonbane Helper actor equipment', () => {
     });
     expect(result).toMatchObject({
       capacity: 5,
-      totalCarriedLoad: 2,
+      totalCarriedLoad: 4,
       isEncumbered: false,
       containerLoads: [{ load: 2, capacity: 4, isOverloaded: false }],
     });

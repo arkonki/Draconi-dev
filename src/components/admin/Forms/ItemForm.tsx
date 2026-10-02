@@ -179,8 +179,9 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Weight */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
-          <input type="number" value={itemData.weight || ''} onChange={(e) => onChange('weight', parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.1" />
+          <label className="block text-sm font-medium text-gray-700 mb-1">Encumbrance slots</label>
+          <input type="number" value={itemData.weight ?? ''} onChange={(e) => onChange('weight', e.target.value === '' ? undefined : parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.01" />
+          <p className="mt-1 text-xs text-gray-500">Not kilograms: ordinary items use 1 slot, tiny items 0, and heavy items more. For a named bundle such as Arrows (20), enter the whole bundle's slots.</p>
         </div>
 
         {/* Quantity / Count */}

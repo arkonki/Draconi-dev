@@ -59,6 +59,54 @@ describe('shared character encumbrance', () => {
     expect(calculateEncumbrance(hero, [item('Arrows (20)', 1)]).load).toBe(1);
   });
 
+  it('includes carried backpack contents regardless of the storage flag', () => {
+    for (const is_container of [false, true]) {
+      const hero = character(11, [{ id: 'rope', name: 'Rope', quantity: 8, containerId: 'pack' }], {
+        containers: [{ id: 'pack', name: 'Backpack', quantity: 1 }],
+      });
+      const result = calculateEncumbrance(hero, [item('Rope', 1), item('Backpack', 1, { is_container, encumbrance_modifier: 2 })]);
+      expect(result).toMatchObject({ baseCapacity: 6, capacity: 8, load: 8, isEncumbered: false });
+      expect(result.containerStats.pack).toMatchObject({ load: 8, countsTowardCarriedLoad: true });
+    }
+  });
+
+  it('counts missing-container and missing-weight items conservatively, preserving explicit zero', () => {
+    const hero = character(11, [
+      { id: 'orphan', name: 'Rope', quantity: 6, containerId: 'missing' },
+      { id: 'unknown', name: 'Cargo', quantity: 2, weight: null as unknown as number },
+      { id: 'tiny', name: 'Tiny item', quantity: 30, weight: 0 },
+    ]);
+    expect(calculateEncumbrance(hero, [item('Rope', 1)]))
+      .toMatchObject({ load: 8, isEncumbered: true, unresolvedContainerItemIds: ['orphan'], unknownWeightItemIds: ['unknown'] });
+  });
+
+  it('normalizes legacy purchases and explicit unit weights without double division', () => {
+    const definitions = [item('Arrows (20)', 1)];
+    for (const arrows of [
+      { name: 'Arrows (20)', quantity: 20 },
+      { name: 'Arrows', quantity: 20, weight: 1 },
+      { name: 'Arrows', quantity: 20, weight: 0.05, weightBasis: 'unit' as const },
+    ]) {
+      expect(calculateEncumbrance(character(12, [arrows]), definitions).load).toBe(1);
+    }
+    expect(calculateEncumbrance(character(12, [{ name: 'Arrows', quantity: 20, weight: 1, weightBasis: 'unit' }]), definitions).load).toBe(20);
+  });
+
+  it('separates mount bags, does not grant their bonus to the hero, and supports externally placed items', () => {
+    const hero = character(12, [
+      { name: 'Rope', quantity: 3 },
+      { id: 'cargo', name: 'Rope', quantity: 9, containerId: 'bag' },
+      { id: 'cache', name: 'Rope', quantity: 7, temporarilyPlaced: true, carriedByActorId: null },
+    ], {
+      animals: [{ id: 'horse', name: 'Horse', quantity: 1 }],
+      containers: [{ id: 'bag', name: 'Saddle bag', quantity: 1, equippedOn: 'horse' }],
+    });
+    const result = calculateEncumbrance(hero, [item('Rope', 1), item('Horse', 0, { is_container: true, container_capacity: 20 }), item('Saddle bag', 1, { encumbrance_modifier: 2 })]);
+    expect(result).toMatchObject({ capacity: 6, load: 3, externalLoad: 16 });
+    expect(result.containerStats.horse.capacity).toBe(22);
+    expect(result.containerStats.bag).toMatchObject({ load: 9, storageKind: 'mount', countsTowardCarriedLoad: false });
+  });
+
   it('accepts legacy JSON fields and handles missing or malformed equipment without crashing the sheet', () => {
     const hero = character(10, [{ name: 'Cargo', quantity: 6 }]);
     const legacy = { ...hero, attributes: JSON.stringify(hero.attributes), equipment: JSON.stringify(hero.equipment) } as unknown as Character;
