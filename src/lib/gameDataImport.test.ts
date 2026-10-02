@@ -33,6 +33,7 @@ describe('game data import', () => {
       weight: 1.5,
       quantity: 2,
       equippable: true,
+      encumbrance_modifier: 0,
       is_consumable: true,
       features: ['UTILITY', 'SURVIVAL'],
     });

@@ -162,7 +162,7 @@ CREATE TABLE game_items (
   supply text,
   quantity integer NOT NULL DEFAULT 1,
   equippable boolean NOT NULL DEFAULT false,
-  encumbrance_modifier numeric NOT NULL DEFAULT 1,
+  encumbrance_modifier numeric NOT NULL DEFAULT 0,
   is_container boolean NOT NULL DEFAULT false,
   container_capacity integer,
   is_consumable boolean NOT NULL DEFAULT false,

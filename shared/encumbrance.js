@@ -54,7 +54,9 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
     if (!parent) return false; // Unresolved references must not erase load.
     return isExternal(parent, new Set([...seen, parentId]));
   };
-  const capacityBonuses = equipped.filter(item => item.equipped !== false && !isExternal(item))
+  // Only carrying equipment grants extra slots. Legacy item records often have
+  // a default modifier of 1, including weapons, armor, and clothes.
+  const capacityBonuses = equipped.filter(item => item.slot === 'container' && item.equipped !== false && !isExternal(item))
     .map(item => ({ id: item.id, name: item.name, slots: finiteNonNegative(item.encumbranceModifier) ?? 0 }))
     .filter(bonus => bonus.slots > 0);
   const capacity = baseCapacity + capacityBonuses.reduce((sum, bonus) => sum + bonus.slots, 0);
@@ -64,7 +66,7 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
     let containerCapacity = finiteNonNegative(item.containerCapacity);
     if (!containerCapacity) containerCapacity = item.isContainer ? 10 : capacity;
     if (item.slot === 'animal') {
-      containerCapacity += equipped.filter(bag => bag.equippedOn === id)
+      containerCapacity += equipped.filter(bag => bag.slot === 'container' && bag.equipped !== false && bag.equippedOn === id)
         .reduce((sum, bag) => sum + (finiteNonNegative(bag.encumbranceModifier) ?? 0), 0);
     }
     containerStats[id] = {

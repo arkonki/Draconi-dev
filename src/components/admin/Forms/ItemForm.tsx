@@ -229,7 +229,7 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
                 placeholder="e.g., 2 for a backpack"
                 min="0"
               />
-              <p className="text-xs text-gray-500 mt-1">Increases CARRYING CAPACITY (STR/2) by this amount.</p>
+              <p className="text-xs text-gray-500 mt-1">Only equipped carrying containers (such as backpacks) increase capacity by this amount. Weapons, armor, and clothes do not grant extra slots; mount bags affect only the mount.</p>
             </div>
 
             {/* Container Logic */}

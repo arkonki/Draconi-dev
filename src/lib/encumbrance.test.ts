@@ -15,6 +15,19 @@ const item = (name: string, weight: number, extra: Partial<GameItem> = {}): Game
 });
 
 describe('shared character encumbrance', () => {
+  it('does not grant capacity for equipped weapons, armor, or clothing with legacy modifiers', () => {
+    const hero = character(14, [{ name: 'Rope', quantity: 7 }], {
+      weapons: [{ name: 'Short bow' }, { name: 'Dagger' }],
+      armor: 'Leather armor', wornClothes: ['Clothes'],
+    });
+    const definitions = ['Short bow', 'Dagger', 'Leather armor', 'Clothes'].map(name => item(name, 1, { encumbrance_modifier: 1 }));
+    expect(calculateEncumbrance(hero, definitions)).toMatchObject({
+      baseCapacity: 7, capacity: 7, load: 7, capacityBonuses: [], isEncumbered: false,
+    });
+    hero.equipment.inventory[0].quantity = 8;
+    expect(calculateEncumbrance(hero, definitions).isEncumbered).toBe(true);
+  });
+
   it('only becomes heavy above the rounded-up STR capacity and responds to STR changes', () => {
     const hero = character(11, [{ name: 'Rope', quantity: 6 }]);
     expect(calculateEncumbrance(hero, [item('Rope', 1)])).toMatchObject({ capacity: 6, load: 6, isEncumbered: false });

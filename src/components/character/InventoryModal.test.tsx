@@ -44,6 +44,8 @@ const gameItems = [
   { id: 'game-horse', name: 'Horse', category: 'ANIMALS', weight: 0, cost: '10 gold', is_container: true, container_capacity: 20 },
   { id: 'game-bag', name: 'Saddle bag', category: 'CONTAINERS', weight: 1, cost: '2 silver', is_container: true, container_capacity: 4, encumbrance_modifier: 2 },
   { id: 'game-arrows', name: 'Arrows (20)', category: 'RANGED WEAPONS', weight: 1, cost: '1 silver', description: 'A bundle of arrows.' },
+  { id: 'game-bow', name: 'Short bow', category: 'RANGED WEAPONS', weight: 1, encumbrance_modifier: 1 },
+  { id: 'game-dagger', name: 'Dagger', category: 'MELEE WEAPONS', weight: 1, encumbrance_modifier: 1 },
   {
     id: 'game-tent',
     name: 'Tent, Large',
@@ -78,9 +80,23 @@ function renderInventory(onClose = vi.fn()) {
 describe('InventoryModal', () => {
   beforeEach(() => {
     character.equipment = structuredClone(initialEquipment);
+    character.attributes.STR = 12;
     mocks.updateCharacterData.mockClear();
     mocks.fetchItems.mockReset();
     mocks.fetchItems.mockResolvedValue(gameItems);
+  });
+
+  it('shows STR 14 capacity as seven slots with an equipped bow and dagger', async () => {
+    character.attributes.STR = 14;
+    character.equipment.inventory[0].quantity = 7;
+    character.equipment.equipped.weapons = [{ name: 'Short bow' }, { name: 'Dagger' }];
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    expect(screen.getByText('7 / 7 Load')).toBeVisible();
+    const breakdown = screen.getByLabelText('Encumbrance breakdown');
+    expect(breakdown).toHaveTextContent('7 carried slots / 7 capacity · STR 14 → 7 base');
+    expect(breakdown).not.toHaveTextContent('Short bow');
+    expect(breakdown).not.toHaveTextContent('Dagger');
   });
 
   it('shows the heavy movement rules in inventory and dismisses them before the dialog', async () => {

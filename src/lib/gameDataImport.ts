@@ -207,7 +207,7 @@ function itemRecord(source: Record<string, SheetCell>, errors: string[]): Record
     supply: nullableText(source.supply),
     quantity: numberValue(source.quantity, 'Quantity', errors, { integer: true, minimum: 1, defaultValue: 1 }),
     equippable: booleanValue(source.equippable, 'Equippable', errors),
-    encumbrance_modifier: numberValue(source.encumbrance_modifier, 'Encumbrance modifier', errors, { minimum: 0, defaultValue: 1 }),
+    encumbrance_modifier: numberValue(source.encumbrance_modifier, 'Encumbrance modifier', errors, { minimum: 0, defaultValue: 0 }),
     is_container: booleanValue(source.is_container, 'Is container', errors),
     container_capacity: numberValue(source.container_capacity, 'Container capacity', errors, { integer: true, minimum: 0 }),
     is_consumable: booleanValue(source.is_consumable, 'Is consumable', errors),

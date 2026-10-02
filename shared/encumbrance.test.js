@@ -12,10 +12,13 @@ const definitions = [
   { id: 'arrows', name: 'Arrows (20)', weight: 1 },
   { id: 'rope', name: 'Rope', weight: 1 },
   { id: 'armor', name: 'Armor', weight: 3 },
+  { id: 'bow', name: 'Short bow', weight: 1, encumbrance_modifier: 1 },
+  { id: 'dagger', name: 'Dagger', weight: 1, encumbrance_modifier: 1 },
 ];
 
 describe('shared encumbrance rules and UI/MCP parity', () => {
   const cases = [
+    { name: 'legacy weapon modifiers do not grant extra storage', strength: 14, expectedCapacity: 7, inventory: [{ name: 'Rope', quantity: 7 }], equipped: { weapons: [{ name: 'Short bow' }, { name: 'Dagger' }] } },
     { name: 'worn gear excluded', inventory: [], equipped: { armor: 'Armor', weapons: [{ name: 'Rope' }] } },
     { name: 'pack contents carried', inventory: [{ name: 'Rope', quantity: 8, containerId: 'pack' }], equipped: { containers: [{ id: 'pack', name: 'Backpack' }] } },
     { name: 'mount and mounted-bag cargo excluded', inventory: [{ name: 'Rope', quantity: 9, containerId: 'bag' }], equipped: { animals: [{ id: 'horse', name: 'Horse' }], containers: [{ id: 'bag', name: 'Saddle bag', equippedOn: 'horse' }] } },
@@ -31,11 +34,12 @@ describe('shared encumbrance rules and UI/MCP parity', () => {
   for (const example of cases) {
     it(example.name, () => {
       const document = { inventory: example.inventory, equipped: { weapons: [], ...example.equipped } };
-      const character = { id: actorId, attributes: { STR: 11 }, equipment: document };
+      const character = { id: actorId, attributes: { STR: example.strength ?? 11 }, equipment: document };
       const ui = uiEncumbrance(character, definitions);
       const normalized = normalizeCharacterEquipment(actorId, document, { definitions });
       const mcp = mcpEncumbrance({ id: actorId, attributes: character.attributes, ...normalized });
       expect(mcp.capacity).toBe(ui.capacity);
+      if (example.expectedCapacity !== undefined) expect(ui.capacity).toBe(example.expectedCapacity);
       expect(mcp.totalCarriedLoad).toBe(ui.load);
       expect(mcp.isEncumbered).toBe(ui.isEncumbered);
       const storageSummary = containers => containers.map(({ name, load, capacity, storageKind }) => ({ name, load, capacity, storageKind }));
