@@ -16,6 +16,7 @@ import { Character, InventoryItem, EquippedWeapon } from '../../types/character'
 import { formatItemAttackRange } from '../../lib/itemRange';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { calculateEncumbrance, getStrengthFromCharacter } from '../../lib/encumbrance';
+import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
 
 // --- CONSTANTS ---
 const DEFAULT_EQUIPPABLE_CATEGORIES = ["ARMOR & HELMETS", "MELEE WEAPONS", "RANGED WEAPONS", "CLOTHES"];
@@ -858,7 +859,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                 bodyClassName="relative flex flex-col overflow-hidden"
             >
                     <div className="inventory-modal-header px-4 py-3 border-b flex items-center justify-between bg-white z-20">
-                        <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 rounded font-bold">HEAVY</span>}</div></div></div>
+                        <div className="inventory-modal-heading flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hidden sm:block"><Package size={20} /></div><div><h2 className="text-lg font-bold text-gray-900 leading-tight">Inventory</h2><div className="flex items-center gap-2 mt-0.5"><span className="text-xs text-gray-500 font-medium">{encumbrance.load} / {encumbrance.capacity} Load</span>{encumbrance.isEncumbered && <HeavyEncumbranceIndicator load={encumbrance.load} capacity={encumbrance.capacity} />}</div></div></div>
                         <div className="inventory-modal-toolbar flex items-center gap-2"><button type="button" onClick={() => setActivePanel('wallet')} aria-label="Open wallet" className="flex min-h-10 items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors"><Coins size={14} />{formatCost(character.equipment?.money || {})}</button><div className="h-8 w-px bg-gray-200 mx-1"></div><button type="button" onClick={onClose} aria-label="Close inventory" className="flex h-10 w-10 items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"><X size={20} /></button></div>
                     </div>
                     {activePanel === 'main' ? (

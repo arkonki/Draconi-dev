@@ -33,7 +33,13 @@ export function HeavyEncumbranceIndicator({ load, capacity }: { load: number; ca
   useEffect(() => {
     if (!position) return;
     const close = () => setPosition(null);
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }
+    };
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) close();
@@ -41,12 +47,13 @@ export function HeavyEncumbranceIndicator({ load, capacity }: { load: number; ca
     const onScroll = (event: Event) => {
       if (!(event.target instanceof Node) || !panelRef.current?.contains(event.target)) close();
     };
-    document.addEventListener('keydown', onKeyDown);
+    // Dismiss the tooltip before an enclosing inventory/character dialog.
+    document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', close);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', close);
@@ -65,7 +72,7 @@ export function HeavyEncumbranceIndicator({ load, capacity }: { load: number; ca
         onFocus={show}
         onBlur={() => setPosition(null)}
         onClick={show}
-        className="inline-flex min-h-7 items-center gap-1 rounded bg-red-100 px-1.5 text-[10px] font-bold font-sans text-red-700 shadow-sm hover:bg-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        className="inline-flex min-h-7 items-center gap-1 rounded bg-red-100 px-1.5 text-[10px] font-bold font-sans text-red-700 shadow-sm hover:bg-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-1"
       >
         <Weight size={12} aria-hidden="true" /> HEAVY <HelpCircle size={12} aria-hidden="true" />
       </button>

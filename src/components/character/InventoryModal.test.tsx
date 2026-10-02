@@ -61,20 +61,40 @@ vi.mock('../../lib/api/items', () => ({
   fetchItems: () => mocks.fetchItems(),
 }));
 
-function renderInventory() {
+function renderInventory(onClose = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <InventoryModal onClose={vi.fn()} />
+      <InventoryModal onClose={onClose} />
     </QueryClientProvider>,
   );
 }
 
 describe('InventoryModal', () => {
   beforeEach(() => {
+    character.equipment.inventory[0].quantity = 1;
     mocks.updateCharacterData.mockClear();
     mocks.fetchItems.mockReset();
     mocks.fetchItems.mockResolvedValue(gameItems);
+  });
+
+  it('shows the heavy movement rules in inventory and dismisses them before the dialog', async () => {
+    character.equipment.inventory[0].quantity = 7;
+    const onClose = vi.fn();
+    renderInventory(onClose);
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    const heavy = screen.getByRole('button', { name: /Over-encumbered/ });
+
+    fireEvent.mouseEnter(heavy);
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Load 7 / 6');
+    expect(tooltip).toHaveTextContent('make a STR roll whenever you want to move in a round of combat or walk for a shift of travel');
+    expect(tooltip).toHaveTextContent('drop what you are carrying or stay where you are');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('keeps dense item descriptions collapsed until requested', async () => {
