@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Spell as DetailedSpell } from '../../types/magic';
 import { Character, AttributeName, DiceType } from '../../types/character';
-import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X, Search, ChevronLeft } from 'lucide-react';
+import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X, Search, ChevronLeft, Info } from 'lucide-react';
 import { useSpells } from '../../hooks/useSpells';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -61,6 +61,18 @@ const SpellDetailView = ({ spell, currentWp, onBack }: { spell: DetailedSpell; c
   const foundRequirements = Object.keys(requirementExplanations).filter(key => spell.requirement?.includes(key));
 
   return (
+    <AccessibleDialog
+      onClose={onBack}
+      title={spell.name}
+      ariaLabel={`${spell.name} spell details`}
+      layer="nested"
+      size="xl"
+      fullScreenMobile
+      hideHeader
+      panelClassName="sm:h-[85dvh] sm:max-w-4xl"
+      bodyScrollable={false}
+      bodyClassName="flex flex-col"
+    >
     <section className="spell-detail-view flex min-h-0 flex-1 flex-col bg-white" aria-label={`${spell.name} spell details`}>
         <div className="spell-detail-pane-header flex shrink-0 items-center gap-3 border-b bg-stone-50 p-4 sm:px-6">
             <button
@@ -83,11 +95,11 @@ const SpellDetailView = ({ spell, currentWp, onBack }: { spell: DetailedSpell; c
         </div>
 
         {/* Content */}
-        <div className="spell-detail-pane-body flex-grow overflow-y-auto p-4 sm:p-6 space-y-6 bg-white">
+        <div data-dialog-scroll className="spell-detail-pane-body min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-6 bg-white">
             
             {/* Description Box */}
-            <div className="spell-detail-pane-description prose prose-stone prose-sm max-w-none text-stone-600 leading-relaxed italic border-l-4 border-stone-300 pl-4">
-                {spell.description}
+            <div className="spell-detail-pane-description prose prose-stone prose-sm max-w-none whitespace-pre-wrap break-words text-stone-600 leading-relaxed italic border-l-4 border-stone-300 pl-4">
+                {spell.description?.trim() || 'No description provided for this spell.'}
             </div>
 
             {/* Properties Grid */}
@@ -153,6 +165,7 @@ const SpellDetailView = ({ spell, currentWp, onBack }: { spell: DetailedSpell; c
 
         </div>
     </section>
+    </AccessibleDialog>
   );
 };
 
@@ -258,7 +271,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     window.requestAnimationFrame(() => {
       if (spellListRef.current) spellListRef.current.scrollTop = savedListScrollTopRef.current;
       if (triggerSpellId) {
-        document.querySelector<HTMLButtonElement>(`[data-spell-detail-trigger="${triggerSpellId}"]`)?.focus();
+        document.querySelector<HTMLButtonElement>(`[data-spell-detail-trigger="${triggerSpellId}"]`)?.focus({ preventScroll: true });
       }
     });
   };
@@ -487,7 +500,9 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
   };
 
   // --- ROW COMPONENT ---
-  const SpellRow = ({ spell }: { spell: DetailedSpell }) => {
+  // Render rows directly: a component defined inside this component would
+  // remount every row on updates, losing focus and interrupting pointer clicks.
+  const renderSpellRow = (spell: DetailedSpell) => {
     const isPrepared = preparedSpellIds.has(spell.id);
     const isTrick = spell.rank === 0;
     const isPowerLevelSpell = hasSpellPowerLevels(spell.powerLevel);
@@ -506,11 +521,11 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
     };
 
     return (
-      <div className="spell-row flex flex-col sm:flex-row sm:items-center p-3 sm:p-4 border-b border-stone-100 hover:bg-stone-50 transition-colors group">
+      <div key={spell.id} className="spell-row flex flex-col sm:flex-row sm:items-center p-3 sm:p-4 border-b border-stone-100 hover:bg-stone-50 transition-colors group">
         {/* Icon / Rank */}
-        <div className="spell-row-rank mr-4 hidden sm:flex flex-col items-center justify-center w-12 h-12 bg-stone-100 rounded-lg text-stone-500">
+        <button type="button" onClick={() => openSpellDetails(spell)} aria-label={`Open ${spell.name} description`} className="spell-row-rank mr-4 hidden sm:flex shrink-0 flex-col items-center justify-center w-12 h-12 bg-stone-100 hover:bg-indigo-100 rounded-lg text-stone-500 focus-visible:ring-2 focus-visible:ring-indigo-500">
            {isTrick ? <Sparkles size={20} /> : <span className="font-serif font-bold text-lg">{spell.rank}</span>}
-        </div>
+        </button>
 
         {/* Main Info */}
         <button
@@ -521,6 +536,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
           aria-label={`View details for ${spell.name}`}
         >
           <div className="spell-row-title flex items-center gap-2 mb-1">
+             <Info size={14} className="shrink-0 text-indigo-500" aria-hidden="true" />
              <h3 className="font-bold text-stone-800 group-hover:text-indigo-700 transition-colors truncate">{spell.name}</h3>
              {isReactionSpell && <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 rounded">Reaction</span>}
           </div>
@@ -602,10 +618,11 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
       hideHeader
       panelClassName="spellcasting-modal-shell sm:h-[85dvh] sm:max-w-4xl sm:border border-stone-200"
       bodyClassName="relative flex flex-col overflow-hidden"
+      bodyScrollable={false}
     >
          
          {/* Header */}
-         <div className="spellcasting-modal-header p-4 sm:p-6 border-b border-stone-200 bg-stone-50 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+         <div className="spellcasting-modal-header shrink-0 p-4 sm:p-6 border-b border-stone-200 bg-stone-50 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
             <div className="spellcasting-modal-heading min-w-0">
                <h2 className="text-2xl font-serif font-bold text-stone-900 flex items-center gap-2">
                   <Sparkles className="text-purple-600"/> Spellbook
@@ -720,10 +737,10 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          </div>
 
          {/* Spell List */}
-         <div ref={spellListRef} className="spellcasting-modal-list flex-grow overflow-y-auto bg-stone-50/30">
+         <div ref={spellListRef} data-dialog-scroll className="spellcasting-modal-list min-h-0 flex-1 overflow-y-auto overscroll-contain bg-stone-50/30">
             {spellsToDisplay.length > 0 ? (
                <div className="divide-y divide-stone-100">
-                  {spellsToDisplay.map(spell => <SpellRow key={spell.id} spell={spell} />)}
+                  {spellsToDisplay.map(renderSpellRow)}
                </div>
             ) : (
                <div className="flex flex-col items-center justify-center h-64 text-stone-400">
@@ -734,7 +751,7 @@ export function SpellcastingView({ onClose }: SpellcastingViewProps) {
          </div>
 
          {/* Footer */}
-         <div className="spellcasting-modal-footer p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
+         <div className="spellcasting-modal-footer shrink-0 p-3 border-t bg-stone-50 text-center text-xs text-stone-400 font-medium">
             Prep Limit: {preparedRankedSpellCount} / {preparationLimit} • Tricks don't count against limit
          </div>
          </>

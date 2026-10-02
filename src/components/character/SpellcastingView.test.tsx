@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Character } from '../../types/character';
 import type { Spell } from '../../types/magic';
 import { SpellcastingView } from './SpellcastingView';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
 
 const mocks = vi.hoisted(() => ({
   toggleDiceRoller: vi.fn(),
@@ -112,7 +113,7 @@ describe('SpellcastingView', () => {
 
   it('returns from internal spell details with query and scroll position intact', async () => {
     render(<SpellcastingView onClose={vi.fn()} />);
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog', { name: 'Character spellbook' });
     const search = screen.getByRole('searchbox', { name: 'Search spells' });
     const list = dialog.querySelector<HTMLDivElement>('.spellcasting-modal-list');
     expect(list).not.toBeNull();
@@ -123,6 +124,7 @@ describe('SpellcastingView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View details for Ember' }));
 
     expect(screen.getByRole('region', { name: 'Ember spell details' })).toBeInTheDocument();
+    expect(screen.getByText('Hurl a burning ember.')).toBeVisible();
     expect(screen.getByText('8 WP available')).toBeInTheDocument();
     expect(screen.getByText('2 WP base cost')).toBeInTheDocument();
 
@@ -133,6 +135,60 @@ describe('SpellcastingView', () => {
       expect(dialog.querySelector<HTMLDivElement>('.spellcasting-modal-list')?.scrollTop).toBe(180);
       expect(screen.getByRole('button', { name: 'View details for Ember' })).toHaveFocus();
     });
+  });
+
+  it('opens descriptions from the grimoire without casting or spending WP', () => {
+    render(<SpellcastingView onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Grimoire (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Stone Shield' }));
+
+    expect(screen.getByText('Raise a wall of stone.')).toBeVisible();
+    expect(mocks.toggleDiceRoller).not.toHaveBeenCalled();
+    expect(mocks.updateCharacterData).not.toHaveBeenCalled();
+  });
+
+  it('keeps the same spell buttons and focus through parent updates', () => {
+    const { rerender } = render(<SpellcastingView onClose={vi.fn()} />);
+    const details = screen.getByRole('button', { name: 'View details for Ember' });
+    details.focus();
+
+    rerender(<SpellcastingView onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'View details for Ember' })).toBe(details);
+    expect(details).toHaveFocus();
+    fireEvent.click(details);
+    expect(screen.getByText('Hurl a burning ember.')).toBeVisible();
+  });
+
+  it('opens a spell description from its rank icon', () => {
+    render(<SpellcastingView onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Ember description' }));
+    expect(screen.getByText('Hurl a burning ember.')).toBeVisible();
+  });
+
+  it('puts spell details above both party sheet and grimoire and closes only details on Escape', async () => {
+    const closeSheet = vi.fn();
+    const closeGrimoire = vi.fn();
+    render(
+      <AccessibleDialog title="Party character sheet" layer="critical" onClose={closeSheet}>
+        <SpellcastingView onClose={closeGrimoire} />
+      </AccessibleDialog>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Ember' }));
+    const details = screen.getByRole('dialog', { name: 'Ember spell details' });
+    const grimoire = screen.getByRole('dialog', { name: 'Character spellbook' });
+    expect(details.parentElement).toHaveStyle({ zIndex: '160' });
+    expect(grimoire.parentElement).toHaveStyle({ zIndex: '140' });
+    expect(details.parentElement?.parentElement).toBe(document.body);
+    expect(screen.getByText('Hurl a burning ember.')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to spell list' })).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Ember spell details' })).not.toBeInTheDocument();
+    expect(grimoire).toBeInTheDocument();
+    expect(closeSheet).not.toHaveBeenCalled();
+    expect(closeGrimoire).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'View details for Ember' })).toHaveFocus());
   });
 
   it('changes legacy power-level spells between levels and recalculates WP cost', () => {
