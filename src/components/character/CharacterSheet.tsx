@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Character, AttributeName } from '../../types/character';
 import { calculateMovement } from '../../lib/movement';
+import { calculateEncumbrance } from '../../lib/encumbrance';
+import { fetchItems } from '../../lib/api/items';
+import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
 import {
   HelpCircle, Swords, Bed, Award, ShieldCheck, Plus, Trash2, Minus,
   Bold, Italic, List, Pencil, Package, Sparkles, Book, UserSquare,
@@ -681,6 +684,16 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   const queryClient = useQueryClient();
   const { toggleDiceRoller } = useDice();
   const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
+  const { data: gameItems } = useQuery({
+    queryKey: ['gameItems'],
+    queryFn: () => fetchItems(),
+    staleTime: Infinity,
+    enabled: Boolean(character),
+  });
+  const encumbrance = useMemo(
+    () => calculateEncumbrance(gameItems ? character : null, gameItems || []),
+    [character, gameItems],
+  );
 
   const [showSpellcastingModal, setShowSpellcastingModal] = useState(false);
   const [showRestOptionsModal, setShowRestOptionsModal] = useState(false);
@@ -1050,7 +1063,10 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
              <div className="character-sheet-vitals-strip md:col-span-7 flex flex-wrap gap-2 md:gap-4 justify-center md:justify-end">
                 <div className="bg-[#1a472a] text-white px-3 py-1 md:px-4 md:py-2 clip-path-banner shadow-md text-center min-w-[80px]">
                    <div className="text-[9px] md:text-[10px] uppercase font-bold opacity-80">Movement</div>
-                   <div className="text-lg md:text-xl font-serif font-bold">{calculateMovement(character.kin, character.attributes?.AGL)} m</div>
+                   <div className="flex items-center justify-center gap-2 text-lg md:text-xl font-serif font-bold">
+                     <span>{calculateMovement(character.kin, character.attributes?.AGL)} m</span>
+                     {encumbrance.isEncumbered && <HeavyEncumbranceIndicator load={encumbrance.load} capacity={encumbrance.capacity} />}
+                   </div>
                 </div>
                 {strBonus && (
                   <div className="bg-[#8b2e2e] text-white px-3 py-1 md:px-4 md:py-2 clip-path-banner shadow-md text-center min-w-[80px]">
