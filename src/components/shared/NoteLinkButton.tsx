@@ -1,7 +1,8 @@
 import { FileText, ExternalLink, Loader2 } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import { getNotePath } from '../../lib/noteLinks';
 
 interface NoteLinkButtonProps {
     noteId: string;
@@ -12,6 +13,7 @@ interface NoteLinkButtonProps {
 
 export function NoteLinkButton({ noteId, partyId, title: initialTitle, className = '' }: NoteLinkButtonProps) {
     const navigate = useNavigate();
+    const location = useLocation();
     const [, setSearchParams] = useSearchParams();
 
     // Fetch note title if not provided
@@ -39,14 +41,10 @@ export function NoteLinkButton({ noteId, partyId, title: initialTitle, className
         e.stopPropagation();
 
         // If we are already on the party page, just update the search params
-        if (partyId && window.location.pathname.includes(`/adventure-party/${partyId}`)) {
-            setSearchParams({ noteId });
-        } else if (partyId) {
-            // Otherwise navigate to the party page with the noteId
-            navigate(`/adventure-party/${partyId}?noteId=${noteId}`);
+        if (partyId && location.pathname === `/party/${partyId}`) {
+            setSearchParams(previous => { const next = new URLSearchParams(previous); next.set('noteId', noteId); return next; });
         } else {
-            // Fallback for global notes page if needed
-            navigate(`/notes?noteId=${noteId}`);
+            navigate(getNotePath(noteId, partyId));
         }
     };
 

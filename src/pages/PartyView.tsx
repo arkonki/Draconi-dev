@@ -482,6 +482,7 @@ export function PartyView() {
               partyId={partyId!}
               isDM={isCampaignGM}
               openNoteId={noteIdFromUrl}
+              readOnly={party.campaign_role === 'observer' && !isAdmin()}
             />
           </Suspense>
         )}

@@ -9,6 +9,7 @@ import { PartyMap, MapPin as MapPinType, MapDrawing } from '../../types/atlas';
 import { useAuth } from '../../contexts/useAuth';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../../lib/appUrl';
+import { getNotePath } from '../../lib/noteLinks';
 import { localImageObjectPath } from '../../lib/images';
 
 interface AtlasViewProps {
@@ -215,7 +216,7 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
 
     const handleCopyLink = () => {
         if (!pin.note_id) return;
-        const url = getAbsoluteAppUrl(`adventure-party/${partyId}?noteId=${pin.note_id}`);
+        const url = getAbsoluteAppUrl(getNotePath(pin.note_id, partyId));
         navigator.clipboard.writeText(url).then(() => {
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);

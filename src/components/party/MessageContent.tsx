@@ -1,8 +1,8 @@
 import { NoteLinkButton } from '../shared/NoteLinkButton';
+import { parseNoteLink } from '../../lib/noteLinks';
 
 // Regex patterns
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
-const NOTE_URL_PATTERN = /\/adventure-party\/([^/?#\s]+)\?noteId=([^&#\s]+)/;
 const BOLD_REGEX = /\*\*(.*?)\*\*/g;
 const ITALIC_REGEX = /\*(.*?)\*/g;
 const CODE_REGEX = /`([^`]+)`/g;
@@ -15,13 +15,13 @@ export const MessageContent = ({ content }: { content: string }) => {
     <span className="whitespace-pre-wrap break-words">
       {parts.map((part, i) => {
         if (part.match(URL_REGEX)) {
-          const noteMatch = part.match(NOTE_URL_PATTERN);
+          const noteMatch = parseNoteLink(part);
           if (noteMatch) {
             return (
               <NoteLinkButton
                 key={i}
-                partyId={noteMatch[1]}
-                noteId={noteMatch[2]}
+                partyId={noteMatch.partyId}
+                noteId={noteMatch.noteId}
                 className="mx-1"
               />
             );

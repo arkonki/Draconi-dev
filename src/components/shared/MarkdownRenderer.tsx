@@ -3,13 +3,12 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { NoteLinkButton } from './NoteLinkButton';
+import { parseNoteLink } from '../../lib/noteLinks';
 
 interface MarkdownRendererProps {
   content: string;
   className?: string;
 }
-
-const NOTE_URL_PATTERN = /\/adventure-party\/([^/?#\s]+)\?noteId=([^&#\s]+)/;
 
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   return (
@@ -20,12 +19,12 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
         className={`prose prose-xl max-w-none font-cinzel ${className}`}
         components={{
           a: ({ children, href, ...props }) => {
-            const noteMatch = href?.match(NOTE_URL_PATTERN);
+            const noteMatch = href ? parseNoteLink(href) : null;
             if (noteMatch) {
               return (
                 <NoteLinkButton
-                  partyId={noteMatch[1]}
-                  noteId={noteMatch[2]}
+                  partyId={noteMatch.partyId}
+                  noteId={noteMatch.noteId}
                   title={String(children)}
                 />
               );

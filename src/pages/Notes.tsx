@@ -11,6 +11,10 @@ import { MarkdownRenderer } from '../components/shared/MarkdownRenderer';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { Button } from '../components/shared/Button';
 import { getAbsoluteAppUrl } from '../lib/appUrl';
+import { getNotePath } from '../lib/noteLinks';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { fetchParties, type Party } from '../lib/api/parties';
+import { canEditNote, canWritePartyNotes } from '../../shared/noteAccess.js';
 
 // --- TYPES ---
 interface Note {
@@ -33,12 +37,25 @@ interface LinkTarget {
 
 // --- MAIN COMPONENT ---
 export function Notes() {
-  const { user, isDM } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const admin = isAdmin();
+  const userId = user?.id;
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const noteId = searchParams.get('noteId');
 
   // Data State
   const [notes, setNotes] = useState<Note[]>([]);
   const [characters, setCharacters] = useState<LinkTarget[]>([]);
-  const [parties, setParties] = useState<LinkTarget[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const canManage = (note: Note) => canEditNote(note, { userId, isAdmin: admin, campaignRole: parties.find(party => party.id === note.party_id)?.campaign_role });
+  const selectNote = (note: Note | null) => {
+    setSelectedNote(note);
+    setViewState('view');
+    setSearchParams(previous => { const next = new URLSearchParams(previous); if (note) next.set('noteId', note.id); else next.delete('noteId'); return next; });
+  };
 
   // UI State
   const [viewState, setViewState] = useState<'view' | 'create' | 'edit'>('view');
@@ -102,6 +119,7 @@ export function Notes() {
   }, []);
 
   const handleOpenCreate = () => {
+    selectNote(null);
     resetForm();
     setViewState('create');
     setSelectedNote(null);
@@ -109,6 +127,7 @@ export function Notes() {
   };
 
   const handleOpenEdit = (note: Note) => {
+    if (!canManage(note)) return;
     setSelectedNote(note);
     setTitle(note.title);
     setContent(note.content);
@@ -126,8 +145,7 @@ export function Notes() {
   };
 
   const handleBackToList = () => {
-    setSelectedNote(null);
-    setViewState('view');
+    selectNote(null);
     setIsFullScreen(false);
   };
 
@@ -138,36 +156,56 @@ export function Notes() {
 
   // --- DATA LOADING ---
   const loadData = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
+    setLoadError(null);
 
     try {
-      const { data: chars } = await supabase.from('characters').select('id, name').eq('user_id', user.id);
-      setCharacters(chars || []);
+      const { data: chars, error: charsError } = await supabase.from('characters').select('id, name').eq('user_id', userId);
+      if (charsError) throw charsError;
+      setCharacters((chars ?? []) as unknown as LinkTarget[]);
 
-      if (isDM()) {
-        const { data: prts } = await supabase.from('parties').select('id, name').eq('created_by', user.id);
-        setParties(prts || []);
-      }
+      const accessibleParties = await fetchParties(userId);
+      setParties(accessibleParties);
 
-      const query = supabase.from('notes').select(`*, character:characters(name), party:parties(name)`).eq('user_id', user.id);
+      const query = supabase.from('notes').select(`*, character:characters(name), party:parties(name)`).eq('user_id', userId);
 
       const { data: notesData, error: notesError } = await query.order('created_at', { ascending: false });
       if (notesError) throw notesError;
-      setNotes(notesData || []);
+      setNotes((notesData ?? []) as unknown as Note[]);
 
     } catch (err) {
       console.error("Load error:", err);
+      setLoadError('Could not load your journal. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [user, isDM]);
+  }, [userId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!noteId) { setLinkError(null); return; }
+    if (loading || !userId) return;
+    let active = true;
+    const open = async () => {
+      const listed = notes.find(note => note.id === noteId);
+      const { data, error } = listed ? { data: listed, error: null } : await supabase.from('notes').select('*, character:characters(name), party:parties(name)').eq('id', noteId).single();
+      if (!active) return;
+      if (error || !data) { setSelectedNote(null); setLinkError('This journal entry was deleted or you do not have access to it.'); return; }
+      const note = data as Note;
+      if (note.party_id) { navigate(getNotePath(note.id, note.party_id), { replace: true }); return; }
+      setSelectedNote(note);
+      setLinkError(null);
+    };
+    void open().catch(() => { if (active) { setSelectedNote(null); setLinkError('Could not open this journal entry. Please try again.'); } });
+    return () => { active = false; };
+  }, [noteId, notes, loading, userId, navigate]);
 
   // --- ACTIONS ---
   const handleSubmit = async () => {
     if (!user) return;
+    if (viewState === 'edit' && selectedNote && !canManage(selectedNote)) { setFormError('You do not have permission to edit this journal entry.'); return; }
     if (!title.trim()) { setFormError('Title is required.'); return; }
 
     if (selectedCharacter && selectedParty) {
@@ -178,7 +216,6 @@ export function Notes() {
     const payload = {
       title: title.trim(),
       content,
-      user_id: user.id,
       character_id: selectedCharacter || null,
       party_id: selectedParty || null,
       updated_at: new Date().toISOString(),
@@ -195,20 +232,20 @@ export function Notes() {
           .select(`*, character:characters(name), party:parties(name)`)
           .single();
         if (error) throw error;
-        result = data;
+        result = data as unknown as Note | null;
       } else {
         const { data, error } = await supabase
           .from('notes')
-          .insert([payload])
+          .insert([{ ...payload, user_id: user.id }])
           .select(`*, character:characters(name), party:parties(name)`)
           .single();
         if (error) throw error;
-        result = data;
+        result = data as unknown as Note | null;
       }
 
       await loadData();
       handleCloseForm();
-      if (result) setSelectedNote(result);
+      if (result) selectNote(result);
 
     } catch {
       setFormError('Failed to save note.');
@@ -216,13 +253,14 @@ export function Notes() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!selectedNote || selectedNote.id !== id || !canManage(selectedNote)) return;
     if (!window.confirm("Delete this note?")) return;
     try {
-      await supabase.from('notes').delete().eq('id', id);
+      const { error } = await supabase.from('notes').delete().eq('id', id);
+      if (error) throw error;
       await loadData();
       if (selectedNote?.id === id) {
-        setSelectedNote(null);
-        setViewState('view');
+        selectNote(null);
       }
     } catch (err) {
       console.error('Failed to delete note:', err);
@@ -230,8 +268,8 @@ export function Notes() {
   };
 
   const handleCopyLink = () => {
-    if (!selectedNote || !selectedNote.party_id) return;
-    const url = getAbsoluteAppUrl(`adventure-party/${selectedNote.party_id}?noteId=${selectedNote.id}`);
+    if (!selectedNote) return;
+    const url = getAbsoluteAppUrl(getNotePath(selectedNote.id, selectedNote.party_id));
     navigator.clipboard.writeText(url).then(() => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
@@ -306,6 +344,7 @@ export function Notes() {
 
         {/* List */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {(linkError || loadError) && <p role="alert" className="p-3 text-sm text-red-700">{linkError || loadError}</p>}
           {filteredNotes.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <StickyNote className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -316,7 +355,7 @@ export function Notes() {
               <button
                 type="button"
                 key={note.id}
-                onClick={() => { setSelectedNote(note); setViewState('view'); }}
+                onClick={() => selectNote(note)}
                 className={`
                    p-3 rounded-lg cursor-pointer border transition-all group
                    ${selectedNote?.id === note.id
@@ -376,7 +415,7 @@ export function Notes() {
                     {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
-                {isDM() && (
+                {parties.some(party => canWritePartyNotes(party.campaign_role, admin)) && (
                   <div>
                     <label htmlFor="note-party-link" className="block text-sm font-bold text-gray-700 mb-1">Party Link (Opt)</label>
                     <select
@@ -387,8 +426,9 @@ export function Notes() {
                       disabled={!!selectedCharacter}
                     >
                       <option value="">None</option>
-                      {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {parties.filter(party => canWritePartyNotes(party.campaign_role, admin)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">Party entries are visible to every campaign member, including observers. Leave unlinked for a private entry.</p>
                   </div>
                 )}
               </div>
@@ -478,19 +518,17 @@ export function Notes() {
                   {isFullScreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
                 </Button>
 
-                {selectedNote.party_id && (
                   <Button
                     variant="ghost"
                     size="sm"
                     icon={LinkIcon}
                     onClick={handleCopyLink}
-                    title={linkCopied ? "Copied!" : "Copy link to party note"}
+                    title={linkCopied ? "Copied!" : "Copy link to note"}
                     className={linkCopied ? "text-green-600" : "text-gray-400 hover:text-blue-600"}
                   />
-                )}
 
-                <Button variant="secondary" size="sm" icon={Edit2} onClick={() => handleOpenEdit(selectedNote!)} title="Edit Note" />
-                <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => handleDelete(selectedNote!.id)} title="Delete Note" />
+                {canManage(selectedNote) && <><Button variant="secondary" size="sm" icon={Edit2} onClick={() => handleOpenEdit(selectedNote!)} title="Edit Note" />
+                <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => handleDelete(selectedNote!.id)} title="Delete Note" /></>}
               </div>
             </div>
 

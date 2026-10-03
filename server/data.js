@@ -1,6 +1,7 @@
 import { pool, withTransaction } from './db.js';
 import { canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
+import { canEditNote } from '../shared/noteAccess.js';
 
 const TABLES = new Set([
   'users', 'magic_schools', 'heroic_abilities', 'game_heroic_abilities', 'kin',
@@ -331,7 +332,7 @@ function canWrite(table, row, ctx, inserting = false) {
       && (row.user_id === ctx.user.id || partyGmAccess(ctx, row.party_id));
   }
   if (PARTY_SCOPED.has(table)) return partyWriteAccess(ctx, row.party_id);
-  if (table === 'notes') return partyWriteAccess(ctx, row.party_id) && (row.user_id === ctx.user.id || partyGmAccess(ctx, row.party_id));
+  if (table === 'notes') return canWriteNote(row, ctx);
   if (table === 'compendium') {
     return row.created_by === ctx.user.id && (!row.party_id || partyWriteAccess(ctx, row.party_id));
   }
@@ -342,6 +343,22 @@ function canWrite(table, row, ctx, inserting = false) {
   if (table === 'party_display_slots') return partyGmAccess(ctx, ctx.sessionParty.get(row.session_id));
   if (table === 'push_subscriptions' || table === 'user_notification_settings') return row.user_id === ctx.user.id;
   return false;
+}
+
+export function canWriteNote(row, ctx) {
+  return canEditNote(row, { userId: ctx.user.id, campaignRole: partyRole(ctx, row.party_id), isAdmin: ctx.admin });
+}
+
+export function validateNoteUpdate(row, prepared, ctx) {
+  if (prepared.user_id !== undefined && prepared.user_id !== row.user_id) {
+    throw new HttpError(403, 'The original journal author cannot be changed');
+  }
+  const next = { ...row, ...prepared, user_id: row.user_id };
+  if (!canWriteNote(row, ctx) || !canWriteNote(next, ctx)) throw new HttpError(403, 'Permission denied for this journal entry or destination party');
+  if (next.party_id && next.character_id) throw new HttpError(400, 'Link a journal entry to either a character or a party, not both');
+  if (next.character_id && next.character_id !== row.character_id && !ctx.admin && !ctx.characterIds.has(next.character_id)) {
+    throw new HttpError(403, 'Cannot link this journal entry to another user\'s character');
+  }
 }
 
 function getValues(value, path) {
@@ -716,9 +733,12 @@ async function synchronizeActiveEncounterVitals(table, rows, prepared, client) {
 }
 
 async function insertOne(table, input, ctx, client, onConflict) {
+  // Journal updates must authorize the existing entry and preserve its author.
+  if (table === 'notes' && onConflict) throw new HttpError(400, 'Use an explicit journal update instead of upsert');
   const owned = applyOwnership(table, input, ctx.user);
   let prepared = await preparePayload(table, owned, client);
   if (!canWrite(table, { ...owned, ...prepared }, ctx, true)) throw new HttpError(403, 'Permission denied');
+  if (table === 'notes') validateNoteUpdate({ ...owned, character_id: null }, prepared, ctx);
   const keys = Object.keys(prepared);
   if (keys.length === 0) throw new HttpError(400, 'No valid fields were supplied');
   const identifiers = keys.map((key) => `"${key}"`).join(', ');
@@ -741,6 +761,7 @@ async function insertOne(table, input, ctx, client, onConflict) {
 export async function executeDataQuery(user, request) {
   const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict } = request;
   assertTable(table);
+  if (table === 'notes' && action === 'upsert') throw new HttpError(400, 'Use an explicit journal update instead of upsert');
 
   if (action === 'select') {
     const ctx = await accessContext(user);
@@ -773,6 +794,10 @@ export async function executeDataQuery(user, request) {
     if (action === 'update') {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
+      if (table === 'notes') {
+        for (const row of candidates) validateNoteUpdate(row, prepared, transactionCtx);
+        delete prepared.user_id;
+      }
       const keys = Object.keys(prepared);
       if (keys.length === 0) return candidates;
       const assignments = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ');

@@ -16,6 +16,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MessageContent } from './MessageContent';
 import type { Character } from '../../types/character';
 import type { CampaignMembership } from '../../lib/api/parties';
+import { getNotePath } from '../../lib/noteLinks';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
@@ -222,7 +223,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   };
 
   // --- NAVIGATION HELPERS ---
-  const openSharedNote = (noteId: string) => { setSearchParams({ noteId: noteId }); };
+  const openSharedNote = (noteId: string) => { navigate(getNotePath(noteId, partyId)); };
   
   // 3. Open Compendium Entry (Deep Link)
   const openCompendiumEntry = (entryId: string) => {

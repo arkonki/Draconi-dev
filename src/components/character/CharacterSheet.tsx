@@ -25,6 +25,8 @@ import { StatusPanelView } from './StatusPanelView';
 import { BioModal } from './modals/BioModal';
 import { PlayerAidModal } from './modals/PlayerAidModal';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/useAuth';
+import { saveCharacterJournalEntry } from '../../lib/api/journal';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
@@ -512,6 +514,7 @@ function ToolbarButton({ icon: Icon, label, onClick }: { icon: React.ElementType
 
 interface CharacterNote {
   id: string;
+  user_id: string;
   title: string;
   content: string;
   created_at: string;
@@ -520,6 +523,7 @@ interface CharacterNote {
 
 interface EditableCharacterNote {
   id?: string;
+  user_id?: string;
   title: string;
   content: string;
   created_at?: string;
@@ -527,7 +531,12 @@ interface EditableCharacterNote {
 }
 
 const CharacterNotesSection = ({ character }: { character: Character }) => {
+  const { user, isAdmin } = useAuth();
+  const canCreate = Boolean(user && (user.id === character.user_id || isAdmin()));
+  const canManage = (note: EditableCharacterNote) => Boolean(user && (note.user_id === user.id || isAdmin()));
   const [notes, setNotes] = useState<CharacterNote[]>([]);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [activeNote, setActiveNote] = useState<EditableCharacterNote | null>(null);
   const [savedNoteSnapshot, setSavedNoteSnapshot] = useState<EditableCharacterNote | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -535,8 +544,9 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadNotes = useCallback(async () => {
-    const { data } = await supabase.from('notes').select('*').eq('character_id', character.id).order('created_at', { ascending: false });
-    setNotes(data || []);
+    const { data, error } = await supabase.from('notes').select('*').eq('character_id', character.id).order('created_at', { ascending: false });
+    if (error) { setNoteError('Could not load character journal entries.'); return; }
+    setNotes((data ?? []) as unknown as CharacterNote[]);
   }, [character.id]);
 
   useEffect(() => { loadNotes(); }, [loadNotes]);
@@ -549,10 +559,15 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   };
 
   const handleSaveNote = async () => {
-    if (!activeNote?.title) return;
-    const noteData = { ...activeNote, character_id: character.id, user_id: character.user_id, updated_at: new Date().toISOString() };
-    const { data } = await supabase.from('notes').upsert(noteData).select().single();
-    setActiveNote(data); setSavedNoteSnapshot(data); setIsEditing(false); setShowPreview(false); loadNotes();
+    if (!activeNote?.title.trim() || !user || isSaving || (activeNote.id ? !canManage(activeNote) : !canCreate)) return;
+    setIsSaving(true);
+    setNoteError(null);
+    try {
+      const data = await saveCharacterJournalEntry(activeNote, character.id, user.id);
+      setActiveNote(data); setSavedNoteSnapshot(data); setIsEditing(false); setShowPreview(false); await loadNotes();
+    } catch {
+      setNoteError('Could not save the journal entry. Your changes have been kept; please try again.');
+    } finally { setIsSaving(false); }
   };
 
   const noteIsDirty = Boolean(
@@ -581,15 +596,20 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
   };
 
   const handleDeleteNote = async (id: string) => {
-    if (confirm("Delete note?")) { await supabase.from('notes').delete().eq('id', id); setActiveNote(null); loadNotes(); }
+    const note = notes.find(entry => entry.id === id);
+    if (!note || !canManage(note) || !confirm('Delete note?')) return;
+    const { error } = await supabase.from('notes').delete().eq('id', id);
+    if (error) { setNoteError('Could not delete the journal entry.'); return; }
+    setActiveNote(null); await loadNotes();
   };
 
   return (
     <div className="h-full flex flex-col p-4">
       <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2 gap-3">
         <h4 className="font-serif font-bold text-stone-700 text-xl">Journal Entries</h4>
-        <button onClick={() => { setSavedNoteSnapshot(null); setActiveNote({ title: '', content: '' }); setIsEditing(true); setShowPreview(false); }} className="text-[#1a472a] text-xs md:text-sm font-bold flex items-center gap-1.5 border border-[#1a472a] px-3 py-2 rounded hover:bg-[#1a472a] hover:text-white transition-colors min-h-[44px] touch-manipulation whitespace-nowrap"><Plus size={14} /> NEW ENTRY</button>
+        {canCreate && <button onClick={() => { setNoteError(null); setSavedNoteSnapshot(null); setActiveNote({ title: '', content: '' }); setIsEditing(true); setShowPreview(false); }} className="text-[#1a472a] text-xs md:text-sm font-bold flex items-center gap-1.5 border border-[#1a472a] px-3 py-2 rounded hover:bg-[#1a472a] hover:text-white transition-colors min-h-[44px] touch-manipulation whitespace-nowrap"><Plus size={14} /> NEW ENTRY</button>}
       </div>
+      {noteError && !activeNote && <p role="alert" className="mb-3 text-sm text-red-700">{noteError}</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pr-1 custom-scrollbar">
         {notes.length === 0 && <div className="col-span-full text-center py-8 text-stone-400 italic">No notes written yet.</div>}
         {notes.map(note => (
@@ -613,9 +633,9 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
               <div className="font-serif font-bold text-stone-800 line-clamp-1">{note.title}</div>
               <div className="text-[10px] text-stone-400 mt-1">{new Date(note.created_at).toLocaleDateString()}</div>
             </div>
-            <div className="absolute top-2 right-2">
-                <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-stone-400 hover:text-red-600 p-2 transition-opacity touch-manipulation"><Trash2 size={16} /></button>
-            </div>
+            {canManage(note) && <div className="absolute top-2 right-2">
+                <button aria-label={`Delete journal entry ${note.title}`} onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-stone-400 hover:text-red-600 p-2 transition-opacity touch-manipulation"><Trash2 size={16} /></button>
+            </div>}
           </div>
         ))}
       </div>
@@ -635,15 +655,16 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
           footer={isEditing ? (
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={cancelNoteEditing}>Cancel</Button>
-              <Button variant="primary" onClick={handleSaveNote}>Save Entry</Button>
+              <Button variant="primary" loading={isSaving} onClick={handleSaveNote}>Save Entry</Button>
             </div>
           ) : (
             <div className="flex justify-end">
-              <Button size="sm" variant="secondary" onClick={() => { setSavedNoteSnapshot(activeNote ? { ...activeNote } : null); setIsEditing(true); }} icon={Pencil}>Edit</Button>
+              {canManage(activeNote) && <Button size="sm" variant="secondary" onClick={() => { setSavedNoteSnapshot(activeNote ? { ...activeNote } : null); setIsEditing(true); }} icon={Pencil}>Edit</Button>}
             </div>
           )}
         >
              <div className="p-4 md:p-6 flex flex-col min-h-full">
+                {noteError && <p role="alert" className="mb-3 text-sm text-red-700">{noteError}</p>}
                 {isEditing ? (
                   <>
                     <input aria-label="Journal entry title" className="text-2xl font-serif font-bold bg-transparent border-b-2 border-[#1a472a] mb-4 outline-none text-[#1a472a] w-full" value={activeNote.title} onChange={e => setActiveNote({...activeNote, title: e.target.value})} placeholder="Title" />

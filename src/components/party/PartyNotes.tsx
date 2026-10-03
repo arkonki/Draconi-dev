@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   Plus, Edit2, Trash2, Save, X, Tag, Book, Search, Filter, ChevronDown,
@@ -14,6 +14,9 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { sendMessage } from '../../lib/api/chat';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../../lib/appUrl';
+import { getNotePath } from '../../lib/noteLinks';
+import { useSearchParams } from 'react-router-dom';
+import { canEditNote } from '../../../shared/noteAccess.js';
 
 // --- UPDATED TYPE DEFINITION ---
 interface Note {
@@ -31,10 +34,12 @@ interface PartyNotesProps {
   partyId: string;
   isDM: boolean;
   openNoteId?: string | null;
+  readOnly?: boolean;
 }
 
-export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
+export function PartyNotes({ partyId, openNoteId, isDM, readOnly = false }: PartyNotesProps) {
   const { user } = useAuth();
+  const [, setSearchParams] = useSearchParams();
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -56,6 +61,21 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [isNotifying, setIsNotifying] = useState(false);
+  const [notificationSent, setNotificationSent] = useState(false);
+  const canManage = (note: Note) => canEditNote(note, { userId: user?.id, campaignRole: readOnly ? 'observer' : isDM ? 'gm' : 'player' });
+  const selectNote = (note: Note | null) => {
+    setSelectedNote(note);
+    setNotificationSent(false);
+    setViewState('view');
+    setSearchParams(previous => {
+      const next = new URLSearchParams(previous);
+      if (note) next.set('noteId', note.id); else next.delete('noteId');
+      next.set('tab', 'notes');
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (viewState === 'create' || viewState === 'edit') {
@@ -97,12 +117,15 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   }, [selectedCategoryFilter]);
 
   const openCreateForm = () => {
+    if (readOnly) return;
+    selectNote(null);
     resetForm();
     setViewState('create');
     setSelectedNote(null);
   };
 
   const openEditForm = (note: Note) => {
+    if (!canManage(note)) return;
     setSelectedNote(note);
     setViewState('edit');
     setTitle(note.title);
@@ -182,18 +205,26 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
 
   // Deep Linking Effect
   useEffect(() => {
-    if (openNoteId && notes.length > 0) {
+    if (!openNoteId) { setLinkError(null); return; }
+    if (!loading) {
       const targetNote = notes.find(n => n.id === openNoteId);
       if (targetNote) {
+        setLinkError(null);
+        if (selectedNote?.id !== targetNote.id) setNotificationSent(false);
+        if (selectedNote?.id === targetNote.id && viewState !== 'view') return;
         setSelectedNote(targetNote);
         setViewState('view');
+      } else {
+        setSelectedNote(null);
+        setLinkError('This journal entry was deleted or you do not have access to it in this party.');
       }
     }
-  }, [openNoteId, notes]);
+  }, [openNoteId, notes, loading, selectedNote?.id, viewState]);
 
   // --- ACTIONS ---
   const handleSave = async () => {
     if (!user) { setFormError("You must be logged in to save notes."); return; }
+    if (readOnly || (viewState === 'edit' && selectedNote && !canManage(selectedNote))) { setFormError('You do not have permission to edit this journal entry.'); return; }
     if (!title.trim()) { setFormError("Title is required."); return; }
     // Allow empty category, default to General
     const finalCategory = category.trim() || 'General';
@@ -206,7 +237,6 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
       content: content || '',
       category: finalCategory,
       party_id: partyId,
-      user_id: user.id,
       updated_at: new Date().toISOString(),
     };
 
@@ -229,13 +259,13 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
           console.error("Failed to sync map pins:", pinSyncError);
         }
       } else {
-        const { data, error } = await supabase.from('notes').insert([notePayload]).select().single();
+        const { data, error } = await supabase.from('notes').insert([{ ...notePayload, user_id: user.id }]).select().single();
         if (error) throw error;
         resultNote = data as unknown as Note;
       }
       await loadNotes();
       setViewState('view');
-      if (resultNote) setSelectedNote(resultNote);
+      if (resultNote) selectNote(resultNote);
     } catch (err) {
       console.error("Save error:", err);
       setFormError(err instanceof Error ? err.message : "Failed to save note.");
@@ -245,6 +275,8 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   };
 
   const handleDelete = async (noteId: string) => {
+    const target = notes.find(note => note.id === noteId);
+    if (!target || !canManage(target)) return;
     if (!window.confirm("Are you sure you want to delete this note?")) return;
     try {
       // 1. Manually delete linked map pins (DB should cascade if configured, but doing safeguards)
@@ -259,8 +291,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
       const { error } = await supabase.from('notes').delete().eq('id', noteId);
       if (error) throw error;
 
-      setSelectedNote(null);
-      setViewState('view');
+      selectNote(null);
       await loadNotes();
     } catch (err) {
       console.error("Delete error:", err);
@@ -269,25 +300,26 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
   };
 
   const handleNotifyParty = async () => {
-    if (!selectedNote || !user || !partyId) return;
-    const btn = document.getElementById('notify-btn');
-    if (btn) btn.innerText = "Sent!";
+    if (!selectedNote || !user || !partyId || readOnly || isNotifying) return;
+    setIsNotifying(true);
+    setNotificationSent(false);
 
     try {
       const secretTag = `<<<NOTE:${selectedNote.id}:${selectedNote.title}>>>`;
       const message = `${secretTag} Shared a note: ${selectedNote.title}`;
       await sendMessage(partyId, user.id, message);
+      setNotificationSent(true);
     } catch (err) {
       console.error("Failed to notify party", err);
-      if (btn) btn.innerText = "Failed";
+      setError('Could not share this journal entry in chat.');
     } finally {
-      setTimeout(() => { if (btn) btn.innerHTML = ''; }, 1500);
+      setIsNotifying(false);
     }
   };
 
   const handleCopyLink = () => {
     if (!selectedNote || !partyId) return;
-    const url = getAbsoluteAppUrl(`adventure-party/${partyId}?noteId=${selectedNote.id}`);
+    const url = getAbsoluteAppUrl(getNotePath(selectedNote.id, partyId));
     navigator.clipboard.writeText(url).then(() => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
@@ -316,13 +348,13 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
     <div className="flex flex-col md:flex-row h-[calc(100vh-140px)] bg-gray-50 border-t border-gray-200">
 
       {/* --- LEFT SIDEBAR --- */}
-      <div className={`w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col h-full ${selectedNote ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col h-full ${selectedNote || viewState !== 'view' ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-gray-100 space-y-3 bg-white z-10">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Book className="w-5 h-5 text-indigo-600" /> <span>Notes</span>
             </h2>
-            <Button size="sm" onClick={openCreateForm} icon={Plus}>New</Button>
+            {!readOnly && <Button size="sm" onClick={openCreateForm} icon={Plus}>New</Button>}
           </div>
 
           <div className="relative">
@@ -341,6 +373,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-gray-50">
+          {linkError && <p role="alert" className="p-3 text-sm text-red-700">{linkError}</p>}
           {error && <div className="p-3 mb-2 bg-red-50 text-red-700 text-sm rounded-md flex gap-2"><AlertCircle className="w-4 h-4 mt-0.5" /> {error}</div>}
           {filteredNotes.length === 0 ? (
             <div className="text-center py-12 px-4 text-gray-400">
@@ -356,7 +389,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
                 <button
                   type="button"
                   key={note.id}
-                  onClick={() => { setSelectedNote(note); setViewState('view'); }}
+                  onClick={() => selectNote(note)}
                   className={`w-full text-left p-3 rounded-lg cursor-pointer border transition-all group relative ${selectedNote?.id === note.id ? 'bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500 z-10' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}
                 >
                   <div className="flex justify-between items-start mb-1">
@@ -455,7 +488,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
           <div className="max-w-4xl mx-auto animate-in fade-in duration-300">
             <div className="flex flex-wrap justify-between items-start gap-4 mb-8 pb-6 border-b border-gray-100">
               <div>
-                <button type="button" className="md:hidden mb-2 text-indigo-600 font-medium text-sm cursor-pointer" onClick={() => setSelectedNote(null)}>← Back to List</button>
+                <button type="button" className="md:hidden mb-2 text-indigo-600 font-medium text-sm cursor-pointer" onClick={() => selectNote(null)}>← Back to List</button>
                 <h1 className="text-3xl font-bold text-gray-900 mb-3">{selectedNote.title}</h1>
                 <div className="flex flex-wrap gap-3 items-center text-sm">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-medium border border-indigo-100">
@@ -475,9 +508,9 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
                 >
                   {linkCopied ? "Copied!" : "Link"}
                 </Button>
-                <Button id="notify-btn" variant="outline" size="sm" icon={Bell} onClick={handleNotifyParty} title="Share this note in Party Chat">Notify</Button>
-                <Button variant="secondary" size="sm" icon={Edit2} onClick={() => openEditForm(selectedNote)}>Edit</Button>
-                <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => handleDelete(selectedNote.id)}>Delete</Button>
+                {!readOnly && <Button variant="outline" size="sm" icon={Bell} disabled={isNotifying} onClick={handleNotifyParty} title="Share this note in Party Chat">{isNotifying ? 'Sharing…' : notificationSent ? 'Shared!' : 'Notify'}</Button>}
+                {canManage(selectedNote) && <><Button variant="secondary" size="sm" icon={Edit2} onClick={() => openEditForm(selectedNote)}>Edit</Button>
+                <Button variant="danger_outline" size="sm" icon={Trash2} onClick={() => handleDelete(selectedNote.id)}>Delete</Button></>}
               </div>
             </div>
             <div className="prose prose-indigo max-w-none text-gray-700">
@@ -490,7 +523,7 @@ export function PartyNotes({ partyId, openNoteId }: PartyNotesProps) {
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6"><StickyNote className="w-10 h-10 text-gray-300" /></div>
             <h3 className="text-xl font-bold text-gray-600 mb-2">Select a Note</h3>
             <p className="max-w-xs text-center mb-8 text-gray-500">Choose a note from the sidebar or create a new one.</p>
-            <Button variant="primary" onClick={openCreateForm} icon={Plus}>Create New Note</Button>
+            {!readOnly && <Button variant="primary" onClick={openCreateForm} icon={Plus}>Create New Note</Button>}
           </div>
         )}
       </div>

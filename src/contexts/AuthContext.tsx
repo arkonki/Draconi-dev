@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '../lib/localBackend.types';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { loginDestination } from '../lib/loginDestination';
 import { useApp } from './useApp';
 import { signUp as supabaseSignUp, signIn as supabaseSignIn, signOut as supabaseSignOut } from '../lib/auth/auth';
 import { AuthContext, VALID_ROLES, type UserRole } from './AuthContextStore';
@@ -13,6 +14,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true); // Always start true
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { setGlobalError } = useApp();
 
   const fetchUserRole = useCallback(async (userId: string): Promise<UserRole> => {
@@ -102,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsAuthenticating(true);
       setGlobalError(null);
       await supabaseSignIn(email, password);
-      navigate('/');
+      navigate(loginDestination(location.state), { replace: true });
     } catch (error) {
       let errorMessage = 'Authentication failed. Please check your credentials.';
       if (error instanceof Error) {

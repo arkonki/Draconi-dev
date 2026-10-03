@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
+import { LegacyPartyRedirect } from './components/party/LegacyPartyRedirect';
 
 const Navigation = lazy(() =>
   import('./components/Navigation').then((module) => ({ default: module.Navigation }))
@@ -77,6 +78,7 @@ export function AppRoutes() {
                       <Route path="/compendium" element={<Compendium />} />
                       <Route path="/adventure-party" element={<AdventureParty />} />
                       <Route path="/party/:id" element={<PartyView />} />
+                      <Route path="/adventure-party/:id" element={<LegacyPartyRedirect />} />
                       <Route path="/party/join/:inviteCode" element={<PartyJoinPage />} />
                       <Route path="/notes" element={<Notes />} />
                       <Route path="/settings" element={<Settings />} />

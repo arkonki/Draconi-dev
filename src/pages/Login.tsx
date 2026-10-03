@@ -25,7 +25,7 @@ export function Login() {
   useEffect(() => {
     if (location.state?.message) {
       setSuccessMessage(location.state.message);
-      navigate(location.pathname, { replace: true, state: {} });
+      navigate(location.pathname, { replace: true, state: { from: location.state.from } });
     }
   }, [location, navigate]);
 
