@@ -1,7 +1,7 @@
 // src/stores/characterSheetStore.ts
 
 import { create } from 'zustand';
-import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells, GameItem } from '../types/character';
+import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells, GameItem, Ability, Equipment } from '../types/character';
 import { Spell, MagicSchool } from '../types/magic';
 import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
@@ -13,15 +13,15 @@ import { supabase } from '../lib/supabase';
 import { fetchHeroicAbilities } from '../lib/api/abilities';
 import { QUERY_STALE_TIME, queryKeys } from '../lib/queryKeys';
 
-export interface HeroicAbility {
-  id: string;
-  name: string;
-  description: string;
-  willpower_cost: number | null;
-  requirement?: string | Record<string, number | null> | null;
-  rule_key?: string | null;
-  activation_type?: 'manual' | 'passive' | 'contextual' | null;
-}
+export type HeroicAbility = Ability;
+
+// A character loaded without equipment still needs a complete structure before one part is replaced.
+const currentEquipment = (character: Character | null | undefined): Equipment => ({
+  inventory: [],
+  equipped: { weapons: [] },
+  money: { gold: 0, silver: 0, copper: 0 },
+  ...character?.equipment,
+});
 
 interface PartySummary {
   id: string;
@@ -101,7 +101,7 @@ interface CharacterSheetState {
   allHeroicAbilities: HeroicAbility[];
   isLoadingAbilities: boolean;
   activeStatusMessage: string | null;
-  statusMessageTimeoutId: NodeJS.Timeout | null;
+  statusMessageTimeoutId: ReturnType<typeof setTimeout> | null;
   
   // Encounter State
   activeEncounter: Encounter | null;
@@ -333,7 +333,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     try {
       const items = await queryClient.ensureQueryData({
         queryKey: queryKeys.gameItems,
-        queryFn: fetchItems,
+        queryFn: () => fetchItems(),
         staleTime: QUERY_STALE_TIME.reference,
       });
       set({ allGameItems: items, isLoadingGameItems: false });
@@ -519,9 +519,9 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   },
 
   updateConditions: async (conditions) => get()._saveCharacter({ conditions }),
-  updateInventory: async (inventory) => get()._saveCharacter({ equipment: { ...get().character?.equipment, inventory } }),
-  updateEquipped: async (equipped) => get()._saveCharacter({ equipment: { ...get().character?.equipment, equipped } }),
-  updateMoney: async (money) => get()._saveCharacter({ equipment: { ...get().character?.equipment, money } }),
+  updateInventory: async (inventory) => get()._saveCharacter({ equipment: { ...currentEquipment(get().character), inventory } }),
+  updateEquipped: async (equipped) => get()._saveCharacter({ equipment: { ...currentEquipment(get().character), equipped } }),
+  updateMoney: async (money) => get()._saveCharacter({ equipment: { ...currentEquipment(get().character), money } }),
   updateNotes: async (notes) => get()._saveCharacter({ notes }),
   updateExperience: async (value) => get()._saveCharacter({ experience: value }),
   updateReputation: async (value) => get()._saveCharacter({ reputation: value }),
@@ -611,7 +611,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     if (!character) return;
     const newSkillLevels = { ...character.skill_levels, [school.name]: level, };
     const updates: Partial<Character> = { skill_levels: newSkillLevels, };
-    if (!character.magic_school) updates.magic_school = school.id;
+    if (!character.magicSchool) updates.magicSchool = school.id;
     await get()._saveCharacter(updates);
   },
 
@@ -636,7 +636,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   clearMarkedSkillsThisSession: () => set({ markedSkillsThisSession: new Set() }),
 
   setActiveStatusMessage: (message, duration = 30000) => {
-    clearTimeout(get().statusMessageTimeoutId as NodeJS.Timeout);
+    clearTimeout(get().statusMessageTimeoutId as ReturnType<typeof setTimeout>);
     set({ activeStatusMessage: message });
     const newTimeoutId = setTimeout(() => {
       set({ activeStatusMessage: null, statusMessageTimeoutId: null });
@@ -645,7 +645,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   },
 
   clearActiveStatusMessage: () => {
-    clearTimeout(get().statusMessageTimeoutId as NodeJS.Timeout);
+    clearTimeout(get().statusMessageTimeoutId as ReturnType<typeof setTimeout>);
     set({ activeStatusMessage: null, statusMessageTimeoutId: null });
   },
 
@@ -691,8 +691,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       
       if (combatant && state.character && combatant.character_id === state.character.id) {
           const charUpdates: Partial<Character> = {};
-          if (updates.current_hp !== undefined) charUpdates.current_hp = updates.current_hp;
-          if (updates.current_wp !== undefined) charUpdates.current_wp = updates.current_wp;
+          if (updates.current_hp != null) charUpdates.current_hp = updates.current_hp;
+          if (updates.current_wp != null) charUpdates.current_wp = updates.current_wp;
           
           if (Object.keys(charUpdates).length > 0) {
               await updateCharacter(state.character.id, charUpdates);
@@ -708,8 +708,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         if (combatant && state.character && combatant.character_id === state.character.id) {
             updatedCharacter = {
                 ...state.character,
-                current_hp: updates.current_hp !== undefined ? updates.current_hp : state.character.current_hp,
-                current_wp: updates.current_wp !== undefined ? updates.current_wp : state.character.current_wp,
+                current_hp: updates.current_hp ?? state.character.current_hp,
+                current_wp: updates.current_wp ?? state.character.current_wp,
             };
         }
         return { encounterCombatants: updatedCombatants, character: updatedCharacter };

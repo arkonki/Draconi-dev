@@ -49,7 +49,7 @@ export function ProfileSettings() {
         setFormData({
           first_name: userProfile.first_name ?? '',
           last_name: userProfile.last_name ?? '',
-          username: userProfile.username ?? currentUser.user_metadata?.username ?? '',
+          username: userProfile.username ?? String(currentUser.user_metadata?.username ?? ''),
           avatar_url: userProfile.avatar_url ?? '',
           bio: userProfile.bio ?? '',
         });
@@ -58,7 +58,7 @@ export function ProfileSettings() {
          setFormData({
              first_name: '',
              last_name: '',
-             username: currentUser.user_metadata?.username ?? '',
+             username: String(currentUser.user_metadata?.username ?? ''),
              avatar_url: '',
              bio: ''
          });

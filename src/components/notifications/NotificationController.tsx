@@ -236,7 +236,7 @@ export function NotificationController() {
       }
 
       if (bindingId === 'message-insert') {
-        const newMessage = payload.new as MessagePayload;
+        const newMessage = payload.new as unknown as MessagePayload;
 
         queryClient.setQueryData(
           queryKeys.messages(newMessage.party_id),

@@ -287,7 +287,7 @@ const StatTracker = ({
   currentValue: number, 
   maxValue: number, 
   colorClass: string, // e.g., 'bg-red-600'
-  onModify: (stat: string, amount: number) => void 
+  onModify: (stat: 'current_hp' | 'current_wp', amount: number) => void 
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [history, setHistory] = useState<StatHistoryItem[]>([]);
@@ -686,7 +686,7 @@ const CharacterNotesSection = ({ character }: { character: Character }) => {
                     <div className="flex-1 overflow-y-auto prose prose-stone max-w-none custom-scrollbar pr-2">
                        <MarkdownRenderer content={activeNote.content} />
                     </div>
-                    <div className="text-right text-xs text-stone-400 mt-2 pt-2 border-t border-stone-100">{new Date(activeNote.created_at).toLocaleDateString()}</div>
+                    <div className="text-right text-xs text-stone-400 mt-2 pt-2 border-t border-stone-100">{activeNote.created_at ? new Date(activeNote.created_at).toLocaleDateString() : ''}</div>
                   </>
                 )}
              </div>
@@ -870,7 +870,8 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
       return;
     }
     setShowRestOptionsModal(false);
-    await performRest(type, type === 'stretch' ? healerPresent : undefined);
+    // A present healer has always restored a single HP here (the boolean was coerced to 1); kept as is.
+    await performRest(type, type === 'stretch' && healerPresent ? 1 : undefined);
     setHealerPresent(false);
     if (type !== 'shift' || !character.party_id) return;
     try {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button } from '../shared/Button';
 import { Input } from '../shared/Input';
 import { X, LogIn } from 'lucide-react';

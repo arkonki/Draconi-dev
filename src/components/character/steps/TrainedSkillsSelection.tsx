@@ -56,10 +56,17 @@ export function TrainedSkillsSelection() {
   useEffect(() => {
     if (isMage) {
       setLoadingSchools(true);
-      supabase.from('magic_schools').select('id, name')
-        .then(({ data, error }) => { if (error) throw error; setAllMagicSchools(data || []); })
-        .catch(err => console.error("Failed to fetch magic schools:", err))
-        .finally(() => setLoadingSchools(false));
+      (async () => {
+        try {
+          const { data, error } = await supabase.from('magic_schools').select('id, name');
+          if (error) throw error;
+          setAllMagicSchools(data || []);
+        } catch (err) {
+          console.error("Failed to fetch magic schools:", err);
+        } finally {
+          setLoadingSchools(false);
+        }
+      })();
     }
   }, [isMage]);
 
@@ -72,7 +79,7 @@ export function TrainedSkillsSelection() {
   
   const magicSchoolDisplay = useMemo(() => {
     const schoolValue = character.magicSchool;
-    if (typeof schoolValue === 'object' && schoolValue !== null && 'name' in schoolValue) return schoolValue.name as string;
+    if (typeof schoolValue === 'object' && schoolValue !== null && 'name' in schoolValue) return String((schoolValue as { name: unknown }).name);
     if (typeof schoolValue === 'string' && allMagicSchools.length > 0) return allMagicSchools.find(s => s.id === schoolValue)?.name ?? null;
     return null;
   }, [character.magicSchool, allMagicSchools]);
@@ -84,7 +91,7 @@ export function TrainedSkillsSelection() {
       try {
         const { data, error } = await supabase.from('professions').select('skills').eq('name', character.profession).single();
         if (error) throw error;
-        setLoadedProfessionSkillNames(Array.isArray(data?.skills) ? data.skills.filter((s): s is string => typeof s === 'string') : []);
+        setLoadedProfessionSkillNames(Array.isArray(data?.skills) ? data.skills.filter((s: unknown): s is string => typeof s === 'string') : []);
       } catch (err) { console.error('Failed to load profession skills:', err); }
       finally { setLoadingProfessionSkills(false); }
     }

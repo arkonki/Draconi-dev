@@ -193,7 +193,7 @@ export function BioModal({ onClose }: BioModalProps) {
   // Sync state
   const syncStateFromCharacter = () => {
     if (character) {
-      const { url, pos } = parsePortraitData(character.portrait_url);
+      const { url, pos } = parsePortraitData(character.portrait_url ?? null);
       setPortraitUrl(url);
       setPortraitPos(pos);
       setAppearance(character.appearance || '');

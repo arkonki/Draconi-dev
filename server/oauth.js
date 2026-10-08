@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { authenticateCredentials } from './auth.js';
 import { pool, withTransaction } from './db.js';
-import { HttpError, readJson, routePath, sendJson } from './http.js';
+import { clientAddress, HttpError, readJson, routePath, sendJson } from './http.js';
 
 const SUPPORTED_SCOPES = Object.freeze(['draconi:read', 'draconi:write']);
 const AUTHORIZATION_REQUEST_MINUTES = 10;
@@ -213,8 +213,7 @@ export function validateClientRegistration(input) {
 }
 
 function enforceRegistrationRateLimit(request) {
-  const address = String(request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown')
-    .split(',')[0].trim();
+  const address = clientAddress(request);
   const now = Date.now();
   const current = registrationWindows.get(address);
   if (!current || current.resetAt <= now) {
@@ -226,8 +225,7 @@ function enforceRegistrationRateLimit(request) {
 }
 
 function enforceAuthorizationRateLimit(request, email) {
-  const address = String(request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown')
-    .split(',')[0].trim();
+  const address = clientAddress(request);
   const key = `${address}:${String(email || '').trim().toLowerCase()}`;
   const now = Date.now();
   const current = authorizationAttemptWindows.get(key);

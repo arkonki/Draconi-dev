@@ -1,14 +1,25 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useCharacterSheetStore } from '../stores/characterSheetStore';
-import { Spell as DetailedSpell } from '../types/magic'; // Use the detailed type
+import type { DetailedSpell } from '../types/magic';
 import { hasSpellPowerLevels } from '../lib/game/spellPowerLevel';
 
 // Define the shape of the data coming directly from the DB query
-export interface DBSpell extends Omit<DetailedSpell, 'schoolId' | 'power_level'> {
+export interface DBSpell {
+  id: string;
+  name: string;
+  description: string;
+  school_id: string | null;
+  rank: number | null;
+  requirement: string | null;
+  casting_time: string | null;
+  range: string | null;
+  duration: string | null;
+  willpower_cost: number | null;
+  dice: string | null;
+  created_at?: string;
   power_level: string | boolean | number | null;
   magic_schools: { name: string } | null;
-  school_id: string | null;
 }
 
 
@@ -100,16 +111,16 @@ export function useSpells(characterId?: string) {
       id: dbSpell.id,
       name: dbSpell.name,
       schoolId: dbSpell.school_id, // Use school_id directly
-      rank: dbSpell.rank,
+      rank: dbSpell.rank ?? 0,
       requirement: dbSpell.requirement,
       castingTime: dbSpell.casting_time,
       range: dbSpell.range,
-      duration: dbSpell.duration,
+      duration: dbSpell.duration ?? '',
       description: dbSpell.description,
       willpowerCost: dbSpell.willpower_cost,
       createdAt: dbSpell.created_at,
       powerLevel: hasSpellPowerLevels(dbSpell.power_level) ? 'yes' : 'none',
-			dice: dbSpell.dice,// Map power_level
+      dice: dbSpell.dice,
     }));
   }, [dbSpells]);
 

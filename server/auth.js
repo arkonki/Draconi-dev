@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
+import { assertSafeBootstrapPassword } from './configCheck.js';
 import { getBearerToken, HttpError } from './http.js';
 
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 14);
@@ -256,6 +257,7 @@ export async function bootstrapAdmin() {
   const username = process.env.ADMIN_USERNAME || 'admin';
   const { rows } = await pool.query('SELECT id FROM users WHERE lower(email) = $1', [email]);
   if (rows[0]) return;
+  assertSafeBootstrapPassword(password);
   await withTransaction(async (client) => {
     const result = await client.query(
       `INSERT INTO users (email, username, role, is_email_verified)

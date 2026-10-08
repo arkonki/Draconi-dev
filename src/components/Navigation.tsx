@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
 import { useDice } from './dice/useDice';
@@ -29,7 +29,8 @@ export function Navigation() {
   const isActive = (path: string) => location.pathname === path;
 
   // Safe username display
-  const displayName = user?.username || user?.email?.split('@')[0] || 'Adventurer';
+  const metadataUsername = user?.user_metadata?.username;
+  const displayName = (typeof metadataUsername === 'string' && metadataUsername) || user?.email?.split('@')[0] || 'Adventurer';
   const displayInitials = displayName.charAt(0).toUpperCase();
 
   const navItems = [
@@ -113,7 +114,7 @@ export function Navigation() {
             {/* Right Side Actions */}
             <div className="flex items-center space-x-3">
               <button
-                onClick={toggleDiceRoller}
+                onClick={() => toggleDiceRoller()}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
                 title="Dice Roller"
               >
@@ -179,7 +180,7 @@ export function Navigation() {
           {/* --- MOBILE TOGGLE --- */}
           <div className="flex items-center gap-2 lg:hidden">
             <button
-              onClick={toggleDiceRoller}
+              onClick={() => toggleDiceRoller()}
               className="p-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white"
             >
               <Dices className="w-6 h-6" />

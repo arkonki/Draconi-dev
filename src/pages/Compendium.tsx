@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import {
@@ -687,9 +687,7 @@ export function Compendium() {
             <CompendiumFullPage
               entry={fullPageEntry}
               onClose={() => setFullPageEntry(null)}
-              onSave={async (e) => {
-                await saveMutation.mutateAsync(e);
-              }}
+              onSave={(e) => saveMutation.mutateAsync(e)}
             />
           </Suspense>
         )}

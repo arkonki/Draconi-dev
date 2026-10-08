@@ -74,6 +74,23 @@ export interface Spell {
   school_name?: string; // Optional: populated if joined
 }
 
+// Camel-cased spell shape the character sheet works with (built from a database row by `useSpells`).
+export interface DetailedSpell {
+  id: string;
+  name: string;
+  schoolId: string | null;
+  rank: number;
+  requirement: string | null;
+  castingTime: string | null;
+  range: string | null;
+  duration: string;
+  description: string;
+  willpowerCost: number | null;
+  createdAt?: string;
+  powerLevel: 'yes' | 'none';
+  dice: string | null;
+}
+
 // Example of how a `prerequisite` (JSON string for learning) might look in the database:
 // Single condition:
 // '{"type": "spell", "name": "Light"}'

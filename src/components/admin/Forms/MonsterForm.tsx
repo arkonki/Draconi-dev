@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   MonsterData,
   MonsterDamageBonusConfig,
@@ -140,7 +140,7 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
   const [abilitySearch, setAbilitySearch] = useState('');
   const { data: allItems = [], isLoading: isLoadingItems } = useQuery<GameItem[]>({
     queryKey: queryKeys.gameItems,
-    queryFn: fetchItems,
+    queryFn: () => fetchItems(),
     staleTime: 1000 * 60 * 10,
   });
   const { data: allSkills = [], isLoading: isLoadingSkills } = useQuery<Array<{ id: string; name: string; attribute?: string | null }>>({
@@ -966,10 +966,10 @@ export function MonsterForm({ entry, onChange }: MonsterFormProps) {
                 <h4 className="text-md font-semibold text-gray-700">Effects (Optional D6 Table)</h4>
                 <Button variant="outline" size="xs" icon={PlusCircle} onClick={() => addEffect(attackIndex)}>Add Effect</Button>
               </div>
-              {attack.effects.length === 0 && (
+              {(attack.effects ?? []).length === 0 && (
                 <p className="text-gray-500">No effects for this attack. Click "Add Effect" to create one.</p>
               )}
-              {attack.effects.map((effect, effectIndex) => (
+              {(attack.effects ?? []).map((effect, effectIndex) => (
                 <div key={effect.id} className="p-2 border rounded-md mb-2 bg-white">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-1">
                     <input

@@ -82,9 +82,9 @@ export async function fetchBioData(): Promise<BioOptions> {
   const allFlaws = new Set<string>();
 
   (data || []).forEach(row => {
-    (row.appearance || []).forEach(item => allAppearance.add(item));
-    (row.mementos || []).forEach(item => allMementos.add(item));
-    (row.flaws || []).forEach(item => allFlaws.add(item));
+    (row.appearance || []).forEach((item: string) => allAppearance.add(item));
+    (row.mementos || []).forEach((item: string) => allMementos.add(item));
+    (row.flaws || []).forEach((item: string) => allFlaws.add(item));
   });
 
   return {

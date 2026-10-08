@@ -12,7 +12,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { applyMoneyDelta, formatCost, subtractCost, parseCost, copperToCurrency } from '../../lib/equipment';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
-import { Character, InventoryItem, EquippedWeapon } from '../../types/character';
+import { Character, InventoryItem, WeaponEntry } from '../../types/character';
 import { formatItemAttackRange } from '../../lib/itemRange';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { calculateEncumbrance, getStrengthFromCharacter } from '../../lib/encumbrance';
@@ -36,7 +36,7 @@ const shopGroups = [
 
 type ItemDetails = (GameItem & Partial<InventoryItem> & { encumbrance_modifier?: number | string }) | undefined;
 type ShopGroup = (typeof shopGroups)[number];
-type SlotItem = string | InventoryItem | EquippedWeapon;
+type SlotItem = string | InventoryItem | WeaponEntry;
 type InventoryPanel = 'main' | 'wallet' | 'forage' | 'cart';
 
 // --- HELPER FUNCTIONS ---
@@ -173,7 +173,7 @@ const ShopItemCard = ({ item, onAdd, characterStrength }: { item: GameItem, onAd
 };
 
 const LoadoutSlot = ({ icon: Icon, label, item, onUnequip, subItems }: { icon: React.ElementType; label: string; item?: SlotItem; onUnequip: () => void; subItems?: React.ReactNode }) => {
-    // Determine the name safely. For EquippedWeapon, it's just .name
+    // Determine the name safely. For WeaponEntry, it's just .name
     const name = typeof item === 'string' ? item : item?.name;
 
     return (
@@ -543,6 +543,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             }
 
             newEquipment.equipped.containers.push(itemToMove);
+        } else {
+            // Not an equippable category: keep the item in the bag instead of dropping it.
+            inventory = mergeIntoInventory(inventory, itemToMove);
         }
         newEquipment.inventory = inventory;
         handleUpdateEquipment(newEquipment);
@@ -562,9 +565,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             if (itemIndex !== undefined && (type === 'weapon' || type === 'clothing')) {
                 findIndex = itemIndex;
             } else if (itemId) {
-                findIndex = arr.findIndex((i: InventoryItem | EquippedWeapon | string) => typeof i !== 'string' && 'id' in i && i.id === itemId);
+                findIndex = arr.findIndex((i: InventoryItem | WeaponEntry | string) => typeof i !== 'string' && 'id' in i && i.id === itemId);
             } else {
-                findIndex = arr.findIndex((i: InventoryItem | EquippedWeapon | string) => (typeof i === 'string' ? i : i.name) === itemName);
+                findIndex = arr.findIndex((i: InventoryItem | WeaponEntry | string) => (typeof i === 'string' ? i : i.name) === itemName);
             }
 
             if (findIndex > -1) {
@@ -683,7 +686,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                 {/* Worn Clothes (Just display chips, not tabs) */}
                 {clothes.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar mt-2 border-t pt-2 border-gray-100">
-                        {clothes.map((c, i) => (<div key={i} className="flex items-center gap-2 px-2 py-1 bg-white border border-blue-100 rounded text-xs whitespace-nowrap text-blue-700"><Shirt size={12} className="text-blue-500" /> <span>{c}</span><button onClick={() => handleUnequipItem(c, 'clothing', undefined, i)} className="text-blue-300 hover:text-red-500"><X size={12} /></button></div>))}
+                        {clothes.map((c: string, i: number) => (<div key={i} className="flex items-center gap-2 px-2 py-1 bg-white border border-blue-100 rounded text-xs whitespace-nowrap text-blue-700"><Shirt size={12} className="text-blue-500" /> <span>{c}</span><button onClick={() => handleUnequipItem(c, 'clothing', undefined, i)} className="text-blue-300 hover:text-red-500"><X size={12} /></button></div>))}
                     </div>
                 )}
             </div>
@@ -695,7 +698,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         const isUsable = isItemConsumable(item, itemDetails);
         const isMenuOpen = menuOpenId === item.id;
         const isDetailsExpanded = expandedItemId === item.id;
-        const toggleMenu = (e: React.MouseEvent) => { e.stopPropagation(); setMenuOpenId(isMenuOpen ? null : item.id); };
+        const toggleMenu = (e: React.MouseEvent) => { e.stopPropagation(); setMenuOpenId(isMenuOpen ? null : (item.id ?? null)); };
         const description = itemDetails?.effect || itemDetails?.description;
 
         // Get valid move targets (equipped containers OR animals THAT ARE STORAGE)
@@ -756,7 +759,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                         {description && (
                             <button
                                 type="button"
-                                onClick={() => setExpandedItemId(isDetailsExpanded ? null : item.id)}
+                                onClick={() => setExpandedItemId(isDetailsExpanded ? null : (item.id ?? null))}
                                 aria-expanded={isDetailsExpanded}
                                 aria-label={`${isDetailsExpanded ? 'Hide' : 'Show'} details for ${item.name}`}
                                 className="flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
@@ -920,7 +923,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                     >
                                         <Package size={14} /> Main Inventory
                                     </button>
-                                    {(character.equipment.inventory || []).some(item => item.id && encumbrance.itemLocations[item.id] === 'external' && (!item.containerId || !encumbrance.containerStats[item.containerId])) && (
+                                    {(character.equipment.inventory || []).some((item: InventoryItem) => item.id && encumbrance.itemLocations[item.id] === 'external' && (!item.containerId || !encumbrance.containerStats[item.containerId])) && (
                                         <button type="button" onClick={() => setActiveInventoryTab('external')} className={`flex items-center gap-2 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 ${activeInventoryTab === 'external' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500'}`}><Anchor size={14} /> Items stored elsewhere</button>
                                     )}
 
@@ -985,10 +988,10 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                     </div>
                                     <div className="inventory-list space-y-3">
                                         {(() => {
-                                            const allItems = (character.equipment?.inventory || []).filter(item => item?.name && item.name.toLowerCase().includes(inventorySearch.toLowerCase()));
+                                            const allItems = (character.equipment?.inventory || []).filter((item: InventoryItem) => item?.name && item.name.toLowerCase().includes(inventorySearch.toLowerCase()));
 
                                             // FILTER LIST BASED ON ACTIVE TAB
-                                            const currentItems = allItems.filter(item => {
+                                            const currentItems = allItems.filter((item: InventoryItem) => {
                                                 const looseItem = !item.containerId || !encumbrance.containerStats[item.containerId];
                                                 const external = item.id && encumbrance.itemLocations[item.id] === 'external';
                                                 if (activeInventoryTab === 'main') return looseItem && !external;
@@ -1026,7 +1029,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                         (() => {
                                                             const tinyItems: InventoryItem[] = [];
                                                             const carriedItems: InventoryItem[] = [];
-                                                            currentItems.forEach(item => {
+                                                            currentItems.forEach((item: InventoryItem) => {
                                                                 const details = getItemData(item);
                                                                 if (details?.weight === 0) {
                                                                     tinyItems.push(item);

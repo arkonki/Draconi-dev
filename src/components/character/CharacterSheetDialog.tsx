@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Character } from '../../types/character';
 import type { SoloState } from '../../lib/api/solo';
 import { AccessibleDialog } from '../shared/AccessibleDialog';

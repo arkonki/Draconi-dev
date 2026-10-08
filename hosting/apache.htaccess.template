@@ -25,7 +25,7 @@ DirectoryIndex index.html
   # Stop inherited parent rewrites for known build files and directories.
   RewriteRule ^index\.html$ - [END]
   RewriteRule ^(?:assets|icons|sounds)/ - [END]
-  RewriteRule ^(?:manifest\.webmanifest|sw\.js|dragonbane-icon\.png|cors\.ts|_redirects)$ - [END]
+  RewriteRule ^(?:manifest\.webmanifest|sw\.js|dragonbane-icon\.png)$ - [END]
 
   # React Router fallback for client-side routes.
   RewriteRule ^ index.html [END]

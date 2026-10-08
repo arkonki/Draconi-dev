@@ -668,7 +668,7 @@ export function ProjectorDisplayManager({
   const isBusy = createSessionMutation.isPending || renewSessionMutation.isPending || revokeSessionMutation.isPending || saveLayoutMutation.isPending;
 
   const reservedCharacterIds = useMemo(
-    () => new Set(editableSlots.map((slot) => slot.character_id).filter(Boolean)),
+    () => new Set(editableSlots.map((slot) => slot.character_id).filter((id): id is string => Boolean(id))),
     [editableSlots]
   );
   const partyMembersById = useMemo(

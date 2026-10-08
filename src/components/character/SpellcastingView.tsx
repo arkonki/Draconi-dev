@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { Spell as DetailedSpell } from '../../types/magic';
+import { useState, useMemo, useRef } from 'react';
+import type { DetailedSpell } from '../../types/magic';
 import { Character, AttributeName, DiceType } from '../../types/character';
 import { Sparkles, Dices, BookOpen, Minus, Plus, CheckSquare, Square, Filter, Zap, Clock, Target, AlertCircle, X, Search, ChevronLeft, Info } from 'lucide-react';
 import { useSpells } from '../../hooks/useSpells';

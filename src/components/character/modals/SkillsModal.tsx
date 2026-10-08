@@ -73,7 +73,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Fetch Items for Bane calculation
-  const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
 
   // Calculate Equipment Banes
   const equipmentBanes = useMemo(() => {
@@ -145,7 +145,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
     if (activeTooltip === skillName) {
         setActiveTooltip(null);
     } else {
-        const layout = getTooltipLayout(e.currentTarget);
+        const layout = getTooltipLayout(e.currentTarget as HTMLElement);
         if (!layout) return;
         setActiveTooltip(skillName); 
         setTooltipPosition(layout); 
@@ -196,7 +196,7 @@ export function SkillsModal({ onClose }: SkillsModalProps) {
           <div className="flex min-w-0 flex-col">
              <div className="flex items-center gap-1.5">
                 <span className={`text-sm truncate ${isTrained ? 'font-bold text-gray-900' : 'font-medium text-gray-700'}`}>{skill.name}</span>
-                {isTrained && <GraduationCap size={12} className="text-indigo-500 shrink-0" title="Trained Skill"/>}
+                {isTrained && <span title="Trained Skill" className="shrink-0"><GraduationCap size={12} className="text-indigo-500" /></span>}
              </div>
              <div className="flex flex-wrap items-center gap-2 text-xs uppercase font-bold tracking-wider text-gray-500">
                 <span>{skill.attr}</span>

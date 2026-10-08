@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Edit2, Plus, Search, Tag, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';

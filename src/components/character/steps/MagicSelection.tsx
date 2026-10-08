@@ -29,7 +29,7 @@ export function MagicSelection() {
   const isMage = !!magicSchoolParam;
   
   // Fetch spells
-  const { tricks, spells, loading: spellsLoading, error: spellsError } = useMagicSpells(magicSchoolParam);
+  const { tricks, spells, loading: spellsLoading, error: spellsError } = useMagicSpells(magicSchoolParam ?? undefined);
 
   // Load Schools
   useEffect(() => {
@@ -165,7 +165,7 @@ export function MagicSelection() {
     if (activeTooltip === spellId) {
       setActiveTooltip(null);
     } else {
-      const layout = getTooltipLayout(e.currentTarget);
+      const layout = getTooltipLayout(e.currentTarget as HTMLElement);
       if (!layout) return;
       setTooltipPosition(layout);
       setActiveTooltip(spellId);

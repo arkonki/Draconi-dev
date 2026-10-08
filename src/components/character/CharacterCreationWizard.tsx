@@ -197,7 +197,7 @@ export function CharacterCreationWizard({ onComplete, onCancel }: CharacterCreat
       case 'kin': return !!character.kin && character.kinAbilityNames !== undefined && character.kinAbilityNames.length > 0;
       case 'profession': {
         const isMage = character.magicSchool !== null && character.magicSchool !== undefined;
-        return !!character.profession && (isMage || character.professionHeroicAbilityName !== undefined);
+        return !!character.profession && (isMage || !!character.professionHeroicAbilityName);
       }
       case 'identity': return !!character.name && character.name.trim().length > 0 && !!character.age;
       case 'attributes': return !!character.attributes && Object.values(character.attributes).every(value => value > 0);

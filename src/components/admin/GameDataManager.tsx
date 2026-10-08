@@ -13,7 +13,9 @@ import { SpellForm } from './Forms/SpellForm';
 import { SkillForm } from './Forms/SkillForm';
 import { MonsterForm } from './Forms/MonsterForm';
 import { BioForm } from './Forms/BioForm';
-import { useGameData, type DataCategory } from '../../hooks/useGameData';
+import type { MonsterData } from '../../types/bestiary';
+import type { BioData } from '../../types/compendium';
+import { useGameData, type DataCategory, type GameDataEntry, type GenericGameDataEntry } from '../../hooks/useGameData';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { isSkillNameRequirement } from '../../types/character';
 import { GameDataImportModal } from './GameDataImportModal';
@@ -154,7 +156,7 @@ const useGameDataManagement = () => {
             delete cleanEntry.magic_schools;
             dataToSave = cleanEntry;
         }
-        await saveData(activeCategory, dataToSave, handleSaveSuccess, setSaveError);
+        await saveData(activeCategory, dataToSave as GameDataEntry, handleSaveSuccess, setSaveError);
     }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
 
     const handleDelete = useCallback(async (id: string) => {
@@ -351,17 +353,19 @@ const EditModal = ({ entry, onClose, onSave, loading, activeCategory, saveError,
     const renderForm = useCallback(() => {
         if (!entry) return null;
         switch (activeCategory) {
-            case 'spells': return <SpellForm entry={entry} onChange={onFieldChange} magicSchools={magicSchools} />;
+            case 'spells': return <SpellForm entry={entry as GenericGameDataEntry} onChange={onFieldChange} magicSchools={magicSchools} />;
             case 'items': return <ItemForm entry={entry} onChange={onFieldChange} />;
             case 'abilities': return <AbilityForm entry={entry} onChange={onFieldChange} />;
             case 'kin': return <KinForm entry={entry} onChange={onFieldChange} />;
             case 'profession': return <ProfessionForm entry={entry} onChange={onFieldChange} />;
-            case 'skills': return <SkillForm entry={entry} onChange={onFieldChange} />;
-            case 'monsters': return <MonsterForm entry={entry} onChange={onFieldChange} />;
-            case 'bio': return <BioForm entry={entry} onChange={onFieldChange} />;
+            case 'skills': return <SkillForm entry={entry as GenericGameDataEntry} onChange={onFieldChange} />;
+            case 'monsters': return <MonsterForm entry={entry as unknown as MonsterData} onChange={onFieldChange} />;
+            case 'bio': return <BioForm entry={entry as unknown as BioData} onChange={onFieldChange} />;
             default: return <p className="text-gray-500 italic text-center py-8">No form available for this category.</p>;
         }
     }, [entry, activeCategory, onFieldChange, magicSchools]);
+
+    if (!entry) return null;
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[80]">

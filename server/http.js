@@ -33,6 +33,13 @@ export async function readJson(request, maxBytes = 2_000_000) {
   }
 }
 
+// The right-most X-Forwarded-For entry is the one appended by the nearest proxy (nginx),
+// so unlike the left-most entry it cannot be forged by the client.
+export function clientAddress(request) {
+  const forwarded = String(request.headers?.['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean);
+  return forwarded.at(-1) || request.socket?.remoteAddress || 'unknown';
+}
+
 export function getBearerToken(request) {
   const value = request.headers.authorization || '';
   return value.startsWith('Bearer ') ? value.slice(7).trim() : null;
@@ -44,7 +51,7 @@ export function routePath(request) {
 
 export function handleError(response, error) {
   if (error instanceof HttpError) {
-    sendJson(response, error.status, { error: { message: error.message, code: error.code } });
+    sendJson(response, error.status, { error: { message: error.message, code: error.code } }, error.headers);
     return;
   }
   if (error?.code === '23505') {

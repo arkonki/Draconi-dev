@@ -1,10 +1,10 @@
 import React from 'react';
 
 // Assuming GameDataEntry can represent a skill structure
-import { GameDataEntry } from '../hooks/useGameData';
+import { GenericGameDataEntry } from '../hooks/useGameData';
 
 interface SkillFormProps {
-  entry: Partial<GameDataEntry>; // Use Partial for creation/editing flexibility
+  entry: Partial<GenericGameDataEntry>; // Use Partial for creation/editing flexibility
   onChange: (field: string, value: unknown) => void;
 }
 

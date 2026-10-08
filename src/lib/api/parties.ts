@@ -78,7 +78,7 @@ export async function fetchParties(userId: string | undefined): Promise<Party[]>
     campaign_memberships: party.campaign_memberships || [],
     members: (party.members || [])
       .map((m) => m.characters ? mapCharacterData(m.characters) : null)
-      .filter((char): char is Character => !!char),
+      .filter((char: Character | null | undefined): char is Character => !!char),
   }));
 
   return parties;
@@ -178,7 +178,7 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
     campaign_memberships: (partyData.campaign_memberships || []) as CampaignMembership[],
     members: (partyData.members || [])
       .map((m: PartyMemberJoinRow) => m.characters ? mapCharacterData(m.characters) : null)
-      .filter((char): char is Character => !!char),
+      .filter((char: Character | null): char is Character => !!char),
   };
 
   return party;

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Svg, Path } from '@react-pdf/renderer';
 import { AttributeName, Character } from '../../types/character';
 import { GameItem } from '../../lib/api/items'; // Ensure this type is imported

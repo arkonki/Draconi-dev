@@ -1,4 +1,4 @@
-import React, { useContext, useEffect } from 'react';
+import { useContext, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { X, Zap, AlertCircle } from 'lucide-react';

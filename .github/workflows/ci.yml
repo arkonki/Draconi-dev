@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, Postgres-SQL]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix server
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests (frontend and server)
+        run: npm test
+      - name: Type check
+        run: npm run typecheck
+      - name: Production build
+        run: npx vite build
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create CI environment
+        run: |
+          cp .env.example .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" .env
+          sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(openssl rand -hex 16)|" .env
+          sed -i "s|^DEVELOPMENT_TOKEN=.*|DEVELOPMENT_TOKEN=$(openssl rand -hex 32)|" .env
+          # DATABASE_URL is only used for host-run Node; keep it consistent anyway.
+          PG=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2)
+          sed -i -E "s|^(DATABASE_URL=postgresql://dragonbane:)[^@]*@|\1${PG}@|" .env
+      - name: Build and start the stack
+        run: docker compose up --build -d --wait --wait-timeout 240
+      - name: Health check through nginx
+        run: curl --fail --silent http://localhost:8080/api/health
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --tail 200

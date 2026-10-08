@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { authenticateAccessToken } from '../auth.js';
 import { pool } from '../db.js';
-import { getBearerToken } from '../http.js';
+import { clientAddress, getBearerToken } from '../http.js';
 import { authenticateOAuthAccessToken } from '../oauth.js';
 import { loadCampaignAccess } from '../campaignRoles.js';
 import { HelperError } from './errors.js';
@@ -64,8 +64,7 @@ export function requireHelperScope(user, method) {
 export function enforceHelperRateLimit(request, user) {
   const windowMs = 60_000;
   const limit = Math.max(10, Number(process.env.HELPER_RATE_LIMIT_PER_MINUTE || 120));
-  const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  const address = forwarded || request.socket?.remoteAddress || 'unknown';
+  const address = clientAddress(request);
   const key = `${user.id}:${address}`;
   const now = Date.now();
   const current = rateWindows.get(key);

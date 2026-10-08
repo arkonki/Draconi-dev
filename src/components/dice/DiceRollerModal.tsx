@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom'; 
 import { useAuth } from '../../contexts/useAuth';
 import { DiceType, DiceRollResult, RollHistoryEntry, PostRollAction } from './DiceContext';
@@ -8,7 +8,7 @@ import { useNotifications } from '../../contexts/useNotifications';
 import { 
   Dices, History, Trash2, Star, ShieldOff, Skull, HeartPulse,
   ShieldQuestion, GraduationCap, Zap, Moon, Share, ArrowRightCircle,
-  AlertTriangle, CheckCircle2, CircleHelp, RotateCcw, Keyboard
+  AlertTriangle, CheckCircle2, CircleHelp, RotateCcw, Keyboard, X
 } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
@@ -87,8 +87,8 @@ export function DiceRollerModal() {
   const [isManualPushRoll, setIsManualPushRoll] = useState(false);
   const [usedSoleSurvivor, setUsedSoleSurvivor] = useState(false);
   const [soloStatus, setSoloStatus] = useState<SoloCampaignStatus | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const completionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCompletionRef = useRef<(() => void) | null>(null);
 
   const rollMode = currentConfig?.rollMode;
@@ -830,7 +830,7 @@ export function DiceRollerModal() {
                             onClick={() => {
                               const action = pendingPostRollAction.onAction;
                               setPendingPostRollAction(null);
-                              action();
+                              action?.();
                             }}
                             size="sm"
                             className="bg-indigo-600 hover:bg-indigo-700 text-white"

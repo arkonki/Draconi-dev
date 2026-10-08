@@ -172,9 +172,10 @@ export function isSkillUuidRequirement(obj: unknown): obj is SkillUuidRequiremen
   if (typeof obj !== 'object' || obj === null) {
     return false;
   }
+  const candidate = obj as Record<string, unknown>;
   return (
-    typeof obj.skill_id === 'string' &&
-    (obj.minimumValue === undefined || typeof obj.minimumValue === 'number')
+    typeof candidate.skill_id === 'string' &&
+    (candidate.minimumValue === undefined || typeof candidate.minimumValue === 'number')
   );
 }
 
@@ -259,4 +260,13 @@ export interface Character {
   party_info?: PartyStub | null;
 }
 
-export type CharacterCreationData = Partial<Character>;
+// Wizard draft: the character being built plus selections that are only meaningful while creating.
+export type CharacterCreationData = Partial<Character> & {
+  startingEquipment?: { option: number; items: Array<string | { name?: string; quantity?: number }> };
+  mementos?: string[];
+  weak_spot?: string;
+  kinAbilityNames?: string[];
+  professionHeroicAbilityName?: string | null;
+  key_attribute?: string | null;
+  magic_school?: string | null;
+};

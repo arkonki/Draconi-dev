@@ -57,3 +57,6 @@ dist-ssr
 
 # Bolt config folder
 .bolt/
+
+# Generated service-worker dev build
+/dev-dist

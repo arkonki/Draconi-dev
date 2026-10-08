@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "server": "node --env-file-if-exists=.env server/index.js",
     "mcp": "node --env-file-if-exists=.env server/mcp/index.js",
     "docker:up": "docker compose up --build -d",
@@ -33,7 +33,9 @@
     "tunnel:doctor": "bash scripts/tunnel-client.sh doctor",
     "tunnel:stop": "bash scripts/tunnel-client.sh stop",
     "lint": "eslint . --ext js,mjs,ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck:app && npm run typecheck:node",
+    "typecheck:app": "tsc -p tsconfig.app.json --noEmit",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -75,6 +77,7 @@
     "@tanstack/react-query-devtools": "^5.104.0",
     "@testing-library/jest-dom": "^6.4.8",
     "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.10.0",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

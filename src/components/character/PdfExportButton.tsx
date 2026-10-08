@@ -6,7 +6,7 @@ import { fetchItems, GameItem } from '../../lib/api/items';
 
 const GAME_ITEMS_QUERY = {
   queryKey: ['gameItems'] as const,
-  queryFn: fetchItems,
+  queryFn: () => fetchItems(),
   staleTime: 1000 * 60 * 10
 };
 

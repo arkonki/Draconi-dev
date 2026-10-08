@@ -7,7 +7,7 @@ import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { GameItem, fetchItems } from '../../../lib/api/items';
 import { normalizeCurrency } from '../../../lib/equipment';
-import { Money } from '../../../types/character';
+import { InventoryItem, Money } from '../../../types/character';
 
 interface EquipmentOption {
   option: number;
@@ -62,7 +62,7 @@ export function GearSelection() {
 
   const { data: allItems = [], isLoading: isLoadingItems, error: errorItems } = useQuery<GameItem[], Error>({
     queryKey: ['gameItems'],
-    queryFn: fetchItems,
+    queryFn: () => fetchItems(),
     staleTime: 1000 * 60 * 10,
   });
 
@@ -182,7 +182,7 @@ export function GearSelection() {
     if (activeTooltip === itemName) {
       setActiveTooltip(null);
     } else {
-      const layout = getTooltipLayout(e.currentTarget);
+      const layout = getTooltipLayout(e.currentTarget as HTMLElement);
       if (!layout) return;
       setTooltipPosition(layout);
       setActiveTooltip(itemName);
@@ -266,7 +266,8 @@ export function GearSelection() {
       equipment: {
         money: normalizeCurrency(money),
         equipped: character.equipment?.equipped || { weapons: [] },
-        inventory: [...items]
+        // The wizard hydrates these raw names into inventory items when the character is saved.
+        inventory: [...items] as unknown as InventoryItem[]
       }
     });
     setEquipmentConfirmed(true);
@@ -280,7 +281,7 @@ export function GearSelection() {
 
     if (equipmentConfirmed && character.startingEquipment) {
        return {
-           items: character.startingEquipment.items,
+           items: character.startingEquipment.items.map(entry => (typeof entry === 'string' ? entry : (entry.name ?? ''))),
            money: character.equipment?.money || { gold: 0, silver: 0, copper: 0 }
        };
     }

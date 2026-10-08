@@ -1,4 +1,3 @@
-import React from 'react';
 import { Dices } from 'lucide-react';
 import { useDice } from '../dice/useDice';
 

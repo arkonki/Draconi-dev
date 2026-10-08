@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { bootstrapAdmin, currentUser, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
+import { assertSafeConfig } from './configCheck.js';
+import { preflightHeaders } from './cors.js';
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
 import { handleError, HttpError, readJson, routePath, sendJson } from './http.js';
 import {
   housekeepingStatus,
@@ -85,12 +88,8 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === 'OPTIONS') {
-      response.writeHead(204, {
-        'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'authorization, content-type, x-upsert, if-match, idempotency-key, x-request-id, x-helper-client, mcp-protocol-version, mcp-session-id, last-event-id',
-        'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-        'access-control-expose-headers': 'mcp-session-id, www-authenticate',
-      });
+      const headers = preflightHeaders(pathname, request.headers.origin);
+      response.writeHead(headers ? 204 : 403, headers || {});
       response.end();
       return;
     }
@@ -167,7 +166,15 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (pathname === '/api/auth/sign-in' && request.method === 'POST') {
-      sendJson(response, 200, await signIn(await readJson(request)));
+      const credentials = await readJson(request);
+      assertLoginAllowed(request, credentials.email);
+      try {
+        sendJson(response, 200, await signIn(credentials));
+        clearLoginFailures(request, credentials.email);
+      } catch (error) {
+        if (error?.code === 'INVALID_CREDENTIALS') recordLoginFailure(request, credentials.email);
+        throw error;
+      }
       return;
     }
     if (pathname === '/api/auth/sign-up' && request.method === 'POST') {
@@ -258,6 +265,7 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+assertSafeConfig();
 await waitForDatabase();
 await runMigrations();
 await bootstrapAdmin();

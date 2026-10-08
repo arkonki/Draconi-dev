@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Character } from '../../types/character';
 import { RollHistoryEntry } from '../dice/DiceContext';
 import { useDice } from '../dice/useDice';

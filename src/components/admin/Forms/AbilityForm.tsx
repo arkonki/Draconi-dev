@@ -5,7 +5,7 @@ import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 
 interface AbilityFormProps {
-  entry: Partial<Ability>;
+  entry: Partial<Ability> & { created_at?: string };
   onChange: (field: string, value: unknown) => void;
 }
 
@@ -15,7 +15,7 @@ export const AbilityForm: React.FC<AbilityFormProps> = ({ entry, onChange }) => 
   const [isLoadingRequirements, setIsLoadingRequirements] = useState(false); // Loading state for requirement conversion
 
   // --- State to manage selected skills and their levels (using NAME as key) ---
-  const [selectedSkillsByName, setSelectedSkillsByName] = useState<SkillRequirement>({});
+  const [selectedSkillsByName, setSelectedSkillsByName] = useState<Record<string, number | null>>({});
   // ---
 
   // --- Initialization Logic: Convert incoming requirement to name-based format ---

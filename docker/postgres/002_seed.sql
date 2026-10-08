@@ -68,15 +68,15 @@ INSERT INTO game_spells (name, rank, school, school_id, description, willpower_c
 ON CONFLICT (name, school_id) DO NOTHING;
 
 INSERT INTO game_items (name, category, cost, weight, description, damage, equippable) VALUES
-  ('Broadsword','Weapon','50 silver',1.0,'A balanced one-handed sword.','2D6',true),
-  ('Small Shield','Armor','20 silver',1.0,'A light shield.',NULL,true),
-  ('Leather Armor','Armor','25 silver',2.0,'Light protective clothing.',NULL,true),
-  ('Staff','Weapon','5 silver',1.0,'A sturdy wooden staff.','D8',true),
-  ('Torch','Gear','1 copper',0.25,'Provides light.',NULL,false),
-  ('Rope','Gear','2 silver',1.0,'Ten meters of strong rope.',NULL,false),
-  ('Lantern','Gear','8 silver',0.5,'A shuttered oil lantern.',NULL,false),
-  ('Blank Book','Gear','10 silver',0.5,'A bound book of blank pages.',NULL,false),
-  ('Quill','Gear','1 copper',0.0,'A writing quill.',NULL,false)
+  ('Broadsword','MELEE WEAPONS','50 silver',1.0,'A balanced one-handed sword.','2D6',true),
+  ('Small Shield','ARMOR & HELMETS','20 silver',1.0,'A light shield.',NULL,true),
+  ('Leather Armor','ARMOR & HELMETS','25 silver',2.0,'Light protective clothing.',NULL,true),
+  ('Staff','MELEE WEAPONS','5 silver',1.0,'A sturdy wooden staff.','D8',true),
+  ('Torch','LIGHT SOURCES','1 copper',0.25,'Provides light.',NULL,false),
+  ('Rope','TOOLS','2 silver',1.0,'Ten meters of strong rope.',NULL,false),
+  ('Lantern','LIGHT SOURCES','8 silver',0.5,'A shuttered oil lantern.',NULL,false),
+  ('Blank Book','TOOLS','10 silver',0.5,'A bound book of blank pages.',NULL,false),
+  ('Quill','TOOLS','1 copper',0.0,'A writing quill.',NULL,false)
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO bio_data (name, appearance, mementos, flaws) VALUES (

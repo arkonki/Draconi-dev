@@ -5,6 +5,7 @@ const SESSION_KEY = 'dragonbane_local_session';
 
 export interface LocalApiError {
   message: string;
+  details?: string;
   code?: string;
   status?: number;
 }
@@ -12,7 +13,10 @@ export interface LocalApiError {
 type LocalUser = User;
 type LocalSession = Session;
 
-type QueryRow = Record<string, unknown>;
+// Rows come back from the generic query endpoint without a schema, exactly like the
+// untyped Supabase client this adapter replaced, so callers narrow them themselves.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type QueryRow = any;
 type QueryResult<T> = { data: T | null; error: LocalApiError | null; count: number | null; status: number; statusText: string };
 type AuthEvent = 'INITIAL_SESSION' | 'SIGNED_IN' | 'SIGNED_OUT' | 'TOKEN_REFRESHED' | 'USER_UPDATED';
 type AuthListener = (event: AuthEvent, session: LocalSession | null) => void;
@@ -113,7 +117,9 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
     return this;
   }
 
-  delete() {
+  // The `count` option is accepted for call compatibility; the endpoint always reports affected rows.
+  delete(options?: { count?: 'exact' | 'planned' | 'estimated' }) {
+    void options;
     this.action = 'delete';
     return this;
   }
@@ -158,8 +164,9 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
     return this;
   }
 
-  order(column: string, options: { ascending?: boolean; nullsFirst?: boolean } = {}) {
-    this.orders.push({ column, ascending: options.ascending, nullsLast: options.nullsFirst === undefined ? true : !options.nullsFirst });
+  order(column: string, options: { ascending?: boolean; nullsFirst?: boolean; nullsLast?: boolean } = {}) {
+    const nullsLast = options.nullsLast ?? (options.nullsFirst === undefined ? true : !options.nullsFirst);
+    this.orders.push({ column, ascending: options.ascending, nullsLast });
     return this;
   }
 
@@ -811,7 +818,7 @@ class LocalStorageBucket {
     return { data: result.data, error: result.error };
   }
 
-  async list(folder = '', options: { limit?: number } = {}) {
+  async list(folder = '', options: { limit?: number; sortBy?: { column: string; order: string } } = {}) {
     const suffix = folder ? `/${encodeObjectPath(folder)}` : '';
     const result = await apiRequest<QueryRow[]>(`/storage/${this.bucket}${suffix}?limit=${options.limit || 100}`);
     return { data: result.data, error: result.error };
@@ -838,13 +845,15 @@ export const supabase = {
   from(table: string) {
     return new LocalQueryBuilder(table);
   },
-  rpc<TResult = unknown>(name: string, args: Record<string, unknown> = {}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc<TResult = any>(name: string, args: Record<string, unknown> = {}) {
     return apiRequest<TResult>(`/rpc/${encodeURIComponent(name)}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args),
     });
   },
   functions: {
-    async invoke<TResult = unknown>(name: string, options: { body?: unknown } = {}) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async invoke<TResult = any>(name: string, options: { body?: unknown } = {}) {
       const result = await apiRequest<TResult>(`/functions/${encodeURIComponent(name)}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(options.body || {}),
       });
@@ -856,7 +865,9 @@ export const supabase = {
       return new LocalStorageBucket(bucket);
     },
   },
-  channel() {
+  // Channels are multiplexed by the realtime transport, so the name is accepted but not needed.
+  channel(name?: string) {
+    void name;
     return new LocalRealtimeChannel() as unknown as RealtimeChannel;
   },
   async removeChannel(channel: RealtimeChannel) {

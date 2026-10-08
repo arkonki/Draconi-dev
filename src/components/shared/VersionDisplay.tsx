@@ -1,4 +1,3 @@
-import React from 'react';
 
 export function VersionDisplay() {
   const version = import.meta.env.VITE_APP_VERSION || '0.0.0';

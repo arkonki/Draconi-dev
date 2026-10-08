@@ -122,7 +122,7 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
 
   const handleStartCustomizing = (baseItem?: GameItem) => {
     if (baseItem) {
-      const rest = { ...baseItem };
+      const rest: Partial<GameItem> = { ...baseItem };
       delete rest.id;
       setCustomForm({ ...rest });
     } else {
@@ -275,7 +275,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   const [isLootModalOpen, setIsLootModalOpen] = useState(false);
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
 
-  const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
   const allItemsByName = useMemo(() => {
     return new Map(allItems.map(item => [normalizeName(item.name), item]));
   }, [allItems]);

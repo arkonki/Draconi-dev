@@ -6,9 +6,15 @@
       export type DataCategory = 'spells' | 'items' | 'abilities' | 'kin' | 'profession' | 'skills' | 'monsters' | 'bio';
 
       // Make GameDataEntry a union of all possible types
-      export type GameDataEntry =
-        | { id?: string; name: string; description?: string; [key: string]: unknown } // Base structure
-        | MonsterData; // Add other specific types if they don't fit the base
+      // Category forms edit differently shaped rows, so the generic entry allows arbitrary fields.
+      export interface GenericGameDataEntry {
+        id?: string;
+        name: string;
+        description?: string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [key: string]: any;
+      }
+      export type GameDataEntry = GenericGameDataEntry | MonsterData;
 
       const getErrorMeta = (err: unknown): { message?: string; details?: string; code?: string } => {
         if (typeof err === 'object' && err !== null) {
@@ -118,7 +124,9 @@
 
             tableName = getTableName(category);
             const { id, ...dataToSaveAny } = editingEntry;
-            const dataToSave = { ...dataToSaveAny }; // Make a mutable copy
+            // Each category stores a different shape, so the save payload is intentionally loose.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const dataToSave: Record<string, any> = { ...dataToSaveAny }; // Make a mutable copy
 
             if (!dataToSave.name || String(dataToSave.name).trim() === '') {
                 throw new Error(`Cannot save ${category} without a name.`);

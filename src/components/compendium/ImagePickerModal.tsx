@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   X, Upload, Image as ImageIcon, Loader, Check,
   Folder, FolderPlus, ChevronRight, Home, ArrowUp,

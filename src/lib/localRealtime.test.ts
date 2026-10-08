@@ -98,7 +98,7 @@ describe('local realtime transport', () => {
   });
 
   it('does not overlap slow event polls', async () => {
-    let resolvePoll: ((response: Response) => void) | null = null;
+    let resolvePoll: (response: Response) => void = () => {};
     const slowPoll = new Promise<Response>((resolve) => {
       resolvePoll = resolve;
     });
@@ -113,7 +113,7 @@ describe('local realtime transport', () => {
     await vi.advanceTimersByTimeAsync(8000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    resolvePoll?.(jsonResponse({ events: [], lastId: 7 }));
+    resolvePoll(jsonResponse({ events: [], lastId: 7 }));
     await flushPromises();
     await vi.advanceTimersByTimeAsync(4000);
     expect(fetchMock).toHaveBeenCalledTimes(3);

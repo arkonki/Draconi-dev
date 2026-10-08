@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 export type LiveSyncStatus = 'healthy' | 'reconnecting' | 'degraded';
 
@@ -19,6 +19,49 @@ const LiveSyncContext = createContext<LiveSyncContextValue | undefined>(undefine
 export function LiveSyncProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Record<string, Record<string, LiveSyncStatus>>>({});
 
+  // These only use functional state updates, so they never need to change. Keeping their identity
+  // stable matters: realtime hooks list them as effect dependencies, and recreating them on every
+  // status change makes each channel unsubscribe and resubscribe in an endless loop.
+  const setChannelStatus = useCallback<LiveSyncContextValue['setChannelStatus']>((scope, channelKey, status) => {
+    setStatuses((current) => {
+      const existingScope = current[scope] || {};
+      if (existingScope[channelKey] === status) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [scope]: {
+          ...existingScope,
+          [channelKey]: status,
+        },
+      };
+    });
+  }, []);
+
+  const clearChannelStatus = useCallback<LiveSyncContextValue['clearChannelStatus']>((scope, channelKey) => {
+    setStatuses((current) => {
+      const existingScope = current[scope];
+      if (!existingScope || !existingScope[channelKey]) {
+        return current;
+      }
+
+      const nextScope = { ...existingScope };
+      delete nextScope[channelKey];
+
+      if (Object.keys(nextScope).length === 0) {
+        const next = { ...current };
+        delete next[scope];
+        return next;
+      }
+
+      return {
+        ...current,
+        [scope]: nextScope,
+      };
+    });
+  }, []);
+
   const value = useMemo<LiveSyncContextValue>(() => ({
     getScopeStatus: (scope) => {
       if (!scope || !statuses[scope]) {
@@ -29,45 +72,9 @@ export function LiveSyncProvider({ children }: { children: React.ReactNode }) {
         STATUS_PRIORITY[current] > STATUS_PRIORITY[worst] ? current : worst
       ), 'healthy');
     },
-    setChannelStatus: (scope, channelKey, status) => {
-      setStatuses((current) => {
-        const existingScope = current[scope] || {};
-        if (existingScope[channelKey] === status) {
-          return current;
-        }
-
-        return {
-          ...current,
-          [scope]: {
-            ...existingScope,
-            [channelKey]: status,
-          },
-        };
-      });
-    },
-    clearChannelStatus: (scope, channelKey) => {
-      setStatuses((current) => {
-        const existingScope = current[scope];
-        if (!existingScope || !existingScope[channelKey]) {
-          return current;
-        }
-
-        const nextScope = { ...existingScope };
-        delete nextScope[channelKey];
-
-        if (Object.keys(nextScope).length === 0) {
-          const next = { ...current };
-          delete next[scope];
-          return next;
-        }
-
-        return {
-          ...current,
-          [scope]: nextScope,
-        };
-      });
-    },
-  }), [statuses]);
+    setChannelStatus,
+    clearChannelStatus,
+  }), [statuses, setChannelStatus, clearChannelStatus]);
 
   return (
     <LiveSyncContext.Provider value={value}>

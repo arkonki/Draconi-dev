@@ -81,14 +81,14 @@ export function DropdownMenuTrigger({ children, asChild }: { children: React.Rea
   );
 }
 
-export function DropdownMenuContent({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function DropdownMenuContent({ children, className = '', align = 'end' }: { children: React.ReactNode; className?: string; align?: 'start' | 'end' }) {
   const { isOpen, setIsOpen } = useDropdown();
 
   if (!isOpen) return null;
 
   return (
     <div
-      className={`origin-top-right absolute right-0 mt-2 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10 ${className || 'w-56'}`}
+      className={`${align === 'end' ? 'origin-top-right right-0' : 'origin-top-left left-0'} absolute mt-2 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10 ${className || 'w-56'}`}
       role="menu"
       aria-orientation="vertical"
       aria-labelledby="menu-button"

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameItem } from './api/items';
 import { shopCartTotal, shopPriceInCopper, shopPurchaseContents } from './shopCart';
 
-const item = (name: string, cost = '1 silver', quantity?: number) => ({ id: name, name, cost, quantity } as GameItem);
+const item = (name: string, cost = '1 silver', quantity?: number) => ({ id: name, name, cost, quantity } as unknown as GameItem);
 
 describe('shop cart', () => {
   it('totals purchases across denominations, including free items', () => {

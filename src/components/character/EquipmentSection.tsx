@@ -36,7 +36,7 @@ const getConditionForAttribute = (attr: AttributeName): keyof Character['conditi
 };
 
 const parseSkillLevels = (skillLevelsData: unknown): Record<string, number> => { 
-  if (typeof skillLevelsData === 'object' && skillLevelsData !== null) { return skillLevelsData; } 
+  if (typeof skillLevelsData === 'object' && skillLevelsData !== null) { return skillLevelsData as Record<string, number>; } 
   return {}; 
 };
 
@@ -155,7 +155,7 @@ export function EquipmentSection({ character }: { character: Character }) {
   const { updateCharacterData } = useCharacterSheetStore();
   const [editingItem, setEditingItem] = useState<{ item: GameItem; category: ItemCategory } | null>(null);
   const [activeDescriptionTooltip, setActiveDescriptionTooltip] = useState<DescriptionTooltipState | null>(null);
-  const { data: allItems = [], isLoading } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: fetchItems, staleTime: Infinity });
+  const { data: allItems = [], isLoading } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
 
   useEffect(() => {
     const closeTooltipOnOutsideClick = (event: PointerEvent) => {
@@ -200,7 +200,6 @@ export function EquipmentSection({ character }: { character: Character }) {
     if (invItem) {
         return { 
             id: invItem.id || `custom-${safeItemName}`,
-            name: toSafeItemName(invItem.name) || safeItemName,
             category: invItem.category || 'LOOT',
             cost: (invItem.cost as string) || '0',
             weight: invItem.weight || 0,

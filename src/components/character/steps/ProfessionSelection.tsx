@@ -134,7 +134,7 @@ export function ProfessionSelection() {
       updateCharacter({ professionHeroicAbilityName: ability.name });
   };
 
-  const getMagicSchoolName = (schoolId: number | null): string | null => {
+  const getMagicSchoolName = (schoolId: string | null): string | null => {
     if (schoolId === null || magicSchools.length === 0) return null;
     return magicSchools.find(ms => ms.id === schoolId)?.name ?? `ID: ${schoolId}`; 
   };
@@ -160,7 +160,7 @@ export function ProfessionSelection() {
     if (activeTooltip === id) {
       setActiveTooltip(null);
     } else {
-      const layout = getTooltipLayout(e.currentTarget);
+      const layout = getTooltipLayout(e.currentTarget as HTMLElement);
       if (!layout) return;
       setTooltipPosition(layout);
       setActiveTooltip(id);

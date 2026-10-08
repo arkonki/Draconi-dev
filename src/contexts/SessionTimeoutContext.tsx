@@ -15,8 +15,8 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
   const location = useLocation();
   
   const lastActivityRef = useRef(Date.now());
-  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
-  const warningIdRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [showWarning, setShowWarning] = useState(false);
   const isCollaborativeRoute = isLiveCollaborativePath(location.pathname);

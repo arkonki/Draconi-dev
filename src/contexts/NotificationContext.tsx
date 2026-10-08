@@ -202,7 +202,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           tag: tag || type,
           renotify: true,
           data: { url: targetUrl },
-        });
+        } as NotificationOptions & { renotify?: boolean });
         return;
       }
     } catch (error) {

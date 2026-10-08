@@ -353,38 +353,47 @@ function PinDetailsSidebar({ pin, onClose, onUpdate, onDelete, isDM, partyId }: 
     );
 }
 
+// Defined at module level on purpose: a component declared inside MapLegend gets a new identity on
+// every render, which makes React rebuild the buttons and drops clicks that span a re-render.
+function LegendPinList({ items, title, icon: Icon, color, onPinClick }: {
+    items: MapPinType[];
+    title: string;
+    icon: LucideIcon;
+    color: string;
+    onPinClick: (pin: MapPinType) => void;
+}) {
+    if (items.length === 0) return null;
+    return (
+        <div className="space-y-2">
+            <div className="flex items-center gap-2 px-1">
+                <Icon size={12} className={color} />
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{title}</h4>
+            </div>
+            <div className="space-y-1">
+                {items.map(pin => (
+                    <button
+                        type="button"
+                        key={pin.id}
+                        aria-label={`Open ${pin.label || 'Untitled Pin'} from map legend`}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onPinClick(pin);
+                        }}
+                        className="w-full flex items-center gap-3 p-2 hover:bg-indigo-50 rounded-lg text-left transition-all group"
+                    >
+                        <div className={`w-1.5 h-1.5 rounded-full ${color.replace('text-', 'bg-')} opacity-40 group-hover:opacity-100 transition-opacity`} />
+                        <span className="text-xs font-medium text-gray-700 truncate">{pin.label || 'Untitled Pin'}</span>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 export function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick: (pin: MapPinType) => void }) {
     const locations = pins.filter(p => p.type === 'location');
     const characters = pins.filter(p => p.type === 'character');
     const notes = pins.filter(p => p.type === 'note');
-
-    const PinList = ({ items, title, icon: Icon, color }: { items: MapPinType[], title: string, icon: LucideIcon, color: string }) => (
-        items.length > 0 && (
-            <div className="space-y-2">
-                <div className="flex items-center gap-2 px-1">
-                    <Icon size={12} className={color} />
-                    <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{title}</h4>
-                </div>
-                <div className="space-y-1">
-                    {items.map(pin => (
-                        <button
-                            type="button"
-                            key={pin.id}
-                            aria-label={`Open ${pin.label || 'Untitled Pin'} from map legend`}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                onPinClick(pin);
-                            }}
-                            className="w-full flex items-center gap-3 p-2 hover:bg-indigo-50 rounded-lg text-left transition-all group"
-                        >
-                            <div className={`w-1.5 h-1.5 rounded-full ${color.replace('text-', 'bg-')} opacity-40 group-hover:opacity-100 transition-opacity`} />
-                            <span className="text-xs font-medium text-gray-700 truncate">{pin.label || 'Untitled Pin'}</span>
-                        </button>
-                    ))}
-                </div>
-            </div>
-        )
-    );
 
     return (
         <div data-atlas-ui="true" className="absolute top-0 left-0 w-64 h-full bg-white/95 backdrop-blur-md border-r shadow-2xl z-40 flex flex-col animate-in slide-in-from-left duration-300">
@@ -393,9 +402,9 @@ export function MapLegend({ pins, onPinClick }: { pins: MapPinType[]; onPinClick
                 <h3 className="font-black text-xs uppercase tracking-tighter">Map Legend / Explorer</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
-                <PinList items={locations} title="Locations" icon={MapPin} color="text-red-500" />
-                <PinList items={characters} title="Characters" icon={User} color="text-indigo-500" />
-                <PinList items={notes} title="Notes" icon={StickyNote} color="text-yellow-600" />
+                <LegendPinList items={locations} title="Locations" icon={MapPin} color="text-red-500" onPinClick={onPinClick} />
+                <LegendPinList items={characters} title="Characters" icon={User} color="text-indigo-500" onPinClick={onPinClick} />
+                <LegendPinList items={notes} title="Notes" icon={StickyNote} color="text-yellow-600" onPinClick={onPinClick} />
 
                 {pins.length === 0 && (
                     <div className="text-center py-12 px-4">
@@ -828,7 +837,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
             // 2. Sync Linked Note
             if (noteId && (updates.label !== undefined || updates.description !== undefined)) {
-                const noteUpdates: { updated_at: string; title?: string; content?: string } = { updated_at: new Date().toISOString() };
+                const noteUpdates: { updated_at: string; title?: string | null; content?: string | null } = { updated_at: new Date().toISOString() };
                 if (updates.label !== undefined) noteUpdates.title = updates.label;
                 if (updates.description !== undefined) noteUpdates.content = updates.description;
 
@@ -1051,7 +1060,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
         if (error) return true; // Fail safe
 
-        const currentTotal = files.reduce((acc, file) => acc + (file.metadata?.size || 0), 0);
+        const currentTotal = (files ?? []).reduce((acc, file) => acc + (file.metadata?.size || 0), 0);
         return (currentTotal + newFileSize) <= STORAGE_LIMIT_BYTES;
     };
 

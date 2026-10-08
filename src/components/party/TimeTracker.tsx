@@ -55,7 +55,7 @@ const createDefaultGridState = (): TimeTracker['grid_state'] => {
 
 // --- COMPONENT ---
 
-export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: string) => void }) {
+export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: 'tables') => void }) {
   const queryClient = useQueryClient();
   const [tracker, setTracker] = useState<TimeTracker | null>(null);
   const [loading, setLoading] = useState(true);

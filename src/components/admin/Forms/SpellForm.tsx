@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { hasSpellPowerLevels } from '../../../lib/game/spellPowerLevel';
-import { GameDataEntry } from '../../../hooks/useGameData';
+import { GenericGameDataEntry } from '../../../hooks/useGameData';
 import { SpellPrerequisite } from '../../../types/magic';
 
 interface SpellFormProps {
-  entry: GameDataEntry; // entry.prerequisite and entry.requirement will be string | null
+  entry: GenericGameDataEntry; // entry.prerequisite and entry.requirement will be string | null
   onChange: (field: string, value: unknown) => void;
   magicSchools?: { id:string; name: string }[];
 }
@@ -20,7 +20,7 @@ function isValidPrerequisiteJSON(obj: unknown): obj is SpellPrerequisite {
       && prerequisite.conditions.every(isValidPrerequisiteJSON);
   }
   if (["spell", "school", "skill", "attribute"].includes(prerequisite.type)) {
-    return typeof prerequisite.name === "string";
+    return typeof (prerequisite as { name?: unknown }).name === "string";
   }
   if (prerequisite.type === "anySchool") {
     return true;

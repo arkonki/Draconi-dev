@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -121,6 +121,7 @@ interface MonsterAttackResolutionContext {
 interface CombatLogEntry {
   type: string;
   ts: number;
+  who?: string;
   round?: number;
   name?: string;
   delta?: number;
@@ -358,7 +359,9 @@ const getMonsterHeroicAbilityDisplay = (stats?: MonsterStats) => {
   return legacyAbilities ? [legacyAbilities] : [];
 };
 
-const getMonsterHeroicAbilityEntries = (stats?: MonsterStats) => {
+type MonsterHeroicAbilityEntry = { ability_id: string; name: string; description?: string; willpower_cost?: number | null };
+
+const getMonsterHeroicAbilityEntries = (stats?: MonsterStats): MonsterHeroicAbilityEntry[] => {
   if (stats?.HEROIC_ABILITY_ITEMS?.length) {
     return stats.HEROIC_ABILITY_ITEMS.map((entry) => ({
       ability_id: entry.ability_id,
@@ -956,13 +959,16 @@ function MarkdownDiceRenderer({ text, contextLabel }: { text: string; contextLab
   if (!text) return null;
   const diceRegex = /((?:\d*d\d+|\d+)(?:\s*[+-]\s*(?:\d*d\d+|\d+))*)/gi;
   const parts = text.split(diceRegex);
-  const applyMarkdown = (str: string) => { return str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>'); };
+  const renderMarkdown = (str: string): ReactNode[] => str.split(/(\*\*[^*]*?\*\*|\*[^*]*?\*)/g).map((chunk, chunkIndex) => {
+    if (chunk.length > 4 && chunk.startsWith('**') && chunk.endsWith('**')) return <strong key={chunkIndex}>{chunk.slice(2, -2)}</strong>;
+    if (chunk.length > 2 && chunk.startsWith('*') && chunk.endsWith('*')) return <em key={chunkIndex}>{chunk.slice(1, -1)}</em>;
+    return chunk;
+  });
   return (<div className="whitespace-pre-wrap leading-relaxed">{parts.map((part, index) => {
     if (part.match(diceRegex) && part.match(/[dD]/)) {
       return (<button key={index} className="inline-flex items-center justify-center font-bold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded mx-0.5 text-xs transition-colors" onClick={() => toggleDiceRoller?.({ dice: part.toLowerCase().replace(/\s/g, ''), label: `${contextLabel} - Effects Roll`, })}><Dice6 size={10} className="mr-1" />{part}</button>);
     }
-    const html = applyMarkdown(part);
-    return <span key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+    return <span key={index}>{renderMarkdown(part)}</span>;
   })}</div>);
 }
 
@@ -974,19 +980,21 @@ function LogEntry({ entry }: { entry: CombatLogEntry }) {
     case 'turn_start': content = <span className="text-stone-600">Turn started: <strong>{entry.name}</strong></span>; break;
     case 'turn_end': content = <span className="text-stone-400 italic">Turn ended: {entry.name}</span>; break;
     case 'hp_change': {
-      const isDamage = entry.delta < 0;
+      const delta = entry.delta ?? 0;
+      const isDamage = delta < 0;
       content = (
         <span className={isDamage ? 'text-red-700' : 'text-green-700'}>
-          <strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(entry.delta)} DMG` : `healed ${entry.delta} HP`}
+          <strong>{entry.name}</strong> {isDamage ? `took ${Math.abs(delta)} DMG` : `healed ${delta} HP`}
         </span>
       );
       break;
     }
     case 'wp_change': {
-      const isSpend = entry.delta < 0;
+      const delta = entry.delta ?? 0;
+      const isSpend = delta < 0;
       content = (
         <span className="text-blue-700">
-          <strong>{entry.name}</strong> {isSpend ? `spent ${Math.abs(entry.delta)} WP` : `recovered ${entry.delta} WP`}
+          <strong>{entry.name}</strong> {isSpend ? `spent ${Math.abs(delta)} WP` : `recovered ${delta} WP`}
         </span>
       );
       break;
@@ -1679,7 +1687,7 @@ function ActiveCombatantSpotlight({ combatant, initiativeSlot, monsterData, curr
                   )}
                   <div className="mt-3 pt-2 border-t border-stone-200 flex justify-end gap-2">
                     {isDM && hasAttackTable && <Button size="sm" variant="outline" icon={Dices} onClick={onRollAttack}>Reroll</Button>}
-                    {canControl && <Button size="sm" variant="danger" icon={Crosshair} onClick={onOpenAttackModal}>Resolve / Apply</Button>}
+                    {canControl && <Button size="sm" variant="danger" icon={Crosshair} onClick={() => onOpenAttackModal()}>Resolve / Apply</Button>}
                   </div>
                 </div>
               ) : (
@@ -1689,13 +1697,13 @@ function ActiveCombatantSpotlight({ combatant, initiativeSlot, monsterData, curr
                   </p>
                   <div className="flex flex-col gap-2">
                     {isDM && hasAttackTable && <Button size="default" variant="danger" icon={Sword} onClick={onRollAttack} className="w-full justify-center shadow-md">Roll Monster Attack</Button>}
-                    {canControl && <Button size="default" variant="outline" icon={Crosshair} onClick={onOpenAttackModal} className="w-full justify-center">Resolve / Apply Manual Attack</Button>}
+                    {canControl && <Button size="default" variant="outline" icon={Crosshair} onClick={() => onOpenAttackModal()} className="w-full justify-center">Resolve / Apply Manual Attack</Button>}
                   </div>
                 </div>
               )}
             </div>
           </div>
-        ) : (<div className="text-center py-6 text-stone-500 flex flex-col items-center gap-3"><p className="italic">It's a player's turn.</p>{canControl && <Button size="sm" variant="outline" icon={Crosshair} onClick={onOpenAttackModal}>Record Action / Damage</Button>}</div>)}
+        ) : (<div className="text-center py-6 text-stone-500 flex flex-col items-center gap-3"><p className="italic">It's a player's turn.</p>{canControl && <Button size="sm" variant="outline" icon={Crosshair} onClick={() => onOpenAttackModal()}>Record Action / Damage</Button>}</div>)}
       </div>
     </div>
   );
@@ -2519,7 +2527,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           </div>
           <div className="lg:col-span-2 space-y-4">
             {swapSourceId && (<div className="bg-purple-600 text-white p-3 rounded-lg shadow-md flex justify-between items-center animate-pulse"><span className="font-bold flex items-center gap-2"><ArrowUpDown /> Select swap target...</span><Button size="sm" variant="secondary" onClick={() => setSwapSourceId(null)}>Cancel</Button></div>)}
-            {isEditingEncounter && (<div className="bg-white p-4 rounded-xl shadow mb-4 border border-blue-200"><h4 className="font-bold mb-2">Edit Details</h4><input className="w-full mb-2 p-2 border rounded" value={editedName} onChange={e => setEditedName(e.target.value)} /><div className="flex gap-2"><Button size="sm" onClick={() => updateEncounterMu.mutate({ id: currentEncounterId, updates: { name: editedName } })}>Save</Button><Button size="sm" variant="ghost" onClick={() => setIsEditingEncounter(false)}>Cancel</Button></div></div>)}
+            {isEditingEncounter && (<div className="bg-white p-4 rounded-xl shadow mb-4 border border-blue-200"><h4 className="font-bold mb-2">Edit Details</h4><input className="w-full mb-2 p-2 border rounded" value={editedName} onChange={e => setEditedName(e.target.value)} /><div className="flex gap-2"><Button size="sm" onClick={() => updateEncounterMu.mutate({ id: currentEncounterId!, updates: { name: editedName } })}>Save</Button><Button size="sm" variant="ghost" onClick={() => setIsEditingEncounter(false)}>Cancel</Button></div></div>)}
             {encounterDetails.status === 'active' && activeCombatant && (
               <ActiveCombatantSpotlight
                 combatant={activeCombatant}
@@ -2550,7 +2558,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onToggleFear={handleToggleFear} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onToggleFear={handleToggleFear} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId ?? null} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
             </div>
           </div>
         </div>

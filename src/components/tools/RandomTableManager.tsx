@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchRandomTables, createRandomTable, updateRandomTable, deleteRandomTable } from '../../lib/api/randomTables';
 import { RandomTable, RandomTableRow } from '../../types/randomTable';

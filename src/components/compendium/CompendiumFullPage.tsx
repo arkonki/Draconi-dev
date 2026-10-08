@@ -193,8 +193,8 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
     name,
     keyCommand: name,
     buttonProps: { 'aria-label': title, title: title },
-    icon,
-    execute: (state, api) => { api.replaceSelection(template); }
+    icon: icon as React.ReactElement,
+    execute: (_state, api) => { api.replaceSelection(template); }
   });
 
   const blockCommands = [
@@ -267,11 +267,13 @@ export function CompendiumFullPage({ entry, onClose, onSave }: CompendiumFullPag
               style: { backgroundColor: 'transparent', padding: 0, fontFamily: 'inherit' },
             }}
             // Render Preview using the Dragonbane-specific HomebrewRenderer
-            renderPreview={(markdownContent) => (
-              <div className="h-full overflow-y-auto bg-white p-8 custom-scrollbar">
-                <HomebrewRenderer content={markdownContent} />
-              </div>
-            )}
+            components={{
+              preview: (markdownContent) => (
+                <div className="h-full overflow-y-auto bg-white p-8 custom-scrollbar">
+                  <HomebrewRenderer content={markdownContent} />
+                </div>
+              ),
+            }}
             commands={[
               commands.bold, commands.italic, commands.title, commands.divider,
               commands.quote, commands.table, commands.hr,

@@ -126,8 +126,8 @@ const createCommand = (name: string, icon: React.ReactNode, template: string): I
   name,
   keyCommand: name,
   buttonProps: { 'aria-label': `Insert ${name}`, title: `Insert ${name}` },
-  icon,
-  execute: (state, api) => api.replaceSelection(template)
+  icon: icon as React.ReactElement,
+  execute: (_state, api) => api.replaceSelection(template)
 });
 
 const customCommands = [
@@ -670,10 +670,10 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
 
                 {activeTab === 'generate' || isEditingLibrary ? (
                   <MDEditor
-                    value={activeTab === 'generate' ? editorContent : (isEditingLibrary ? selectedIdea.response : '')}
+                    value={activeTab === 'generate' ? editorContent : (isEditingLibrary ? (selectedIdea?.response ?? '') : '')}
                     onChange={(val) => {
                       if (activeTab === 'generate') setEditorContent(val || '');
-                      else setSelectedIdea({ ...selectedIdea, response: val || '' });
+                      else setSelectedIdea(selectedIdea ? { ...selectedIdea, response: val || '' } : selectedIdea);
                     }}
                     height="100%"
                     visibleDragbar={false}
@@ -690,11 +690,11 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                         code: (props: React.ComponentPropsWithoutRef<'code'>) => <code {...props} />
                       }
                     }}
-                    renderPreview={(markdownContent) => <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar"><HomebrewRenderer content={markdownContent} /></div>}
+                    components={{ preview: (markdownContent) => <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar"><HomebrewRenderer content={markdownContent} /></div> }}
                   />
                 ) : (
                   <div className="h-full overflow-y-auto bg-gray-50 p-6 custom-scrollbar">
-                    <HomebrewRenderer content={selectedIdea.response} />
+                    <HomebrewRenderer content={selectedIdea?.response ?? ''} />
                   </div>
                 )}
               </div>

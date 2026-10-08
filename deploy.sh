@@ -74,9 +74,9 @@ else
   [[ "${actual_remote}" == "${REPOSITORY_URL}" ]] \
     || fail "Unexpected origin in ${APP_DIR}: ${actual_remote:-missing}"
 
-  # The repository tracks a small part of dist. Discard only prior generated
-  # build output before checking for real source changes.
-  git -C "${APP_DIR}" restore --worktree -- dist
+  # Older checkouts still track part of dist; discard prior generated build output
+  # so the pull that stops tracking it cannot conflict. A no-op once dist is untracked.
+  git -C "${APP_DIR}" restore --worktree -- dist 2>/dev/null || true
 
   if [[ -n "$(git -C "${APP_DIR}" status --porcelain --untracked-files=no)" ]]; then
     fail "Tracked local changes exist in ${APP_DIR}; commit or remove them before deploying"

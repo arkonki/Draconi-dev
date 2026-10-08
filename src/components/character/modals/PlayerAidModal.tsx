@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Swords, Heart, Map, Wand2, HelpCircle, Info } from 'lucide-react';
 import { AccessibleDialog } from '../../shared/AccessibleDialog';
 
@@ -168,6 +168,7 @@ interface PlayerAidModalProps {
   onClose: () => void;
 }
 type TabKey = keyof typeof aidData;
+interface AidSection { title: string; description?: string; items: { title: string; description: string }[] }
 
 export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('general');
@@ -177,7 +178,7 @@ export function PlayerAidModal({ onClose }: PlayerAidModalProps) {
   const renderContent = () => {
     const tabContent = aidData[activeTab];
     const normalizedQuery = searchQuery.trim().toLowerCase();
-    const sections = tabContent.sections.map((section) => ({
+    const sections = (tabContent.sections as AidSection[]).map((section) => ({
       ...section,
       items: section.items.filter((item) => !normalizedQuery || `${section.title} ${item.title} ${item.description}`.toLowerCase().includes(normalizedQuery)),
     })).filter((section) => !normalizedQuery || section.items.length > 0 || section.title.toLowerCase().includes(normalizedQuery));

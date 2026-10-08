@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../../shared/Button';
 import { Plus, Trash2 } from 'lucide-react';
-import { BioData } from '../../../types/gameData'; // It's best to use a specific type
+import { BioData } from '../../../types/compendium';
 
 interface BioFormProps {
   entry: BioData; 

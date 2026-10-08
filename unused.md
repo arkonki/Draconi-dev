@@ -2,6 +2,12 @@
 
 Audit date: 2026-09-27
 
+> **Status (2026-10-07):** the confirmed-unreachable files, the legacy Supabase Edge Functions and the
+> tracked build output have been removed, and `npm run typecheck` is clean and enforced by `npm run build`.
+> Still open: stale public assets, unused exports and types, the root `bcryptjs` dependency, and the
+> historical planning files that remain outside `docs/archive/`.
+
+
 This list separates files that are unreachable from the current application entry points from cleanup candidates that should receive a final deployment or product-policy check before removal.
 
 ## Summary

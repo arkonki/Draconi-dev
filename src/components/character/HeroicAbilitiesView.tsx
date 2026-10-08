@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useCharacterSheetStore, HeroicAbility } from '../../stores/characterSheetStore';
 import { isSkillNameRequirement } from '../../types/character';
 import { Zap, ShieldCheck, Info } from 'lucide-react';
@@ -80,7 +80,7 @@ export function HeroicAbilitiesView() {
     const cost = ability.willpower_cost;
     const currentWP = character.current_wp ?? character.attributes.WIL;
     
-    if (cost === null || cost <= 0) { 
+    if (cost == null || cost <= 0) { 
         setActiveStatusMessage(`Activated: ${ability.name}`); 
         return; 
     }
@@ -117,7 +117,7 @@ export function HeroicAbilitiesView() {
         {availableAbilities.map((ability) => {
           const cost = ability.willpower_cost;
           const currentWP = character?.current_wp ?? 0;
-          const canAfford = cost === null || cost <= 0 || currentWP >= cost;
+          const canAfford = cost == null || cost <= 0 || currentWP >= cost;
           const isPassive = ability.activation_type === 'passive';
           const isContextual = ability.activation_type === 'contextual';
           
