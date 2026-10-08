@@ -51,6 +51,15 @@ while (($# > 0)); do
   shift
 done
 
+# The frontend is published with `rsync --delete`, so the publish directory must never be (or contain)
+# the git checkout. Running this script from inside the checkout used to wipe .git, server/ and src/.
+resolve_dir() { (cd -- "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
+resolved_app_dir="$(resolve_dir "${APP_DIR}")"
+resolved_public_dir="$(resolve_dir "${PUBLIC_DIR}")"
+if [[ "${resolved_public_dir}" == "${resolved_app_dir}" || "${resolved_app_dir}" == "${resolved_public_dir}"/* ]]; then
+  fail "Refusing to publish: ${resolved_public_dir} is (or contains) the Git checkout ${resolved_app_dir}. Run deploy.sh from the web root, or set DRACONI_PUBLIC_DIR to it."
+fi
+
 for command_name in git npm rsync sed; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "Required command not found: ${command_name}"
 done
