@@ -171,6 +171,14 @@ printf 'Installing frontend dependencies and building...\n'
   COMMIT_REF="${commit_ref}" npm run build
 )
 
+# Never publish or restart onto an incomplete build: the Node API serves ${APP_DIR}/dist directly,
+# and pulling a commit that stops tracking old dist files deletes them from the checkout.
+for required_file in index.html sw.js manifest.webmanifest dragonbane-icon.png icons/icon-192x192.png; do
+  [[ -s "${APP_DIR}/dist/${required_file}" ]] \
+    || fail "Build output is incomplete: dist/${required_file} is missing"
+done
+compgen -G "${APP_DIR}/dist/assets/*.js" >/dev/null || fail "Build output is incomplete: dist/assets has no JavaScript"
+
 printf 'Installing production API dependencies...\n'
 (
   cd "${APP_DIR}/server"
