@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { useConfirm } from '../../hooks/useConfirm';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -299,6 +300,7 @@ const MemberCard = React.memo(({
 // --- MAIN COMPONENT: PARTY LIST ---
 
 export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyMemberListProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const queryClient = useQueryClient();
   const {
     character: viewedSheetCharacter,
@@ -498,7 +500,7 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
   };
 
   const handleRemoveMember = async (characterId: string, characterName: string) => {
-    if (!window.confirm(`Are you sure you want to remove ${characterName} from the party?`)) {
+    if (!(await confirm({ title: `Remove ${characterName}?`, description: `${characterName} will be removed from the party. The character itself is not deleted.`, confirmText: 'Remove from party' }))) {
       return;
     }
     try {
@@ -529,6 +531,7 @@ export function PartyMemberList({ party, isDM, currentUserId, onUpdate }: PartyM
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {confirmDialog}
         {party.members.map(member => (
         <MemberCard 
             key={member.id} 

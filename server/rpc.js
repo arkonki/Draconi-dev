@@ -37,6 +37,35 @@ export async function executeRpc(user, name, args = {}) {
       return parties[0].id;
     }
 
+    if (name === 'leave_campaign') {
+      const partyId = args.p_party_id;
+      if (typeof partyId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(partyId)) {
+        throw new HttpError(400, 'p_party_id must be a campaign id');
+      }
+      const { rows: parties } = await client.query('SELECT created_by FROM parties WHERE id = $1', [partyId]);
+      if (!parties[0]) throw new HttpError(404, 'Campaign not found');
+      if (parties[0].created_by === user.id) {
+        throw new HttpError(409, 'The campaign owner cannot leave. Disband the campaign or hand it over first.', 'OWNER_CANNOT_LEAVE');
+      }
+      const { rows: memberships } = await client.query(
+        'SELECT role FROM campaign_memberships WHERE party_id = $1 AND user_id = $2 FOR UPDATE',
+        [partyId, user.id],
+      );
+      if (!memberships[0]) throw new HttpError(404, 'You are not a member of this campaign');
+      // The player's characters go back to "no party"; the orphan trigger drops a pure player membership,
+      // and a GM or observer membership is removed explicitly.
+      const released = await client.query(
+        `DELETE FROM party_members
+         WHERE party_id = $1
+           AND (user_id = $2 OR character_id IN (SELECT id FROM characters WHERE user_id = $2))
+         RETURNING character_id`,
+        [partyId, user.id],
+      );
+      await client.query('UPDATE characters SET party_id = NULL WHERE party_id = $1 AND user_id = $2', [partyId, user.id]);
+      await client.query('DELETE FROM campaign_memberships WHERE party_id = $1 AND user_id = $2', [partyId, user.id]);
+      return { left: true, characters: released.rowCount };
+    }
+
     if (name === 'increase_character_max_stat') {
       const characterId = args.character_id_input;
       const column = args.stat_name === 'hp' ? 'max_hp' : args.stat_name === 'wp' ? 'max_wp' : null;
@@ -224,7 +253,7 @@ export async function executeRpc(user, name, args = {}) {
 
     throw new HttpError(404, `Unknown RPC: ${name}`);
   });
-  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'duplicate_encounter_with_combatants') {
+  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'leave_campaign' || name === 'duplicate_encounter_with_combatants') {
     invalidateAccessContextCache();
   }
   return result;

@@ -11,6 +11,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { BarteringCalculator } from './BarteringCalculator';
 import { parseCost } from '../../lib/equipment';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { useConfirm } from '../../hooks/useConfirm';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -261,6 +262,7 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
 // --- MAIN COMPONENT ---
 
 export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const queryClient = useQueryClient();
   const [inventory, setInventory] = useState<PartyInventoryTableItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -486,7 +488,8 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   // --- HANDLER: Delete Selected from Party ---
   const handleDeleteSelected = async () => {
     if (!selectedItemIds.length) return;
-    if (!window.confirm(`Permanently delete ${selectedItemIds.length} items from party stash?`)) return;
+    const count = selectedItemIds.length;
+    if (!(await confirm({ title: `Delete ${count} item${count === 1 ? '' : 's'}?`, description: `${count === 1 ? 'This item' : `These ${count} items`} will be permanently deleted from the party stash.`, confirmText: 'Delete from stash' }))) return;
 
     const itemsToDelete = inventory.filter(i => selectedItemIdSet.has(i.id));
     setInventory(prev => prev.filter(i => !selectedItemIdSet.has(i.id)));
@@ -811,6 +814,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
 
   return (
     <>
+      {confirmDialog}
       {isLootModalOpen && <LootAssignmentModal onClose={() => setIsLootModalOpen(false)} allItems={allItems} onAssignLoot={handleAssignLoot} />}
 
       {/* SELL MODAL */}

@@ -22,6 +22,7 @@ import { rollOnTable } from '../../lib/game/randomTableUtils';
 import { rollDiceExpression } from '../../lib/game/diceExpression';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
+import { useConfirm } from '../../hooks/useConfirm';
 
 interface SessionManagerProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ const LIGHT_SOURCES = [
 ] as const;
 
 export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionManagerProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const queryClient = useQueryClient();
   const [activePanel, setActivePanel] = useState<'time' | 'session' | 'reminders'>('time');
   const [sessionTitle, setSessionTitle] = useState(`${partyName} Session`);
@@ -127,6 +129,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 p-2 backdrop-blur-sm sm:p-4">
+      {confirmDialog}
       <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-stone-300 bg-stone-50 shadow-2xl">
         <header className="flex items-center justify-between border-b bg-stone-900 px-4 py-3 text-white">
           <div className="flex items-center gap-3">
@@ -376,8 +379,8 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                           </Button>
                           {!reminder.active ? (
                             <Button variant="danger" size="sm" icon={Trash2} disabled={mutation.isPending}
-                              onClick={() => {
-                                if (window.confirm(`Remove the paused reminder “${reminder.label}”?`)) {
+                              onClick={async () => {
+                                if (await confirm({ title: 'Remove this reminder?', description: `The paused reminder “${reminder.label}” will be removed.`, confirmText: 'Remove' })) {
                                   run(() => deleteCampaignTimeReminder(partyId, reminder.id, state.campaignRevision));
                                 }
                               }}>

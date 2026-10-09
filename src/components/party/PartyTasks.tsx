@@ -18,6 +18,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { useConfirm } from '../../hooks/useConfirm';
 
 // --- TYPES ---
 interface PartyTasksProps {
@@ -92,6 +93,7 @@ const TaskCard = ({
 
 // --- MAIN COMPONENT ---
 export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { handleError } = useErrorHandler();
@@ -176,8 +178,8 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
     });
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Delete this task permanently?')) {
+  const handleDelete = async (id: string) => {
+    if (await confirm({ title: 'Delete this task?', description: 'The task will be permanently deleted.', confirmText: 'Delete task' })) {
       deleteTaskMu.mutate(id);
     }
   };
@@ -201,6 +203,7 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
 
   return (
     <div className="max-w-4xl mx-auto p-6 h-full overflow-y-auto">
+      {confirmDialog}
       
       {/* Header */}
       <div className="flex justify-between items-end mb-8 border-b pb-4">

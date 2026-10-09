@@ -274,3 +274,39 @@ export async function deleteParty(partyId: string): Promise<void> {
     throw new Error(error.message || 'Failed to delete party');
   }
 }
+
+/** Changes the campaign's name and description. Only the campaign owner may do this. */
+export async function updatePartyDetails(partyId: string, details: { name: string; description: string }): Promise<void> {
+  const name = details.name.trim();
+  if (!name) throw new Error('The campaign needs a name');
+  const { error } = await supabase
+    .from('parties')
+    .update({ name, description: details.description.trim() })
+    .eq('id', partyId);
+  if (error) throw new Error(error.message || 'Failed to update the campaign');
+}
+
+/** Same shape as the database default: ten upper-case hexadecimal characters. */
+export function generateInviteCode(): string {
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+/** Replaces the invite code, which stops the old link from working. Returns the new code. */
+export async function regenerateInviteCode(partyId: string): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const inviteCode = generateInviteCode();
+    const { error } = await supabase.from('parties').update({ invite_code: inviteCode }).eq('id', partyId);
+    if (!error) return inviteCode;
+    // 23505 is a collision with another campaign's code: try a fresh one.
+    if (error.code !== '23505') throw new Error(error.message || 'Failed to create a new invite link');
+  }
+  throw new Error('Could not create a unique invite link. Please try again.');
+}
+
+/** Removes the signed-in user's characters and role from the campaign. The owner cannot leave. */
+export async function leaveParty(partyId: string): Promise<void> {
+  const { error } = await supabase.rpc('leave_campaign', { p_party_id: partyId });
+  if (error) throw new Error(error.message || 'Failed to leave the campaign');
+}

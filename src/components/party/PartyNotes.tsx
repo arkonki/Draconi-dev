@@ -17,6 +17,7 @@ import { getAbsoluteAppUrl } from '../../lib/appUrl';
 import { getNotePath } from '../../lib/noteLinks';
 import { useSearchParams } from 'react-router-dom';
 import { canEditNote } from '../../../shared/noteAccess.js';
+import { useConfirm } from '../../hooks/useConfirm';
 
 // --- UPDATED TYPE DEFINITION ---
 interface Note {
@@ -38,6 +39,7 @@ interface PartyNotesProps {
 }
 
 export function PartyNotes({ partyId, openNoteId, isDM, readOnly = false }: PartyNotesProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const [, setSearchParams] = useSearchParams();
 
@@ -277,7 +279,7 @@ export function PartyNotes({ partyId, openNoteId, isDM, readOnly = false }: Part
   const handleDelete = async (noteId: string) => {
     const target = notes.find(note => note.id === noteId);
     if (!target || !canManage(target)) return;
-    if (!window.confirm("Are you sure you want to delete this note?")) return;
+    if (!(await confirm({ title: 'Delete this note?', description: 'The note and any map pins linked to it will be permanently deleted.', confirmText: 'Delete note' }))) return;
     try {
       // 1. Manually delete linked map pins (DB should cascade if configured, but doing safeguards)
       const { error: pinError } = await supabase
@@ -346,6 +348,7 @@ export function PartyNotes({ partyId, openNoteId, isDM, readOnly = false }: Part
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-140px)] bg-gray-50 border-t border-gray-200">
+      {confirmDialog}
 
       {/* --- LEFT SIDEBAR --- */}
       <div className={`w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col h-full ${selectedNote || viewState !== 'view' ? 'hidden md:flex' : 'flex'}`}>

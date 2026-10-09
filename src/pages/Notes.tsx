@@ -15,6 +15,7 @@ import { getNotePath } from '../lib/noteLinks';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchParties, type Party } from '../lib/api/parties';
 import { canEditNote, canWritePartyNotes } from '../../shared/noteAccess.js';
+import { useConfirm } from '../hooks/useConfirm';
 
 // --- TYPES ---
 interface Note {
@@ -37,6 +38,7 @@ interface LinkTarget {
 
 // --- MAIN COMPONENT ---
 export function Notes() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user, isAdmin } = useAuth();
   const admin = isAdmin();
   const userId = user?.id;
@@ -254,7 +256,7 @@ export function Notes() {
 
   const handleDelete = async (id: string) => {
     if (!selectedNote || selectedNote.id !== id || !canManage(selectedNote)) return;
-    if (!window.confirm("Delete this note?")) return;
+    if (!(await confirm({ title: 'Delete this note?', description: 'The note will be permanently deleted.', confirmText: 'Delete note' }))) return;
     try {
       const { error } = await supabase.from('notes').delete().eq('id', id);
       if (error) throw error;
@@ -296,6 +298,7 @@ export function Notes() {
   return (
     // Layout: Full height, removed margins on mobile
     <div className="flex flex-col md:flex-row h-[calc(100vh-4rem)] md:h-[calc(100vh-6rem)] bg-white md:border md:rounded-xl overflow-hidden shadow-sm relative -mx-4 md:mx-0">
+      {confirmDialog}
 
       {/* LEFT SIDEBAR (List) */}
       {/* Logic: Hidden on mobile if detail view. Hidden on desktop if Full Screen. */}

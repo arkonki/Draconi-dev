@@ -11,6 +11,7 @@ import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { getAbsoluteAppUrl } from '../../lib/appUrl';
 import { getNotePath } from '../../lib/noteLinks';
 import { localImageObjectPath } from '../../lib/images';
+import { useConfirm } from '../../hooks/useConfirm';
 
 interface AtlasViewProps {
     partyId: string;
@@ -473,6 +474,7 @@ function MapContextMenu({ x, y, onSelectTool, onClose }: {
 }
 
 export function AtlasView({ partyId, isDM }: AtlasViewProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
     const { user } = useAuth();
     const [activeTool, setActiveTool] = useState<'select' | 'pin' | 'draw'>('select');
     const [drawMode, setDrawMode] = useState<'pencil' | 'eraser' | 'shape'>('pencil');
@@ -751,7 +753,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
     const deleteMapMutation = useMutation({
         mutationFn: async (map: PartyMap) => {
-            if (!confirm(`Are you sure you want to delete "${map.name}"? This will also remove the image file.`)) return;
+            if (!(await confirm({ title: 'Delete this map?', description: `"${map.name}" and its image file will be permanently deleted.`, confirmText: 'Delete map' }))) return;
 
             // 1. Delete locally hosted images and their generated variants.
             const localObjectPath = localImageObjectPath(map.image_url);
@@ -1128,6 +1130,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
 
     return (
         <div ref={rootRef} className={`flex flex-col bg-slate-900/5 overflow-hidden border border-gray-200 shadow-sm relative group/app transition-all duration-300 ${isFullscreen ? 'h-screen w-screen rounded-none bg-slate-100' : 'h-[750px] rounded-xl'}`}>
+      {confirmDialog}
             {isDM && (
                 <input
                     type="file"

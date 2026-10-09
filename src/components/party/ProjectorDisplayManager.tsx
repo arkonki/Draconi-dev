@@ -24,6 +24,7 @@ import type { PartyDisplaySlot } from '../../types/projectorDisplay';
 import type { Character } from '../../types/character';
 import { queryKeys } from '../../lib/queryKeys';
 import { optimizedImageUrl } from '../../lib/images';
+import { useConfirm } from '../../hooks/useConfirm';
 
 interface ProjectorDisplayManagerProps {
   isOpen: boolean;
@@ -529,6 +530,7 @@ export function ProjectorDisplayManager({
   partyName,
   partyMembers,
 }: ProjectorDisplayManagerProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const queryClient = useQueryClient();
   const [editableSlots, setEditableSlots] = useState<PartyDisplaySlot[]>(DEFAULT_DISPLAY_SLOTS);
   const [displaySourceMode, setDisplaySourceMode] = useState<DisplaySourceMode>('active_map');
@@ -747,7 +749,7 @@ export function ProjectorDisplayManager({
   };
 
   const handleDeleteProjectorImage = async (image: ProjectorStoredImage) => {
-    if (!window.confirm(`Delete "${image.name}" from the projector library?`)) {
+    if (!(await confirm({ title: 'Delete this image?', description: `"${image.name}" will be deleted from the projector library.`, confirmText: 'Delete image' }))) {
       return;
     }
 
@@ -783,6 +785,7 @@ export function ProjectorDisplayManager({
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[80] p-4 backdrop-blur-sm">
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden border border-stone-200 flex flex-col">
         <div className="p-4 border-b bg-stone-800 text-white flex items-center justify-between">
           <div>

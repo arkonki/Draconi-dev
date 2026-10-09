@@ -16,6 +16,7 @@ import {
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
+import { useConfirm } from '../../hooks/useConfirm';
 
 // --- TYPES & CONSTANTS ---
 
@@ -56,6 +57,7 @@ const createDefaultGridState = (): TimeTracker['grid_state'] => {
 // --- COMPONENT ---
 
 export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onTabChange?: (tab: 'tables') => void }) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const queryClient = useQueryClient();
   const [tracker, setTracker] = useState<TimeTracker | null>(null);
   const [loading, setLoading] = useState(true);
@@ -268,11 +270,16 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
     if (tracker) saveTracker(tracker);
   };
 
-  const handleDayChange = (delta: number) => {
+  const handleDayChange = async (delta: number) => {
     if (!tracker) return;
     const newDay = Math.max(1, tracker.current_day + delta);
 
-    if (window.confirm(delta > 0 ? "Start a new day? This will clear the time grid." : "Go back a day? (Grid will reset)")) {
+    if (await confirm({
+      title: delta > 0 ? 'Start a new day?' : 'Go back a day?',
+      description: delta > 0 ? 'This clears the time grid for the new day.' : 'Going back resets the time grid.',
+      confirmText: delta > 0 ? 'Start new day' : 'Go back a day',
+      destructive: false,
+    })) {
       const defaultState = createDefaultGridState();
       saveTracker({ ...tracker, current_day: newDay, current_shift: 1, grid_state: defaultState });
       setActiveShift(1);
@@ -330,6 +337,7 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
 
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-4">

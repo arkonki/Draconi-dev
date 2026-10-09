@@ -2,15 +2,17 @@ import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // 1. Added useSearchParams
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/useAuth';
-import { fetchPartyById, removePartyMember, deleteParty } from '../lib/api/parties';
+import { fetchPartyById, removePartyMember, deleteParty, leaveParty } from '../lib/api/parties';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
-  MessageSquare, ChevronDown, Dices, Map, Monitor, CalendarClock
+  MessageSquare, ChevronDown, Dices, Map, Monitor, CalendarClock, LogOut, Pencil
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
+import { PartyDetailsDialog } from '../components/party/PartyDetailsDialog';
+import { useConfirm } from '../hooks/useConfirm';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
@@ -100,6 +102,8 @@ export function PartyView() {
   const [memberToRemove, setMemberToRemove] = useState<{ id: string, name: string } | null>(null);
   const [isProjectorManagerOpen, setIsProjectorManagerOpen] = useState(false);
   const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [isSoloSettingsOpen, setIsSoloSettingsOpen] = useState(false);
   const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
 
@@ -221,6 +225,25 @@ export function PartyView() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: queryKeys.parties }); navigate('/adventure-party'); },
   });
 
+  const leaveMutation = useMutation({
+    mutationFn: () => { if (!partyId) throw new Error('Party ID is missing'); return leaveParty(partyId); },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.parties });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.availableCharacters });
+      queryClient.removeQueries({ queryKey: queryKeys.party(partyId), exact: true });
+      navigate('/adventure-party');
+    },
+  });
+
+  const handleLeave = async () => {
+    const confirmed = await confirm({
+      title: 'Leave this campaign?',
+      description: 'Your characters are taken out of the party and you lose access to it. The GM can invite you again later.',
+      confirmText: 'Leave campaign',
+    });
+    if (confirmed) leaveMutation.mutate();
+  };
+
   const confirmRemoveMember = () => { if (memberToRemove) { removeMemberMutation.mutate(memberToRemove.id); } };
   const confirmDeleteParty = () => { deletePartyMutation.mutate(); };
 
@@ -282,7 +305,15 @@ export function PartyView() {
             <div>
               <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">{party.name}</h1>
               <p className="text-gray-500 mt-1 font-medium">A band of {party.members.length} brave adventurers.</p>
+              {party.description ? <p className="mt-2 max-w-2xl text-sm text-gray-600">{party.description}</p> : null}
             </div>
+
+            {leaveMutation.error && <p role="alert" className="text-sm text-red-700">{leaveMutation.error.message}</p>}
+            {party.campaign_role !== 'owner' && user?.id !== party.created_by && party.campaign_role && (
+              <Button variant="outline" size="sm" icon={LogOut} onClick={() => void handleLeave()} loading={leaveMutation.isPending}>
+                Leave campaign
+              </Button>
+            )}
 
             {isCampaignGM && (
               <div className="flex items-center gap-2">
@@ -326,6 +357,11 @@ export function PartyView() {
                     <DropdownMenuItem onSelect={() => setIsSoloSettingsOpen(true)}>
                       <Sparkles className="w-4 h-4 mr-2" /> Solo Mode
                     </DropdownMenuItem>
+                    {isPartyOwner && (
+                      <DropdownMenuItem onSelect={() => setIsDetailsOpen(true)}>
+                        <Pencil className="w-4 h-4 mr-2" /> Campaign Details
+                      </DropdownMenuItem>
+                    )}
                     {isPartyOwner && (
                       <DropdownMenuItem onSelect={() => setIsRoleManagerOpen(true)}>
                         <Users className="w-4 h-4 mr-2" /> Campaign Roles
@@ -592,6 +628,8 @@ export function PartyView() {
         partyId={partyId!}
         partyName={party.name}
       />
+      {confirmDialog}
+      <PartyDetailsDialog party={party} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <CampaignRoleManager
         party={party}
         isOpen={isRoleManagerOpen}

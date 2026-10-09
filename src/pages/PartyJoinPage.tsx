@@ -59,7 +59,8 @@ export function PartyJoinPage() {
     },
     onSuccess: (data) => {
       // On success, the RPC returns the party_id for redirection
-      const partyId = data?.party_id;
+      // The server answers with the campaign id itself; older responses wrapped it as { party_id }.
+      const partyId = typeof data === 'string' ? data : data?.party_id;
       if (partyId) {
         // Invalidate queries to make sure everything is fresh
         queryClient.invalidateQueries({ queryKey: ['parties'] }); // A general key for party lists

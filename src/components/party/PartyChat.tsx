@@ -18,6 +18,7 @@ import type { Character } from '../../types/character';
 import type { CampaignMembership } from '../../lib/api/parties';
 import { getNotePath } from '../../lib/noteLinks';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
+import { useConfirm } from '../../hooks/useConfirm';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -37,6 +38,7 @@ interface PartyChatProps {
 }
 
 export function PartyChat({ partyId, members, campaignMembers = [], readOnly = false }: PartyChatProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -161,7 +163,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   // --- ACTIONS ---
   
   const handleDeleteMessage = async (messageId: string) => {
-    if (!confirm("Delete this message?")) return;
+    if (!(await confirm({ title: 'Delete this message?', description: 'The message will be removed for everyone in the campaign.', confirmText: 'Delete message' }))) return;
     try {
       // Optimistic delete from UI
       queryClient.setQueryData(queryKeys.messages(partyId), (oldData: Message[] = []) => oldData.filter(m => m.id !== messageId));
@@ -247,6 +249,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
 
   return (
     <div className={`flex flex-col h-[calc(100vh-14rem)] min-h-[500px] bg-gray-50 rounded-xl overflow-hidden border border-gray-200 shadow-inner relative ${isShaking ? 'animate-shake' : ''}`}>
+      {confirmDialog}
       
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar z-0">
         {messages.length === 0 ? (
