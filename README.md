@@ -254,6 +254,20 @@ reports `10.0.7.214`). The address is deliberately not hardcoded because the
 provider can change it. Production deployment stops if the variable is missing;
 local and Docker development continue to use their configured host fallbacks.
 
+### Deploying to the server
+
+On the server, from the Git checkout (`~/apps/draconi`):
+
+```bash
+cd ~/apps/draconi && ./deploy.sh
+```
+
+The script fast-forwards `Postgres-SQL`, takes a database backup, builds the frontend, restarts the API under
+PM2 and checks health. It copies the build to `~/htdocs/draconi` when that directory exists (override with
+`DRACONI_PUBLIC_DIR`); the API also serves `dist/` itself. It never publishes into the checkout, it runs from
+a temporary copy so a pull cannot change the running script, and it stops before restarting if the build
+output is incomplete. `bash scripts/deploy-smoke.sh` tests all of this in a sandbox.
+
 Uploaded images are stored in the Docker volume rather than in an object-storage service. PostgreSQL and uploaded files are captured together by the recovery commands:
 
 ```bash

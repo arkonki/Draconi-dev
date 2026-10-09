@@ -5,9 +5,42 @@ readonly REPOSITORY_URL="https://github.com/arkonki/Draconi-dev.git"
 readonly DEPLOY_BRANCH="Postgres-SQL"
 readonly PM2_APP_NAME="draconi-api"
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly APP_DIR="${DRACONI_APP_DIR:-${HOME}/apps/draconi}"
-readonly PUBLIC_DIR="${DRACONI_PUBLIC_DIR:-${SCRIPT_DIR}}"
+# Bash reads a script while it runs, and this script fast-forwards the checkout it may live in. Run
+# from a private temporary copy so an updated deploy.sh can never change the code that is executing.
+if [[ -z "${DRACONI_DEPLOY_SELF_COPY:-}" ]]; then
+  self_copy="$(mktemp "${TMPDIR:-/tmp}/draconi-deploy.XXXXXX")"
+  cp -- "${BASH_SOURCE[0]}" "${self_copy}"
+  DRACONI_DEPLOY_ORIGIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" \
+    DRACONI_DEPLOY_SELF_COPY=1 exec bash "${self_copy}" "$@"
+fi
+rm -f -- "${BASH_SOURCE[0]}" 2>/dev/null || true
+readonly SCRIPT_DIR="${DRACONI_DEPLOY_ORIGIN:?deploy.sh must be started as ./deploy.sh}"
+
+# Where the Git checkout is. When the script itself sits in a checkout, that checkout is used.
+if [[ -n "${DRACONI_APP_DIR:-}" ]]; then
+  APP_DIR="${DRACONI_APP_DIR}"
+elif [[ -d "${SCRIPT_DIR}/.git" && -f "${SCRIPT_DIR}/server/index.js" ]]; then
+  APP_DIR="${SCRIPT_DIR}"
+else
+  APP_DIR="${HOME}/apps/draconi"
+fi
+readonly APP_DIR
+
+# Where the built frontend is copied (rsync --delete). Never the checkout itself:
+#   - DRACONI_PUBLIC_DIR wins when set.
+#   - Started from a web root (not a checkout): that directory, as before.
+#   - Started from the checkout: ~/htdocs/draconi when it exists; otherwise nothing is copied, because the
+#     Node API serves APP_DIR/dist directly.
+if [[ -n "${DRACONI_PUBLIC_DIR:-}" ]]; then
+  PUBLIC_DIR="${DRACONI_PUBLIC_DIR}"
+elif [[ "${SCRIPT_DIR}" != "${APP_DIR}" ]]; then
+  PUBLIC_DIR="${SCRIPT_DIR}"
+elif [[ -d "${HOME}/htdocs/draconi" ]]; then
+  PUBLIC_DIR="${HOME}/htdocs/draconi"
+else
+  PUBLIC_DIR=""
+fi
+readonly PUBLIC_DIR
 readonly ENV_FILE="${DRACONI_ENV_FILE:-${HOME}/.config/draconi/production.env}"
 readonly DATA_DIR="${DRACONI_DATA_DIR:-${HOME}/.local/share/draconi}"
 readonly LOCK_DIR="${TMPDIR:-/tmp}/draconi-deploy-${USER}.lock"
@@ -22,9 +55,13 @@ Usage: ./deploy.sh [--pull-only] [--no-restart]
   --pull-only   Clone or fast-forward the Postgres-SQL branch, then stop.
   --no-restart  Build and publish the frontend without starting/restarting PM2.
 
+It can be run from the Git checkout itself (cd ~/apps/draconi && ./deploy.sh) or from a web root.
+
 Optional path overrides:
-  DRACONI_APP_DIR     Private Git checkout (default: $HOME/apps/draconi)
-  DRACONI_PUBLIC_DIR  Frontend destination (default: deploy.sh directory)
+  DRACONI_APP_DIR     Private Git checkout (default: the checkout containing this script,
+                      otherwise $HOME/apps/draconi)
+  DRACONI_PUBLIC_DIR  Frontend copy destination (default: this script's directory when it is a web
+                      root; $HOME/htdocs/draconi when run from the checkout and that exists; else none)
   DRACONI_ENV_FILE    API environment file (default: $HOME/.config/draconi/production.env)
   DRACONI_DATA_DIR    Upload/backup root (default: $HOME/.local/share/draconi)
 USAGE
@@ -55,10 +92,13 @@ done
 # the git checkout. Running this script from inside the checkout used to wipe .git, server/ and src/.
 resolve_dir() { (cd -- "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
 resolved_app_dir="$(resolve_dir "${APP_DIR}")"
-resolved_public_dir="$(resolve_dir "${PUBLIC_DIR}")"
-if [[ "${resolved_public_dir}" == "${resolved_app_dir}" || "${resolved_app_dir}" == "${resolved_public_dir}"/* ]]; then
-  fail "Refusing to publish: ${resolved_public_dir} is (or contains) the Git checkout ${resolved_app_dir}. Run deploy.sh from the web root, or set DRACONI_PUBLIC_DIR to it."
+if [[ -n "${PUBLIC_DIR}" ]]; then
+  resolved_public_dir="$(resolve_dir "${PUBLIC_DIR}")"
+  if [[ "${resolved_public_dir}" == "${resolved_app_dir}" || "${resolved_app_dir}" == "${resolved_public_dir}"/* ]]; then
+    fail "Refusing to publish: ${resolved_public_dir} is (or contains) the Git checkout ${resolved_app_dir}. Unset DRACONI_PUBLIC_DIR or point it at a different directory."
+  fi
 fi
+printf 'Checkout: %s\nPublishing frontend to: %s\n' "${APP_DIR}" "${PUBLIC_DIR:-(nowhere, the API serves dist directly)}"
 
 for command_name in git npm rsync sed; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "Required command not found: ${command_name}"
@@ -194,14 +234,24 @@ printf 'Installing production API dependencies...\n'
   npm ci --omit=dev
 )
 
-mkdir -p "${PUBLIC_DIR}"
-if [[ "${NO_RESTART}" == true ]]; then
+# Copies the built frontend to the web root. The API also serves APP_DIR/dist itself, so with no
+# publish directory configured this is skipped.
+publish_frontend() {
+  if [[ -z "${PUBLIC_DIR}" ]]; then
+    printf 'No publish directory configured; the API serves %s/dist directly.\n' "${APP_DIR}"
+    return 0
+  fi
+  mkdir -p "${PUBLIC_DIR}"
   printf 'Publishing frontend to %s...\n' "${PUBLIC_DIR}"
   rsync -a --delete-delay \
     --exclude '/deploy.sh' \
     --exclude '/.htaccess' \
     --exclude '/.well-known/' \
     "${APP_DIR}/dist/" "${PUBLIC_DIR}/"
+}
+
+if [[ "${NO_RESTART}" == true ]]; then
+  publish_frontend
   printf 'Frontend deployed. PM2 restart skipped by request.\n'
   exit 0
 fi
@@ -236,22 +286,20 @@ curl --fail --silent --show-error "${oauth_metadata_url}" >/dev/null \
 mcp_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://${API_PROXY_HOST}:${PORT}/mcp")"
 [[ "${mcp_status}" == "401" ]] || fail "MCP unauthenticated check returned HTTP ${mcp_status}, expected 401"
 
-apache_template="${APP_DIR}/hosting/apache.htaccess.template"
-[[ -f "${apache_template}" ]] || fail "Apache proxy template is missing: ${apache_template}"
-apache_config_next="${PUBLIC_DIR}/.htaccess.draconi-next"
-sed \
-  -e "s/__DRACONI_API_HOST__/${API_PROXY_HOST}/g" \
-  -e "s/__DRACONI_API_PORT__/${PORT}/g" \
-  "${apache_template}" > "${apache_config_next}"
-chmod 644 "${apache_config_next}"
-mv "${apache_config_next}" "${PUBLIC_DIR}/.htaccess"
+if [[ -n "${PUBLIC_DIR}" ]]; then
+  apache_template="${APP_DIR}/hosting/apache.htaccess.template"
+  [[ -f "${apache_template}" ]] || fail "Apache proxy template is missing: ${apache_template}"
+  mkdir -p "${PUBLIC_DIR}"
+  apache_config_next="${PUBLIC_DIR}/.htaccess.draconi-next"
+  sed \
+    -e "s/__DRACONI_API_HOST__/${API_PROXY_HOST}/g" \
+    -e "s/__DRACONI_API_PORT__/${PORT}/g" \
+    "${apache_template}" > "${apache_config_next}"
+  chmod 644 "${apache_config_next}"
+  mv "${apache_config_next}" "${PUBLIC_DIR}/.htaccess"
+fi
 
-printf 'Publishing frontend to %s...\n' "${PUBLIC_DIR}"
-rsync -a --delete-delay \
-  --exclude '/deploy.sh' \
-  --exclude '/.htaccess' \
-  --exclude '/.well-known/' \
-  "${APP_DIR}/dist/" "${PUBLIC_DIR}/"
+publish_frontend
 
 pm2 save
 printf 'Deployment %s completed successfully.\n' "${commit_ref}"

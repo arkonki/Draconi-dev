@@ -26,6 +26,8 @@ jobs:
         run: npm run lint
       - name: Unit tests (frontend and server)
         run: npm test
+      - name: Deploy script checks (sandboxed)
+        run: bash scripts/deploy-smoke.sh
       - name: Type check
         run: npm run typecheck
       - name: Production build
