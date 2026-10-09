@@ -35,6 +35,15 @@ import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import {
+  deleteUser,
+  listAuditLog,
+  listUsers,
+  resetPassword,
+  revokeUserSessions,
+  updateUser,
+  userImpact,
+} from './adminUsers.js';
+import {
   performanceStatus,
   resetPerformanceMetrics,
   stopPerformanceMonitoring,
@@ -51,7 +60,8 @@ const handleMcpHttpRequest = createMcpHttpHandler({
 
 function matchPath(pathname, expression) {
   const match = pathname.match(expression);
-  return match ? match.slice(1).map(decodeURIComponent) : null;
+  // Optional groups that did not take part in the match stay undefined (decodeURIComponent would turn them into "undefined").
+  return match ? match.slice(1).map((part) => (part === undefined ? undefined : decodeURIComponent(part))) : null;
 }
 
 const server = http.createServer(async (request, response) => {
@@ -110,6 +120,44 @@ const server = http.createServer(async (request, response) => {
       await pool.query('SELECT 1');
       sendJson(response, 200, { status: 'ok', database: 'postgresql' });
       return;
+    }
+
+    if (pathname === '/api/admin/users' && request.method === 'GET') {
+      sendJson(response, 200, await listUsers(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/audit' && request.method === 'GET') {
+      const params = new URL(request.url, 'http://localhost').searchParams;
+      sendJson(response, 200, await listAuditLog(await currentUser(request), {
+        limit: params.get('limit'),
+        userId: params.get('user'),
+      }));
+      return;
+    }
+    const adminUserMatch = matchPath(pathname, /^\/api\/admin\/users\/([^/]+)(?:\/(impact|reset-password|revoke-sessions))?$/);
+    if (adminUserMatch) {
+      const [userId, action] = adminUserMatch;
+      const actor = await currentUser(request);
+      if (!action && request.method === 'PATCH') {
+        sendJson(response, 200, await updateUser(actor, userId, await readJson(request)));
+        return;
+      }
+      if (!action && request.method === 'DELETE') {
+        sendJson(response, 200, await deleteUser(actor, userId, await readJson(request)));
+        return;
+      }
+      if (action === 'impact' && request.method === 'GET') {
+        sendJson(response, 200, await userImpact(actor, userId));
+        return;
+      }
+      if (action === 'reset-password' && request.method === 'POST') {
+        sendJson(response, 200, await resetPassword(actor, userId, await readJson(request)));
+        return;
+      }
+      if (action === 'revoke-sessions' && request.method === 'POST') {
+        sendJson(response, 200, await revokeUserSessions(actor, userId));
+        return;
+      }
     }
 
     if (pathname === '/api/admin/housekeeping' && request.method === 'GET') {

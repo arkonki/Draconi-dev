@@ -2,6 +2,7 @@ import { pool, withTransaction } from './db.js';
 import { canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
 import { canEditNote } from '../shared/noteAccess.js';
+import { assertUserActionAllowed, assertUserQueryAllowed, assertUserUpdateAllowed, projectUserRow } from './userAccess.js';
 
 const TABLES = new Set([
   'users', 'magic_schools', 'heroic_abilities', 'game_heroic_abilities', 'kin',
@@ -675,10 +676,14 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
 }
 
 async function authorizedRows(table, ctx, client = pool, options = {}) {
+  if (table === 'users') assertUserQueryAllowed(options, ctx);
   const columns = await columnsFor(table, client);
   const query = buildAuthorizedSelectQuery(table, ctx, columns, options);
   const { rows } = await client.query(query.text, query.values);
-  const visible = rows.map((row) => outwardAliases(table, row));
+  const visible = rows.map((row) => {
+    const aliased = outwardAliases(table, row);
+    return table === 'users' ? projectUserRow(aliased, ctx) : aliased;
+  });
   return options.enrich === false ? visible : enrichRows(table, visible, client, ctx);
 }
 
@@ -762,6 +767,7 @@ export async function executeDataQuery(user, request) {
   const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict } = request;
   assertTable(table);
   if (table === 'notes' && action === 'upsert') throw new HttpError(400, 'Use an explicit journal update instead of upsert');
+  if (table === 'users') assertUserActionAllowed(action);
 
   if (action === 'select') {
     const ctx = await accessContext(user);
@@ -794,6 +800,7 @@ export async function executeDataQuery(user, request) {
     if (action === 'update') {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
+      if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
       if (table === 'notes') {
         for (const row of candidates) validateNoteUpdate(row, prepared, transactionCtx);
         delete prepared.user_id;

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { BookOpen, Wrench, UserPlus } from 'lucide-react';
+import { BookOpen, History, Wrench, Users } from 'lucide-react';
 import { UserManagement } from '../admin/UserManagement';
 import { CompendiumManager } from '../admin/CompendiumManager';
+import { AdminActivityLog } from '../admin/AdminActivityLog';
 import { MaintenanceSettings } from './MaintenanceSettings';
 
-type AdminSection = 'users' | 'compendium' | 'maintenance';
+type AdminSection = 'users' | 'activity' | 'compendium' | 'maintenance';
 
 export function AdminSettings() {
   const [activeSection, setActiveSection] = useState<AdminSection>('users');
@@ -13,6 +14,8 @@ export function AdminSettings() {
     switch (activeSection) {
       case 'users':
         return <UserManagement />;
+      case 'activity':
+        return <AdminActivityLog />;
       case 'compendium':
         return <CompendiumManager />;
       case 'maintenance':
@@ -23,7 +26,8 @@ export function AdminSettings() {
   };
 
   const tabs: { key: AdminSection; label: string; Icon: React.ElementType }[] = [
-    { key: 'users', label: 'Users', Icon: UserPlus },
+    { key: 'users', label: 'Users', Icon: Users },
+    { key: 'activity', label: 'Activity', Icon: History },
     { key: 'compendium', label: 'Compendium', Icon: BookOpen },
     { key: 'maintenance', label: 'Maintenance', Icon: Wrench },
   ];

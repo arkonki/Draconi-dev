@@ -255,8 +255,15 @@ export async function bootstrapAdmin() {
   const email = normalizeEmail(process.env.ADMIN_EMAIL || 'admin@example.com');
   const password = process.env.ADMIN_PASSWORD || 'change-me-now';
   const username = process.env.ADMIN_USERNAME || 'admin';
-  const { rows } = await pool.query('SELECT id FROM users WHERE lower(email) = $1', [email]);
-  if (rows[0]) return;
+  // Only for a database that has no administrator yet. Recreating this account whenever its email is
+  // missing would silently resurrect an administrator that was deliberately deleted, with a password
+  // taken from the environment file.
+  const { rows } = await pool.query(
+    `SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND is_active = true) AS has_admin,
+            EXISTS (SELECT 1 FROM users WHERE lower(email) = $1) AS email_taken`,
+    [email],
+  );
+  if (rows[0].has_admin || rows[0].email_taken) return;
   assertSafeBootstrapPassword(password);
   await withTransaction(async (client) => {
     const result = await client.query(

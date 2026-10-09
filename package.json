@@ -22,6 +22,7 @@
     "test:recovery": "node scripts/recovery-smoke.mjs",
     "test:realtime": "node scripts/realtime-smoke.mjs",
     "test:security": "node scripts/security-smoke.mjs",
+    "test:user-admin": "node scripts/user-admin-smoke.mjs",
     "test:workflow": "node scripts/workflow-smoke.mjs",
     "test:housekeeping": "node scripts/housekeeping-smoke.mjs",
     "test:helper-api": "node --env-file-if-exists=.env server/helper/smoke.mjs",

@@ -248,6 +248,9 @@ try {
   }, null, 2));
 } finally {
   try {
+    // Campaigns first: the database refuses to remove a campaign creator's owner membership while the
+    // campaign still exists, and the cascade from users reaches memberships before parties.
+    await database.query('DELETE FROM parties WHERE created_by IN (SELECT id FROM users WHERE email = ANY($1::text[]))', [testEmails]);
     await database.query('DELETE FROM users WHERE email = ANY($1::text[])', [testEmails]);
   } finally {
     await database.end();
