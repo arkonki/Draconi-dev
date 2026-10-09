@@ -99,8 +99,12 @@ Ordered by value for effort.
    can round-trip and be reviewed in a spreadsheet.
 8. **Extend the audit log to content.** Record who created, changed or deleted game data and compendium entries; show
    history on each entry and allow restoring a previous version.
-9. **Backup management:** delete or prune old recovery sets, show size and age, record whether a set was verified, and
-   document or schedule automatic backups from the UI (today this lives in server scripts).
+9. **Backup management** (partly done). **Done: pruning of pre-deployment database dumps.** `deploy.sh` keeps the newest
+   `PREDEPLOY_DUMPS_TO_KEEP` (default 10) dumps plus anything younger than `PREDEPLOY_DUMP_MIN_AGE_DAYS` (default 14) and
+   deletes the rest after each successful new dump; Backup & Restore has "Review old dumps", which previews the exact
+   files, asks for confirmation and records `backups.prune` in the activity log. Recovery sets, pre-restore copies and
+   manual dumps are never pruned automatically. **Still open:** deleting individual recovery sets from the UI, recording
+   whether a set was verified, and scheduling automatic backups.
 10. **Users: session list and login history.** Show devices and last sign-in per user, plus recent failed sign-ins
     (the new rate limiter already counts them).
 

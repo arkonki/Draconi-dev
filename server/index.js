@@ -34,7 +34,7 @@ import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
-import { adminOverview } from './adminOverview.js';
+import { adminOverview, pruneBackups } from './adminOverview.js';
 import { gameDataUsage } from './gameDataUsage.js';
 import {
   deleteUser,
@@ -138,6 +138,11 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/admin/overview' && request.method === 'GET') {
       sendJson(response, 200, await adminOverview(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/backups/prune' && request.method === 'POST') {
+      const body = await readJson(request);
+      sendJson(response, 200, await pruneBackups(await currentUser(request), { dryRun: body?.dryRun !== false }));
       return;
     }
     const gameDataUsageMatch = matchPath(pathname, /^\/api\/admin\/game-data\/([^/]+)\/([^/]+)\/usage$/);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { applicationVersion } from './recovery.js';
 import { housekeepingStatus } from './housekeeping.js';
 import { pool } from './db.js';
+import { pruneDeployDumps } from './backupRetention.js';
 import { HttpError } from './http.js';
 import { performanceStatus } from './performance.js';
 import {
@@ -167,4 +168,17 @@ export async function adminOverview(user) {
     },
     attention,
   };
+}
+
+/** Previews (dryRun) or performs the removal of old deployment database dumps. Audited when it deletes. */
+export async function pruneBackups(user, { dryRun = true } = {}) {
+  requireAdmin(user);
+  const result = await pruneDeployDumps(BACKUP_ROOT, { dryRun });
+  if (!dryRun && result.prunable > 0) {
+    await pool.query(
+      `INSERT INTO admin_audit_log (actor_id, actor_email, action, details) VALUES ($1, $2, 'backups.prune', $3)`,
+      [user.id, user.email, JSON.stringify({ removed: result.prunable, bytes: result.bytes, kept: result.kept, policy: result.policy })],
+    );
+  }
+  return result;
 }

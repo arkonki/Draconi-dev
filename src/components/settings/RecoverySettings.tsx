@@ -12,6 +12,7 @@ import {
 } from '../../lib/adminRecovery';
 import { clearLocalSession } from '../../lib/supabase';
 import { BackupStatus } from '../admin/BackupStatus';
+import { DumpCleanup } from '../admin/DumpCleanup';
 import { notifyAdminOverviewChanged, useAdminOverview } from '../../hooks/useAdminOverview';
 
 function formatBytes(bytes: number) {
@@ -126,6 +127,8 @@ export function RecoverySettings() {
         onCreate={() => void handleCreateBackup()}
         creating={busy === 'backup'}
       />
+
+      {overview && overview.backups.deployDumps.count > 0 && <DumpCleanup dumpCount={overview.backups.deployDumps.count} />}
 
       {error && (
         <div role="alert" className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">

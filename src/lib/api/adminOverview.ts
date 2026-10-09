@@ -102,3 +102,24 @@ export async function resetPerformanceCounters() {
   if (!response.ok) throw new Error('Could not reset the counters.');
   return response.json() as Promise<{ resetAt: string }>;
 }
+
+export interface PruneResult {
+  dryRun: boolean;
+  policy: { keep: number; minAgeDays: number };
+  kept: number;
+  failed: { filename: string; reason: string }[];
+  prunable: number;
+  bytes: number;
+  files: BackupFile[];
+}
+
+export async function pruneDeploymentDumps(dryRun: boolean): Promise<PruneResult> {
+  const response = await authenticatedApiFetch('/admin/backups/prune', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dryRun }),
+  });
+  const payload = await response.json().catch(() => ({})) as PruneResult & { error?: { message?: string } };
+  if (!response.ok) throw new Error(payload.error?.message || 'Could not clean up the old dumps.');
+  return payload;
+}

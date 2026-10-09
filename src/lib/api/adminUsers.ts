@@ -105,6 +105,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'user.reset_password': 'Reset password',
   'user.revoke_sessions': 'Signed out everywhere',
   'user.delete': 'Deleted account',
+  'backups.prune': 'Removed old database dumps',
 };
 
 export function displayName(user: Pick<AdminUser, 'username' | 'first_name' | 'last_name' | 'email'>): string {

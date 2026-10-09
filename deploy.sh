@@ -204,6 +204,9 @@ EOF
     || fail "Unable to create pre-deployment PostgreSQL backup"
   chmod 600 "${predeploy_backup}"
   printf 'Database backup stored at %s.\n' "${predeploy_backup}"
+  # Keep the newest dumps (PREDEPLOY_DUMPS_TO_KEEP, default 10, and anything under PREDEPLOY_DUMP_MIN_AGE_DAYS
+  # days old). A failure here must never stop a deployment.
+  node "${APP_DIR}/server/backupRetention.js" "${BACKUP_ROOT}" || printf 'Warning: old database dumps were not pruned.\n' >&2
 fi
 
 # Build for the public URL. Production uses draconi.ee at the domain root;

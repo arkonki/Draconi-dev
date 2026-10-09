@@ -103,6 +103,7 @@ check "checkout is NOT wiped (.git, server/, src/)" "[[ -d ${APP}/.git && -f ${A
 check "build exists in the checkout (dist/index.html)" "[[ -f ${APP}/dist/index.html ]]"
 check "frontend published to htdocs/draconi" "[[ -f ${HOME_DIR}/htdocs/draconi/index.html && -f ${HOME_DIR}/htdocs/draconi/.htaccess ]]"
 check "htaccess has host and port filled in" "grep -q 'http://127.0.0.1:3999/api' ${HOME_DIR}/htdocs/draconi/.htaccess"
+check "a failing dump prune only warns, the deploy still completes" "grep -q 'old database dumps were not pruned' ${HOME_DIR}/out.log"
 check "API restarted exactly once" "[[ \$(grep -c 'pm2 restart' ${SANDBOX_LOG}) -eq 1 ]]"
 check "no temporary script copies left behind" "[[ -z \"\$(ls ${HOME_DIR}/tmp | grep draconi-deploy)\" ]]"
 

@@ -101,6 +101,14 @@ try {
   assert.ok(reset.requests.total < before.requests.total, 'request counter restarted');
   results.performanceCounters = 'passed';
 
+  // --- Pruning old deployment dumps is administrator-only, and a preview never deletes.
+  await ok(call('POST', '/admin/backups/prune', { body: { dryRun: true } }), 401, 'anonymous prune');
+  await ok(call('POST', '/admin/backups/prune', { token: player, body: { dryRun: false } }), 403, 'player prune');
+  const preview = await ok(call('POST', '/admin/backups/prune', { token: admin, body: {} }), 200, 'prune preview (dry run is the default)');
+  assert.equal(preview.dryRun, true);
+  assert.ok(preview.policy.keep >= 1 && Array.isArray(preview.files) && preview.prunable === preview.files.length);
+  results.backupPruning = 'passed';
+
   console.log(JSON.stringify(results, null, 2));
 } finally {
   await cleanup().catch((error) => console.error('Cleanup failed:', error.message));
