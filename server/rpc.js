@@ -267,14 +267,162 @@ export async function executeRpc(user, name, args = {}) {
 
     if (name === 'advance_encounter_round') {
       await requireEncounterAccess(client, user, args.p_encounter_id, true);
-      await client.query('UPDATE encounters SET current_round = current_round + 1 WHERE id = $1', [args.p_encounter_id]);
+      // One transaction: the next round starts, everybody is ready to act again, and the log gets its round marker.
+      const { rows } = await client.query(
+        `UPDATE encounters
+         SET current_round = current_round + 1,
+             log = COALESCE(log, '[]'::jsonb) || jsonb_build_array(
+               jsonb_build_object('type', 'round_advanced', 'ts', $2::bigint, 'round', current_round + 1))
+         WHERE id = $1 RETURNING current_round`,
+        [args.p_encounter_id, Date.now()],
+      );
       await client.query(
         `UPDATE encounter_combatants
          SET has_acted = false, completed_initiative_slots = '{}'::integer[]
          WHERE encounter_id = $1`,
         [args.p_encounter_id],
       );
-      return null;
+      return { round: rows[0].current_round };
+    }
+
+    if (name === 'apply_encounter_damage') {
+      const encounterId = requireUuid(args.p_encounter_id, 'p_encounter_id');
+      const { rows: encounters } = await client.query('SELECT party_id, current_round FROM encounters WHERE id = $1 FOR UPDATE', [encounterId]);
+      if (!encounters[0]) throw new HttpError(404, 'Encounter not found');
+      const access = await loadCampaignAccess(client, user, encounters[0].party_id);
+      if (!access?.canWrite) throw new HttpError(403, 'Permission denied');
+
+      const entries = Array.isArray(args.p_entries) ? args.p_entries : [];
+      if (entries.length === 0 || entries.length > 50) throw new HttpError(400, 'p_entries must hold between 1 and 50 targets');
+      const attackerName = String(args.p_attacker_name ?? '').slice(0, 120) || null;
+      const attackName = String(args.p_attack_name ?? '').slice(0, 120) || null;
+      const baseName = (displayName) => String(displayName).replace(/ \(Act \d+\)$/, '');
+      const integer = (value, label, min, max) => {
+        const number = Number(value ?? 0);
+        if (!Number.isInteger(number) || number < min || number > max) throw new HttpError(400, `${label} must be a whole number between ${min} and ${max}`);
+        return number;
+      };
+
+      const outcomes = [];
+      const seen = new Set();
+      for (const entry of entries) {
+        const combatantId = requireUuid(entry?.combatant_id, 'combatant_id');
+        const raw = integer(entry.damage, 'damage', -1000, 1000);
+        const armor = integer(entry.armor, 'armor', 0, 100);
+        const ignoreArmor = entry.ignore_armor === true;
+        const parried = entry.parried === true;
+
+        const { rows: targets } = await client.query(
+          'SELECT * FROM encounter_combatants WHERE id = $1 AND encounter_id = $2 FOR UPDATE',
+          [combatantId, encounterId],
+        );
+        const target = targets[0];
+        if (!target) throw new HttpError(404, 'A target is not part of this encounter');
+        if (seen.has(target.monster_id ? `${target.monster_id}:${baseName(target.display_name)}` : target.id)) continue;
+        seen.add(target.monster_id ? `${target.monster_id}:${baseName(target.display_name)}` : target.id);
+
+        // Damage after the parry and the armor; a negative number is healing and ignores both.
+        const healing = raw < 0 ? -raw : 0;
+        const absorbed = raw > 0 && !parried && !ignoreArmor ? Math.min(armor, raw) : 0;
+        const dealt = raw > 0 && !parried ? raw - absorbed : 0;
+
+        const hpBefore = target.current_hp;
+        const hpAfter = Math.min(target.max_hp, Math.max(0, hpBefore - dealt + healing));
+
+        const siblingIds = target.monster_id
+          ? (await client.query(
+            `SELECT id FROM encounter_combatants
+             WHERE encounter_id = $1 AND monster_id = $2
+               AND regexp_replace(display_name, ' \\(Act \\d+\\)$', '') = $3
+             FOR UPDATE`,
+            [encounterId, target.monster_id, baseName(target.display_name)],
+          )).rows.map((row) => row.id)
+          : [target.id];
+        await client.query('UPDATE encounter_combatants SET current_hp = $1 WHERE id = ANY($2::uuid[])', [hpAfter, siblingIds]);
+
+        let dying = false;
+        let instantDeath = false;
+        let deathFailures = null;
+        if (target.character_id) {
+          const { rows: characters } = await client.query(
+            'SELECT death_rolls_passed, death_rolls_failed FROM characters WHERE id = $1 FOR UPDATE',
+            [target.character_id],
+          );
+          let passed = characters[0]?.death_rolls_passed ?? 0;
+          let failed = characters[0]?.death_rolls_failed ?? 0;
+          let rallied = null;
+          // Dragonbane: damage beyond your remaining HP plus your maximum HP kills outright.
+          instantDeath = dealt > 0 && dealt - hpBefore > target.max_hp;
+          if (hpAfter > 0 && hpBefore === 0) {
+            passed = 0; failed = 0; rallied = false;
+          } else if (hpBefore > 0 && hpAfter === 0) {
+            dying = true; passed = 0; failed = instantDeath ? 3 : 0; rallied = false;
+          } else if (hpBefore === 0 && dealt > 0) {
+            dying = true; failed = instantDeath ? 3 : Math.min(3, failed + 1);
+          }
+          deathFailures = hpAfter === 0 ? failed : null;
+          await client.query(
+            `UPDATE characters
+             SET current_hp = $2, death_rolls_passed = $3, death_rolls_failed = $4,
+                 is_rallied = COALESCE($5::boolean, is_rallied)
+             WHERE id = $1`,
+            [target.character_id, hpAfter, passed, failed, rallied],
+          );
+        }
+
+        const name = target.monster_id ? baseName(target.display_name) : target.display_name;
+        outcomes.push({
+          type: 'attack_resolve',
+          ts: Date.now(),
+          round: encounters[0].current_round,
+          attacker: attackerName,
+          attackName,
+          target: name,
+          targetIsPlayer: Boolean(target.character_id),
+          damage: dealt - healing,
+          raw,
+          armor: raw > 0 && !parried && !ignoreArmor ? armor : 0,
+          absorbed,
+          parried,
+          ignoredArmor: ignoreArmor,
+          hpBefore,
+          hpAfter,
+          defeated: Boolean(target.monster_id) && hpAfter === 0 && hpBefore > 0,
+          dying,
+          instantDeath,
+          deathFailures,
+        });
+      }
+
+      await client.query(
+        `UPDATE encounters SET log = COALESCE(log, '[]'::jsonb) || $2::jsonb WHERE id = $1`,
+        [encounterId, JSON.stringify(outcomes)],
+      );
+      return { outcomes };
+    }
+
+    if (name === 'finish_encounter') {
+      const encounterId = requireUuid(args.p_encounter_id, 'p_encounter_id');
+      await requireEncounterAccess(client, user, encounterId, true);
+      const { rows } = await client.query(
+        `UPDATE encounters
+         SET status = 'completed',
+             log = COALESCE(log, '[]'::jsonb) || jsonb_build_array(
+               jsonb_build_object('type', 'encounter_ended', 'ts', $2::bigint, 'round', current_round))
+         WHERE id = $1 RETURNING current_round`,
+        [encounterId, Date.now()],
+      );
+      let cleared = 0;
+      if (args.p_clear_conditions === true) {
+        const result = await client.query(
+          `UPDATE characters
+           SET conditions = '{"exhausted":false,"sickly":false,"dazed":false,"angry":false,"scared":false,"disheartened":false}'::jsonb
+           WHERE id IN (SELECT character_id FROM encounter_combatants WHERE encounter_id = $1 AND character_id IS NOT NULL)`,
+          [encounterId],
+        );
+        cleared = result.rowCount;
+      }
+      return { rounds: rows[0].current_round, clearedConditions: cleared };
     }
 
     if (name === 'roll_initiative_for_combatants') {

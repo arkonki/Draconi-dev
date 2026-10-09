@@ -22,9 +22,17 @@ export function useEncounterRealtime(encounterId: string | null, partyId: string
             table: 'encounter_combatants',
             filter: `encounter_id=eq.${encounterId}`,
           },
+          // Death rolls, conditions and hit points are saved on the character sheet.
+          ...(partyId ? [{
+            bindingId: 'characters',
+            event: '*' as const,
+            schema: 'public' as const,
+            table: 'characters',
+            filter: `party_id=eq.${partyId}`,
+          }] : []),
         ]
       : []
-  ), [encounterId]);
+  ), [encounterId, partyId]);
 
   useRealtimeChannel({
     key: `encounter_room:${encounterId ?? 'inactive'}`,

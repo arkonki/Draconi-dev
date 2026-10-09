@@ -112,6 +112,8 @@ interface CharacterSheetState {
 
   // Actions
   fetchCharacter: (id: string, userId: string) => Promise<void>;
+  /** Pulls in hit points, death rolls and conditions changed elsewhere (a GM in combat) without touching the rest of the sheet. */
+  refreshVitals: () => Promise<void>;
   setCharacter: (character: Character | null) => void;
   _saveCharacter: (updates: Partial<Character>) => Promise<void>;
   _loadGameItems: () => Promise<void>;
@@ -178,6 +180,28 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
   encounterCombatants: [],
   isLoadingEncounter: false,
   encounterError: null,
+
+  refreshVitals: async () => {
+    const current = get().character;
+    if (!current?.id || get().isSaving) return;
+    const fresh = await fetchCharacterById(current.id, current.user_id);
+    const latest = get().character;
+    if (!fresh || !latest || latest.id !== fresh.id || get().isSaving) return;
+    set({
+      character: {
+        ...latest,
+        current_hp: fresh.current_hp,
+        max_hp: fresh.max_hp,
+        current_wp: fresh.current_wp,
+        max_wp: fresh.max_wp,
+        death_rolls_passed: fresh.death_rolls_passed,
+        death_rolls_failed: fresh.death_rolls_failed,
+        is_rallied: fresh.is_rallied,
+        conditions: fresh.conditions,
+        marked_skills: fresh.marked_skills,
+      },
+    });
+  },
 
   fetchCharacter: async (id, userId) => {
     set({ isLoading: true, error: null });

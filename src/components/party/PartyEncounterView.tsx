@@ -15,7 +15,9 @@ import {
   removeCombatant,
   swapInitiative,
   startEncounter,
-  endEncounter,
+  applyEncounterDamage,
+  finishEncounter,
+  updateCharacterCombatState,
   appendEncounterLog,
   nextRound,
 } from '../../lib/api/encounters';
@@ -30,7 +32,7 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import {
   PlusCircle, UserPlus, Trash2, Play, Square, Edit3, XCircle, Heart, Zap, Dice6, SkipForward,
   ArrowUpDown, Copy, List, RotateCcw, ShieldAlert, Skull, Dices, Search, User,
-  Sword, Swords, RefreshCw, Crosshair, Target, Link as LinkIcon, Check, Hourglass, AlertCircle
+  Sword, Swords, RefreshCw, Crosshair, Link as LinkIcon, Check, Hourglass, AlertCircle
 } from 'lucide-react';
 import { useDice } from '../dice/useDice';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
@@ -52,6 +54,13 @@ import {
   usesArmyOfOne,
 } from '../../lib/initiativeSlots';
 import { TrustedRollFeed } from './TrustedRollFeed';
+import { AttackResolutionModal, type AttackResolution } from './AttackResolutionModal';
+import { CombatSummaryDialog } from './CombatSummaryDialog';
+import { ConditionChips, DeathRollPanel } from './CombatantStatus';
+import { CONDITIONS, type ConditionKey } from '../../lib/conditions';
+import { fetchItems } from '../../lib/api/items';
+import { playerArmorRating } from '../../lib/combatDamage';
+import { buildCombatSummary, type SummaryLogEntry } from '../../lib/combatSummary';
 
 // --- TYPES ---
 export interface MonsterStats {
@@ -131,6 +140,17 @@ interface CombatLogEntry {
   target?: string;
   damage?: number;
   message?: string;
+  raw?: number;
+  armor?: number;
+  absorbed?: number;
+  parried?: boolean;
+  ignoredArmor?: boolean;
+  attackName?: string | null;
+  hpBefore?: number;
+  hpAfter?: number;
+  defeated?: boolean;
+  dying?: boolean;
+  instantDeath?: boolean;
 }
 interface InitiativeUpdate { id: string; initiative_roll: number; initiative_slots: number[]; }
 interface PersistedEncounterViewState {
@@ -1000,7 +1020,30 @@ function LogEntry({ entry }: { entry: CombatLogEntry }) {
       break;
     }
     case 'monster_attack': content = (<div className="bg-orange-50 p-2 rounded border border-orange-100"><span className="text-orange-800 font-medium flex items-center gap-1"><Sword size={12} /> {entry.name}: {entry.attack?.name || 'Attack'}</span><div className="text-xs text-stone-600 mt-1 italic">Rolled {entry.roll}{entry.attack?.tableDie ? ` on ${entry.attack.tableDie.toUpperCase()}` : ''}</div>{entry.message ? <div className="text-xs text-orange-800 mt-1">{entry.message}</div> : null}</div>); break;
-    case 'attack_resolve': content = (<span className="text-stone-700"><Crosshair size={12} className="inline mr-1" /><strong>{entry.attacker}</strong> dealt {entry.damage} damage to <strong>{entry.target}</strong></span>); break;
+    case 'attack_resolve': {
+      if (entry.raw === undefined) {
+        content = (<span className="text-stone-700"><Crosshair size={12} className="inline mr-1" /><strong>{entry.attacker}</strong> dealt {entry.damage} damage to <strong>{entry.target}</strong></span>);
+        break;
+      }
+      const healed = (entry.damage ?? 0) < 0;
+      const result = entry.parried
+        ? 'was parried'
+        : healed
+          ? `healed ${Math.abs(entry.damage ?? 0)}`
+          : `took ${entry.damage} damage${entry.absorbed ? ` (${entry.raw} rolled, armor stopped ${entry.absorbed})` : ''}`;
+      content = (
+        <span className="text-stone-700">
+          <Crosshair size={12} className="inline mr-1" />
+          {entry.attacker ? <><strong>{entry.attacker}</strong>{entry.attackName ? ` (${entry.attackName})` : ''}: </> : null}
+          <strong>{entry.target}</strong> {result}
+          {entry.hpBefore !== undefined && entry.hpAfter !== undefined && entry.hpBefore !== entry.hpAfter ? <span className="text-stone-400"> · HP {entry.hpBefore} → {entry.hpAfter}</span> : null}
+          {entry.defeated ? <strong className="ml-1 text-stone-800">Defeated.</strong> : null}
+          {entry.instantDeath ? <strong className="ml-1 text-red-700">Dies instantly.</strong> : entry.dying ? <strong className="ml-1 text-red-700">Down: death rolls.</strong> : null}
+        </span>
+      );
+      break;
+    }
+    case 'encounter_ended': content = <span className="text-stone-500 italic">Encounter ended after {entry.round ?? 0} round{entry.round === 1 ? '' : 's'}.</span>; break;
     default: content = <span>{entry.message || JSON.stringify(entry)}</span>;
   }
   return (<div className="flex gap-2 text-sm py-1 border-b border-stone-100 last:border-0"><time className="text-xs text-stone-300 font-mono mt-0.5 w-10 shrink-0">{formatTime(entry.ts)}</time><div className="flex-grow">{content}</div></div>);
@@ -1141,135 +1184,6 @@ function WaitTurnModal({ isOpen, onClose, currentActor, allCombatants, onSwap }:
 }
 
 // --- MODAL: ATTACK RESOLUTION ---
-interface AttackResolutionModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  attacker: EncounterCombatant;
-  targets: EncounterCombatant[];
-  attackName?: string;
-  attackContext?: MonsterAttackResolutionContext | null;
-  onConfirm: (targetIds: string[], damage: number) => void;
-}
-
-function AttackResolutionModal({ isOpen, onClose, attacker, targets, attackName, attackContext, onConfirm }: AttackResolutionModalProps) {
-  const { rollHistory } = useDice();
-  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
-  const [damage, setDamage] = useState<string>('');
-  const damageInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedTargetIds([]);
-      setDamage(attackContext?.damage != null ? String(attackContext.damage) : '');
-      damageInputRef.current?.focus();
-    }
-  }, [attackContext?.damage, isOpen]);
-
-  if (!isOpen) return null;
-
-  const isAttackerMonster = !!attacker.monster_id;
-
-  const uniqueTargets = useMemo(() => {
-    const seen = new Set<string>();
-    return targets.filter(t => {
-      if (!t.monster_id) return true;
-      const baseName = t.display_name.replace(/ \(Act \d+\)$/, '');
-      const key = `${t.monster_id}:${baseName}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [targets]);
-
-  const sortedTargets = [...uniqueTargets].sort((a, b) => {
-    const aIsMonster = !!a.monster_id; const bIsMonster = !!b.monster_id;
-    if (isAttackerMonster) return (aIsMonster === bIsMonster) ? 0 : aIsMonster ? 1 : -1;
-    return (aIsMonster === bIsMonster) ? 0 : aIsMonster ? -1 : 1;
-  });
-  const recentRolls = rollHistory.slice(0, 3);
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-stone-200 flex flex-col max-h-[90vh]">
-        <div className="p-4 border-b bg-stone-800 text-white flex justify-between items-center"><div><h3 className="text-lg font-bold font-serif flex items-center gap-2"><Sword className="w-5 h-5 text-red-400" /> Resolve Action</h3><p className="text-xs text-stone-400">{attacker.display_name} is acting{attackName ? ` using ${attackName}` : ''}</p></div><button onClick={onClose} className="text-stone-400 hover:text-white"><XCircle size={24} /></button></div>
-        <div className="flex-grow overflow-y-auto p-4 bg-stone-50 space-y-4">
-          {attackContext ? (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-              <div className="font-semibold">Attack table roll: {attackContext.roll} on {attackContext.tableDie.toUpperCase()} ({attackContext.attackName})</div>
-              {attackContext.damageFormula ? (
-                <div className="text-xs text-orange-700">
-                  Last damage roll {attackContext.damageFormula}
-                  {attackContext.damage != null ? ` = ${attackContext.damage}` : ''}
-                </div>
-              ) : (
-                <div className="text-xs text-orange-700">No damage roll captured yet. Roll from the active action text or enter damage manually.</div>
-              )}
-            </div>
-          ) : null}
-          <div className="rounded-lg border border-stone-200 bg-white px-3 py-2">
-            <div className="text-xs font-bold uppercase text-stone-500 mb-2">Recent Dice Rolls</div>
-            {recentRolls.length > 0 ? (
-              <div className="space-y-2">
-                {recentRolls.map((entry) => {
-                  const total = typeof entry.finalOutcome === 'number'
-                    ? entry.finalOutcome
-                    : entry.results.reduce((sum, result) => sum + result.value, 0);
-                  const isApplied = damage !== '' && Number(damage) === total;
-                  return (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => setDamage(String(total))}
-                      className={`w-full rounded border px-2 py-1.5 text-left transition-colors ${
-                        isApplied
-                          ? 'border-red-300 bg-red-50'
-                          : 'border-stone-100 bg-stone-50 hover:border-red-200 hover:bg-red-50/60'
-                      }`}
-                    >
-                      <div className="text-xs font-semibold text-stone-700">{entry.description || 'Dice Roll'}</div>
-                      <div className="text-[11px] text-stone-500">
-                        {entry.dicePool.join(' + ')} = <span className="font-bold text-stone-800">{total}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-xs text-stone-500">No recent dice rolls yet.</div>
-            )}
-            {recentRolls.length > 0 ? (
-              <div className="mt-2 text-[11px] text-stone-500">Tap a roll to use it as the damage amount.</div>
-            ) : null}
-          </div>
-          <div>
-            <h4 className="text-xs font-bold text-stone-500 uppercase mb-2 flex items-center gap-1"><Target size={12} /> Select Target(s)</h4>
-            <p className="text-[11px] text-stone-500 mb-2">{selectedTargetIds.length} selected</p>
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-              {sortedTargets.map(t => {
-                const isFoe = (isAttackerMonster && !t.monster_id) || (!isAttackerMonster && !!t.monster_id);
-                const isDead = t.current_hp === 0;
-                const displayName = t.monster_id ? t.display_name.replace(/ \(Act \d+\)$/, '') : t.display_name;
-                const isSelected = selectedTargetIds.includes(t.id);
-                return (
-                  <button type="button" key={t.id} onClick={() => !isDead && setSelectedTargetIds(prev => prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id])} className={`w-full p-3 rounded border flex justify-between items-center cursor-pointer transition-all text-left ${isSelected ? 'ring-2 ring-red-500 border-red-500 bg-red-50' : 'bg-white border-stone-200 hover:border-stone-400'} ${isDead ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
-                    <div>
-                      <span className={`font-bold ${isFoe ? 'text-red-700' : 'text-blue-700'}`}>{displayName}</span>
-                      <div className="text-xs text-stone-500">{isFoe ? 'Enemy' : 'Ally'} • HP: {t.current_hp}/{t.max_hp}</div>
-                    </div>
-                    {isSelected && <Check className="text-red-600 w-5 h-5" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div><h4 className="text-xs font-bold text-stone-500 uppercase mb-2">Damage Amount</h4><div className="flex gap-2"><input ref={damageInputRef} type="number" placeholder="0" className="flex-grow p-3 text-lg font-bold border rounded shadow-sm focus:ring-2 focus:ring-red-500 outline-none" value={damage} onChange={(e) => setDamage(e.target.value)} /></div><p className="text-xs text-stone-400 mt-1">Enter negative number to heal.</p></div>
-        </div>
-        <div className="p-4 border-t bg-white flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" icon={Sword} disabled={selectedTargetIds.length === 0 || !damage} onClick={() => { const parsed = parseInt(damage, 10); if (!isNaN(parsed)) onConfirm(selectedTargetIds, parsed); }}>Apply to {selectedTargetIds.length || 0}</Button></div>
-      </div>
-    </div>
-  );
-}
-
 interface InitiativeDrawModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1727,9 +1641,12 @@ interface DragonbaneCombatantCardProps {
   myCharacterId: string | null;
   onSetInitiative: (id: string, val: number) => void;
   onOpenCharacterSheet: (combatant: EncounterCombatant) => void;
+  onToggleCondition: (combatant: EncounterCombatant, key: ConditionKey) => void;
+  onDeathRollChange: (combatant: EncounterCombatant, changes: { passed?: number; failed?: number; rallied?: boolean }) => void;
+  onStabilise: (combatant: EncounterCombatant, hp: number) => void;
 }
 
-function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onToggleFear, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet }: DragonbaneCombatantCardProps) {
+function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect, onSwapRequest, onFlipCard, onSaveStats, onToggleFear, onTogglePoison, statsState, setStatsState, monsterData, onRemove, isDM, myCharacterId, onSetInitiative, onOpenCharacterSheet, onToggleCondition, onDeathRollChange, onStabilise }: DragonbaneCombatantCardProps) {
   const isMonster = !!combatant.monster_id;
   const hasActed = combatant.has_acted || false;
   const initValue = initiativeSlotsFor(combatant).filter((value) => value !== null).join(' / ') || '-';
@@ -1827,6 +1744,8 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
             )}
           </div>
         </div>
+        {!isMonster && <ConditionChips combatant={combatant} canEdit={Boolean(canEdit)} onToggle={(key) => onToggleCondition(combatant, key)} />}
+        {isDying && <DeathRollPanel combatant={combatant} canEdit={Boolean(canEdit)} onChange={(changes) => onDeathRollChange(combatant, changes)} onStabilise={(hp) => onStabilise(combatant, hp)} />}
         <div className="flex items-center justify-between mt-2 h-6">
           {isDying && (<div className="flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded border border-red-100"><Skull size={10} className="text-red-500" /><span className="text-[10px] font-bold text-red-700 uppercase">Dying</span></div>)}
           {isDefeated && (<div className="flex items-center gap-1 px-2 py-0.5 rounded bg-stone-700 text-white"><Skull size={10} /><span className="text-[10px] font-bold uppercase">Defeated</span></div>)}
@@ -2189,8 +2108,13 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
 
   const appendLogMu = useMutation({ mutationFn: (entry: CombatLogEntry) => appendEncounterLog(currentEncounterId!, entry), onSuccess: invalidateEncounter });
   const startEncounterMu = useMutation({ mutationFn: () => startEncounter(currentEncounterId!), onSuccess: () => { void Promise.all([invalidateEncounter(), invalidateEncounterList()]); setIsInitModalOpen(true); } });
-  const endEncounterMu = useMutation({ mutationFn: endEncounter, onSuccess: () => Promise.all([invalidateEncounter(), invalidateEncounterList()]) });
-  const nextRoundMu = useMutation({ mutationFn: async () => { await nextRound(currentEncounterId!); if (combatantsData) await Promise.all(combatantsData.map(c => updateCombatant(c.id, { has_acted: false, completed_initiative_slots: [] }))); }, onSuccess: () => { appendLogMu.mutate({ type: 'round_advanced', ts: Date.now(), round: (encounterDetails?.current_round ?? 0) + 1 }); setSelectedActorId(null); setIsInitModalOpen(true); void Promise.all([invalidateEncounter(), invalidateCombatants()]); } });
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const finishEncounterMu = useMutation({
+    mutationFn: (clearConditions: boolean) => finishEncounter(currentEncounterId!, clearConditions),
+    onSuccess: async () => { setIsSummaryOpen(false); await Promise.all([invalidateEncounter(), invalidateEncounterList(), invalidateCombatants()]); },
+    onError: (error: Error) => { setFeedbackToast({ id: Date.now(), text: error.message, type: 'error' }); setTimeout(() => setFeedbackToast(null), 3500); },
+  });
+  const nextRoundMu = useMutation({ mutationFn: () => nextRound(currentEncounterId!), onSuccess: () => { setSelectedActorId(null); setIsInitModalOpen(true); void Promise.all([invalidateEncounter(), invalidateCombatants()]); }, onError: (error: Error) => { setFeedbackToast({ id: Date.now(), text: error.message, type: 'error' }); setTimeout(() => setFeedbackToast(null), 3500); } });
 
   const handleAddMonster = (id: string, count: number, customName: string) => {
     const m = id ? monstersById.get(id) : null;
@@ -2428,35 +2352,98 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     });
   };
 
-  const handleAttackConfirm = (targetIds: string[], dmg: number) => {
-    if (!activeCombatant || targetIds.length === 0) return;
-    const updatedCombatantIds = new Set<string>();
-    const loggedTargets = new Set<string>();
+  const { data: gameItems } = useQuery({ queryKey: queryKeys.gameItems, queryFn: () => fetchItems(), staleTime: QUERY_STALE_TIME.reference });
 
-    targetIds.forEach((targetId) => {
-      const target = combatants.find(c => c.id === targetId);
-      if (!target) return;
-
-      const newHp = Math.max(0, target.current_hp - dmg);
-      const updates: Partial<EncounterCombatant> = { current_hp: newHp };
-      let siblings = [target];
-      if (target.monster_id && combatantsData) siblings = getSiblings(target, combatantsData);
-
-      siblings.forEach((sib) => {
-        if (updatedCombatantIds.has(sib.id)) return;
-        updatedCombatantIds.add(sib.id);
-        updateCombatantMu.mutate({ id: sib.id, updates });
-      });
-
-      const targetName = target.monster_id ? target.display_name.replace(/ \(Act \d+\)$/, '') : target.display_name;
-      if (!loggedTargets.has(targetName)) {
-        loggedTargets.add(targetName);
-        appendLogMu.mutate({ type: 'attack_resolve', ts: Date.now(), attacker: activeCombatant.display_name, target: targetName, damage: dmg });
-      }
-    });
-
-    setIsAttackModalOpen(false);
+  /** Armor rating a target starts with: what a player wears, or a monster's stat block and gear. */
+  const armorFor = (target: EncounterCombatant) => {
+    if (target.monster_id) {
+      const data = monstersById.get(target.monster_id);
+      return getEquippedArmorValue(data?.stats?.GEAR_ITEMS, data?.stats);
+    }
+    return playerArmorRating(target.character?.equipment, gameItems || []).total;
   };
+
+  const showToast = (text: string, type?: 'error', duration = 3500) => {
+    setFeedbackToast({ id: Date.now(), text, ...(type ? { type } : {}) });
+    setTimeout(() => setFeedbackToast(null), duration);
+  };
+
+  const activeAttackName = activeCombatant?.monster_id
+    ? currentMonsterAttacks[activeCombatant.id]?.name ?? getDefaultMonsterAttack(activeCombatantMonsterData || undefined)?.name
+    : undefined;
+
+  const applyDamageMu = useMutation({
+    mutationFn: async (resolution: AttackResolution) => {
+      if (!activeCombatant) throw new Error('No one is acting');
+      const outcomes = await applyEncounterDamage({
+        encounterId: currentEncounterId!,
+        attackerName: activeCombatant.monster_id ? activeCombatant.display_name.replace(/ \(Act \d+\)$/, '') : activeCombatant.display_name,
+        attackName: activeAttackName ?? null,
+        entries: resolution.entries,
+      });
+      if (resolution.markSkill && activeCombatant.character_id) {
+        const marked = new Set(activeCombatant.character?.marked_skills ?? []);
+        marked.add(resolution.markSkill);
+        await updateCharacterCombatState(activeCombatant.character_id, { marked_skills: [...marked] });
+      }
+      return outcomes;
+    },
+    onSuccess: (outcomes) => {
+      setIsAttackModalOpen(false);
+      const notes = outcomes.flatMap((outcome) => (
+        outcome.instantDeath ? [`${outcome.target} dies instantly`]
+          : outcome.dying ? [`${outcome.target} is down: death rolls begin`]
+            : outcome.defeated ? [`${outcome.target} is defeated`] : []
+      ));
+      if (notes.length > 0) showToast(notes.slice(0, 3).join(' · '), undefined, 4500);
+      void Promise.all([invalidateEncounter(), invalidateCombatants()]);
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const characterStateMu = useMutation({
+    mutationFn: ({ characterId, updates }: { characterId: string; updates: Parameters<typeof updateCharacterCombatState>[1] }) => updateCharacterCombatState(characterId, updates),
+    onSuccess: () => invalidateCombatants(),
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const handleToggleCondition = (combatant: EncounterCombatant, key: ConditionKey) => {
+    if (!combatant.character_id) return;
+    const current = combatant.character?.conditions ?? {};
+    const label = CONDITIONS.find((condition) => condition.key === key)?.label ?? key;
+    const next = { exhausted: false, sickly: false, dazed: false, angry: false, scared: false, disheartened: false, ...current, [key]: !current[key] };
+    characterStateMu.mutate({ characterId: combatant.character_id, updates: { conditions: next } });
+    appendLogMu.mutate({ type: 'generic', ts: Date.now(), message: `${combatant.display_name} ${current[key] ? `is no longer ${label}` : `is now ${label}`}.` });
+  };
+
+  const handleDeathRollChange = (combatant: EncounterCombatant, changes: { passed?: number; failed?: number; rallied?: boolean }) => {
+    if (!combatant.character_id) return;
+    const updates: Parameters<typeof updateCharacterCombatState>[1] = {};
+    if (changes.passed !== undefined) updates.death_rolls_passed = changes.passed;
+    if (changes.failed !== undefined) updates.death_rolls_failed = changes.failed;
+    if (changes.rallied !== undefined) updates.is_rallied = changes.rallied;
+    characterStateMu.mutate({ characterId: combatant.character_id, updates });
+    const message = changes.failed === 3 ? `${combatant.display_name} has died.`
+      : changes.passed === 3 ? `${combatant.display_name} is stabilised.`
+        : changes.rallied === true ? `${combatant.display_name} rallied.`
+          : null;
+    if (message) appendLogMu.mutate({ type: 'generic', ts: Date.now(), message });
+  };
+
+  const stabiliseMu = useMutation({
+    mutationFn: async ({ combatant, hp }: { combatant: EncounterCombatant; hp: number }) => {
+      await updateCombatant(combatant.id, { current_hp: hp });
+      if (combatant.character_id) await updateCharacterCombatState(combatant.character_id, { death_rolls_passed: 0, death_rolls_failed: 0, is_rallied: false });
+      await appendEncounterLog(currentEncounterId!, { type: 'generic', ts: Date.now(), message: `${combatant.display_name} recovers ${hp} HP and is back on their feet.` });
+    },
+    onSuccess: () => Promise.all([invalidateEncounter(), invalidateCombatants()]),
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const combatSummary = useMemo(
+    () => buildCombatSummary((encounterDetails?.log ?? []) as SummaryLogEntry[], combatants, encounterDetails?.current_round ?? 0),
+    [encounterDetails?.log, encounterDetails?.current_round, combatants],
+  );
 
   const handleWaitConfirm = (targetId: string) => {
     if (!activeCombatant) return;
@@ -2488,7 +2475,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
                 {encounterDetails?.status === 'active' && isDM && (
                   <>
                     <Button variant="primary" icon={SkipForward} onClick={() => nextRoundMu.mutate()}>Next Round</Button>
-                    <Button variant="outline" icon={Square} onClick={() => endEncounterMu.mutate(currentEncounterId!)}>End</Button>
+                    <Button variant="outline" icon={Square} onClick={() => setIsSummaryOpen(true)}>End</Button>
                   </>
                 )}
                 {/* Player View: Simple Status Indicator if not DM */}
@@ -2558,7 +2545,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
             <div className="bg-stone-100/50 p-4 rounded-xl border border-stone-200">
               <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-stone-500 uppercase tracking-wider text-sm">Initiative Track</h3><div className="flex gap-2">{isDM && encounterDetails.status === 'active' && <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => setIsInitModalOpen(true)}>Re-Draw</Button>}{isDM && <Button size="sm" variant="outline" icon={UserPlus} onClick={() => setIsAddModalOpen(true)}>Add</Button>}</div></div>
 
-              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onToggleFear={handleToggleFear} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId ?? null} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} />))}</div>
+              <div className="space-y-2">{combatants.length === 0 && <p className="text-center py-8 text-stone-400 italic">No combatants added.</p>}{combatants.map(c => (<DragonbaneCombatantCard key={c.id} combatant={c} monsterData={monstersById.get(c.monster_id || '')} isSelected={selectedActorId === c.id} isSwapSource={swapSourceId === c.id} onSelect={setSelectedActorId} onSwapRequest={(id: string) => swapSourceId ? swapInitiativeMu.mutate({ id1: swapSourceId, id2: id }) : setSwapSourceId(id)} onFlipCard={handleFlip} onSaveStats={handleSaveStats} onToggleFear={handleToggleFear} onTogglePoison={handleTogglePoison} onRemove={(id: string) => removeCombatantMu.mutate(id)} statsState={editingStats[c.id] || { current_hp: '', current_wp: '' }} setStatsState={(v: EditableCombatantStats) => setEditingStats(prev => ({ ...prev, [c.id]: v }))} isDM={isDM} myCharacterId={myCharacterId ?? null} onSetInitiative={handleSetInitiativeSingle} onOpenCharacterSheet={handleOpenCharacterSheet} onToggleCondition={handleToggleCondition} onDeathRollChange={handleDeathRollChange} onStabilise={(combatant, hp) => stabiliseMu.mutate({ combatant, hp })} />))}</div>
             </div>
           </div>
         </div>
@@ -2579,15 +2566,20 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
           onClose={() => setIsAttackModalOpen(false)}
           attacker={activeCombatant}
           targets={combatants.filter(c => c.id !== activeCombatant.id)}
-          attackName={
-            activeCombatant.monster_id
-              ? currentMonsterAttacks[activeCombatant.id]?.name ?? getDefaultMonsterAttack(activeCombatantMonsterData || undefined)?.name
-              : undefined
-          }
+          attackName={activeAttackName}
           attackContext={activeCombatant.monster_id ? currentMonsterAttackContexts[activeCombatant.id] : null}
-          onConfirm={handleAttackConfirm}
+          armorFor={armorFor}
+          isSaving={applyDamageMu.isPending}
+          onConfirm={(resolution) => applyDamageMu.mutate(resolution)}
         />
       )}
+      <CombatSummaryDialog
+        isOpen={isSummaryOpen}
+        summary={combatSummary}
+        isSaving={finishEncounterMu.isPending}
+        onClose={() => setIsSummaryOpen(false)}
+        onFinish={(clearConditions) => finishEncounterMu.mutate(clearConditions)}
+      />
       {/* NEW: WAIT MODAL */}
       {isWaitModalOpen && activeCombatant && (
         <WaitTurnModal

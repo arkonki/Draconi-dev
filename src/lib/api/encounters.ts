@@ -26,7 +26,7 @@ export async function fetchEncounterDetails(encounterId: string): Promise<Encoun
 export async function fetchEncounterCombatants(encounterId: string): Promise<EncounterCombatant[]> {
   const { data, error } = await supabase
     .from('encounter_combatants')
-    .select('*, character:characters(current_hp, max_hp, current_wp, max_wp)')
+    .select('*, character:characters(user_id, current_hp, max_hp, current_wp, max_wp, heroic_ability, attributes, conditions, is_rallied, death_rolls_passed, death_rolls_failed, equipment, skill_levels, marked_skills)')
     .eq('encounter_id', encounterId)
     // Primary Sort: Initiative (1 is best, null is worst)
     .order('initiative_roll', { ascending: true, nullsLast: true })
@@ -178,15 +178,75 @@ export async function startEncounter(id: string): Promise<Encounter> {
 
   return encounter;
 }
-export const endEncounter = (id: string) => updateEncounter(id, { status: 'completed' });
+export interface DamageEntry {
+  combatant_id: string;
+  /** Damage as rolled; negative heals. */
+  damage: number;
+  armor: number;
+  ignore_armor?: boolean;
+  parried?: boolean;
+}
 
+export interface DamageOutcome {
+  target: string;
+  targetIsPlayer: boolean;
+  damage: number;
+  absorbed: number;
+  parried: boolean;
+  hpBefore: number;
+  hpAfter: number;
+  defeated: boolean;
+  dying: boolean;
+  instantDeath: boolean;
+  deathFailures: number | null;
+}
+
+/** Applies armor, parry and HP loss to every target in one step and writes the combat log. */
+export async function applyEncounterDamage(params: {
+  encounterId: string;
+  attackerName: string;
+  attackName?: string | null;
+  entries: DamageEntry[];
+}): Promise<DamageOutcome[]> {
+  const { data, error } = await supabase.rpc<{ outcomes: DamageOutcome[] }>('apply_encounter_damage', {
+    p_encounter_id: params.encounterId,
+    p_attacker_name: params.attackerName,
+    p_attack_name: params.attackName ?? null,
+    p_entries: params.entries,
+  });
+  if (error || !data) throw new Error(error?.message || 'Failed to apply the damage');
+  return data.outcomes;
+}
+
+/** Completes the encounter, writes the end marker to the log and optionally clears the players' conditions. */
+export async function finishEncounter(id: string, clearConditions = false): Promise<{ rounds: number; clearedConditions: number }> {
+  const { data, error } = await supabase.rpc<{ rounds: number; clearedConditions: number }>('finish_encounter', {
+    p_encounter_id: id,
+    p_clear_conditions: clearConditions,
+  });
+  if (error || !data) throw new Error(error?.message || 'Failed to end the encounter');
+  return data;
+}
+
+export async function updateCharacterCombatState(characterId: string, updates: {
+  conditions?: Record<string, boolean>;
+  death_rolls_passed?: number;
+  death_rolls_failed?: number;
+  is_rallied?: boolean;
+  marked_skills?: string[];
+}): Promise<void> {
+  const { error } = await supabase.from('characters').update(updates).eq('id', characterId);
+  if (error) throw new Error(error.message || 'Failed to update the character');
+}
+
+/** Starts the next round: resets everyone's turn and writes the round marker to the log, all in one step. */
 export const nextRound = async (id: string) => {
-  // Requires SQL Function: advance_encounter_round
-  const { error } = await supabase.rpc('advance_encounter_round', {
+  const { data, error } = await supabase.rpc<{ round: number }>('advance_encounter_round', {
     p_encounter_id: id
   });
 
   if (error) throw error;
+  return data?.round ?? null;
 };
 
 // --- DELETE OPERATIONS ---

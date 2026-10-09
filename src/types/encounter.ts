@@ -24,11 +24,20 @@ export interface EncounterCombatant {
   created_at: string;
   updated_at: string;
   character?: {
+    user_id?: string;
     current_hp: number;
     max_hp: number;
     current_wp: number;
     max_wp: number;
     heroic_ability?: string[];
+    attributes?: Record<string, number> | string;
+    conditions?: Record<string, boolean>;
+    is_rallied?: boolean;
+    death_rolls_passed?: number;
+    death_rolls_failed?: number;
+    equipment?: { equipped?: { armor?: string; helmet?: string } } | null;
+    skill_levels?: Record<string, number>;
+    marked_skills?: string[];
   };
 }
 

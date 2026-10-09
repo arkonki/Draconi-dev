@@ -26,6 +26,7 @@
     "test:game-data-usage": "node scripts/game-data-usage-smoke.mjs",
     "test:admin-overview": "node scripts/admin-overview-smoke.mjs",
     "test:party-management": "node scripts/party-management-smoke.mjs",
+    "test:combat": "node scripts/combat-smoke.mjs",
     "test:workflow": "node scripts/workflow-smoke.mjs",
     "test:housekeeping": "node scripts/housekeeping-smoke.mjs",
     "test:helper-api": "node --env-file-if-exists=.env server/helper/smoke.mjs",

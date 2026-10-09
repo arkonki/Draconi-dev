@@ -665,7 +665,10 @@ async function enrichRows(table, rows, client = pool, ctx = null) {
   }
   if (table === 'encounter_combatants') {
     const { rows: characters } = await client.query(
-      `SELECT id, current_hp, max_hp, current_wp, max_wp, heroic_ability
+      `SELECT id, user_id, current_hp, max_hp, current_wp, max_wp, heroic_ability,
+              attributes, conditions, is_rallied, death_rolls_passed, death_rolls_failed,
+              jsonb_build_object('equipped', equipment->'equipped') AS equipment,
+              skill_levels, marked_skills
        FROM characters WHERE id = ANY($1::uuid[])`,
       [uniqueRowValues(rows, 'character_id')],
     );

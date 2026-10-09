@@ -20,6 +20,8 @@ import { HeroicAbilitiesView } from './HeroicAbilitiesView';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { AdvancementSystem } from './AdvancementSystem';
 import { DeathRollTracker } from './DeathRollTracker';
+import { DownedReminder } from './DownedReminder';
+import { useCharacterVitalsRealtime } from '../../hooks/useCharacterVitalsRealtime';
 import { CharacterInjuriesPanel } from './CharacterInjuriesPanel';
 import { StatusPanelView } from './StatusPanelView';
 import { BioModal } from './modals/BioModal';
@@ -708,6 +710,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
   const queryClient = useQueryClient();
   const { toggleDiceRoller } = useDice();
   const { character, fetchCharacter, adjustStat, toggleCondition, updateAttribute, performRest, isLoading, error, isSaving, activeEncounter, setActiveStatusMessage } = useCharacterSheetStore();
+  useCharacterVitalsRealtime(character?.id ?? null, character?.party_id ?? null);
   const { data: gameItems } = useQuery({
     queryKey: ['gameItems'],
     queryFn: () => fetchItems(),
@@ -1040,6 +1043,7 @@ export function CharacterSheet({ soloState: providedSoloState, embedded = false 
 
   return (
     <div className={`character-sheet-root ${embedded ? 'character-sheet-embedded min-h-0' : 'character-sheet-standalone min-h-screen md:p-6'} bg-[#f5f0e1] text-stone-800 p-0 font-sans overflow-x-clip`}>
+      <DownedReminder character={character} />
       <div className={`character-sheet-shell max-w-7xl mx-auto bg-[#fdfbf7] border-x-0 md:border-2 border-[#d4c5a3] relative ${embedded ? 'shadow-none md:border-0' : 'shadow-2xl'}`}>
         
         {/* HEADER */}
