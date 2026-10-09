@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { PartyDetailsDialog } from '../components/party/PartyDetailsDialog';
+import { PartyPeople } from '../components/party/PartyPeople';
 import { useConfirm } from '../hooks/useConfirm';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
@@ -477,6 +478,7 @@ export function PartyView() {
               currentUserId={user?.id}
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
+            <PartyPeople party={party} currentUserId={user?.id} />
           </div>
         )}
 

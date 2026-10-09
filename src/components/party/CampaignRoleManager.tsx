@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, Shield, Swords, UserCog, X } from 'lucide-react';
 import type { CampaignMembership, CampaignRole, Party } from '../../lib/api/parties';
-import { updateCampaignMemberRole } from '../../lib/api/parties';
+import { transferCampaignOwnership, updateCampaignMemberRole } from '../../lib/api/parties';
+import { useConfirm } from '../../hooks/useConfirm';
 import { Button } from '../shared/Button';
 
 interface CampaignRoleManagerProps {
@@ -38,6 +39,27 @@ export function CampaignRoleManager({ party, isOpen, onClose }: CampaignRoleMana
       ]);
     },
   });
+
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const transferMutation = useMutation({
+    mutationFn: (userId: string) => transferCampaignOwnership(party.id, userId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['party', party.id] }),
+        queryClient.invalidateQueries({ queryKey: ['parties'] }),
+      ]);
+      onClose();
+    },
+  });
+
+  const handOver = async (member: CampaignMembership) => {
+    const confirmed = await confirm({
+      title: `Make ${memberName(member)} the owner?`,
+      description: `${memberName(member)} will own ${party.name}, including campaign roles, the invite link and disbanding it. You stay on as a GM, but you can't take ownership back yourself.`,
+      confirmText: 'Hand over campaign',
+    });
+    if (confirmed) transferMutation.mutate(member.user_id);
+  };
 
   if (!isOpen) return null;
 
@@ -79,6 +101,7 @@ export function CampaignRoleManager({ party, isOpen, onClose }: CampaignRoleMana
                   {isOwner ? (
                     <span className="self-start rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-700 sm:self-auto">Owner</span>
                   ) : (
+                    <div className="flex shrink-0 items-center gap-2">
                     <label className="flex shrink-0 items-center gap-2 text-sm text-gray-600">
                       <span className="sr-only">Role for {memberName(member)}</span>
                       <select
@@ -93,12 +116,19 @@ export function CampaignRoleManager({ party, isOpen, onClose }: CampaignRoleMana
                         {editableRoles.map((role) => <option key={role} value={role}>{roleDetails[role].label}</option>)}
                       </select>
                     </label>
+                    <Button type="button" variant="ghost" size="sm" loading={transferMutation.isPending && transferMutation.variables === member.user_id} onClick={() => void handOver(member)}>
+                      Make owner
+                    </Button>
+                    </div>
                   )}
                 </div>
               );
             })}
           </div>
 
+          {transferMutation.error && (
+            <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{transferMutation.error.message}</p>
+          )}
           {roleMutation.error && (
             <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{roleMutation.error.message}</p>
           )}
@@ -108,6 +138,7 @@ export function CampaignRoleManager({ party, isOpen, onClose }: CampaignRoleMana
           <Button variant="secondary" onClick={onClose}>Done</Button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

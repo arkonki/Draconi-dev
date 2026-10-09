@@ -3,6 +3,13 @@ import { loadCampaignAccess } from './campaignRoles.js';
 import { invalidateAccessContextCache } from './data.js';
 import { HttpError } from './http.js';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireUuid(value, label) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) throw new HttpError(400, `${label} must be an id`);
+  return value;
+}
+
 async function requirePartyAccess(client, user, partyId, gmOnly = false) {
   const access = await loadCampaignAccess(client, user, partyId);
   const allowed = access?.canRead && (!gmOnly || access.isGm);
@@ -37,11 +44,76 @@ export async function executeRpc(user, name, args = {}) {
       return parties[0].id;
     }
 
-    if (name === 'leave_campaign') {
-      const partyId = args.p_party_id;
-      if (typeof partyId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(partyId)) {
-        throw new HttpError(400, 'p_party_id must be a campaign id');
+    if (name === 'create_campaign') {
+      const campaignName = String(args.p_name ?? '').trim();
+      if (!campaignName) throw new HttpError(400, 'The campaign needs a name');
+      if (campaignName.length > 120) throw new HttpError(400, 'The campaign name is too long');
+      const description = String(args.p_description ?? '').trim();
+      const characterIds = [...new Set(Array.isArray(args.p_character_ids) ? args.p_character_ids : [])].map((id) => requireUuid(id, 'p_character_ids'));
+      if (user.role === 'player') throw new HttpError(403, 'Only a Dungeon Master can create a campaign');
+
+      const { rows: characters } = characterIds.length
+        ? await client.query('SELECT c.id, c.user_id, c.party_id FROM characters c WHERE c.id = ANY($1::uuid[]) FOR UPDATE', [characterIds])
+        : { rows: [] };
+      if (characters.length !== characterIds.length) throw new HttpError(404, 'A selected character was not found');
+      for (const character of characters) {
+        if (character.user_id !== user.id && user.role !== 'admin') throw new HttpError(403, 'You do not own one of the selected characters');
+        if (character.party_id) throw new HttpError(409, 'A selected character is already in a party');
       }
+
+      // One transaction: either the campaign and all of its members exist, or nothing does.
+      const { rows } = await client.query(
+        'INSERT INTO parties (name, description, created_by) VALUES ($1, $2, $3) RETURNING *',
+        [campaignName, description, user.id],
+      );
+      for (const character of characters) {
+        await client.query(
+          'INSERT INTO party_members (party_id, character_id, user_id) VALUES ($1, $2, $3)',
+          [rows[0].id, character.id, character.user_id],
+        );
+      }
+      return rows[0];
+    }
+
+    if (name === 'remove_party_member') {
+      const partyId = requireUuid(args.p_party_id, 'p_party_id');
+      const characterId = requireUuid(args.p_character_id, 'p_character_id');
+      const access = await loadCampaignAccess(client, user, partyId);
+      if (!access?.canWrite) throw new HttpError(403, 'Permission denied');
+      const { rows: members } = await client.query(
+        `SELECT pm.character_id, c.user_id AS owner_id
+         FROM party_members pm JOIN characters c ON c.id = pm.character_id
+         WHERE pm.party_id = $1 AND pm.character_id = $2 FOR UPDATE OF pm`,
+        [partyId, characterId],
+      );
+      if (!members[0]) throw new HttpError(404, 'That character is not in this party');
+      if (!access.isGm && members[0].owner_id !== user.id) throw new HttpError(403, 'Permission denied');
+      // Triggers point the character at its next party (or none) and drop a player with no characters left.
+      await client.query('DELETE FROM party_members WHERE party_id = $1 AND character_id = $2', [partyId, characterId]);
+      return { removed: true };
+    }
+
+    if (name === 'transfer_campaign_ownership') {
+      const partyId = requireUuid(args.p_party_id, 'p_party_id');
+      const newOwnerId = requireUuid(args.p_user_id, 'p_user_id');
+      const { rows: parties } = await client.query('SELECT created_by FROM parties WHERE id = $1 FOR UPDATE', [partyId]);
+      if (!parties[0]) throw new HttpError(404, 'Campaign not found');
+      const previousOwnerId = parties[0].created_by;
+      if (previousOwnerId !== user.id && user.role !== 'admin') throw new HttpError(403, 'Only the campaign owner can hand it over');
+      if (newOwnerId === previousOwnerId) throw new HttpError(409, 'That person already owns the campaign');
+      const { rows: members } = await client.query(
+        'SELECT 1 FROM campaign_memberships WHERE party_id = $1 AND user_id = $2 AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = $2 AND NOT u.is_active)',
+        [partyId, newOwnerId],
+      );
+      if (!members[0]) throw new HttpError(409, 'The new owner must be an active member of the campaign');
+      // The trigger on parties.created_by gives the new creator the owner role; the previous owner stays on as GM.
+      await client.query('UPDATE parties SET created_by = $1 WHERE id = $2', [newOwnerId, partyId]);
+      await client.query("UPDATE campaign_memberships SET role = 'gm' WHERE party_id = $1 AND user_id = $2", [partyId, previousOwnerId]);
+      return { transferred: true, previousOwnerId, newOwnerId };
+    }
+
+    if (name === 'leave_campaign') {
+      const partyId = requireUuid(args.p_party_id, 'p_party_id');
       const { rows: parties } = await client.query('SELECT created_by FROM parties WHERE id = $1', [partyId]);
       if (!parties[0]) throw new HttpError(404, 'Campaign not found');
       if (parties[0].created_by === user.id) {
@@ -253,7 +325,7 @@ export async function executeRpc(user, name, args = {}) {
 
     throw new HttpError(404, `Unknown RPC: ${name}`);
   });
-  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'leave_campaign' || name === 'duplicate_encounter_with_combatants') {
+  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'leave_campaign' || name === 'create_campaign' || name === 'remove_party_member' || name === 'transfer_campaign_ownership' || name === 'duplicate_encounter_with_combatants') {
     invalidateAccessContextCache();
   }
   return result;

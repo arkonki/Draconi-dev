@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Plus, Users, Sword, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
 import { Button } from '../components/shared/Button';
 import { useNavigate } from 'react-router-dom';
 import { Character } from '../types/character';
-import { Party, fetchParties, fetchAvailableCharacters } from '../lib/api/parties';
+import { Party, createParty, fetchParties, fetchAvailableCharacters } from '../lib/api/parties';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { EmptyState } from '../components/shared/EmptyState';
@@ -42,32 +41,7 @@ export function AdventureParty() {
   const error = errorParties?.message || errorChars?.message || null;
 
   const createPartyMutation = useMutation({
-    mutationFn: async ({ name, characterIds }: { name: string; characterIds: string[] }) => {
-      if (!name.trim()) throw new Error('Party name is required');
-      if (!user) throw new Error('User not authenticated');
-
-      const { data: party, error: partyError } = await supabase
-        .from('parties')
-        .insert([{ name: name, created_by: user.id }])
-        .select()
-        .single();
-
-      if (partyError) throw partyError;
-      if (!party) throw new Error('Party creation failed');
-
-      if (characterIds.length > 0) {
-        const membersToAdd = characterIds.map((characterId) => ({
-          party_id: party.id,
-          character_id: characterId,
-        }));
-        const { error: membersError } = await supabase.from('party_members').insert(membersToAdd);
-        if (membersError) {
-          await supabase.from('parties').delete().eq('id', party.id);
-          throw membersError;
-        }
-      }
-      return party;
-    },
+    mutationFn: ({ name, characterIds }: { name: string; characterIds: string[] }) => createParty({ name, characterIds }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['parties', user?.id, isDM()] });
       queryClient.invalidateQueries({ queryKey: ['availableCharacters', user?.id] });

@@ -200,67 +200,28 @@ export async function updateCampaignMemberRole(
 }
 
 // REVERTED: Uses direct DB insert instead of RPC
-export async function addPartyMember(partyId: string, characterId: string, inviteCode?: string): Promise<void> {
-  // 1. Verify invite code if provided (Client-side check for now, to restore functionality)
-  if (inviteCode) {
-    const { data: party, error: partyError } = await supabase
-      .from('parties')
-      .select('invite_code')
-      .eq('id', partyId)
-      .single();
-
-    if (partyError) throw new Error('Party not found');
-    if (party.invite_code && party.invite_code !== inviteCode) {
-      throw new Error('Invalid invite code');
-    }
-  }
-
-  // 2. Insert into party_members
-  const { error: insertError } = await supabase
-    .from('party_members')
-    .insert({ party_id: partyId, character_id: characterId });
-
-  if (insertError) {
-    // Handle unique constraint violation gracefully
-    if (insertError.code === '23505') { // unique_violation
-      return;
-    }
-    console.error('Error joining party:', insertError);
-    throw new Error(insertError.message || 'Failed to join party');
-  }
-
-  // 3. Update character's party_id
-  const { error: updateError } = await supabase
-    .from('characters')
-    .update({ party_id: partyId })
-    .eq('id', characterId);
-
-  if (updateError) {
-    console.error('Error updating character party link:', updateError);
-    // We should probably rollback the member insert here, but for now let's just throw
-    throw new Error('Failed to link character to party');
-  }
+export async function removePartyMember(partyId: string, characterId: string): Promise<void> {
+  const { error } = await supabase.rpc('remove_party_member', { p_party_id: partyId, p_character_id: characterId });
+  if (error) throw new Error(error.message || 'Failed to remove party member');
 }
 
-export async function removePartyMember(partyId: string, characterId: string): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from('party_members')
-    .delete()
-    .match({ party_id: partyId, character_id: characterId });
+/** Creates a campaign and adds the chosen characters in one step: either everything is saved or nothing is. */
+export async function createParty(details: { name: string; description?: string; characterIds: string[] }): Promise<{ id: string; name: string }> {
+  const name = details.name.trim();
+  if (!name) throw new Error('Party name is required');
+  const { data, error } = await supabase.rpc<{ id: string; name: string }>('create_campaign', {
+    p_name: name,
+    p_description: details.description ?? '',
+    p_character_ids: details.characterIds,
+  });
+  if (error || !data) throw new Error(error?.message || 'Party creation failed');
+  return data;
+}
 
-  if (deleteError) {
-    console.error('Error removing party member:', deleteError);
-    throw new Error(deleteError.message || 'Failed to remove party member');
-  }
-
-  const { error: updateError } = await supabase
-    .from('characters')
-    .update({ party_id: null })
-    .eq('id', characterId);
-
-  if (updateError) {
-    console.error('Error clearing character party link:', updateError);
-  }
+/** Hands the campaign to another member. The previous owner stays on as a GM. */
+export async function transferCampaignOwnership(partyId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('transfer_campaign_ownership', { p_party_id: partyId, p_user_id: userId });
+  if (error) throw new Error(error.message || 'Failed to hand over the campaign');
 }
 
 export async function deleteParty(partyId: string): Promise<void> {

@@ -97,6 +97,48 @@ try {
   assert.equal((await database.query('SELECT count(*)::int AS n FROM campaign_memberships WHERE party_id = $1 AND user_id = $2', [party.id, observerId])).rows[0].n, 0);
   results.gmLeaving = 'passed';
 
+  // --- Creating a campaign is all-or-nothing.
+  const ownerHero = await character(tokens.owner, `PM Owner Hero ${suffix}`);
+  const countParties = async (name) => (await database.query('SELECT count(*)::int AS n FROM parties WHERE name = $1', [name])).rows[0].n;
+  await ok(rpc(tokens.player, 'create_campaign', { p_name: `PM Player Party ${suffix}`, p_character_ids: [] }), 403, 'players cannot create');
+  await ok(rpc(tokens.owner, 'create_campaign', { p_name: '   ', p_character_ids: [] }), 400, 'blank name');
+  await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Atomic ${suffix}`, p_character_ids: [ownerHero.id, randomUUID()] }), 404, 'unknown character');
+  await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Atomic ${suffix}`, p_character_ids: [playerHero.id] }), 403, 'someone else\'s character');
+  assert.equal(await countParties(`PM Atomic ${suffix}`), 0, 'a failed creation leaves no campaign behind');
+  const second = (await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Second ${suffix}`, p_description: 'created together', p_character_ids: [ownerHero.id] }), 200, 'create with a character')).data;
+  assert.equal((await database.query('SELECT party_id FROM characters WHERE id = $1', [ownerHero.id])).rows[0].party_id, second.id);
+  assert.equal((await database.query('SELECT role FROM campaign_memberships WHERE party_id = $1 AND user_id = $2', [second.id, second.created_by])).rows[0].role, 'owner');
+  await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Third ${suffix}`, p_character_ids: [ownerHero.id] }), 409, 'character already in a party');
+  assert.equal(await countParties(`PM Third ${suffix}`), 0);
+  results.atomicCreate = 'passed';
+
+  // --- Removing a member: the character's owner or a GM, nobody else.
+  const memberHero = await character(tokens.player, `PM Member ${suffix}`);
+  await database.query('INSERT INTO party_members (party_id, character_id, user_id) VALUES ($1, $2, (SELECT user_id FROM characters WHERE id = $2))', [second.id, memberHero.id]);
+  await ok(rpc(tokens.observer, 'remove_party_member', { p_party_id: second.id, p_character_id: memberHero.id }), 403, 'outsider removes');
+  await ok(rpc(tokens.owner, 'remove_party_member', { p_party_id: second.id, p_character_id: randomUUID() }), 404, 'not a member');
+  await ok(rpc(tokens.owner, 'remove_party_member', { p_party_id: second.id, p_character_id: memberHero.id }), 200, 'gm removes');
+  assert.equal((await database.query('SELECT party_id FROM characters WHERE id = $1', [memberHero.id])).rows[0].party_id, null);
+  assert.equal((await database.query('SELECT count(*)::int AS n FROM campaign_memberships WHERE party_id = $1 AND role = $2', [second.id, 'player'])).rows[0].n, 0, 'player with no characters left drops off');
+  await database.query('INSERT INTO party_members (party_id, character_id, user_id) VALUES ($1, $2, (SELECT user_id FROM characters WHERE id = $2))', [second.id, memberHero.id]);
+  await ok(rpc(tokens.player, 'remove_party_member', { p_party_id: second.id, p_character_id: memberHero.id }), 200, 'owner removes own character');
+  results.removingMembers = 'passed';
+
+  // --- Handing the campaign over.
+  await database.query('INSERT INTO party_members (party_id, character_id, user_id) VALUES ($1, $2, (SELECT user_id FROM characters WHERE id = $2))', [second.id, memberHero.id]);
+  const playerId = (await database.query('SELECT id FROM users WHERE email = $1', [emails.player])).rows[0].id;
+  const ownerId = second.created_by;
+  await ok(rpc(tokens.player, 'transfer_campaign_ownership', { p_party_id: second.id, p_user_id: playerId }), 403, 'non-owner hands over');
+  await ok(rpc(tokens.owner, 'transfer_campaign_ownership', { p_party_id: second.id, p_user_id: observerId }), 409, 'target is not a member');
+  await ok(rpc(tokens.owner, 'transfer_campaign_ownership', { p_party_id: second.id, p_user_id: ownerId }), 409, 'already the owner');
+  await ok(rpc(tokens.owner, 'transfer_campaign_ownership', { p_party_id: second.id, p_user_id: playerId }), 200, 'owner hands over');
+  const roles = Object.fromEntries((await database.query('SELECT user_id, role FROM campaign_memberships WHERE party_id = $1', [second.id])).rows.map((row) => [row.user_id, row.role]));
+  assert.deepEqual([roles[playerId], roles[ownerId]], ['owner', 'gm']);
+  assert.equal((await database.query('SELECT created_by FROM parties WHERE id = $1', [second.id])).rows[0].created_by, playerId);
+  await ok(rpc(tokens.owner, 'leave_campaign', { p_party_id: second.id }), 200, 'previous owner can now leave');
+  await ok(rpc(tokens.player, 'leave_campaign', { p_party_id: second.id }), 409, 'new owner cannot leave');
+  results.ownershipTransfer = 'passed';
+
   console.log(JSON.stringify(results, null, 2));
 } finally {
   await cleanup().catch((error) => console.error('Cleanup failed:', error.message));
