@@ -10,6 +10,7 @@ import { UserEditModal } from './UserEditModal';
 import { UserPasswordModal } from './UserPasswordModal';
 import { UserDeleteModal } from './UserDeleteModal';
 import { useAuth } from '../../contexts/useAuth';
+import { notifyAdminOverviewChanged } from '../../hooks/useAdminOverview';
 import {
   displayName,
   fetchAdminUsers,
@@ -111,7 +112,8 @@ export function UserManagement() {
   }, [users, search, roleFilter, statusFilter, sort]);
 
   const replaceUser = (updated: AdminUser) => setUsers((current) => current.map((user) => (user.id === updated.id ? { ...user, ...updated } : user)));
-  const success = (text: string) => setNotice({ kind: 'success', text });
+  // Any successful change can alter the "needs attention" figures shown elsewhere.
+  const success = (text: string) => { setNotice({ kind: 'success', text }); notifyAdminOverviewChanged(); };
 
   const toggleActive = async (user: AdminUser) => {
     setBusyId(user.id);

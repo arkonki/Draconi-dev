@@ -34,6 +34,8 @@ import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
+import { adminOverview } from './adminOverview.js';
+import { gameDataUsage } from './gameDataUsage.js';
 import {
   deleteUser,
   listAuditLog,
@@ -132,6 +134,16 @@ const server = http.createServer(async (request, response) => {
         limit: params.get('limit'),
         userId: params.get('user'),
       }));
+      return;
+    }
+    if (pathname === '/api/admin/overview' && request.method === 'GET') {
+      sendJson(response, 200, await adminOverview(await currentUser(request)));
+      return;
+    }
+    const gameDataUsageMatch = matchPath(pathname, /^\/api\/admin\/game-data\/([^/]+)\/([^/]+)\/usage$/);
+    if (gameDataUsageMatch && request.method === 'GET') {
+      const [category, id] = gameDataUsageMatch;
+      sendJson(response, 200, await gameDataUsage(await currentUser(request), { category, id }));
       return;
     }
     const adminUserMatch = matchPath(pathname, /^\/api\/admin\/users\/([^/]+)(?:\/(impact|reset-password|revoke-sessions))?$/);

@@ -145,7 +145,7 @@ async function sha256File(filename) {
   return hash.digest('hex');
 }
 
-async function applicationVersion() {
+export async function applicationVersion() {
   for (const packagePath of ['/app/application-package.json', path.resolve('package.json')]) {
     try {
       const applicationPackage = JSON.parse(await readFile(packagePath, 'utf8'));

@@ -245,10 +245,7 @@
 
 
         const handleDelete = useCallback(async (category: DataCategory, id: string) => {
-          if (!window.confirm(`Are you sure you want to delete this ${category} entry (ID: ${id})? This action cannot be undone.`)) {
-              return;
-          }
-
+          // Confirmation (and the "where is this used" check) is handled by the screen that calls this.
           let tableName: string = '';
           try {
             setError(null);

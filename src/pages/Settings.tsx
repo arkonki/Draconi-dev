@@ -21,6 +21,7 @@ import { LocalizationSettings } from '../components/settings/LocalizationSetting
 import { AdminSettings } from '../components/settings/AdminSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
+import { useAdminOverview } from '../hooks/useAdminOverview';
 
 type SettingsSection = 
   | 'profile'
@@ -85,6 +86,13 @@ const menuItems: SettingsMenuItem[] = [
 
 export function Settings() {
   const { isAdmin } = useAuth();
+  // Lets administrators see a problem (old backups, low disk) without opening the Admin Panel.
+  const { overview: adminOverview } = useAdminOverview(120_000, isAdmin());
+  const urgent = (adminOverview?.attention ?? []).filter((item) => item.severity !== 'info');
+  const badgeCounts: Partial<Record<SettingsSection, number>> = {
+    admin: urgent.length,
+    recovery: urgent.filter((item) => item.section === 'backups').length,
+  };
   
   // State
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
@@ -126,7 +134,7 @@ export function Settings() {
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
       case 'recovery': return <RecoverySettings />;
-      case 'admin': return <AdminSettings />;
+      case 'admin': return <AdminSettings onOpenBackups={() => handleSectionChange('recovery')} />;
       default: return <ProfileSettings />;
     }
   };
@@ -174,7 +182,18 @@ export function Settings() {
                         <item.icon size={20} className={isActive ? 'text-indigo-600' : 'text-gray-400'} />
                       </div>
                       <div className="text-left">
-                        <span className="block font-semibold md:font-medium">{item.label}</span>
+                        <span className="flex items-center gap-2 font-semibold md:font-medium">
+                          {item.label}
+                          {(badgeCounts[item.id] ?? 0) > 0 && (
+                            <span
+                              role="status"
+                              aria-label={`${badgeCounts[item.id]} item${badgeCounts[item.id] === 1 ? '' : 's'} need attention`}
+                              className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-5 text-white"
+                            >
+                              {badgeCounts[item.id]}
+                            </span>
+                          )}
+                        </span>
                         <span className="block lg:hidden text-xs text-gray-400 font-normal mt-0.5">{item.description}</span>
                       </div>
                     </div>

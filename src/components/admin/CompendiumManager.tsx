@@ -9,6 +9,7 @@ import {
   saveCompendiumEntry,
 } from '../../lib/api/compendium';
 import { Button } from '../shared/Button';
+import { ConfirmationDialog } from '../shared/ConfirmationDialog';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { HomebrewRenderer } from '../compendium/HomebrewRenderer';
@@ -97,17 +98,19 @@ export function CompendiumManager() {
     });
   };
 
-  const handleDelete = async (entry: CompendiumEntry) => {
-    if (!entry.id) {
-      return;
-    }
+  const [pendingDelete, setPendingDelete] = useState<CompendiumEntry | null>(null);
 
-    const confirmed = window.confirm(`Delete "${entry.title}"? This action cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
+  const handleDelete = (entry: CompendiumEntry) => {
+    if (entry.id) setPendingDelete(entry);
+  };
 
-    await deleteMutation.mutateAsync(entry.id);
+  const confirmDelete = async () => {
+    if (!pendingDelete?.id) return;
+    try {
+      await deleteMutation.mutateAsync(pendingDelete.id);
+    } finally {
+      setPendingDelete(null);
+    }
   };
 
   if (!isAdmin()) {
@@ -213,7 +216,7 @@ export function CompendiumManager() {
                       variant="ghost"
                       size="icon_sm"
                       icon={Trash2}
-                      onClick={() => void handleDelete(entry)}
+                      onClick={() => handleDelete(entry)}
                       className="text-red-500 hover:bg-red-50 hover:text-red-600"
                       title={`Delete ${entry.title}`}
                     />
@@ -245,6 +248,17 @@ export function CompendiumManager() {
           onSave={(entry) => saveMutation.mutateAsync(entry)}
         />
       )}
+
+      <ConfirmationDialog
+        isOpen={pendingDelete !== null}
+        onClose={() => { if (!deleteMutation.isPending) setPendingDelete(null); }}
+        onConfirm={() => void confirmDelete()}
+        title={`Delete \u201c${pendingDelete?.title ?? ''}\u201d?`}
+        description="This permanently removes the entry for everyone and cannot be undone."
+        confirmText="Delete entry"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+      />
     </>
   );
 }

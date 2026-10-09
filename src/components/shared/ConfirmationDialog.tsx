@@ -7,7 +7,11 @@ interface ConfirmationDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  description: string;
+  description: React.ReactNode;
+  /** Extra content shown under the description, such as a list of what will be affected. */
+  children?: React.ReactNode;
+  /** Keeps the confirm button disabled, for example while details are still loading. */
+  confirmDisabled?: boolean;
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
@@ -21,6 +25,8 @@ export function ConfirmationDialog({
   onConfirm,
   title,
   description,
+  children,
+  confirmDisabled = false,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   isLoading = false,
@@ -37,7 +43,7 @@ export function ConfirmationDialog({
       size="md"
       layer="critical"
       closeDisabled={isLoading}
-      bodyClassName="hidden"
+      bodyClassName={children ? 'px-4 pb-2 sm:px-6' : 'hidden'}
       footerClassName="border-t-0 pt-2 sm:pb-6"
       footer={(
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -53,6 +59,7 @@ export function ConfirmationDialog({
             variant={isDestructive ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={isLoading}
+            disabled={confirmDisabled}
             className="w-full sm:w-auto"
           >
             {confirmText}
@@ -60,7 +67,7 @@ export function ConfirmationDialog({
         </div>
       )}
     >
-      <span />
+      {children ?? <span />}
     </AccessibleDialog>
   );
 }

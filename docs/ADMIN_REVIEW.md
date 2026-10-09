@@ -62,15 +62,29 @@ Ordered by value for effort.
 
 ### Quick wins
 
-1. **Replace `window.confirm`** in Game Data and the Compendium manager with the same dialog pattern used for users.
-   They are inconsistent, unstyled, and impossible to make accessible.
-2. **Warn before deleting game data that is in use.** Deleting an item, spell or heroic ability does not check whether
-   characters reference it. Show "used by N characters" before confirming.
-3. **Show backup age and status** on the Backup & Restore screen and on an admin landing page. Today nothing tells an
-   administrator that the last backup is three weeks old.
-4. **Expose the performance endpoints that already exist.** `GET /api/admin/performance` and `/reset` have no UI at all.
-   A "System health" panel (slow queries, request timings, pool use, database size, storage size, schema version) costs
-   little and answers "why is the site slow".
+1. **Done: replaced `window.confirm`** in Game Data, the Compendium manager and the Compendium page with the shared
+   `ConfirmationDialog`. Game Data deletes used to ask twice, once from the screen and again from the hook behind it.
+   Eleven other `window.confirm` calls remain outside the admin area (party tasks, notes, stash, time tracker and
+   similar); they can move to the same dialog one by one.
+2. **Done: warn before deleting game data that is in use.** `GET /api/admin/game-data/:category/:id/usage` reports where
+   an entry is referenced, and the delete dialog shows it before confirming. Checked per category: items (characters,
+   party stashes, monsters' gear), spells (known or prepared), heroic abilities (characters, kin, professions,
+   monsters), skills (characters, professions, monsters), kin and professions (characters), monsters (encounters).
+   Professions' starting gear is free text and is not checked. Covered by `scripts/game-data-usage-smoke.mjs`
+   (`npm run test:game-data-usage`).
+3. **Done: backup age and status.** A banner on Backup & Restore and on the new Overview tab says how old the newest
+   backup is (green within 7 days, amber after, red after 30 or when there is none; `BACKUP_WARN_DAYS` and
+   `BACKUP_CRITICAL_DAYS` change the limits). Both recovery sets and the database dumps made by deployments count;
+   the automatic pre-restore copy does not, because it holds the data from before the restore. Red badges in the
+   Settings menu flag Backup & Restore and the Admin Panel when something needs attention, and clear as soon as it
+   is fixed. The overview also warns about low disk space, a single administrator, accounts that have never signed
+   in, and failed cleanups.
+4. **Done: System health.** The performance endpoints now have a screen (Admin Panel, System health): response times
+   in plain language, failed and slow requests, the slowest endpoints, database connections and cache, memory, and
+   live-update delivery, refreshing every 15 seconds. Findings (for example "Requests are waiting for a database
+   connection") also appear on the Overview. Counters can be reset after confirming. Backed by
+   `GET /api/admin/overview`; rules are in `server/adminAssessment.js` and tested; `npm run test:admin-overview`
+   checks the endpoint against the database.
 5. **Create user: allow choosing Administrator** (today only player or DM; admins must be promoted afterwards) and
    offer a one-click "copy sign-in details" (already present) plus an optional forced password change on first sign-in.
 

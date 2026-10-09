@@ -10,6 +10,7 @@ import { CompendiumEntry, GrimoireSpell } from '../types/compendium';
 import { Button } from '../components/shared/Button';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
+import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { fetchCompendiumEntries, deleteCompendiumEntry, fetchGrimoireSpells, saveCompendiumEntry } from '../lib/api/compendium';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { sendMessage } from '../lib/api/chat';
@@ -229,10 +230,18 @@ export function Compendium() {
     onError: (err) => console.error("Delete error:", err)
   });
 
-  const handleDelete = async () => {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const handleDelete = () => {
+    if (selectedEntry?.id) setConfirmingDelete(true);
+  };
+
+  const confirmDelete = async () => {
     if (!selectedEntry?.id) return;
-    if (window.confirm("Are you sure you want to delete this entry? This action cannot be undone.")) {
+    try {
       await deleteMutation.mutateAsync(selectedEntry.id);
+    } finally {
+      setConfirmingDelete(false);
     }
   };
 
@@ -691,6 +700,17 @@ export function Compendium() {
             />
           </Suspense>
         )}
+
+        <ConfirmationDialog
+          isOpen={confirmingDelete}
+          onClose={() => { if (!deleteMutation.isPending) setConfirmingDelete(false); }}
+          onConfirm={() => void confirmDelete()}
+          title={`Delete \u201c${selectedEntry?.title ?? ''}\u201d?`}
+          description="This permanently removes the entry and cannot be undone."
+          confirmText="Delete entry"
+          isDestructive
+          isLoading={deleteMutation.isPending}
+        />
       </div>
     </>
   );

@@ -11,6 +11,8 @@ import {
   type StoredBackup,
 } from '../../lib/adminRecovery';
 import { clearLocalSession } from '../../lib/supabase';
+import { BackupStatus } from '../admin/BackupStatus';
+import { notifyAdminOverviewChanged, useAdminOverview } from '../../hooks/useAdminOverview';
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -24,6 +26,7 @@ function errorMessage(error: unknown) {
 }
 
 export function RecoverySettings() {
+  const { overview, loading: overviewLoading, error: overviewError } = useAdminOverview();
   const [backups, setBackups] = useState<StoredBackup[]>([]);
   const [databaseName, setDatabaseName] = useState('dragonbane');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -41,6 +44,7 @@ export function RecoverySettings() {
       const result = await listRecoveryBackups();
       setBackups(result.data);
       setDatabaseName(result.databaseName);
+      notifyAdminOverviewChanged();
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -114,6 +118,14 @@ export function RecoverySettings() {
           Create complete recovery sets containing PostgreSQL data and uploaded files. Only administrators can access these controls.
         </p>
       </div>
+
+      <BackupStatus
+        backups={overview?.backups ?? null}
+        loading={overviewLoading}
+        error={overviewError}
+        onCreate={() => void handleCreateBackup()}
+        creating={busy === 'backup'}
+      />
 
       {error && (
         <div role="alert" className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">

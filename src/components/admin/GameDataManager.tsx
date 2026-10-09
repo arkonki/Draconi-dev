@@ -19,6 +19,9 @@ import { useGameData, type DataCategory, type GameDataEntry, type GenericGameDat
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { isSkillNameRequirement } from '../../types/character';
 import { GameDataImportModal } from './GameDataImportModal';
+import { GameDataUsageNotice } from './GameDataUsageNotice';
+import { ConfirmationDialog } from '../shared/ConfirmationDialog';
+import { fetchGameDataUsage, type GameDataUsage } from '../../lib/api/gameDataUsage';
 
 // --- CONSTANTS ---
 const CATEGORIES: Array<{ id: DataCategory; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -159,13 +162,43 @@ const useGameDataManagement = () => {
         await saveData(activeCategory, dataToSave as GameDataEntry, handleSaveSuccess, setSaveError);
     }, [editingEntry, activeCategory, saveData, handleSaveSuccess]);
 
-    const handleDelete = useCallback(async (id: string) => {
+    // Deleting is a two-step flow: ask (while checking what still uses the entry), then confirm.
+    const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; category: DataCategory } | null>(null);
+    const [deleteUsage, setDeleteUsage] = useState<GameDataUsage | null>(null);
+    const [deleteUsageError, setDeleteUsageError] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const requestDelete = useCallback((id: string) => {
         if (!id) return;
-        if(!window.confirm("Are you sure you want to delete this entry?")) return;
-        await deleteData(activeCategory, id);
-        if (activeCategory === 'items') fetchData('game_items', setItemCategories);
-        if (activeCategory === 'monsters') fetchData('monsters', setMonsterCategories);
-    }, [activeCategory, deleteData, fetchData]);
+        const entry = entries.find((candidate) => candidate.id === id) as { name?: string } | undefined;
+        setDeleteUsage(null);
+        setDeleteUsageError(null);
+        setPendingDelete({ id, name: entry?.name || 'this entry', category: activeCategory });
+    }, [entries, activeCategory]);
+
+    useEffect(() => {
+        if (!pendingDelete) return undefined;
+        let cancelled = false;
+        fetchGameDataUsage(pendingDelete.category, pendingDelete.id)
+            .then((value) => { if (!cancelled) setDeleteUsage(value); })
+            .catch((error) => { if (!cancelled) setDeleteUsageError(error instanceof Error ? error.message : 'unknown error'); });
+        return () => { cancelled = true; };
+    }, [pendingDelete]);
+
+    const cancelDelete = useCallback(() => { if (!deleting) setPendingDelete(null); }, [deleting]);
+
+    const confirmDelete = useCallback(async () => {
+        if (!pendingDelete) return;
+        setDeleting(true);
+        try {
+            await deleteData(pendingDelete.category, pendingDelete.id);
+            if (pendingDelete.category === 'items') fetchData('game_items', setItemCategories);
+            if (pendingDelete.category === 'monsters') fetchData('monsters', setMonsterCategories);
+        } finally {
+            setDeleting(false);
+            setPendingDelete(null);
+        }
+    }, [pendingDelete, deleteData, fetchData]);
 
     const handleFieldChange = useCallback((field: string, value: unknown) => {
         setEditingEntry((prev) => prev ? ({ ...prev, [field]: value }) : null);
@@ -220,7 +253,8 @@ const useGameDataManagement = () => {
     return {
         editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
         selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
-        entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
+        entries, loading, loadError, handleSave, requestDelete, pendingDelete, deleteUsage, deleteUsageError, deleting,
+        cancelDelete, confirmDelete, switchCategory, activeCategory,
         handleFieldChange, createNewEntry, filteredEntries, closeModal, reloadActiveCategory
     };
 };
@@ -395,7 +429,8 @@ export function GameDataManager() {
     const {
         editingEntry, setEditingEntry, searchTerm, setSearchTerm, saveError, setSaveError,
         selectedSubCategory, setSelectedSubCategory, itemCategories, magicSchools, monsterCategories,
-        entries, loading, loadError, handleSave, handleDelete, switchCategory, activeCategory,
+        entries, loading, loadError, handleSave, requestDelete, pendingDelete, deleteUsage, deleteUsageError, deleting, cancelDelete, confirmDelete,
+        switchCategory, activeCategory,
         handleFieldChange, createNewEntry, filteredEntries, closeModal, reloadActiveCategory
     } = useGameDataManagement();
 
@@ -502,9 +537,22 @@ export function GameDataManager() {
                 <div className="bg-gray-50 border-b border-gray-200"><CategoryTabs activeCategory={activeCategory} switchCategory={handleCategorySwitch} loading={loading} /></div>
                 <div className="p-4 bg-white border-b border-gray-100"><SearchAndFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} activeCategory={activeCategory} loading={loading} currentSubCategories={currentSubCategories} selectedSubCategory={selectedSubCategory} setSelectedSubCategory={setSelectedSubCategory}/></div>
                 <div>
-                    {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries as DataRow[]} onEdit={(entry) => { setSaveError(null); setEditingEntry(entry); }} onDelete={handleDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
+                    {loading && !entries.length ? <div className="flex justify-center items-center h-64 text-gray-400"><p>Loading {activeCategory}...</p></div> : <DataTable columns={tableColumns} entries={filteredEntries as DataRow[]} onEdit={(entry) => { setSaveError(null); setEditingEntry(entry); }} onDelete={requestDelete} loading={loading} activeCategory={activeCategory} searchTerm={searchTerm} selectedSubCategory={selectedSubCategory} loadError={loadError} />}
                 </div>
             </div>
+            <ConfirmationDialog
+                isOpen={pendingDelete !== null}
+                onClose={cancelDelete}
+                onConfirm={() => void confirmDelete()}
+                title={`Delete \u201c${pendingDelete?.name ?? ''}\u201d?`}
+                description="This permanently removes the entry and cannot be undone."
+                confirmText={deleteUsage && deleteUsage.total > 0 ? 'Delete anyway' : 'Delete'}
+                isDestructive
+                isLoading={deleting}
+                confirmDisabled={!deleteUsage && !deleteUsageError}
+            >
+                <GameDataUsageNotice usage={deleteUsage} error={deleteUsageError} />
+            </ConfirmationDialog>
             {editingEntry && <EditModal entry={editingEntry} onClose={closeModal} onSave={handleSave} loading={loading} activeCategory={activeCategory} saveError={saveError} onFieldChange={handleFieldChange} magicSchools={magicSchools} />}
             {importOpen && importableCategory && (
                 <GameDataImportModal
