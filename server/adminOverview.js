@@ -1,9 +1,10 @@
 import { readdir, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
-import { applicationVersion } from './recovery.js';
+import { applicationVersion, SERVER_BACKUP_PATTERN } from './recovery.js';
 import { housekeepingStatus } from './housekeeping.js';
 import { pool } from './db.js';
 import { pruneDeployDumps } from './backupRetention.js';
+import { automaticBackupStatus } from './automaticBackups.js';
 import { HttpError } from './http.js';
 import { performanceStatus } from './performance.js';
 import {
@@ -17,7 +18,6 @@ import {
 
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || '/data/storage');
 const BACKUP_ROOT = path.resolve(process.env.BACKUP_ROOT || '/data/backups');
-const SERVER_BACKUP_PATTERN = /^(?:dragonbane-backup|pre-restore)-\d{8}T\d{6}Z-[a-f0-9]{8}\.tar\.gz$/;
 const DEPLOY_DUMP_PATTERN = /^database-.+\.dump$/;
 
 function requireAdmin(user) {
@@ -93,7 +93,7 @@ async function diskUsage(directory) {
 export async function adminOverview(user) {
   requireAdmin(user);
 
-  const [recoverySets, deployDumps, storage, disk, counts, migrations, postgres, housekeeping, performance, version] = await Promise.all([
+  const [recoverySets, deployDumps, storage, disk, counts, migrations, postgres, housekeeping, performance, version, automatic] = await Promise.all([
     filesMatching(BACKUP_ROOT, SERVER_BACKUP_PATTERN),
     filesMatching(path.join(BACKUP_ROOT, 'predeploy'), DEPLOY_DUMP_PATTERN),
     storageUsage(),
@@ -114,6 +114,7 @@ export async function adminOverview(user) {
     housekeepingStatus(user).catch(() => null),
     performanceStatus(user).catch(() => null),
     applicationVersion(),
+    automaticBackupStatus(user),
   ]);
 
   const row = counts.rows[0];
@@ -132,6 +133,7 @@ export async function adminOverview(user) {
     housekeeping,
     adminCount: users.admins,
     performanceFindings: assessPerformance(performance),
+    automaticBackup: automatic,
   });
 
   return {
@@ -157,6 +159,7 @@ export async function adminOverview(user) {
       recoverySets: summarise(manualSets),
       safetyCopies: summarise(safetyCopies),
       deployDumps: summarise(deployDumps),
+      automatic,
     },
     users,
     content: { characters: row.characters, campaigns: row.campaigns },

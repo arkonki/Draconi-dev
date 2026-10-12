@@ -35,6 +35,12 @@ import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
+import {
+  automaticBackupStatus,
+  runAutomaticBackupNow,
+  startAutomaticBackups,
+  stopAutomaticBackups,
+} from './automaticBackups.js';
 import { gameDataUsage } from './gameDataUsage.js';
 import {
   deleteUser,
@@ -138,6 +144,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/admin/overview' && request.method === 'GET') {
       sendJson(response, 200, await adminOverview(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/backups/automatic' && request.method === 'GET') {
+      sendJson(response, 200, await automaticBackupStatus(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/backups/automatic/run' && request.method === 'POST') {
+      sendJson(response, 200, await runAutomaticBackupNow(await currentUser(request)));
       return;
     }
     if (pathname === '/api/admin/backups/prune' && request.method === 'POST') {
@@ -339,6 +353,7 @@ server.listen(PORT, host, () => {
   console.log(`Dragonbane local API listening on ${host}:${PORT}`);
 });
 startHousekeeping();
+await startAutomaticBackups();
 
 let shutdownStarted = false;
 
@@ -357,7 +372,7 @@ async function shutdown(signal) {
     await Promise.all([new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
       server.closeIdleConnections?.();
-    }), stopHousekeeping(), realtimeServer.close()]);
+    }), stopHousekeeping(), stopAutomaticBackups(), realtimeServer.close()]);
     stopPerformanceMonitoring();
     await pool.end();
     clearTimeout(forceExit);

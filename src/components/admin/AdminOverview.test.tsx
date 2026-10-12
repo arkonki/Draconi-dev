@@ -23,6 +23,10 @@ const backups = (overrides: Partial<OverviewData['backups']> = {}): OverviewData
   newestAt: '2026-10-07T10:00:00Z',
   recoverySets: { count: 2, bytes: 5_000_000, newest: null },
   deployDumps: { count: 3, bytes: 3_000_000, newest: null },
+  automatic: {
+    enabled: true, hourUtc: 2, keep: 7, running: false, nextRunAt: '2026-10-10T02:00:00.000Z', lastStartedAt: null,
+    lastCompletedAt: null, lastReason: null, lastError: null, lastResult: null, sets: { count: 2, bytes: 320_000_000, newest: null },
+  },
   safetyCopies: { count: 0, bytes: 0, newest: null },
   ...overrides,
 });

@@ -24,12 +24,12 @@ import { HttpError } from './http.js';
 import { runMigrations } from './migrations.js';
 
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || '/data/storage');
-const BACKUP_ROOT = path.resolve(process.env.BACKUP_ROOT || '/data/backups');
+export const BACKUP_ROOT = path.resolve(process.env.BACKUP_ROOT || '/data/backups');
 const MAX_BACKUP_BYTES = Number(process.env.MAX_BACKUP_BYTES || 1_073_741_824);
 const STAGE_LIFETIME_MS = 15 * 60 * 1000;
 const BACKUP_FILES = ['database.dump', 'storage.tar.gz', 'manifest.json', 'SHA256SUMS'];
 const CHECKSUM_FILES = ['database.dump', 'storage.tar.gz', 'manifest.json'];
-const SERVER_BACKUP_PATTERN = /^(?:dragonbane-backup|pre-restore)-\d{8}T\d{6}Z-[a-f0-9]{8}\.tar\.gz$/;
+export const SERVER_BACKUP_PATTERN = /^(?:dragonbane-backup|dragonbane-auto|pre-restore)-\d{8}T\d{6}Z-[a-f0-9]{8}\.tar\.gz$/;
 
 const databaseUrl = new URL(process.env.DATABASE_URL);
 const databaseConfig = {
@@ -364,6 +364,22 @@ export async function createAndDownloadBackup(response, user) {
   }
 }
 
+/**
+ * Makes and verifies a recovery set on the server's own schedule. Writes pause for the length of the snapshot,
+ * exactly as for a backup made by hand. The caller must count itself as an active request (the scheduler does).
+ */
+export async function createAutomaticBackup() {
+  await enterMaintenance('backup', 1);
+  try {
+    const backup = await createBackupPackage('dragonbane-auto');
+    await validateBackupPackage(backup.path);
+    const details = await stat(backup.path);
+    return { filename: backup.filename, size: details.size, createdAt: details.mtime.toISOString() };
+  } finally {
+    leaveMaintenance();
+  }
+}
+
 export async function listBackups(user) {
   requireAdmin(user);
   await mkdir(BACKUP_ROOT, { recursive: true, mode: 0o700 });
@@ -377,6 +393,7 @@ export async function listBackups(user) {
       size: details.size,
       createdAt: details.mtime.toISOString(),
       safetyBackup: entry.name.startsWith('pre-restore-'),
+      automatic: entry.name.startsWith('dragonbane-auto-'),
     });
   }
   return backups.sort((left, right) => right.createdAt.localeCompare(left.createdAt));

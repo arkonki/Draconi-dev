@@ -16,6 +16,8 @@ export interface StoredBackup {
   size: number;
   createdAt: string;
   safetyBackup: boolean;
+  /** Made by the server's own schedule rather than by an administrator. */
+  automatic?: boolean;
 }
 
 export interface StagedBackup {

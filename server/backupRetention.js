@@ -83,6 +83,40 @@ export async function pruneDeployDumps(backupRoot, { dryRun = false, policy = re
   };
 }
 
+export const AUTOMATIC_BACKUP_PATTERN = /^dragonbane-auto-\d{8}T\d{6}Z-[a-f0-9]{8}\.tar\.gz$/;
+
+/** Keeps the newest `keep` automatic recovery sets in the backup root and deletes the rest. Manual sets are never touched. */
+export async function pruneAutomaticBackups(backupRoot, { keep, dryRun = false } = {}) {
+  let entries;
+  try {
+    entries = await readdir(backupRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { dryRun, kept: 0, prunable: 0, bytes: 0, failed: [], files: [] };
+    throw error;
+  }
+  const files = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !AUTOMATIC_BACKUP_PATTERN.test(entry.name)) continue;
+    const details = await stat(path.join(backupRoot, entry.name));
+    files.push({ filename: entry.name, size: details.size, createdAt: details.mtime.toISOString() });
+  }
+  const prunable = selectDumpsToPrune(files, { keep, minAgeDays: 0 });
+  const removed = [];
+  const failed = [];
+  if (!dryRun) {
+    for (const file of prunable) {
+      try {
+        await unlink(path.join(backupRoot, file.filename));
+        removed.push(file);
+      } catch (error) {
+        failed.push({ filename: file.filename, reason: error?.code || 'unknown' });
+      }
+    }
+  }
+  const affected = dryRun ? prunable : removed;
+  return { dryRun, kept: files.length - affected.length, prunable: affected.length, bytes: affected.reduce((sum, file) => sum + file.size, 0), failed, files: affected };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = process.argv[2];
   if (!root) {

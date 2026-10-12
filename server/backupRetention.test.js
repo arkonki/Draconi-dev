@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/p
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEPLOY_DUMP_PATTERN, pruneDeployDumps, selectDumpsToPrune } from './backupRetention.js';
+import { AUTOMATIC_BACKUP_PATTERN, DEPLOY_DUMP_PATTERN, pruneAutomaticBackups, pruneDeployDumps, selectDumpsToPrune } from './backupRetention.js';
 
 const NOW = Date.parse('2026-10-09T12:00:00Z');
 const day = 86_400_000;
@@ -89,5 +89,40 @@ describe('pruneDeployDumps', () => {
   it('copes with a missing directory', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'retention-'));
     expect(await pruneDeployDumps(root, { policy: { keep: 1, minAgeDays: 0 } })).toMatchObject({ prunable: 0, kept: 0 });
+  });
+});
+
+describe('pruneAutomaticBackups', () => {
+  let root;
+  afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); });
+
+  it('keeps the newest automatic sets and leaves manual sets, safety copies and dumps alone', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'auto-retention-'));
+    const names = [];
+    for (let index = 1; index <= 5; index += 1) {
+      const name = `dragonbane-auto-2026100${index}T020000Z-abcdef0${index}.tar.gz`;
+      await writeFile(path.join(root, name), 'x');
+      const when = new Date(Date.UTC(2026, 9, index));
+      await utimes(path.join(root, name), when, when);
+      names.push(name);
+    }
+    const others = ['dragonbane-backup-20260101T000000Z-abcdef01.tar.gz', 'pre-restore-20260101T000000Z-abcdef01.tar.gz', 'database-20260101T000000Z-abc.dump'];
+    for (const name of others) await writeFile(path.join(root, name), 'x');
+
+    const preview = await pruneAutomaticBackups(root, { keep: 2, dryRun: true });
+    expect(preview).toMatchObject({ prunable: 3, kept: 2 });
+    expect((await readdir(root)).length).toBe(8);
+
+    await pruneAutomaticBackups(root, { keep: 2 });
+    expect((await readdir(root)).sort()).toEqual([...others, names[3], names[4]].sort());
+  });
+
+  it('recognises only automatic sets', () => {
+    expect(AUTOMATIC_BACKUP_PATTERN.test('dragonbane-auto-20261009T020000Z-abcdef01.tar.gz')).toBe(true);
+    expect(AUTOMATIC_BACKUP_PATTERN.test('dragonbane-backup-20261009T020000Z-abcdef01.tar.gz')).toBe(false);
+  });
+
+  it('copes with a missing directory', async () => {
+    expect(await pruneAutomaticBackups('/nonexistent/backup/root', { keep: 3 })).toMatchObject({ prunable: 0, kept: 0 });
   });
 });

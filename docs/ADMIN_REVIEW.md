@@ -99,12 +99,17 @@ Ordered by value for effort.
    can round-trip and be reviewed in a spreadsheet.
 8. **Extend the audit log to content.** Record who created, changed or deleted game data and compendium entries; show
    history on each entry and allow restoring a previous version.
-9. **Backup management** (partly done). **Done: pruning of pre-deployment database dumps.** `deploy.sh` keeps the newest
+9. **Backup management** (mostly done). **Done: pruning of pre-deployment database dumps.** `deploy.sh` keeps the newest
    `PREDEPLOY_DUMPS_TO_KEEP` (default 10) dumps plus anything younger than `PREDEPLOY_DUMP_MIN_AGE_DAYS` (default 14) and
    deletes the rest after each successful new dump; Backup & Restore has "Review old dumps", which previews the exact
-   files, asks for confirmation and records `backups.prune` in the activity log. Recovery sets, pre-restore copies and
-   manual dumps are never pruned automatically. **Still open:** deleting individual recovery sets from the UI, recording
-   whether a set was verified, and scheduling automatic backups.
+   files, asks for confirmation and records `backups.prune` in the activity log. **Done: automatic backups.** The server
+   makes a full recovery set (database and uploads) by itself every day at `AUTO_BACKUP_HOUR_UTC` (default 02:00 UTC),
+   keeps the newest `AUTO_BACKUP_KEEP` (default 7) and removes older automatic sets. A server that was down at that hour
+   makes one shortly after it starts; a failed attempt is retried up to three times, 30 minutes apart; a run is skipped
+   when the disk could not hold another copy. The site is unavailable for a few seconds while it runs. Backup & Restore
+   shows the schedule, the last and next run, a "Back up now" button and a "Scheduled" label on those sets; a failure
+   appears under "Needs your attention". Recovery sets made by hand, pre-restore copies and manual dumps are never pruned
+   automatically. **Still open:** deleting individual recovery sets from the UI, and recording whether a set was verified.
 10. **Users: session list and login history.** Show devices and last sign-in per user, plus recent failed sign-ins
     (the new rate limiter already counts them).
 

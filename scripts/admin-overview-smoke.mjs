@@ -109,6 +109,17 @@ try {
   assert.ok(preview.policy.keep >= 1 && Array.isArray(preview.files) && preview.prunable === preview.files.length);
   results.backupPruning = 'passed';
 
+  // --- Automatic backups: status for administrators only (a real run is slow and pauses the site, so it is not triggered here).
+  await ok(call('GET', '/admin/backups/automatic'), 401, 'anonymous automatic status');
+  await ok(call('GET', '/admin/backups/automatic', { token: player }), 403, 'player automatic status');
+  await ok(call('POST', '/admin/backups/automatic/run', { token: player }), 403, 'player automatic run');
+  const automatic = await ok(call('GET', '/admin/backups/automatic', { token: admin }), 200, 'automatic status');
+  assert.ok(typeof automatic.enabled === 'boolean' && automatic.keep >= 1 && automatic.hourUtc >= 0 && automatic.hourUtc <= 23);
+  assert.ok(automatic.sets.count >= 0 && automatic.sets.bytes >= 0);
+  const inOverview = await ok(call('GET', '/admin/overview', { token: admin }), 200, 'overview carries it');
+  assert.equal(inOverview.backups.automatic.keep, automatic.keep);
+  results.automaticBackups = 'passed';
+
   console.log(JSON.stringify(results, null, 2));
 } finally {
   await cleanup().catch((error) => console.error('Cleanup failed:', error.message));

@@ -71,7 +71,7 @@ export function assessPerformance(snapshot) {
   return findings;
 }
 
-export function buildAttention({ backup, disk, users, housekeeping, adminCount, performanceFindings }) {
+export function buildAttention({ backup, disk, users, housekeeping, adminCount, performanceFindings, automaticBackup = null }) {
   const items = [];
   if (backup.level !== 'ok') {
     items.push({
@@ -81,6 +81,11 @@ export function buildAttention({ backup, disk, users, housekeeping, adminCount, 
       detail: `${backup.message} Create one in Backup & Restore.`,
       section: 'backups',
     });
+  }
+  if (automaticBackup?.enabled && automaticBackup.lastError) {
+    items.push({ severity: 'warning', code: 'automatic-backup-error', title: 'The last automatic backup failed', detail: automaticBackup.lastError, section: 'backups' });
+  } else if (automaticBackup && !automaticBackup.enabled) {
+    items.push({ severity: 'info', code: 'automatic-backup-off', title: 'Automatic backups are switched off', detail: 'Backups only happen when someone makes one or when a deployment does. Set AUTO_BACKUP_ENABLED=true to turn them on.', section: 'backups' });
   }
   const diskState = assessDisk(disk);
   if (diskState && diskState.level !== 'ok') {

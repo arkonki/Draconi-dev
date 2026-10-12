@@ -115,3 +115,22 @@ describe('attention list', () => {
     expect(overallStatus(items.filter((item) => item.severity === 'info'))).toBe('healthy');
   });
 });
+
+describe('automatic backup findings', () => {
+  const base = { backup: { level: 'ok' }, disk: null, users: { needsAttention: 0 }, housekeeping: null, adminCount: 2, performanceFindings: [] };
+
+  it('warns when the last automatic backup failed', () => {
+    const items = buildAttention({ ...base, automaticBackup: { enabled: true, lastError: 'Not enough free disk space' } });
+    expect(items).toEqual([expect.objectContaining({ code: 'automatic-backup-error', severity: 'warning', section: 'backups', detail: 'Not enough free disk space' })]);
+  });
+
+  it('mentions that automatic backups are off, without alarm', () => {
+    const items = buildAttention({ ...base, automaticBackup: { enabled: false, lastError: null } });
+    expect(items).toEqual([expect.objectContaining({ code: 'automatic-backup-off', severity: 'info' })]);
+  });
+
+  it('says nothing when they are on and healthy, or when the status is unavailable', () => {
+    expect(buildAttention({ ...base, automaticBackup: { enabled: true, lastError: null } })).toEqual([]);
+    expect(buildAttention(base)).toEqual([]);
+  });
+});

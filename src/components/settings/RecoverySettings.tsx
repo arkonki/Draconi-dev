@@ -13,6 +13,7 @@ import {
 import { clearLocalSession } from '../../lib/supabase';
 import { BackupStatus } from '../admin/BackupStatus';
 import { DumpCleanup } from '../admin/DumpCleanup';
+import { AutomaticBackups } from '../admin/AutomaticBackups';
 import { notifyAdminOverviewChanged, useAdminOverview } from '../../hooks/useAdminOverview';
 
 function formatBytes(bytes: number) {
@@ -128,6 +129,8 @@ export function RecoverySettings() {
         creating={busy === 'backup'}
       />
 
+      {overview && <AutomaticBackups status={overview.backups.automatic} onChanged={() => void refreshBackups()} />}
+
       {overview && overview.backups.deployDumps.count > 0 && <DumpCleanup dumpCount={overview.backups.deployDumps.count} />}
 
       {error && (
@@ -147,7 +150,7 @@ export function RecoverySettings() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-semibold text-gray-900">Create a recovery set</h3>
-            <p className="mt-1 text-sm text-gray-500">Writes pause briefly while a consistent database and file snapshot is generated and verified.</p>
+            <p className="mt-1 text-sm text-gray-500">The site is unavailable for a few seconds while a consistent database and file snapshot is generated and verified.</p>
           </div>
           <button
             type="button"
@@ -189,6 +192,7 @@ export function RecoverySettings() {
                     <FileArchive className="h-4 w-4 flex-none text-indigo-500" />
                     <span className="truncate text-sm font-medium text-gray-800">{backup.filename}</span>
                     {backup.safetyBackup && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Safety</span>}
+                    {backup.automatic && <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">Scheduled</span>}
                   </div>
                   <p className="mt-1 pl-6 text-xs text-gray-500">{new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.size)}</p>
                 </div>

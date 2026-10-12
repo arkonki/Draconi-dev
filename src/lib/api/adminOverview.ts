@@ -17,6 +17,22 @@ export interface BackupFile {
   createdAt: string;
 }
 
+export interface AutomaticBackupStatus {
+  enabled: boolean;
+  /** Hour of the day, in UTC, when the daily backup is due. */
+  hourUtc: number;
+  /** How many automatic sets are kept. */
+  keep: number;
+  running: boolean;
+  nextRunAt: string | null;
+  lastStartedAt: string | null;
+  lastCompletedAt: string | null;
+  lastReason: 'scheduled' | 'manual' | null;
+  lastError: string | null;
+  lastResult: { filename: string; size: number; durationMs: number; prunedCount: number } | null;
+  sets: { count: number; bytes: number; newest: BackupFile | null };
+}
+
 export interface AdminOverview {
   generatedAt: string;
   status: 'healthy' | 'attention' | 'critical';
@@ -35,6 +51,7 @@ export interface AdminOverview {
     /** Automatic copies made just before a restore. Kept, but not counted as a current backup. */
     safetyCopies: { count: number; bytes: number; newest: BackupFile | null };
     deployDumps: { count: number; bytes: number; newest: BackupFile | null };
+    automatic: AutomaticBackupStatus;
   };
   users: { total: number; active: number; admins: number; needsAttention: number };
   content: { characters: number; campaigns: number };
@@ -121,5 +138,12 @@ export async function pruneDeploymentDumps(dryRun: boolean): Promise<PruneResult
   });
   const payload = await response.json().catch(() => ({})) as PruneResult & { error?: { message?: string } };
   if (!response.ok) throw new Error(payload.error?.message || 'Could not clean up the old dumps.');
+  return payload;
+}
+
+export async function runAutomaticBackup(): Promise<NonNullable<AutomaticBackupStatus['lastResult']>> {
+  const response = await authenticatedApiFetch('/admin/backups/automatic/run', { method: 'POST' });
+  const payload = await response.json().catch(() => ({})) as { error?: { message?: string } } & NonNullable<AutomaticBackupStatus['lastResult']>;
+  if (!response.ok) throw new Error(payload.error?.message || 'Could not make the backup.');
   return payload;
 }
