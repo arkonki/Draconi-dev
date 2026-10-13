@@ -12,7 +12,7 @@ import { EmptyState } from '../components/shared/EmptyState';
 import { optimizedImageUrl } from '../lib/images';
 
 export function AdventureParty() {
-  const { user, isDM } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -26,7 +26,7 @@ export function AdventureParty() {
   }, [isCreating]);
 
   const { data: parties = [], isLoading: isLoadingParties, error: errorParties } = useQuery<Party[], Error>({
-    queryKey: ['parties', user?.id, isDM()],
+    queryKey: ['parties', user?.id],
     queryFn: () => fetchParties(user?.id),
     enabled: !!user,
   });
@@ -43,7 +43,7 @@ export function AdventureParty() {
   const createPartyMutation = useMutation({
     mutationFn: ({ name, characterIds }: { name: string; characterIds: string[] }) => createParty({ name, characterIds }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['parties', user?.id, isDM()] });
+      queryClient.invalidateQueries({ queryKey: ['parties', user?.id] });
       queryClient.invalidateQueries({ queryKey: ['availableCharacters', user?.id] });
       setNewPartyName('');
       setSelectedCharacters([]);
@@ -74,7 +74,7 @@ export function AdventureParty() {
           </div>
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">Adventure Parties</h1>
         </div>
-        {isDM() && !isCreating && (
+        {!isCreating && (
           // Responsive Button: Icon only on mobile, text on desktop
           <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>
             <span className="hidden md:inline">Create Party</span>
@@ -261,10 +261,8 @@ export function AdventureParty() {
             <EmptyState
               icon={Users}
               title="No Adventure Parties"
-              description={isDM() ? "You haven't created any parties yet." : "You're not currently in any adventure parties."}
-              action={isDM() ? (
-                <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>Create Your First Party</Button>
-              ) : undefined}
+              description="You are not in any adventure parties yet. Create one to run a game as its GM or to play solo, or join one with an invite link."
+              action={<Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>Create Your First Party</Button>}
             />
           </div>
         )

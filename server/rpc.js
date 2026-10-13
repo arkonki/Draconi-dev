@@ -1,5 +1,5 @@
 import { withTransaction } from './db.js';
-import { loadCampaignAccess } from './campaignRoles.js';
+import { assertCanCreateCampaign, loadCampaignAccess } from './campaignRoles.js';
 import { invalidateAccessContextCache } from './data.js';
 import { HttpError } from './http.js';
 
@@ -50,7 +50,8 @@ export async function executeRpc(user, name, args = {}) {
       if (campaignName.length > 120) throw new HttpError(400, 'The campaign name is too long');
       const description = String(args.p_description ?? '').trim();
       const characterIds = [...new Set(Array.isArray(args.p_character_ids) ? args.p_character_ids : [])].map((id) => requireUuid(id, 'p_character_ids'));
-      if (user.role === 'player') throw new HttpError(403, 'Only a Dungeon Master can create a campaign');
+      // Anyone can run a campaign; creating one makes you its owner, which is the GM role there.
+      await assertCanCreateCampaign(client, user);
 
       const { rows: characters } = characterIds.length
         ? await client.query('SELECT c.id, c.user_id, c.party_id FROM characters c WHERE c.id = ANY($1::uuid[]) FOR UPDATE', [characterIds])

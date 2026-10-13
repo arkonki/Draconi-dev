@@ -3,10 +3,10 @@ import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { Button } from '../shared/Button';
 import {
+  normalizeRole,
   updateAdminUser,
   type AdminUser,
   type AdminUserChanges,
-  type UserRole,
 } from '../../lib/api/adminUsers';
 
 interface UserEditModalProps {
@@ -16,10 +16,11 @@ interface UserEditModalProps {
   onSaved: (user: AdminUser, summary: string) => void;
 }
 
-const ROLE_HELP: Record<UserRole, string> = {
-  player: 'Plays characters and joins campaigns.',
-  dm: 'Can run campaigns they create. No access to site administration.',
-  admin: 'Full access: manages users, game data, backups and maintenance.',
+// Anyone can create campaigns (and so run them as GM), join others as a player, or watch as an observer. The only
+// account-wide distinction left is administrator. A legacy "dm" account is shown, and saved, as an ordinary user.
+const ROLE_HELP: Record<'player' | 'admin', string> = {
+  player: 'Plays characters, creates and runs their own campaigns, and joins others by invite. Their role in each campaign decides what they can do there.',
+  admin: 'Everything a user can do, plus full access to manage users, game data, backups and maintenance.',
 };
 
 const fieldClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500';
@@ -30,7 +31,7 @@ export function UserEditModal({ user, isSelf, onClose, onSaved }: UserEditModalP
     last_name: user.last_name ?? '',
     username: user.username ?? '',
     email: user.email,
-    role: user.role,
+    role: normalizeRole(user.role),
     is_active: user.is_active,
   });
   const [saving, setSaving] = useState(false);
@@ -42,7 +43,7 @@ export function UserEditModal({ user, isSelf, onClose, onSaved }: UserEditModalP
     if (form.last_name.trim() !== (user.last_name ?? '')) next.last_name = form.last_name.trim() || null;
     if (form.username.trim() !== (user.username ?? '')) next.username = form.username.trim();
     if (form.email.trim().toLowerCase() !== user.email) next.email = form.email.trim().toLowerCase();
-    if (form.role !== user.role) next.role = form.role;
+    if (form.role !== normalizeRole(user.role)) next.role = form.role;
     if (form.is_active !== user.is_active) next.is_active = form.is_active;
     return next;
   }, [form, user]);
@@ -118,10 +119,9 @@ export function UserEditModal({ user, isSelf, onClose, onSaved }: UserEditModalP
             aria-label="Role"
             className={fieldClass}
             value={form.role}
-            onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}
+            onChange={(e) => setForm({ ...form, role: e.target.value as 'player' | 'admin' })}
           >
-            <option value="player">Player</option>
-            <option value="dm">Dungeon Master</option>
+            <option value="player">User</option>
             <option value="admin">Administrator</option>
           </select>
           <p className="text-xs text-gray-500">{ROLE_HELP[form.role]}</p>

@@ -1,5 +1,5 @@
 import { pool, withTransaction } from './db.js';
-import { canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
+import { assertCanCreateCampaign, canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
 import { canEditNote } from '../shared/noteAccess.js';
 import { assertUserActionAllowed, assertUserQueryAllowed, assertUserUpdateAllowed, projectUserRow } from './userAccess.js';
@@ -760,6 +760,7 @@ async function insertOne(table, input, ctx, client, onConflict) {
   const owned = applyOwnership(table, input, ctx.user);
   let prepared = await preparePayload(table, owned, client);
   if (!canWrite(table, { ...owned, ...prepared }, ctx, true)) throw new HttpError(403, 'Permission denied');
+  if (table === 'parties') await assertCanCreateCampaign(client, ctx.user);
   if (table === 'notes') validateNoteUpdate({ ...owned, character_id: null }, prepared, ctx);
   const keys = Object.keys(prepared);
   if (keys.length === 0) throw new HttpError(400, 'No valid fields were supplied');

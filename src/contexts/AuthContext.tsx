@@ -173,7 +173,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticating, navigate, setGlobalError]);
 
   const isAdmin = () => role === 'admin';
+  // Anyone can run or join a campaign, so what a person may do there comes from their role in that campaign
+  // (see the campaign_role on a party). These two only describe the legacy account-wide flag; do not use them to gate features.
+  /** @deprecated Use the campaign role instead. */
   const isDM = () => role === 'dm' || role === 'admin';
+  /** @deprecated Use the campaign role, or ownership of the character, instead. */
   const isPlayer = () => role === 'player';
 
   const combinedIsLoading = isLoading || isAuthenticating;

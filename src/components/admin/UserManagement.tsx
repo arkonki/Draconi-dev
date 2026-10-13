@@ -15,6 +15,7 @@ import {
   displayName,
   fetchAdminUsers,
   revokeUserSessions,
+  normalizeRole,
   updateAdminUser,
   type AdminUser,
   type UserRole,
@@ -27,10 +28,10 @@ type Modal =
   | { type: 'edit' | 'password' | 'delete' | 'signout'; user: AdminUser }
   | null;
 
-const ROLE_LABEL: Record<UserRole, string> = { player: 'Player', dm: 'Dungeon Master', admin: 'Administrator' };
+const ROLE_LABEL: Record<UserRole, string> = { player: 'User', dm: 'User', admin: 'Administrator' };
 const ROLE_CLASS: Record<UserRole, string> = {
   admin: 'bg-purple-100 text-purple-800',
-  dm: 'bg-blue-100 text-blue-800',
+  dm: 'bg-green-100 text-green-800',
   player: 'bg-green-100 text-green-800',
 };
 
@@ -60,7 +61,7 @@ export function UserManagement() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'player' | 'admin'>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sort, setSort] = useState<SortKey>('newest');
   const [modal, setModal] = useState<Modal>(null);
@@ -96,7 +97,7 @@ export function UserManagement() {
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
     const matches = users.filter((user) => {
-      if (roleFilter !== 'all' && user.role !== roleFilter) return false;
+      if (roleFilter !== 'all' && normalizeRole(user.role) !== roleFilter) return false;
       if (statusFilter === 'active' && !user.is_active) return false;
       if (statusFilter === 'inactive' && user.is_active) return false;
       if (statusFilter === 'attention' && !needsAttention(user)) return false;
@@ -248,10 +249,9 @@ export function UserManagement() {
           />
         </div>
         <div className="grid grid-cols-3 gap-3 xl:flex">
-        <select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | UserRole)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
+        <select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | 'player' | 'admin')} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
           <option value="all">All roles</option>
-          <option value="player">Players</option>
-          <option value="dm">Dungeon Masters</option>
+          <option value="player">Users</option>
           <option value="admin">Administrators</option>
         </select>
         <select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">

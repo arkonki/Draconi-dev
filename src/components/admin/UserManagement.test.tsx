@@ -69,6 +69,19 @@ describe('administrator user management', () => {
     expect(screen.getAllByText('gone').length).toBeGreaterThan(0);
   });
 
+  it('shows a legacy Dungeon Master account as an ordinary user, and counts it among users', async () => {
+    render(<UserManagement />);
+    await screen.findAllByText('gamemaster');
+    expect(screen.queryByText('Dungeon Master')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Filter by role'), { target: { value: 'player' } });
+    expect(screen.getAllByText('gamemaster').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('newbie').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('me')).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText('Filter by role'), { target: { value: 'admin' } });
+    expect(screen.queryAllByText('gamemaster')).toHaveLength(0);
+    expect(screen.getAllByText('me').length).toBeGreaterThan(0);
+  });
+
   it('never lets administrators delete or deactivate their own account', async () => {
     render(<UserManagement />);
     await screen.findAllByText('gamemaster');

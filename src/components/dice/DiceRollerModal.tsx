@@ -42,7 +42,7 @@ function Loader2({ className }: { className?: string }) {
 
 export function DiceRollerModal() {
   const { id: urlPartyId } = useParams<{ id: string }>(); 
-  const { user, isPlayer } = useAuth();
+  const { user } = useAuth();
   
   // 2. GET PLAY SOUND
   const { playSound } = useNotifications();
@@ -64,6 +64,8 @@ export function DiceRollerModal() {
     shareRollToParty 
   } = useDice();
 
+  // Pushing a failed roll is for the person whose character it is, whatever their role in the campaign.
+  const ownsCurrentCharacter = Boolean(currentCharacter && user && currentCharacter.user_id === user.id);
   const effectivePartyId = urlPartyId || currentCharacter?.party_id;
 
   const [results, setResults] = useState<DiceRollResult[]>([]);
@@ -262,7 +264,7 @@ export function DiceRollerModal() {
 
     const pushAvailability = getPushRollAvailability({
       isSkillCheck,
-      isPlayer: isPlayer(),
+      isPlayer: ownsCurrentCharacter,
       isFailure: success === false,
       isDemon: crit && success === false,
       hasCharacter: Boolean(currentCharacter),
@@ -282,7 +284,7 @@ export function DiceRollerModal() {
     } else {
       runCompletionCallbacks();
     }
-  }, [addRollToHistory, canAffordSoleSurvivor, currentCharacter, currentConfig, dicePool, flushPendingCompletion, isBaneActive, isBoonActive, isInitiative, isPlayer, isRest, isSkillCheck, markSkillThisSession, performRest, rollMode, setInitiativeForCombatant]);
+  }, [addRollToHistory, canAffordSoleSurvivor, currentCharacter, currentConfig, dicePool, flushPendingCompletion, isBaneActive, isBoonActive, isInitiative, ownsCurrentCharacter, isRest, isSkillCheck, markSkillThisSession, performRest, rollMode, setInitiativeForCombatant]);
 
   const handleRoll = useCallback((isPushedRoll = false) => {
     if (dicePool.length === 0) return;
@@ -453,7 +455,7 @@ export function DiceRollerModal() {
   const availablePushConditions = getAvailablePushRollConditions(currentCharacter?.conditions);
   const pushAvailability = getPushRollAvailability({
     isSkillCheck,
-    isPlayer: isPlayer(),
+    isPlayer: ownsCurrentCharacter,
     isFailure: isSuccess === false,
     isDemon: isCritical && isSuccess === false,
     hasCharacter: Boolean(currentCharacter),
@@ -464,7 +466,7 @@ export function DiceRollerModal() {
   const shouldShowPushAction =
     isSkillCheck
     && isSuccess === false
-    && isPlayer()
+    && ownsCurrentCharacter
     && Boolean(currentCharacter)
     && !hasPushedCurrentTest;
 

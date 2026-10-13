@@ -91,7 +91,7 @@ export function JoinPartyDialog({ isOpen, onClose, onJoin }: JoinPartyDialogProp
         </div>
         
         <p className="text-gray-600 mb-4">
-          Paste the invite link you received from your Dungeon Master to join their party.
+          Paste the invite link you received from the GM to join their party.
         </p>
 
         <div>

@@ -12,7 +12,7 @@ interface UserCreationModalProps {
 interface CreatedCredentials {
   email: string;
   username: string;
-  role: 'player' | 'dm';
+  role: 'player';
   temporaryPassword: string;
 }
 
@@ -26,10 +26,12 @@ function generateTemporaryPassword(length = 18) {
   return Array.from(randomValues, (value) => PASSWORD_ALPHABET[value % PASSWORD_ALPHABET.length]).join('');
 }
 
+/** Every new account is an ordinary user. They can create and run campaigns, join others and watch as observers; an administrator can be promoted afterwards. */
+const NEW_ACCOUNT_ROLE = 'player' as const;
+
 export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalProps) {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState<'player' | 'dm'>('player');
   const [temporaryPassword, setTemporaryPassword] = useState(() => generateTemporaryPassword());
   const [showPassword, setShowPassword] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<CreatedCredentials | null>(null);
@@ -51,7 +53,7 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
       const { data, error: authError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password: temporaryPassword,
-        options: { data: { username: normalizedUsername, role } },
+        options: { data: { username: normalizedUsername, role: NEW_ACCOUNT_ROLE } },
       });
       if (authError) throw authError;
       if (!data.user) throw new Error('The server did not return the created user');
@@ -59,7 +61,7 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
       setCreatedCredentials({
         email: normalizedEmail,
         username: normalizedUsername,
-        role,
+        role: NEW_ACCOUNT_ROLE,
         temporaryPassword,
       });
       onUserCreated();
@@ -83,7 +85,6 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
   const resetForm = () => {
     setEmail('');
     setUsername('');
-    setRole('player');
     setTemporaryPassword(generateTemporaryPassword());
     setShowPassword(false);
     setCreatedCredentials(null);
@@ -140,7 +141,7 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
                   {createdCredentials.username} is ready to sign in
                 </div>
                 <p className="mt-1 text-sm text-green-700">
-                  Role: {createdCredentials.role === 'dm' ? 'Dungeon Master' : 'Player'}
+                  Account type: user
                 </p>
               </div>
 
@@ -211,19 +212,6 @@ export function UserCreationModal({ onClose, onUserCreated }: UserCreationModalP
                   onChange={(event) => setUsername(event.target.value)}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-transparent focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-
-              <div>
-                <label htmlFor="new-user-role" className="mb-1 block text-sm font-medium text-gray-700">Role</label>
-                <select
-                  id="new-user-role"
-                  value={role}
-                  onChange={(event) => setRole(event.target.value as 'player' | 'dm')}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="player">Player</option>
-                  <option value="dm">Dungeon Master</option>
-                </select>
               </div>
 
               <div>

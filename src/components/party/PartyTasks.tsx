@@ -268,7 +268,7 @@ export function PartyTasks({ partyId, isDM }: PartyTasksProps) {
           </div>
           <h3 className="text-lg font-medium text-gray-900">No active quests</h3>
           <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-            {isDM ? "Your quest log is empty. Add a task to guide your players." : "The Dungeon Master hasn't assigned any quests yet."}
+            {isDM ? "Your quest log is empty. Add a task to guide your players." : "The GM hasn't assigned any quests yet."}
           </p>
           {isDM && (
             <Button onClick={() => setIsFormOpen(true)} variant="outline" className="mt-6">Create First Task</Button>

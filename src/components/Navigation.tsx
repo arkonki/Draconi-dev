@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
 import { useDice } from './dice/useDice';
+import { useCampaignRoleLabel, type RoleBadgeKind } from '../hooks/useCampaignRoleLabel';
 import {
   Users,
   Book,
@@ -11,6 +12,8 @@ import {
   LogOut,
   Shield,
   Crown,
+  Eye,
+  User,
   Dices,
   Menu,
   X,
@@ -19,7 +22,8 @@ import {
 
 export function Navigation() {
   const location = useLocation();
-  const { signOut, isAdmin, isDM, role, user } = useAuth();
+  const { signOut, role, user } = useAuth();
+  const badge = useCampaignRoleLabel();
   const { toggleDiceRoller } = useDice();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -59,17 +63,16 @@ export function Navigation() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const getRoleIcon = () => {
-    if (isAdmin()) return <Crown className="w-4 h-4 text-yellow-400" />;
-    if (isDM()) return <Shield className="w-4 h-4 text-blue-400" />;
-    return <Users className="w-4 h-4 text-green-400" />;
+  // The badge follows the campaign page you are on: GM where you run the game, Player where you joined, Observer where you watch.
+  const ROLE_ICONS: Record<RoleBadgeKind, JSX.Element> = {
+    admin: <Crown className="w-4 h-4 text-yellow-400" />,
+    gm: <Shield className="w-4 h-4 text-blue-400" />,
+    player: <Users className="w-4 h-4 text-green-400" />,
+    observer: <Eye className="w-4 h-4 text-gray-300" />,
+    member: <User className="w-4 h-4 text-gray-300" />,
   };
-
-  const getRoleName = () => {
-    if (isAdmin()) return 'Admin';
-    if (isDM()) return 'Gamemaster';
-    return 'Player';
-  };
+  const getRoleIcon = () => ROLE_ICONS[badge.kind];
+  const getRoleName = () => badge.label;
 
   return (
     <nav className="bg-gray-900 border-b border-gray-800 text-white sticky top-0 z-40" ref={navRef}>
@@ -133,7 +136,7 @@ export function Navigation() {
                   </div>
                   <div className="flex flex-col items-start text-left">
                     <span className="text-sm font-bold text-gray-200 leading-none">{displayName}</span>
-                    <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide leading-none mt-1">{getRoleName()}</span>
+                    <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide leading-none mt-1" title={badge.campaignName ? `${badge.label} in ${badge.campaignName}` : undefined}>{getRoleName()}</span>
                   </div>
                   <ChevronDown className={`w-3 h-3 text-gray-500 ml-1 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -207,7 +210,7 @@ export function Navigation() {
             </div>
             <div>
               <div className="text-lg font-bold text-white">{displayName}</div>
-              <div className="flex items-center gap-1.5 text-xs text-indigo-300 font-medium uppercase tracking-wide bg-indigo-900/30 px-2 py-0.5 rounded-full w-fit mt-1">
+              <div className="flex items-center gap-1.5 text-xs text-indigo-300 font-medium uppercase tracking-wide bg-indigo-900/30 px-2 py-0.5 rounded-full w-fit mt-1" title={badge.campaignName ? `${badge.label} in ${badge.campaignName}` : undefined}>
                 {getRoleIcon()}
                 {getRoleName()}
               </div>

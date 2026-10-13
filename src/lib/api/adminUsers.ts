@@ -2,6 +2,10 @@ import { authenticatedApiFetch } from '../supabase';
 
 export type UserRole = 'player' | 'dm' | 'admin';
 
+/** Anyone can run or join campaigns, so apart from administrators every account is the same kind of user. "dm" is a legacy value. */
+export const isAdministrator = (role: UserRole) => role === 'admin';
+export const normalizeRole = (role: UserRole): 'player' | 'admin' => (role === 'admin' ? 'admin' : 'player');
+
 export interface AdminUser {
   id: string;
   email: string;
