@@ -1,6 +1,6 @@
 import { supabase } from '../supabase';
 import type { PartyMap } from '../../types/atlas';
-import type { NewTableItem, TableItem, TableState } from '../../types/virtualTable';
+import type { NewTableItem, TableItem, TablePing, TableState } from '../../types/virtualTable';
 
 const toNumber = (value: unknown, fallback: number) => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -60,4 +60,37 @@ export async function updateTableItem(id: string, updates: Partial<Pick<TableIte
 export async function deleteTableItem(id: string): Promise<void> {
   const { error } = await supabase.from('table_items').delete().eq('id', id);
   if (error) throw new Error(error.message || 'Could not remove the token');
+}
+
+export async function pingTable(mapId: string, x: number, y: number, focus = false): Promise<void> {
+  const { error } = await supabase.rpc<TablePing>('ping_table', { p_map_id: mapId, p_x: x, p_y: y, p_focus: focus });
+  // A ping sent too soon after the last one is simply dropped; there is nothing for the sender to fix.
+  if (error && !/one ping at a time/i.test(error.message)) throw new Error(error.message || 'Could not send the ping');
+}
+
+/** The same 20 MB-per-campaign map allowance and storage folder the Atlas uses, so maps are shared between the two. */
+export const MAP_STORAGE_LIMIT_BYTES = 20 * 1024 * 1024;
+
+export async function uploadTableMap(partyId: string, file: File, name: string): Promise<PartyMap> {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  const folder = `Atlas/${partyId}`;
+  const { data: existing, error: listError } = await supabase.storage.from('images').list(folder);
+  if (!listError) {
+    const used = (existing ?? []).reduce((sum, entry) => sum + (entry.metadata?.size || 0), 0);
+    if (used + file.size > MAP_STORAGE_LIMIT_BYTES) {
+      throw new Error(`Map storage is full: a campaign can hold ${MAP_STORAGE_LIMIT_BYTES / 1024 / 1024} MB of maps. Remove an old map in the Atlas first.`);
+    }
+  }
+  const extension = file.name.split('.').pop() || 'png';
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${extension}`;
+  const { error: uploadError } = await supabase.storage.from('images').upload(path, file);
+  if (uploadError) throw new Error(uploadError.message || 'The upload failed.');
+  const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(path);
+  const { data, error } = await supabase
+    .from('party_maps')
+    .insert([{ party_id: partyId, name: name.trim() || file.name, image_url: publicUrl, is_active: false }])
+    .select()
+    .single<PartyMap>();
+  if (error || !data) throw new Error(error?.message || 'Could not save the map.');
+  return data;
 }

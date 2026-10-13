@@ -12,7 +12,7 @@ const TABLES = new Set([
   'compendium', 'compendium_templates', 'encounters', 'encounter_combatants',
   'party_maps', 'party_map_pins', 'party_map_drawings', 'party_display_sessions',
   'party_display_slots', 'push_subscriptions', 'user_notification_settings',
-  'campaign_events', 'party_table_state', 'table_items',
+  'campaign_events', 'party_table_state', 'table_items', 'table_pings',
 ]);
 
 const REFERENCE_TABLES = new Set([
@@ -87,6 +87,7 @@ const NUMERIC_OUTPUT_FIELDS = new Map([
   ['party_map_pins', ['x', 'y']],
   ['party_map_drawings', ['thickness']],
   ['table_items', ['x', 'y', 'size']],
+  ['table_pings', ['x', 'y']],
 ]);
 
 export function normalizeNumericOutput(table, row) {
@@ -299,7 +300,7 @@ export function canRead(table, row, ctx) {
   if (table === 'party_members') {
     return row.user_id === ctx.user.id || ctx.characterIds.has(row.character_id) || partyAccess(ctx, row.party_id);
   }
-  if (table === 'campaign_memberships' || table === 'party_table_state') return partyAccess(ctx, row.party_id);
+  if (table === 'campaign_memberships' || table === 'party_table_state' || table === 'table_pings') return partyAccess(ctx, row.party_id);
   if (table === 'table_items') return partyAccess(ctx, row.party_id) && (row.visible === true || partyGmAccess(ctx, row.party_id));
   if (PARTY_SCOPED.has(table)) return partyAccess(ctx, row.party_id);
   if (table === 'notes') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
@@ -326,6 +327,8 @@ export function canWrite(table, row, ctx, inserting = false) {
   if (table === 'campaign_memberships') return ctx.admin || partyRole(ctx, row.party_id) === 'owner';
   // Players move their own token through the move_table_item function, which checks ownership and locks.
   if (table === 'table_items' || table === 'party_table_state') return partyGmAccess(ctx, row.party_id);
+  // Pings are made through the ping_table function, which limits how often one person can send them.
+  if (table === 'table_pings') return false;
   if (table === 'party_members') {
     if (!partyWriteAccess(ctx, row.party_id)) return false;
     if (inserting) return partyGmAccess(ctx, row.party_id) || ctx.characterIds.has(row.character_id);
@@ -478,7 +481,7 @@ function authorizationSql(table, ctx, state) {
     const gmPartyIds = partyIds.filter((partyId) => partyGmAccess(ctx, partyId));
     return `(${uuidArrayPredicate('t."party_id"', partyIds, state)} AND (${uuidArrayPredicate('t."party_id"', gmPartyIds, state)} OR t."visible" = true))`;
   }
-  if (table === 'campaign_memberships' || PARTY_SCOPED.has(table) || table === 'party_display_sessions' || table === 'party_table_state') {
+  if (table === 'campaign_memberships' || PARTY_SCOPED.has(table) || table === 'party_display_sessions' || table === 'party_table_state' || table === 'table_pings') {
     return uuidArrayPredicate('t."party_id"', partyIds, state);
   }
   if (table === 'notes') {

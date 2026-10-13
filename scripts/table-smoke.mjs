@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import console from 'node:console';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import pg from 'pg';
 
 const { Client } = pg;
@@ -144,6 +145,29 @@ try {
   assert.equal((await items(tokens.player, mapA.id)).length, 3);
   await ok(rpc(tokens.player, 'set_table_items_visibility', { p_map_id: mapA.id, p_visible: false }), 403, 'players cannot hide tokens');
   results.revealAndHide = 'passed';
+
+  // --- Pings: anyone who can write at the table, rate limited, and only the GM can move people's views.
+  const pingCount = async () => Number((await database.query('SELECT count(*) AS n FROM table_pings WHERE party_id = $1', [party.id])).rows[0].n);
+  const ping = (token, body) => rpc(token, 'ping_table', { p_map_id: mapA.id, ...body });
+  await ok(ping(tokens.observer, { p_x: 0.5, p_y: 0.5 }), 403, 'observers cannot ping');
+  await ok(ping(tokens.outsider, { p_x: 0.5, p_y: 0.5 }), 403, 'outsiders cannot ping');
+  await ok(ping(tokens.player, { p_x: 'here', p_y: 0.5 }), 400, 'bad coordinates');
+  await ok(rpc(tokens.player, 'ping_table', { p_map_id: randomUUID(), p_x: 0.5, p_y: 0.5 }), 404, 'unknown map');
+  const playerPing = (await ok(ping(tokens.player, { p_x: 7, p_y: -1, p_focus: true }), 200, 'player ping')).data;
+  assert.deepEqual([Number(playerPing.x), Number(playerPing.y), playerPing.focus], [1, 0, false], 'clamped, and a player cannot move everyone\'s view');
+  assert.ok(playerPing.label.startsWith('tb-player-'), 'the ping says whose it is');
+  await ok(ping(tokens.player, { p_x: 0.2, p_y: 0.2 }), 429, 'pinging again at once is slowed down');
+  await sleep(700);
+  await ok(ping(tokens.player, { p_x: 0.3, p_y: 0.3 }), 200, 'a moment later it works');
+  assert.equal(await pingCount(), 1, 'a person has at most one ping on the table');
+  const gmPing = (await ok(ping(tokens.gm, { p_x: 0.5, p_y: 0.5, p_focus: true }), 200, 'GM look-here ping')).data;
+  assert.equal(gmPing.focus, true);
+  assert.notEqual(gmPing.color, playerPing.color, 'different people get different colours');
+  const seen = (await ok(query(tokens.player, { table: 'table_pings', action: 'select', filters: [{ column: 'party_id', operator: 'eq', value: party.id }] }), 200, 'players read pings')).data;
+  assert.equal(seen.length, 2);
+  assert.equal((await ok(query(tokens.outsider, { table: 'table_pings', action: 'select', filters: [{ column: 'party_id', operator: 'eq', value: party.id }] }), 200, 'outsiders read pings')).data.length, 0);
+  await ok(query(tokens.player, { table: 'table_pings', action: 'insert', payload: { party_id: party.id, map_id: mapA.id, x: 0.5, y: 0.5 } }), 403, 'pings cannot be written directly');
+  results.pings = 'passed';
 
   console.log(JSON.stringify(results, null, 2));
 } finally {

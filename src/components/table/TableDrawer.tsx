@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Eye, EyeOff, Lock, LockOpen, MapPin, Monitor, Plus, Search, Trash2, Users } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { Eye, EyeOff, Lock, LockOpen, MapPin, Monitor, Plus, Search, Trash2, Upload, Users } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { optimizedImageUrl } from '../../lib/images';
 import type { PartyMap } from '../../types/atlas';
@@ -28,12 +28,23 @@ interface TableDrawerProps {
   onRemove: (item: TableItem) => void;
   onFocus: (item: TableItem) => void;
   onAdd: (items: NewTableItem[]) => void;
+  onResize: (item: TableItem, size: number) => void;
+  /** Resolves true when the map was saved, so the form can reset. */
+  onUpload: (file: File, name: string) => Promise<boolean>;
+  uploading: boolean;
+  uploadError: string | null;
 }
+
+const SIZE_PRESETS = [0.5, 1, 2, 3, 4, 6];
+const formatSize = (size: number) => (Number.isInteger(size) ? String(size) : size.toFixed(2).replace(/0+$/, ''));
 
 export function TableDrawer({
   maps, liveMapId, viewMapId, items, partyMembers, monsters, selectedItemId, busy,
-  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd,
+  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd, onResize, onUpload, uploading, uploadError,
 }: TableDrawerProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [mapName, setMapName] = useState('');
   const [tab, setTab] = useState<'tokens' | 'scenes'>('tokens');
   const [monsterQuery, setMonsterQuery] = useState('');
   const [markerLabel, setMarkerLabel] = useState('');
@@ -74,7 +85,34 @@ export function TableDrawer({
       {tab === 'scenes' && (
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
           <p className="text-xs text-stone-500">Players see the scene marked Live. Look at another scene to set it up first, then show it when you are ready. Tokens keep their places on every scene.</p>
-          {maps.length === 0 && <p className="rounded-lg border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500">No maps yet. Upload one in the Atlas tab and it will appear here.</p>}
+          <div className="rounded-lg border border-stone-200 p-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setPendingFile(file);
+                setMapName(file ? file.name.replace(/\.[^.]+$/, '') : '');
+              }}
+            />
+            {!pendingFile ? (
+              <Button size="sm" variant="outline" icon={Upload} className="w-full" onClick={() => fileInputRef.current?.click()}>Upload a map</Button>
+            ) : (
+              <div className="space-y-2">
+                <label htmlFor="table-map-name" className="block text-xs text-stone-600">Name for {pendingFile.name} ({(pendingFile.size / 1024 / 1024).toFixed(1)} MB)</label>
+                <input id="table-map-name" value={mapName} maxLength={80} onChange={(event) => setMapName(event.target.value)} className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm" />
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" disabled={uploading} onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}>Cancel</Button>
+                  <Button size="sm" variant="primary" loading={uploading} disabled={!mapName.trim()} onClick={() => { void onUpload(pendingFile, mapName).then((saved) => { if (saved) { setPendingFile(null); setMapName(''); if (fileInputRef.current) fileInputRef.current.value = ''; } }); }}>Upload</Button>
+                </div>
+              </div>
+            )}
+            {uploadError && <p role="alert" className="mt-2 text-xs text-red-700">{uploadError}</p>}
+            <p className="mt-2 text-xs text-stone-500">Set a map's grid in the Atlas tab, so tokens and the ruler follow it.</p>
+          </div>
+          {maps.length === 0 && <p className="rounded-lg border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500">No maps yet. Upload one above.</p>}
           {maps.map((map) => {
             const live = map.id === liveMapId;
             const viewing = map.id === viewMapId;
@@ -131,6 +169,16 @@ export function TableDrawer({
                         />
                         <span className="h-3 w-3 flex-none rounded-full" style={{ backgroundColor: item.color }} />
                         <button type="button" onClick={() => onFocus(item)} className={`min-w-0 flex-1 truncate text-left text-sm ${item.visible ? 'font-medium text-stone-900' : 'text-stone-500'}`} title="Find on the map">{item.label}</button>
+                        <select
+                          aria-label={`Size of ${item.label}`}
+                          title="Size in grid squares"
+                          value={String(item.size)}
+                          disabled={busy}
+                          onChange={(event) => onResize(item, Number(event.target.value))}
+                          className="w-14 flex-none rounded border border-stone-200 bg-white px-0.5 py-0.5 text-xs text-stone-600"
+                        >
+                          {[...new Set([...SIZE_PRESETS, item.size])].sort((a, b) => a - b).map((size) => <option key={size} value={String(size)}>{formatSize(size)}×</option>)}
+                        </select>
                         <button type="button" aria-label={item.locked ? `Unlock ${item.label}` : `Lock ${item.label}`} title={item.locked ? 'Locked: players cannot move it' : 'Unlocked'} onClick={() => onToggleLocked(item)} className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700">
                           {item.locked ? <Lock size={15} /> : <LockOpen size={15} />}
                         </button>

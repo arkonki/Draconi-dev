@@ -39,3 +39,17 @@ export interface NewTableItem {
   color?: string;
   size?: number;
 }
+
+export interface TablePing {
+  id: string;
+  party_id: string;
+  map_id: string;
+  user_id: string;
+  x: number;
+  y: number;
+  color: string;
+  label: string;
+  /** A GM ping that also moves everyone's view to the spot. */
+  focus: boolean;
+  created_at: string;
+}

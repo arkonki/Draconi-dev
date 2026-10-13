@@ -19,23 +19,27 @@ interface TableTokenProps {
   selected: boolean;
   /** The GM is looking at it but players are not. */
   hiddenFromPlayers: boolean;
+  /** It is this token's turn in the running encounter. */
+  isTurn: boolean;
+  /** False while a tool such as the ruler or ping is active, so the token does not swallow the click. */
+  interactive: boolean;
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>, item: TableItem) => void;
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>, item: TableItem) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>, item: TableItem) => void;
 }
 
 export const TableToken = memo(function TableToken({
-  item, centerX, centerY, diameter, scale, imageUrl, isMine, draggable, dragging, selected, hiddenFromPlayers,
+  item, centerX, centerY, diameter, scale, imageUrl, isMine, draggable, dragging, selected, hiddenFromPlayers, isTurn, interactive,
   onPointerDown, onPointerMove, onPointerUp,
 }: TableTokenProps) {
   const labelScale = 1 / Math.max(scale, 0.05);
   return (
     <div
       data-token={item.id}
-      data-draggable={draggable}
+      data-draggable={draggable && interactive}
       role="img"
       aria-label={`${item.label}${hiddenFromPlayers ? ' (hidden from players)' : ''}`}
-      className={`absolute select-none touch-none ${draggable ? (dragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'}`}
+      className={`absolute select-none touch-none ${!interactive ? 'pointer-events-none' : ''} ${draggable ? (dragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'}`}
       style={{ left: centerX - diameter / 2, top: centerY - diameter / 2, width: diameter, height: diameter, zIndex: dragging ? 50 : selected ? 40 : 10 + item.sort_order }}
       onPointerDown={(event) => onPointerDown(event, item)}
       onPointerMove={(event) => onPointerMove(event, item)}
@@ -49,7 +53,7 @@ export const TableToken = memo(function TableToken({
           borderColor: isMine ? '#facc15' : selected ? '#ffffff' : item.color,
           borderStyle: hiddenFromPlayers ? 'dashed' : 'solid',
           backgroundColor: item.color,
-          boxShadow: selected ? '0 0 0 3px rgba(255,255,255,0.55)' : undefined,
+          boxShadow: isTurn ? '0 0 0 4px #fbbf24, 0 0 24px 8px rgba(251,191,36,0.7)' : selected ? '0 0 0 3px rgba(255,255,255,0.55)' : undefined,
         }}
       >
         {imageUrl ? (
@@ -58,6 +62,12 @@ export const TableToken = memo(function TableToken({
           <span className="font-bold" style={{ fontSize: diameter * 0.38 }}>{initials(item.label)}</span>
         )}
       </div>
+
+      {isTurn && (
+        <div className="absolute -left-1 -top-2 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-stone-900 shadow" style={{ transform: `scale(${labelScale})`, transformOrigin: 'top left' }}>
+          Turn
+        </div>
+      )}
 
       {(hiddenFromPlayers || item.locked) && (
         <div className="absolute -right-1 -top-1 flex gap-0.5" style={{ transform: `scale(${labelScale})`, transformOrigin: 'top right' }}>

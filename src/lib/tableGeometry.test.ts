@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMoveItem, centerOn, clamp01, dragToFraction, fitView, initials, tokenDiameter, zoomAround } from './tableGeometry';
+import { canMoveItem, cellSize, centerOn, clamp01, dragToFraction, fitView, initials, measureBetween, screenToFraction, tokenDiameter, zoomAround } from './tableGeometry';
 
 describe('tokenDiameter', () => {
   it('follows the grid when there is one', () => {
@@ -84,5 +84,41 @@ describe('initials', () => {
     expect(initials('Anna')).toBe('AN');
     expect(initials('Borin Stonefist')).toBe('BS');
     expect(initials('  ')).toBe('?');
+  });
+});
+
+describe('cellSize and measureBetween', () => {
+  it('knows the width of a grid square', () => {
+    expect(cellSize({ grid_type: 'square', grid_size: 70 })).toBe(70);
+    expect(cellSize({ grid_type: 'hex', grid_size: 50 })).toBeCloseTo(50 * Math.sqrt(3));
+    expect(cellSize({ grid_type: 'none', grid_size: 70 })).toBeNull();
+    expect(cellSize({ grid_type: 'square', grid_size: 2 })).toBeNull();
+  });
+
+  it('measures in grid squares and, when asked, in metres', () => {
+    const image = { width: 1000, height: 1000 };
+    const grid = { grid_type: 'square' as const, grid_size: 100 };
+    const result = measureBetween({ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.5 }, image, grid, 1.5);
+    expect(result.pixels).toBeCloseTo(500);
+    expect(result.squares).toBeCloseTo(5);
+    expect(result.metres).toBeCloseTo(7.5);
+  });
+
+  it('says nothing about squares on a map without a grid', () => {
+    const result = measureBetween({ x: 0, y: 0 }, { x: 1, y: 0 }, { width: 800, height: 600 }, { grid_type: 'none', grid_size: 50 }, 2);
+    expect(result).toMatchObject({ pixels: 800, squares: null, metres: null });
+  });
+});
+
+describe('screenToFraction', () => {
+  it('is the inverse of placing a point on the map', () => {
+    const view = { x: 100, y: 50, scale: 0.5 };
+    const image = { width: 2000, height: 1000 };
+    expect(screenToFraction({ x: 100 + 0.25 * 2000 * 0.5, y: 50 + 0.5 * 1000 * 0.5 }, view, image)).toEqual({ x: 0.25, y: 0.5 });
+  });
+
+  it('stays on the map and waits for the image size', () => {
+    expect(screenToFraction({ x: -999, y: 99999 }, { x: 0, y: 0, scale: 1 }, { width: 100, height: 100 })).toEqual({ x: 0, y: 1 });
+    expect(screenToFraction({ x: 1, y: 1 }, { x: 0, y: 0, scale: 1 }, { width: 0, height: 0 })).toBeNull();
   });
 });

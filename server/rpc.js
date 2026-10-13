@@ -204,6 +204,39 @@ export async function executeRpc(user, name, args = {}) {
       return { changed: result.rowCount };
     }
 
+    if (name === 'ping_table') {
+      const mapId = requireUuid(args.p_map_id, 'p_map_id');
+      const x = Number(args.p_x);
+      const y = Number(args.p_y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new HttpError(400, 'p_x and p_y must be numbers');
+      const { rows: maps } = await client.query('SELECT party_id FROM party_maps WHERE id = $1', [mapId]);
+      if (!maps[0]) throw new HttpError(404, 'Map not found');
+      const partyId = maps[0].party_id;
+      const access = await loadCampaignAccess(client, user, partyId);
+      if (!access?.canWrite) throw new HttpError(403, 'Permission denied');
+      const { rows: recent } = await client.query(
+        "SELECT 1 FROM table_pings WHERE user_id = $1 AND created_at > now() - interval '600 milliseconds'",
+        [user.id],
+      );
+      if (recent[0]) throw new HttpError(429, 'Slow down: one ping at a time', 'PING_RATE_LIMITED');
+      // Tidy up: this person's earlier pings, and anything nobody could still be looking at.
+      await client.query(
+        "DELETE FROM table_pings WHERE party_id = $1 AND (user_id = $2 OR created_at < now() - interval '5 minutes')",
+        [partyId, user.id],
+      );
+      const { rows: names } = await client.query('SELECT username FROM users WHERE id = $1', [user.id]);
+      // A stable colour per person, so players can tell whose ping it is.
+      const hue = parseInt(user.id.replace(/-/g, '').slice(0, 6), 16) % 360;
+      const palette = ['#f97316', '#22c55e', '#06b6d4', '#a855f7', '#ec4899', '#eab308', '#3b82f6', '#ef4444'];
+      const color = palette[hue % palette.length];
+      const { rows } = await client.query(
+        `INSERT INTO table_pings (party_id, map_id, user_id, x, y, color, label, focus)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [partyId, mapId, user.id, Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)), color, String(names[0]?.username ?? '').slice(0, 40), access.isGm && args.p_focus === true],
+      );
+      return rows[0];
+    }
+
     if (name === 'move_table_item') {
       const itemId = requireUuid(args.p_item_id, 'p_item_id');
       const x = Number(args.p_x);

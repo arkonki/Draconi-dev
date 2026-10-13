@@ -3,17 +3,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, Maximize, Minimize, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import { TableCanvas } from './TableCanvas';
+import { TableCanvas, type TableTool } from './TableCanvas';
+import { TurnStrip } from './TurnStrip';
 import { TableDrawer } from './TableDrawer';
 import { useConfirm } from '../../hooks/useConfirm';
 import { tableKeys, useVirtualTable } from '../../hooks/useVirtualTable';
+import { useTablePings } from '../../hooks/useTablePings';
+import { useTableTurn } from '../../hooks/useTableTurn';
 import {
   addTableItems,
   deleteTableItem,
   moveTableItem,
+  pingTable,
   setItemsVisibility,
   setTableScene,
   updateTableItem,
+  uploadTableMap,
 } from '../../lib/api/virtualTable';
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { queryKeys } from '../../lib/queryKeys';
@@ -37,6 +42,13 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ itemId: string; nonce: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [tool, setTool] = useState<TableTool>('move');
+  const [lookHere, setLookHere] = useState(false);
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number; nonce: number } | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [metresPerSquare, setMetresPerSquare] = useState(() => {
+    try { return Number(window.localStorage.getItem('table-ruler-metres') || 0) || 0; } catch { return 0; }
+  });
   const lastNoticeTimer = useRef<number | null>(null);
 
   const showNotice = useCallback((message: string) => {
@@ -49,9 +61,16 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const table = useVirtualTable(partyId, isGm ? gmViewMapId : null);
   const { liveMapId, viewMapId } = table;
 
+  const { pings } = useTablePings(partyId, (ping) => {
+    // A GM "look here" ping brings the viewers on that scene to the spot.
+    if (ping.map_id === (viewMapId ?? liveMapId)) setFocusPoint({ x: ping.x, y: ping.y, nonce: Date.now() });
+  });
+
   const viewMap = useMemo(() => table.maps.find((map) => map.id === (viewMapId ?? liveMapId)) ?? null, [table.maps, viewMapId, liveMapId]);
   const liveMap = useMemo(() => table.maps.find((map) => map.id === liveMapId) ?? null, [table.maps, liveMapId]);
   const items = useMemo(() => (viewMap ? table.items.filter((item) => item.map_id === viewMap.id) : []), [table.items, viewMap]);
+
+  const turn = useTableTurn(partyId, items, isGm);
 
   const myCharacterIds = useMemo(
     () => new Set(partyMembers.filter((member) => member.user_id === currentUserId && member.id).map((member) => member.id as string)),
@@ -60,6 +79,11 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const portraits = useMemo(() => new Map(partyMembers.filter((member) => member.id).map((member) => [member.id as string, member.portrait_url ?? null])), [partyMembers]);
 
   const { data: monsters = [] } = useQuery({ queryKey: queryKeys.monsters, queryFn: fetchAllMonsters, enabled: isGm, staleTime: 5 * 60_000 });
+
+  const handleMetres = (value: number) => {
+    setMetresPerSquare(value);
+    try { window.localStorage.setItem('table-ruler-metres', String(value)); } catch { /* a remembered setting is a convenience only */ }
+  };
 
   const refreshItems = () => queryClient.invalidateQueries({ queryKey: ['table-items'] });
   const onError = (error: Error) => showNotice(error.message);
@@ -95,6 +119,32 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     onSuccess: () => refreshItems(),
     onError,
   });
+
+  const resizeMutation = useMutation({
+    mutationFn: ({ item, size }: { item: TableItem; size: number }) => updateTableItem(item.id, { size }),
+    onMutate: ({ item, size }) => {
+      queryClient.setQueryData<TableItem[]>(tableKeys.items(item.map_id), (current) => current?.map((entry) => (entry.id === item.id ? { ...entry, size } : entry)));
+    },
+    onSuccess: () => refreshItems(),
+    onError: (error: Error) => { onError(error); void refreshItems(); },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, name }: { file: File; name: string }) => uploadTableMap(partyId, file, name),
+    onSuccess: async (map) => {
+      setUploadError(null);
+      await table.refreshAll();
+      setGmViewMapId(map.id);
+      showNotice(`“${map.name}” is ready. Add tokens, then show it to players.`);
+    },
+    onError: (error: Error) => setUploadError(error.message),
+  });
+
+  const handlePing = useCallback((x: number, y: number) => {
+    const mapId = viewMapId ?? liveMapId;
+    if (!mapId) return;
+    pingTable(mapId, x, y, isGm && lookHere).catch((error: Error) => showNotice(error.message));
+  }, [isGm, liveMapId, lookHere, showNotice, viewMapId]);
 
   const allVisibleMutation = useMutation({
     mutationFn: (visible: boolean) => setItemsVisibility(viewMapId!, visible),
@@ -133,7 +183,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     if (confirmed) removeMutation.mutate(item);
   };
 
-  const drawerBusy = addMutation.isPending || visibilityMutation.isPending || allVisibleMutation.isPending || goLiveMutation.isPending || lockMutation.isPending;
+  const drawerBusy = addMutation.isPending || resizeMutation.isPending || visibilityMutation.isPending || allVisibleMutation.isPending || goLiveMutation.isPending || lockMutation.isPending;
   const previewing = isGm && viewMap && viewMap.id !== liveMapId;
 
   if (table.loading) return <div className="flex h-96 items-center justify-center"><LoadingSpinner size="lg" /></div>;
@@ -160,6 +210,14 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
 
       {table.error && <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{table.error.message}</div>}
 
+      {turn.active && (
+        <TurnStrip
+          round={turn.round}
+          entries={turn.entries}
+          onSelect={isGm ? (entry) => { if (entry.itemId) { setSelectedItemId(entry.itemId); setFocusRequest({ itemId: entry.itemId, nonce: Date.now() }); } } : undefined}
+        />
+      )}
+
       <div className={`flex min-h-0 ${fullscreen ? 'flex-1' : 'h-[calc(100vh-17rem)] min-h-[460px]'}`}>
         <div className="relative min-w-0 flex-1">
           {viewMap ? (
@@ -170,7 +228,17 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               myCharacterIds={myCharacterIds}
               portraits={portraits}
               selectedItemId={selectedItemId}
+              turnItemIds={turn.currentItemIds}
               focusRequest={focusRequest}
+              focusPoint={focusPoint}
+              pings={pings}
+              tool={tool}
+              onToolChange={setTool}
+              lookHere={lookHere}
+              onLookHereChange={setLookHere}
+              onPing={handlePing}
+              metresPerSquare={metresPerSquare}
+              onMetresPerSquareChange={handleMetres}
               onSelect={setSelectedItemId}
               onMove={handleMove}
             />
@@ -204,6 +272,12 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               onRemove={(item) => void handleRemove(item)}
               onFocus={(item) => { setSelectedItemId(item.id); setFocusRequest({ itemId: item.id, nonce: Date.now() }); }}
               onAdd={(newItems) => addMutation.mutate(newItems)}
+              onResize={(item, size) => resizeMutation.mutate({ item, size })}
+              onUpload={async (file, name) => {
+                try { await uploadMutation.mutateAsync({ file, name }); return true; } catch { return false; }
+              }}
+              uploading={uploadMutation.isPending}
+              uploadError={uploadError}
             />
           </div>
         )}

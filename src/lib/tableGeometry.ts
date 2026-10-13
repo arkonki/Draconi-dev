@@ -76,3 +76,40 @@ export function initials(label: string) {
   if (words.length === 0) return '?';
   return (words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[1][0]).toUpperCase();
 }
+
+/** The width of one grid square in the map image's pixels, or null when the map has no usable grid. */
+export function cellSize(grid: GridSettings): number | null {
+  if (grid.grid_size <= 5) return null;
+  if (grid.grid_type === 'square') return grid.grid_size;
+  if (grid.grid_type === 'hex') return grid.grid_size * Math.sqrt(3);
+  return null;
+}
+
+export interface Measurement {
+  /** Straight-line length in the map image's pixels. */
+  pixels: number;
+  /** Length in grid squares, or null without a grid. */
+  squares: number | null;
+  /** Length in metres when the viewer has said how long a square is. */
+  metres: number | null;
+}
+
+/** Measures between two map points (fractions) for the ruler. */
+export function measureBetween(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  image: { width: number; height: number },
+  grid: GridSettings,
+  metresPerSquare = 0,
+): Measurement {
+  const pixels = Math.hypot((to.x - from.x) * image.width, (to.y - from.y) * image.height);
+  const cell = cellSize(grid);
+  const squares = cell ? pixels / cell : null;
+  return { pixels, squares, metres: squares !== null && metresPerSquare > 0 ? squares * metresPerSquare : null };
+}
+
+/** The map fraction under a screen point, given the view. Null until the image size is known. */
+export function screenToFraction(point: { x: number; y: number }, view: TableView, image: { width: number; height: number }) {
+  if (image.width <= 0 || image.height <= 0 || view.scale <= 0) return null;
+  return { x: clamp01((point.x - view.x) / view.scale / image.width), y: clamp01((point.y - view.y) / view.scale / image.height) };
+}
