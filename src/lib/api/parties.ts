@@ -9,6 +9,8 @@ export interface Party {
   created_by: string;
   created_at: string;
   invite_code?: string;
+  /** Whether the invite link also lets people follow the game as observers. */
+  allow_observers?: boolean;
   campaign_role: CampaignRole;
   members: Character[];
   campaign_memberships: CampaignMembership[];
@@ -41,6 +43,7 @@ interface PartyRow {
   created_by: string;
   created_at: string;
   invite_code?: string;
+  allow_observers?: boolean;
   campaign_role?: CampaignRole;
   members?: PartyMemberJoinRow[];
   campaign_memberships?: CampaignMembership[];
@@ -131,6 +134,7 @@ export async function fetchPartyById(partyId: string | undefined): Promise<Party
     created_by,
     created_at,
     invite_code,
+    allow_observers,
     members:party_members (
       characters (
         id,
@@ -222,6 +226,7 @@ export interface PartyInvitePreview {
   party_id: string;
   name: string;
   gm_name: string | null;
+  allow_observers: boolean;
   /** The viewer's role in this campaign if they already have one. */
   my_role: 'owner' | 'gm' | 'player' | 'observer' | null;
 }
@@ -238,6 +243,18 @@ export async function joinPartyAsObserver(inviteCode: string): Promise<string> {
   const { data, error } = await supabase.rpc<string>('join_party_as_observer', { p_invite_code: inviteCode });
   if (error || !data) throw new Error(error?.message || 'Could not join as an observer.');
   return data;
+}
+
+/** Owner only: lets the invite link be used for watching the game, or stops that. */
+export async function setAllowObservers(partyId: string, allow: boolean): Promise<void> {
+  const { error } = await supabase.from('parties').update({ allow_observers: allow }).eq('id', partyId);
+  if (error) throw new Error(error.message || 'Could not change the observer setting');
+}
+
+/** Owner only: takes a GM or observer out of the campaign. A player is removed by removing their characters. */
+export async function removeCampaignMember(partyId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from('campaign_memberships').delete().match({ party_id: partyId, user_id: userId });
+  if (error) throw new Error(error.message || 'Could not remove this person');
 }
 
 /** Hands the campaign to another member. The previous owner stays on as a GM. */

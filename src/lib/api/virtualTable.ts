@@ -1,6 +1,7 @@
 import { supabase } from '../supabase';
 import { listProjectorImages, type ProjectorStoredImage } from './projectorDisplay';
 import { isImageFileName, sanitizeIconFileName, type TokenIconFile } from '../tokenIcons';
+import { MAX_FOG_AREAS, type FogArea } from '../tableFog';
 import type { PartyMap } from '../../types/atlas';
 import type { NewTableItem, TableItem, TablePing, TableState } from '../../types/virtualTable';
 
@@ -57,6 +58,15 @@ export async function moveTableItem(itemId: string, x: number, y: number): Promi
 export async function updateTableItem(id: string, updates: Partial<Pick<TableItem, 'label' | 'size' | 'color' | 'locked' | 'visible' | 'image_url'>>): Promise<void> {
   const { error } = await supabase.from('table_items').update(updates).eq('id', id);
   if (error) throw new Error(error.message || 'Could not update the token');
+}
+
+/** Covers or uncovers the map for players, and/or replaces the list of revealed areas. */
+export async function updateMapFog(mapId: string, changes: { enabled?: boolean; areas?: FogArea[] }): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (changes.enabled !== undefined) update.fog_enabled = changes.enabled;
+  if (changes.areas !== undefined) update.fog_areas = changes.areas.slice(0, MAX_FOG_AREAS);
+  const { error } = await supabase.from('party_maps').update(update).eq('id', mapId);
+  if (error) throw new Error(error.message || 'Could not change the fog');
 }
 
 export async function deleteTableItem(id: string): Promise<void> {

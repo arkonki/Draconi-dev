@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { PartyDetailsDialog } from '../components/party/PartyDetailsDialog';
-import { PartyPeople } from '../components/party/PartyPeople';
 import { useConfirm } from '../hooks/useConfirm';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
@@ -316,12 +315,17 @@ export function PartyView() {
               {party.description ? <p className="mt-2 max-w-2xl text-sm text-gray-600">{party.description}</p> : null}
             </div>
 
-            {leaveMutation.error && <p role="alert" className="text-sm text-red-700">{leaveMutation.error.message}</p>}
-            {party.campaign_role !== 'owner' && user?.id !== party.created_by && party.campaign_role && (
-              <Button variant="outline" size="sm" icon={LogOut} onClick={() => void handleLeave()} loading={leaveMutation.isPending}>
-                Leave campaign
+            <div className="flex flex-wrap items-center gap-2">
+              {leaveMutation.error && <p role="alert" className="text-sm text-red-700">{leaveMutation.error.message}</p>}
+              <Button variant="outline" size="sm" icon={Users} onClick={() => setIsRoleManagerOpen(true)}>
+                People
               </Button>
-            )}
+              {party.campaign_role !== 'owner' && user?.id !== party.created_by && party.campaign_role && (
+                <Button variant="outline" size="sm" icon={LogOut} onClick={() => void handleLeave()} loading={leaveMutation.isPending}>
+                  Leave campaign
+                </Button>
+              )}
+            </div>
 
             {isCampaignGM && (
               <div className="flex items-center gap-2">
@@ -372,7 +376,7 @@ export function PartyView() {
                     )}
                     {isPartyOwner && (
                       <DropdownMenuItem onSelect={() => setIsRoleManagerOpen(true)}>
-                        <Users className="w-4 h-4 mr-2" /> Campaign Roles
+                        <Users className="w-4 h-4 mr-2" /> People & Roles
                       </DropdownMenuItem>
                     )}
                     {isPartyOwner && (
@@ -485,7 +489,6 @@ export function PartyView() {
               currentUserId={user?.id}
               onUpdate={() => queryClient.invalidateQueries({ queryKey: ['party', partyId] })}
             />
-            <PartyPeople party={party} currentUserId={user?.id} />
           </div>
         )}
 
@@ -647,6 +650,8 @@ export function PartyView() {
       <PartyDetailsDialog party={party} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <CampaignRoleManager
         party={party}
+        currentUserId={user?.id}
+        canManage={isPartyOwner}
         isOpen={isRoleManagerOpen}
         onClose={() => setIsRoleManagerOpen(false)}
       />

@@ -14,6 +14,9 @@ export interface PartyMap {
     /** Saved scale: map-image pixels per grid square, and metres per square. Null when none is saved. */
     scale_px_per_square?: number | null;
     scale_metres_per_square?: number | null;
+    /** Fog of war on the shared table: when on, players see only the revealed areas. */
+    fog_enabled?: boolean;
+    fog_areas?: unknown;
     created_at: string;
     updated_at: string;
 }

@@ -102,6 +102,31 @@ try {
   await database.query('DELETE FROM campaign_memberships WHERE party_id = $1 AND user_id = (SELECT id FROM users WHERE email = $2)', [aliceParty.id, emails.legacy]);
   results.observerByInvite = 'passed';
 
+  // --- The owner decides whether the link may be used for watching, and can remove people again.
+  const partyWhere = (id) => [{ column: 'id', operator: 'eq', value: id }];
+  await ok(query(tokens.bob, { table: 'parties', action: 'update', filters: partyWhere(aliceParty.id), payload: { allow_observers: false } }), 403, 'an observer cannot switch observers off');
+  await ok(query(tokens.alice, { table: 'parties', action: 'update', filters: partyWhere(aliceParty.id), payload: { allow_observers: false } }), 200, 'the owner switches observers off');
+  assert.equal((await ok(rpc(tokens.legacy, 'preview_party_invite', { p_invite_code: code }), 200, 'preview with observers off')).data.allow_observers, false);
+  await ok(rpc(tokens.legacy, 'join_party_as_observer', { p_invite_code: code }), 403, 'nobody new can watch while it is off');
+  await ok(query(tokens.alice, { table: 'parties', action: 'update', filters: partyWhere(aliceParty.id), payload: { allow_observers: true } }), 200, 'the owner switches it back on');
+  await ok(rpc(tokens.legacy, 'join_party_as_observer', { p_invite_code: code }), 200, 'watching works again');
+  const legacyId = (await database.query('SELECT id FROM users WHERE email = $1', [emails.legacy])).rows[0].id;
+  const byUser = (partyId, userId) => [{ column: 'party_id', operator: 'eq', value: partyId }, { column: 'user_id', operator: 'eq', value: userId }];
+  await ok(query(tokens.bob, { table: 'campaign_memberships', action: 'delete', filters: byUser(aliceParty.id, legacyId) }), 403, 'an observer cannot remove another observer');
+  await ok(query(tokens.alice, { table: 'campaign_memberships', action: 'delete', filters: byUser(aliceParty.id, legacyId) }), 200, 'the owner removes an observer');
+  assert.equal(await roleIn(aliceParty.id, emails.legacy), null, 'the removed observer has no role any more');
+
+  // --- Fog of war lives on the map: only a GM can change it, and everyone in the campaign can read it.
+  const map = (await ok(query(tokens.alice, { table: 'party_maps', action: 'insert', payload: { party_id: aliceParty.id, name: `RL Map ${suffix}`, image_url: 'https://example.com/map.png' } }), 200, 'GM adds a map')).data[0];
+  assert.equal(map.fog_enabled, false, 'fog is off by default');
+  const fog = [{ id: randomUUID(), shape: 'rect', x: 0.1, y: 0.1, w: 0.3, h: 0.3 }];
+  await ok(query(tokens.bob, { table: 'party_maps', action: 'update', filters: partyWhere(map.id), payload: { fog_enabled: true, fog_areas: fog } }), 403, 'an observer cannot change the fog');
+  await ok(query(tokens.alice, { table: 'party_maps', action: 'update', filters: partyWhere(map.id), payload: { fog_enabled: true, fog_areas: fog } }), 200, 'the GM covers the map and reveals an area');
+  const seen = (await ok(query(tokens.bob, { table: 'party_maps', action: 'select', filters: partyWhere(map.id) }), 200, 'an observer reads the fog')).data[0];
+  assert.equal(seen.fog_enabled, true);
+  assert.deepEqual(seen.fog_areas, fog);
+  results.observerManagementAndFog = 'passed';
+
   // --- Solo play is available to anyone who runs a campaign, and to nobody who merely watches.
   const soloHero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `RL Solo Hero ${suffix}`, max_hp: 10, current_hp: 10, max_wp: 8, current_wp: 8 } }), 200, 'solo hero')).data[0];
   const soloParty = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `RL Solo ${suffix}`, p_character_ids: [soloHero.id] }), 200, 'Alice starts a solo campaign')).data;

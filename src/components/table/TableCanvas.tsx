@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleDot, Crosshair, Hand, Maximize2, Minus, Plus, Radio, Ruler, Scaling, Target, X } from 'lucide-react';
+import { CircleDot, CloudFog, Crosshair, Eraser, Hand, HeartPulse, Maximize2, Minus, Plus, Radio, Ruler, Scaling, Square, Circle as CircleIcon, Target, X } from 'lucide-react';
 import type { PartyMap } from '../../types/atlas';
 import type { TableItem } from '../../types/virtualTable';
 import type { LivePing } from '../../hooks/useTablePings';
@@ -18,6 +18,8 @@ import {
   zoomAround,
   type TableView,
 } from '../../lib/tableGeometry';
+import { areaAt, areaFromDrag, isRevealed, parseFogAreas, MAX_FOG_AREAS, type FogArea, type FogShape } from '../../lib/tableFog';
+import type { TokenStatus } from '../../lib/tableStatus';
 import { MapGrid } from './MapGrid';
 import { TableToken } from './TableToken';
 
@@ -27,7 +29,8 @@ const MIN_TOKEN_SCREEN_PX = 28;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 8;
 
-export type TableTool = 'move' | 'ping' | 'ruler' | 'scale';
+export type TableTool = 'move' | 'ping' | 'ruler' | 'scale' | 'fog';
+type FogMode = FogShape | 'erase';
 
 interface TableCanvasProps {
   map: PartyMap;
@@ -59,6 +62,12 @@ interface TableCanvasProps {
   /** This viewer's own multiplier for every token's size. */
   tokenScale: number;
   onTokenScaleChange: (value: number) => void;
+  /** Hit points and conditions for the tokens the viewer may see them on. */
+  statuses: ReadonlyMap<string, TokenStatus>;
+  showVitals: boolean;
+  onShowVitalsChange: (value: boolean) => void;
+  /** GM only: cover or uncover the map for players and change the revealed areas. */
+  onFogChange: (changes: { enabled?: boolean; areas?: FogArea[] }) => void;
   onSelect: (itemId: string | null) => void;
   /** Called while a token is dragged (throttled) and once more when it is dropped. */
   onMove: (itemId: string, x: number, y: number) => Promise<void> | void;
@@ -77,7 +86,7 @@ interface Ruler { from: { x: number; y: number }; to: { x: number; y: number } }
 
 export function TableCanvas({
   map, items, isGm, myCharacterIds, portraits, iconFor, selectedItemId, turnItemIds, focusRequest, focusPoint, pings, tool, onToolChange,
-  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, onScaleMeasure, tokenScale, onTokenScaleChange, onSelect, onMove,
+  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, onScaleMeasure, tokenScale, onTokenScaleChange, statuses, showVitals, onShowVitalsChange, onFogChange, onSelect, onMove,
 }: TableCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -91,6 +100,9 @@ export function TableCanvas({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [ruler, setRuler] = useState<Ruler | null>(null);
   const rulerDragRef = useRef<number | null>(null);
+  const fogDragRef = useRef<number | null>(null);
+  const [fogMode, setFogMode] = useState<FogMode>('rect');
+  const [fogDraft, setFogDraft] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const panRef = useRef<{ x: number; y: number; viewX: number; viewY: number } | null>(null);
@@ -100,6 +112,8 @@ export function TableCanvas({
 
   // One grid square in the map image's pixels: the saved scale if there is one, otherwise the map's own grid.
   const cell = useMemo(() => effectiveCell(map), [map]);
+  const fogAreas = useMemo(() => parseFogAreas(map.fog_areas), [map.fog_areas]);
+  const fogOn = map.fog_enabled === true;
   const savedMetres = savedMetresPerSquare(map);
   const metres = savedMetres > 0 ? savedMetres : metresPerSquare;
 
@@ -129,6 +143,7 @@ export function TableCanvas({
     setNatural({ width: 0, height: 0 });
     setOverrides({});
     setRuler(null);
+    setFogDraft(null);
   }, [map.id, map.image_url]);
 
   // Wheel zoom needs a non-passive listener so the page does not scroll as well.
@@ -195,6 +210,19 @@ export function TableCanvas({
       pingAt(event);
       return;
     }
+    if (tool === 'fog' && isGm) {
+      const start = fractionAt(event);
+      if (!start) return;
+      if (fogMode === 'erase') {
+        const hit = areaAt(fogAreas, start);
+        if (hit) onFogChange({ areas: fogAreas.filter((area) => area.id !== hit.id) });
+        return;
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      fogDragRef.current = event.pointerId;
+      setFogDraft({ from: start, to: start });
+      return;
+    }
     if (tool === 'ruler' || tool === 'scale') {
       const start = fractionAt(event);
       if (!start) return;
@@ -224,6 +252,11 @@ export function TableCanvas({
   };
 
   const handleBackgroundMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (fogDragRef.current === event.pointerId) {
+      const end = fractionAt(event);
+      if (end) setFogDraft((current) => (current ? { ...current, to: end } : current));
+      return;
+    }
     if (rulerDragRef.current === event.pointerId) {
       const end = fractionAt(event);
       if (end) setRuler((current) => (current ? { ...current, to: end } : current));
@@ -246,6 +279,17 @@ export function TableCanvas({
   };
 
   const handleBackgroundUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (fogDragRef.current === event.pointerId) {
+      fogDragRef.current = null;
+      const draft = fogDraft;
+      setFogDraft(null);
+      if (draft && fogMode !== 'erase' && event.type !== 'pointercancel' && fogAreas.length < MAX_FOG_AREAS) {
+        const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `fog-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const area = areaFromDrag(draft.from, draft.to, fogMode, id);
+        if (area) onFogChange({ areas: [...fogAreas, area] });
+      }
+      return;
+    }
     if (rulerDragRef.current === event.pointerId) {
       rulerDragRef.current = null;
       return;
@@ -341,7 +385,7 @@ export function TableCanvas({
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full touch-none select-none overflow-hidden bg-stone-900 ${tool === 'ping' ? 'cursor-crosshair' : tool === 'ruler' ? 'cursor-cell' : ''}`}
+      className={`relative h-full w-full touch-none select-none overflow-hidden bg-stone-900 ${tool === 'ping' || tool === 'fog' ? 'cursor-crosshair' : tool === 'ruler' ? 'cursor-cell' : ''}`}
       onPointerDown={handleBackgroundDown}
       onPointerMove={handleBackgroundMove}
       onPointerUp={handleBackgroundUp}
@@ -375,7 +419,38 @@ export function TableCanvas({
               width={natural.width}
               height={natural.height}
             />
+            {fogOn && (
+              <svg width={natural.width} height={natural.height} className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }} aria-hidden="true">
+                <defs>
+                  <mask id={`fog-${map.id}`}>
+                    <rect width={natural.width} height={natural.height} fill="white" />
+                    {fogAreas.map((area) => (area.shape === 'rect'
+                      ? <rect key={area.id} x={area.x * natural.width} y={area.y * natural.height} width={area.w * natural.width} height={area.h * natural.height} fill="black" />
+                      : <ellipse key={area.id} cx={(area.x + area.w / 2) * natural.width} cy={(area.y + area.h / 2) * natural.height} rx={(area.w / 2) * natural.width} ry={(area.h / 2) * natural.height} fill="black" />))}
+                  </mask>
+                </defs>
+                {/* Players see solid fog; the GM sees through it so they know what they are hiding. */}
+                <rect width={natural.width} height={natural.height} fill="#07070b" opacity={isGm ? 0.6 : 1} mask={`url(#fog-${map.id})`} />
+                {isGm && fogAreas.map((area) => (area.shape === 'rect'
+                  ? <rect key={area.id} x={area.x * natural.width} y={area.y * natural.height} width={area.w * natural.width} height={area.h * natural.height} fill="none" stroke="#a5b4fc" strokeWidth={2 / view.scale} strokeDasharray={`${8 / view.scale} ${5 / view.scale}`} />
+                  : <ellipse key={area.id} cx={(area.x + area.w / 2) * natural.width} cy={(area.y + area.h / 2) * natural.height} rx={(area.w / 2) * natural.width} ry={(area.h / 2) * natural.height} fill="none" stroke="#a5b4fc" strokeWidth={2 / view.scale} strokeDasharray={`${8 / view.scale} ${5 / view.scale}`} />))}
+              </svg>
+            )}
+            {fogDraft && fogMode !== 'erase' && (() => {
+              const draft = areaFromDrag(fogDraft.from, fogDraft.to, fogMode, 'draft');
+              if (!draft) return null;
+              const common = { fill: 'rgba(165,180,252,0.25)', stroke: '#a5b4fc', strokeWidth: 2 / view.scale };
+              return (
+                <svg width={natural.width} height={natural.height} className="pointer-events-none absolute inset-0" style={{ zIndex: 56 }} aria-hidden="true">
+                  {draft.shape === 'rect'
+                    ? <rect x={draft.x * natural.width} y={draft.y * natural.height} width={draft.w * natural.width} height={draft.h * natural.height} {...common} />
+                    : <ellipse cx={(draft.x + draft.w / 2) * natural.width} cy={(draft.y + draft.h / 2) * natural.height} rx={(draft.w / 2) * natural.width} ry={(draft.h / 2) * natural.height} {...common} />}
+                </svg>
+              );
+            })()}
             {items.map((item) => {
+              // Players are not shown creatures standing in fog; their own party's tokens always stay in view.
+              if (!isGm && fogOn && item.kind !== 'character' && !isRevealed(true, fogAreas, { x: item.x, y: item.y })) return null;
               const position = overrides[item.id] ?? { x: item.x, y: item.y };
               const draggable = canMoveItem(item, isGm, myCharacterIds);
               return (
@@ -391,6 +466,7 @@ export function TableCanvas({
                   draggable={draggable}
                   dragging={draggingId === item.id}
                   selected={selectedItemId === item.id}
+                  status={showVitals ? statuses.get(item.id) ?? null : null}
                   hiddenFromPlayers={isGm && !item.visible}
                   isTurn={turnItemIds.has(item.id)}
                   interactive={interactive}
@@ -460,6 +536,7 @@ export function TableCanvas({
         {toolButton('ping', 'Ping', Target)}
         {toolButton('ruler', 'Ruler', Ruler)}
         {isGm && toolButton('scale', 'Scale', Scaling)}
+        {isGm && toolButton('fog', 'Fog', CloudFog)}
         {isGm && (
           <button
             type="button"
@@ -471,6 +548,15 @@ export function TableCanvas({
             <Radio size={16} /> <span className="hidden sm:inline">Look here</span>
           </button>
         )}
+        <button
+          type="button"
+          aria-pressed={showVitals}
+          title="Show hit points and conditions on the tokens"
+          onClick={() => onShowVitalsChange(!showVitals)}
+          className={`flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm ${showVitals ? 'bg-white text-stone-900' : 'hover:bg-white/15'}`}
+        >
+          <HeartPulse size={16} /> <span className="hidden sm:inline">Vitals</span>
+        </button>
         <label className="flex items-center gap-1.5 px-2 text-xs text-white/80" title="Make every token bigger or smaller on your screen">
           <CircleDot size={14} />
           <span className="hidden sm:inline">Tokens</span>
@@ -487,6 +573,30 @@ export function TableCanvas({
           />
           <span className="w-9 text-right font-mono">{Math.round(tokenScale * 100)}%</span>
         </label>
+        {tool === 'fog' && isGm && (
+          <>
+            <label className="flex items-center gap-1.5 px-1 text-xs text-white/90" title="Cover the map for players, except for the areas you reveal">
+              <input type="checkbox" checked={fogOn} onChange={(event) => onFogChange({ enabled: event.target.checked })} className="h-4 w-4" />
+              Fog on
+            </label>
+            {([['rect', 'Reveal a rectangle', Square], ['ellipse', 'Reveal a circle or oval', CircleIcon], ['erase', 'Cover an area again (click it)', Eraser]] as const).map(([mode, label, Icon]) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={fogMode === mode}
+                title={label}
+                aria-label={label}
+                onClick={() => setFogMode(mode)}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg ${fogMode === mode ? 'bg-indigo-300 text-stone-900' : 'hover:bg-white/15'}`}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+            <button type="button" onClick={() => onFogChange({ enabled: true, areas: [] })} className="h-9 rounded-lg px-2 text-xs hover:bg-white/15" title="Cover the whole map again">Cover all</button>
+            <button type="button" onClick={() => onFogChange({ enabled: false })} className="h-9 rounded-lg px-2 text-xs hover:bg-white/15" title="Switch the fog off and show the whole map">Reveal all</button>
+            {!fogOn && <span className="px-1 text-xs text-amber-200">Fog is off: players see the whole map</span>}
+          </>
+        )}
         {tool === 'ruler' && (
           <>
             {savedMetres === 0 && <label className="flex items-center gap-1 px-1 text-xs text-white/80">

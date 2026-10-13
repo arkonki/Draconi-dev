@@ -49,20 +49,20 @@ export async function executeRpc(user, name, args = {}) {
       const inviteCode = String(args.p_invite_code ?? '').trim();
       if (!inviteCode) throw new HttpError(404, 'Invalid invite code');
       const { rows } = await client.query(
-        `SELECT p.id, p.name, u.username AS gm_name,
+        `SELECT p.id, p.name, p.allow_observers, u.username AS gm_name,
                 (SELECT role FROM campaign_memberships cm WHERE cm.party_id = p.id AND cm.user_id = $2) AS my_role
            FROM parties p LEFT JOIN users u ON u.id = p.created_by
           WHERE upper(p.invite_code) = upper($1)`,
         [inviteCode, user.id],
       );
       if (!rows[0]) throw new HttpError(404, 'Invalid invite code');
-      return { party_id: rows[0].id, name: rows[0].name, gm_name: rows[0].gm_name, my_role: rows[0].my_role };
+      return { party_id: rows[0].id, name: rows[0].name, gm_name: rows[0].gm_name, my_role: rows[0].my_role, allow_observers: rows[0].allow_observers };
     }
 
     if (name === 'join_party_as_observer') {
       const inviteCode = String(args.p_invite_code ?? '').trim();
       const { rows: parties } = inviteCode
-        ? await client.query('SELECT id FROM parties WHERE upper(invite_code) = upper($1)', [inviteCode])
+        ? await client.query('SELECT id, allow_observers FROM parties WHERE upper(invite_code) = upper($1)', [inviteCode])
         : { rows: [] };
       if (!parties[0]) throw new HttpError(404, 'Invalid invite code');
       // Someone who already has a seat keeps it; watching never replaces a stronger role.
@@ -72,6 +72,7 @@ export async function executeRpc(user, name, args = {}) {
         [parties[0].id, user.id],
       );
       if (!existing[0]) {
+        if (!parties[0].allow_observers) throw new HttpError(403, 'This campaign does not accept observers.');
         await client.query(
           `INSERT INTO campaign_memberships (party_id, user_id, role)
            VALUES ($1, $2, 'observer') ON CONFLICT (party_id, user_id) DO NOTHING`,

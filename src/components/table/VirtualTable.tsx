@@ -30,6 +30,7 @@ import {
   saveMapScale,
   setItemsVisibility,
   setTableScene,
+  updateMapFog,
   updateTableItem,
   uploadTableMap,
   uploadTokenIcons,
@@ -37,9 +38,12 @@ import {
 } from '../../lib/api/virtualTable';
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { clampTokenScale } from '../../lib/tableGeometry';
+import { buildTokenStatuses } from '../../lib/tableStatus';
+import type { FogArea } from '../../lib/tableFog';
 import { nameCandidates, type TokenIconFile } from '../../lib/tokenIcons';
 import { queryKeys } from '../../lib/queryKeys';
 import type { Character } from '../../types/character';
+import type { PartyMap } from '../../types/atlas';
 import type { NewTableItem, TableItem } from '../../types/virtualTable';
 
 // The combat page is large, and only a GM ever opens it, so it is loaded when first needed.
@@ -76,6 +80,9 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const [sizePreview, setSizePreview] = useState<{ id: string; size: number } | null>(null);
   const [tokenScale, setTokenScale] = useState(() => {
     try { return clampTokenScale(Number(window.localStorage.getItem('table-token-scale') || 1)); } catch { return 1; }
+  });
+  const [showVitals, setShowVitals] = useState(() => {
+    try { return window.localStorage.getItem('table-show-vitals') !== 'off'; } catch { return true; }
   });
   const [metresPerSquare, setMetresPerSquare] = useState(() => {
     try { return Number(window.localStorage.getItem('table-ruler-metres') || 0) || 0; } catch { return 0; }
@@ -117,6 +124,11 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const combatInfo = useTableEncounter(partyId, items, isGm);
   const iconUrlFor = useCallback((item: TableItem) => tokenImages.iconFor(item)?.url ?? null, [tokenImages]);
 
+  const handleShowVitals = (value: boolean) => {
+    setShowVitals(value);
+    try { window.localStorage.setItem('table-show-vitals', value ? 'on' : 'off'); } catch { /* a remembered setting is a convenience only */ }
+  };
+
   const memberIds = useMemo(() => partyMembers.map((member) => member.id).filter(Boolean) as string[], [partyMembers]);
   const quickCharacters = useTableCharacters(partyId, memberIds);
   // Inside the sheet modal a player can only switch between their own characters; the GM can open anyone's.
@@ -125,6 +137,10 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     [isGm, partyMembers, currentUserId],
   );
   const sheet = useCharacterSheetModal(currentUserId, sheetMembers);
+  const statuses = useMemo(
+    () => buildTokenStatuses(items, quickCharacters, turn.combatants, isGm),
+    [items, quickCharacters, turn.combatants, isGm],
+  );
 
   const myCharacterIds = useMemo(
     () => new Set(partyMembers.filter((member) => member.user_id === currentUserId && member.id).map((member) => member.id as string)),
@@ -277,6 +293,18 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     onError: (error: Error) => setScaleError(error.message),
   });
 
+  const fogMutation = useMutation({
+    mutationFn: (changes: { enabled?: boolean; areas?: FogArea[] }) => updateMapFog(viewMap!.id, changes),
+    onMutate: (changes) => {
+      // Show the change straight away; the live update then confirms it for everyone.
+      queryClient.setQueryData<PartyMap[]>(tableKeys.maps(partyId), (current) => current?.map((map) => (map.id === viewMap!.id
+        ? { ...map, ...(changes.enabled !== undefined ? { fog_enabled: changes.enabled } : {}), ...(changes.areas !== undefined ? { fog_areas: changes.areas } : {}) }
+        : map)));
+    },
+    onSuccess: () => table.refreshAll(),
+    onError: (error: Error) => { onError(error); void table.refreshAll(); },
+  });
+
   const handlePing = useCallback((x: number, y: number) => {
     const mapId = viewMapId ?? liveMapId;
     if (!mapId) return;
@@ -380,6 +408,10 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               onScaleMeasure={setScaleMeasure}
               tokenScale={tokenScale}
               onTokenScaleChange={handleTokenScale}
+              statuses={statuses}
+              showVitals={showVitals}
+              onShowVitalsChange={handleShowVitals}
+              onFogChange={(changes) => fogMutation.mutate(changes)}
               onSelect={setSelectedItemId}
               onMove={handleMove}
             />

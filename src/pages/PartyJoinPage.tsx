@@ -204,7 +204,7 @@ export function PartyJoinPage() {
           </div>
         )}
 
-        {!invite?.my_role && (
+        {!invite?.my_role && invite?.allow_observers !== false && (
           <div className="mt-8 border-t pt-6 text-center">
             <p className="text-sm text-gray-600 mb-3">
               Not playing a character? You can follow the game as an observer: you see the campaign but cannot change anything.

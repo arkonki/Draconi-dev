@@ -85,7 +85,7 @@ Ordered by value for effort.
    connection") also appear on the Overview. Counters can be reset after confirming. Backed by
    `GET /api/admin/overview`; rules are in `server/adminAssessment.js` and tested; `npm run test:admin-overview`
    checks the endpoint against the database.
-5. **Create user: allow choosing Administrator** (today only player or DM; admins must be promoted afterwards) and
+5. **Create user: allow choosing Administrator** (new accounts are ordinary users; admins must be promoted afterwards) and
    offer a one-click "copy sign-in details" (already present) plus an optional forced password change on first sign-in.
 
 ### Medium
@@ -126,8 +126,13 @@ Ordered by value for effort.
 
 - `users.account_status` duplicates `is_active`. It is now kept in sync (`active` or `suspended`); one of the two
   should eventually go.
-- "Dungeon Master" is a site-wide role, while campaigns have their own owner, GM, player and observer roles. The role
-  descriptions in the edit dialog explain the difference; the naming is still easy to confuse.
+- **Accounts and campaign roles (updated).** An account is either a *User* or an *Administrator*. Being a GM, player
+  or observer is decided per campaign (`campaign_memberships.role`: owner, gm, player, observer), and every user may
+  create campaigns (capped by `MAX_OWNED_CAMPAIGNS`, default 10; administrators are exempt) and follow other
+  campaigns as observers through an invite link, unless the owner has switched that off in People & roles. The
+  database still has a legacy `users.role = 'dm'` value from the old site-wide Dungeon Master role; it behaves
+  exactly like an ordinary user and is shown as "User". The nav badge shows the campaign role while you are inside a
+  campaign.
 - Database design to remember: `parties.created_by` cascades, and five session and solo tables restrict deletion of
   their creator. Any future delete feature must go through the successor step used here.
 - The 11 end-to-end scenarios for this feature live in `scripts/user-admin-smoke.mjs`
