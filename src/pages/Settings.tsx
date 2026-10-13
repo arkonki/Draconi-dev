@@ -10,6 +10,7 @@ import {
   Bell, // Ensure Bell is imported
   ArrowLeft,
   Database,
+  Plug,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -21,6 +22,7 @@ import { LocalizationSettings } from '../components/settings/LocalizationSetting
 import { AdminSettings } from '../components/settings/AdminSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
+import { ConnectionSettings } from '../components/settings/ConnectionSettings';
 import { useAdminOverview } from '../hooks/useAdminOverview';
 
 type SettingsSection = 
@@ -30,7 +32,8 @@ type SettingsSection =
   | 'localization'
   | 'admin'
   | 'game-data'
-  | 'recovery';
+  | 'recovery'
+  | 'connections';
 
 interface SettingsMenuItem {
   id: SettingsSection;
@@ -54,6 +57,13 @@ const menuItems: SettingsMenuItem[] = [
     label: 'Notifications',
     icon: Bell,
     description: 'Configure email, desktop and sound alerts',
+    category: 'account'
+  },
+  {
+    id: 'connections',
+    label: 'AI Assistants',
+    icon: Plug,
+    description: 'Connect ChatGPT, Claude or another assistant',
     category: 'account'
   },
   // Future implementations...
@@ -134,6 +144,7 @@ export function Settings() {
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
       case 'recovery': return <RecoverySettings />;
+      case 'connections': return <ConnectionSettings />;
       case 'admin': return <AdminSettings onOpenBackups={() => handleSectionChange('recovery')} />;
       default: return <ProfileSettings />;
     }

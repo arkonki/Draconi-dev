@@ -31,7 +31,8 @@ Draconi Helper MCP endpoint.
 - [ ] Allow an owner to invite a GM or observer who does not join with a
   character; invite-code joins currently create player access and can be
   promoted afterward.
-- [ ] Add administrator-visible OAuth connection and token revocation controls.
+- [x] Let every user see the assistants connected to their account, disconnect them, and create or remove personal access tokens (Settings > AI Assistants).
+- [ ] Add an administrator view of every user's connections, with revocation.
 
 ## Phase 2 — Trusted dice rolls
 

@@ -33,6 +33,7 @@ import {
 import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
+import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -127,6 +128,26 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/health' && request.method === 'GET') {
       await pool.query('SELECT 1');
       sendJson(response, 200, { status: 'ok', database: 'postgresql' });
+      return;
+    }
+
+    // Which assistants can act as the signed-in user. A web session is required: connection tokens cannot manage connections.
+    if (pathname === '/api/account/connections' && request.method === 'GET') {
+      sendJson(response, 200, await listConnections(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/account/connections/tokens' && request.method === 'POST') {
+      sendJson(response, 201, await createPersonalToken(await currentUser(request), await readJson(request)));
+      return;
+    }
+    const connectionTokenMatch = matchPath(pathname, /^\/api\/account\/connections\/tokens\/([^/]+)$/);
+    if (connectionTokenMatch && request.method === 'DELETE') {
+      sendJson(response, 200, await revokePersonalToken(await currentUser(request), connectionTokenMatch[0]));
+      return;
+    }
+    const connectionAppMatch = matchPath(pathname, /^\/api\/account\/connections\/apps\/([^/]+)$/);
+    if (connectionAppMatch && request.method === 'DELETE') {
+      sendJson(response, 200, await revokeApp(await currentUser(request), connectionAppMatch[0]));
       return;
     }
 

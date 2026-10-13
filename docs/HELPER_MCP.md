@@ -79,6 +79,18 @@ and rotating refresh tokens, and asks the user to sign in and consent on
 Draconi. OAuth grants use `draconi:read` and `draconi:write`. Identity never
 comes from MCP arguments.
 
+**Connecting from the app.** Settings > AI Assistants shows the server address to
+paste into an assistant, lists the assistants that have signed in with OAuth (with
+a Disconnect button that revokes their access and refresh tokens at once), and can
+make **personal access tokens** for clients that cannot do the OAuth sign-in. A
+token has a name, a read or read-and-write scope, and a fixed lifetime (7, 30, 90
+or 365 days); only its SHA-256 hash is stored, the secret is shown once, and a
+person may hold at most ten. Tokens are ordinary rows in `oauth_access_tokens`
+under the built-in `personal-access-token` client, so the Helper API and `/mcp`
+check them and enforce their scopes exactly as for OAuth. Managing connections
+(`/api/account/connections*`) needs a web session: a connection token can never
+create tokens or disconnect anything.
+
 Campaign access is checked on every endpoint:
 
 - administrators may access all campaigns;
