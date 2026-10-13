@@ -83,7 +83,7 @@ function aliasesFor(table, value) {
 }
 
 const NUMERIC_OUTPUT_FIELDS = new Map([
-  ['party_maps', ['grid_opacity', 'grid_offset_x', 'grid_offset_y', 'grid_rotation']],
+  ['party_maps', ['grid_opacity', 'grid_offset_x', 'grid_offset_y', 'grid_rotation', 'scale_px_per_square', 'scale_metres_per_square']],
   ['party_map_pins', ['x', 'y']],
   ['party_map_drawings', ['thickness']],
   ['table_items', ['x', 'y', 'size']],
@@ -327,6 +327,8 @@ export function canWrite(table, row, ctx, inserting = false) {
   if (table === 'campaign_memberships') return ctx.admin || partyRole(ctx, row.party_id) === 'owner';
   // Players move their own token through the move_table_item function, which checks ownership and locks.
   if (table === 'table_items' || table === 'party_table_state') return partyGmAccess(ctx, row.party_id);
+  // A map's grid and scale decide how every token is drawn, so only a GM may change or remove a map.
+  if (table === 'party_maps') return partyGmAccess(ctx, row.party_id);
   // Pings are made through the ping_table function, which limits how often one person can send them.
   if (table === 'table_pings') return false;
   if (table === 'party_members') {

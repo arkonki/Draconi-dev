@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleDot, Crosshair, Hand, Maximize2, Minus, Plus, Radio, Ruler, Target, X } from 'lucide-react';
+import { CircleDot, Crosshair, Hand, Maximize2, Minus, Plus, Radio, Ruler, Scaling, Target, X } from 'lucide-react';
 import type { PartyMap } from '../../types/atlas';
 import type { TableItem } from '../../types/virtualTable';
 import type { LivePing } from '../../hooks/useTablePings';
@@ -9,10 +9,12 @@ import {
   canMoveItem,
   centerOn,
   dragToFraction,
+  effectiveCell,
   fitView,
-  measureBetween,
+  measureWithCell,
+  savedMetresPerSquare,
   screenToFraction,
-  tokenDiameter,
+  tokenDiameterForCell,
   zoomAround,
   type TableView,
 } from '../../lib/tableGeometry';
@@ -25,7 +27,7 @@ const MIN_TOKEN_SCREEN_PX = 28;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 8;
 
-export type TableTool = 'move' | 'ping' | 'ruler';
+export type TableTool = 'move' | 'ping' | 'ruler' | 'scale';
 
 interface TableCanvasProps {
   map: PartyMap;
@@ -52,6 +54,8 @@ interface TableCanvasProps {
   onPing: (x: number, y: number) => void;
   metresPerSquare: number;
   onMetresPerSquareChange: (value: number) => void;
+  /** Called with the length, in the map image's pixels, of the line being drawn while setting the scale. */
+  onScaleMeasure?: (pixels: number | null) => void;
   /** This viewer's own multiplier for every token's size. */
   tokenScale: number;
   onTokenScaleChange: (value: number) => void;
@@ -73,7 +77,7 @@ interface Ruler { from: { x: number; y: number }; to: { x: number; y: number } }
 
 export function TableCanvas({
   map, items, isGm, myCharacterIds, portraits, iconFor, selectedItemId, turnItemIds, focusRequest, focusPoint, pings, tool, onToolChange,
-  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, tokenScale, onTokenScaleChange, onSelect, onMove,
+  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, onScaleMeasure, tokenScale, onTokenScaleChange, onSelect, onMove,
 }: TableCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -94,7 +98,10 @@ export function TableCanvas({
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
   const userMovedViewRef = useRef(false);
 
-  const grid = useMemo(() => ({ grid_type: map.grid_type, grid_size: Number(map.grid_size) }), [map.grid_type, map.grid_size]);
+  // One grid square in the map image's pixels: the saved scale if there is one, otherwise the map's own grid.
+  const cell = useMemo(() => effectiveCell(map), [map]);
+  const savedMetres = savedMetresPerSquare(map);
+  const metres = savedMetres > 0 ? savedMetres : metresPerSquare;
 
   const fit = useCallback(() => {
     userMovedViewRef.current = false;
@@ -188,7 +195,7 @@ export function TableCanvas({
       pingAt(event);
       return;
     }
-    if (tool === 'ruler') {
+    if (tool === 'ruler' || tool === 'scale') {
       const start = fractionAt(event);
       if (!start) return;
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -310,9 +317,15 @@ export function TableCanvas({
     setView((current) => zoomAround(current, factor, { x: containerSize.width / 2, y: containerSize.height / 2 }));
   };
 
-  const measurement = ruler && natural.width > 0 ? measureBetween(ruler.from, ruler.to, natural, grid, metresPerSquare) : null;
+  const measurement = ruler && natural.width > 0 ? measureWithCell(ruler.from, ruler.to, natural, cell, metres) : null;
+
+  // While the scale is being set, tell the panel how long the drawn line is.
+  useEffect(() => {
+    if (tool !== 'scale') return;
+    onScaleMeasure?.(measurement ? measurement.pixels : null);
+  }, [tool, measurement?.pixels]); // the callback is deliberately not a dependency
   const interactive = tool === 'move';
-  const hasGrid = measurement ? measurement.squares !== null : grid.grid_type !== 'none' && grid.grid_size > 5;
+  const hasGrid = cell !== null;
   const toolButton = (id: TableTool, label: string, Icon: typeof Hand) => (
     <button
       type="button"
@@ -371,7 +384,7 @@ export function TableCanvas({
                   item={item}
                   centerX={position.x * natural.width}
                   centerY={position.y * natural.height}
-                  diameter={Math.max(tokenDiameter(item.size, grid, natural.width) * tokenScale, MIN_TOKEN_SCREEN_PX / view.scale)}
+                  diameter={Math.max(tokenDiameterForCell(item.size, cell, natural.width) * tokenScale, MIN_TOKEN_SCREEN_PX / view.scale)}
                   scale={view.scale}
                   imageUrl={item.image_url ?? (item.character_id ? portraits.get(item.character_id) ?? null : iconFor(item))}
                   isMine={Boolean(item.character_id && myCharacterIds.has(item.character_id))}
@@ -418,9 +431,11 @@ export function TableCanvas({
                   transform: `translate(-50%, -130%) scale(${1 / view.scale})`,
                 }}
               >
-                {measurement.squares !== null
-                  ? `${measurement.squares.toFixed(1)} squares${measurement.metres !== null ? ` · ${measurement.metres.toFixed(1)} m` : ''}`
-                  : 'Set a grid to measure'}
+                {tool === 'scale'
+                  ? `${Math.round(measurement.pixels)} px`
+                  : measurement.squares !== null
+                    ? `${measurement.squares.toFixed(1)} squares${measurement.metres !== null ? ` · ${measurement.metres.toFixed(1)} m` : ''}`
+                    : 'Set a scale to measure'}
               </div>
             )}
           </>
@@ -444,6 +459,7 @@ export function TableCanvas({
         {toolButton('move', 'Move', Hand)}
         {toolButton('ping', 'Ping', Target)}
         {toolButton('ruler', 'Ruler', Ruler)}
+        {isGm && toolButton('scale', 'Scale', Scaling)}
         {isGm && (
           <button
             type="button"
@@ -473,7 +489,7 @@ export function TableCanvas({
         </label>
         {tool === 'ruler' && (
           <>
-            <label className="flex items-center gap-1 px-1 text-xs text-white/80">
+            {savedMetres === 0 && <label className="flex items-center gap-1 px-1 text-xs text-white/80">
               m/square
               <input
                 type="number"
@@ -485,9 +501,9 @@ export function TableCanvas({
                 className="w-14 rounded border border-white/25 bg-black/40 px-1 py-0.5 text-center text-white"
                 aria-label="Metres per grid square"
               />
-            </label>
+            </label>}
             {ruler && <button type="button" aria-label="Clear the ruler" onClick={() => setRuler(null)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-white/15"><X size={16} /></button>}
-            {!hasGrid && <span className="px-1 text-xs text-amber-200">This map has no grid</span>}
+            {!hasGrid && <span className="px-1 text-xs text-amber-200">This map has no scale yet</span>}
           </>
         )}
       </div>

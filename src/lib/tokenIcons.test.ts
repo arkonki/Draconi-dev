@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildIconIndex, findIcon, isImageFileName, nameCandidates, normalizeIconName, sanitizeIconFileName, type TokenIconFile } from './tokenIcons';
+import { buildIconIndex, findIcon, isImageFileName, matchesSearch, nameCandidates, normalizeIconName, sanitizeIconFileName, type TokenIconFile } from './tokenIcons';
 
 const file = (name: string): TokenIconFile => ({ name, path: `TokenIcons/${name}`, url: `/icons/${name}` });
 
@@ -54,6 +54,25 @@ describe('findIcon', () => {
 
   it('returns nothing from an empty library', () => {
     expect(findIcon(buildIconIndex([]), 'Goblin')).toBeNull();
+  });
+});
+
+describe('matchesSearch', () => {
+  it('matches part of a name, in any case', () => {
+    expect(matchesSearch('Giant_Spider.png', 'spid')).toBe(true);
+    expect(matchesSearch('Giant_Spider.png', 'GIANT')).toBe(true);
+    expect(matchesSearch('Giant_Spider.png', 'wolf')).toBe(false);
+  });
+
+  it('needs every word, in any order', () => {
+    expect(matchesSearch('Giant Spider.png', 'spider giant')).toBe(true);
+    expect(matchesSearch('Giant Spider.png', 'giant wolf')).toBe(false);
+  });
+
+  it('ignores the extension and accents, and treats an empty search as everything', () => {
+    expect(matchesSearch('Ghûl.png', 'ghul')).toBe(true);
+    expect(matchesSearch('Goblin.png', 'png')).toBe(false);
+    expect(matchesSearch('Goblin.png', '   ')).toBe(true);
   });
 });
 

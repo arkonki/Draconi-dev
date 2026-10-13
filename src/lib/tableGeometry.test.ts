@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMoveItem, clampTokenScale, cellSize, centerOn, clamp01, dragToFraction, fitView, initials, measureBetween, screenToFraction, tokenDiameter, zoomAround } from './tableGeometry';
+import { canMoveItem, cellFromMeasurement, clampTokenScale, cellSize, effectiveCell, measureWithCell, savedMetresPerSquare, tokenDiameterForCell, centerOn, clamp01, dragToFraction, fitView, initials, measureBetween, screenToFraction, tokenDiameter, zoomAround } from './tableGeometry';
 
 describe('tokenDiameter', () => {
   it('follows the grid when there is one', () => {
@@ -76,6 +76,42 @@ describe('canMoveItem', () => {
     expect(canMoveItem({ character_id: 'c1', locked: true }, false, mine)).toBe(false);
     expect(canMoveItem({ character_id: 'c2', locked: false }, false, mine)).toBe(false);
     expect(canMoveItem({ character_id: null, locked: false }, false, mine)).toBe(false);
+  });
+});
+
+describe('map scale', () => {
+  const none = { grid_type: 'none' as const, grid_size: 50 };
+
+  it('prefers a saved scale over the grid, and falls back to the grid', () => {
+    expect(effectiveCell({ ...none, scale_px_per_square: 84 })).toBe(84);
+    expect(effectiveCell({ grid_type: 'square', grid_size: 70, scale_px_per_square: 84 })).toBe(84);
+    expect(effectiveCell({ grid_type: 'square', grid_size: 70, scale_px_per_square: null })).toBe(70);
+    expect(effectiveCell({ ...none, scale_px_per_square: null })).toBeNull();
+    expect(effectiveCell({ ...none, scale_px_per_square: 2 })).toBeNull();
+  });
+
+  it('sizes tokens by the effective cell, so changing the scale resizes them', () => {
+    expect(tokenDiameterForCell(1, 84, 4000)).toBe(84);
+    expect(tokenDiameterForCell(2, 42, 4000)).toBe(84);
+    expect(tokenDiameterForCell(1, null, 2000)).toBe(140);
+  });
+
+  it('works out pixels per square from a measured line', () => {
+    expect(cellFromMeasurement(840, 10)).toBe(84);
+    expect(cellFromMeasurement(840, 0)).toBeNull();
+    expect(cellFromMeasurement(10, 100)).toBeNull();
+    expect(cellFromMeasurement(Number.NaN, 4)).toBeNull();
+  });
+
+  it('measures with a cell and reads metres from the saved scale', () => {
+    const result = measureWithCell({ x: 0, y: 0 }, { x: 0.5, y: 0 }, { width: 1000, height: 1000 }, 100, savedMetresPerSquare({ ...none, scale_metres_per_square: 1.5 }));
+    expect(result.squares).toBeCloseTo(5);
+    expect(result.metres).toBeCloseTo(7.5);
+  });
+
+  it('reads no metres when none are saved', () => {
+    expect(savedMetresPerSquare({ ...none, scale_metres_per_square: null })).toBe(0);
+    expect(savedMetresPerSquare({ ...none, scale_metres_per_square: -2 })).toBe(0);
   });
 });
 

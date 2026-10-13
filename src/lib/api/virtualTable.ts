@@ -219,3 +219,32 @@ export async function uploadTokenImage(partyId: string, file: File): Promise<str
   if (error) throw new Error(error.message || 'The upload failed.');
   return supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
 }
+
+export interface MapScaleChange {
+  /** Pixels of the map image per grid square. */
+  cell: number;
+  metresPerSquare: number;
+  /** Also draw a square grid of this size over the map. */
+  showGrid?: boolean;
+}
+
+/** Saves a map's scale. Players watching the table pick it up straight away through the live map updates. */
+export async function saveMapScale(mapId: string, change: MapScaleChange): Promise<void> {
+  const updates: Record<string, unknown> = {
+    scale_px_per_square: Math.round(change.cell * 100) / 100,
+    scale_metres_per_square: change.metresPerSquare,
+  };
+  if (change.showGrid) {
+    updates.grid_type = 'square';
+    // The map's grid size is stored as whole pixels; the scale itself keeps its decimals.
+    updates.grid_size = Math.max(5, Math.round(change.cell));
+  }
+  const { error } = await supabase.from('party_maps').update(updates).eq('id', mapId);
+  if (error) throw new Error(error.message || 'Could not save the scale');
+}
+
+/** Forgets the saved scale; the map goes back to its grid, if it has one. */
+export async function clearMapScale(mapId: string): Promise<void> {
+  const { error } = await supabase.from('party_maps').update({ scale_px_per_square: null, scale_metres_per_square: null }).eq('id', mapId);
+  if (error) throw new Error(error.message || 'Could not clear the scale');
+}

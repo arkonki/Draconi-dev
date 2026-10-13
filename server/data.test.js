@@ -199,6 +199,13 @@ describe('shared table access', () => {
     expect(canRead('party_table_state', { party_id: 'party' }, player)).toBe(true);
   });
 
+  it('lets only the GM change a map, because its scale and grid size every token', () => {
+    expect(canWrite('party_maps', { party_id: 'party' }, gm)).toBe(true);
+    expect(canWrite('party_maps', { party_id: 'party' }, player)).toBe(false);
+    expect(canWrite('party_maps', { party_id: 'party' }, observer)).toBe(false);
+    expect(canRead('party_maps', { party_id: 'party' }, player)).toBe(true);
+  });
+
   it('filters hidden tokens out of the SQL a player runs', () => {
     const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }], ['visible', { data_type: 'boolean', udt_name: 'bool' }]]);
     const playerQuery = buildAuthorizedSelectQuery('table_items', player, columns);

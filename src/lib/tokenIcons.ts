@@ -51,6 +51,14 @@ export function nameCandidates(label: string, extra: Array<string | null | undef
   return candidates;
 }
 
+/** True when every word typed appears in the file name, ignoring case, accents, separators and the extension. */
+export function matchesSearch(fileName: string, query: string): boolean {
+  const words = normalizeIconName(query).split(' ').filter(Boolean);
+  if (words.length === 0) return true;
+  const name = normalizeIconName(fileName);
+  return words.every((word) => name.includes(word));
+}
+
 export type TokenIconIndex = ReadonlyMap<string, TokenIconFile>;
 
 export function buildIconIndex(files: TokenIconFile[]): TokenIconIndex {

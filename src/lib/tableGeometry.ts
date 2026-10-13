@@ -23,11 +23,14 @@ export const TOKEN_SIZE_STEP = 0.25;
 
 export const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
-/** How wide a token is, in the map image's pixels. */
+/** How wide a token is, in the map image's pixels, given the width of one grid square (null when there is none). */
+export function tokenDiameterForCell(size: number, cell: number | null, imageWidth: number): number {
+  return cell ? size * cell : size * imageWidth * 0.07;
+}
+
+/** How wide a token is, in the map image's pixels, going by the map's grid. */
 export function tokenDiameter(size: number, grid: GridSettings, imageWidth: number): number {
-  if (grid.grid_type === 'square' && grid.grid_size > 5) return size * grid.grid_size;
-  if (grid.grid_type === 'hex' && grid.grid_size > 5) return size * grid.grid_size * Math.sqrt(3);
-  return size * imageWidth * 0.07;
+  return tokenDiameterForCell(size, cellSize(grid), imageWidth);
 }
 
 /** The scale that fits the whole image inside the container, with a little breathing room. */
@@ -95,6 +98,37 @@ export function cellSize(grid: GridSettings): number | null {
   return null;
 }
 
+export interface MapScale extends GridSettings {
+  scale_px_per_square?: number | null;
+  scale_metres_per_square?: number | null;
+}
+
+export const SCALE_CELL_MIN = 5;
+export const SCALE_CELL_MAX = 5000;
+
+/**
+ * The width of one grid square in the map image's pixels. A saved scale wins over the map's own grid; null means
+ * the map has neither, and tokens fall back to a share of the map's width.
+ */
+export function effectiveCell(map: MapScale): number | null {
+  const saved = Number(map.scale_px_per_square);
+  if (Number.isFinite(saved) && saved >= SCALE_CELL_MIN) return saved;
+  return cellSize({ grid_type: map.grid_type, grid_size: Number(map.grid_size) });
+}
+
+/** The saved metres per square, or 0 when none is saved. */
+export function savedMetresPerSquare(map: MapScale): number {
+  const metres = Number(map.scale_metres_per_square);
+  return Number.isFinite(metres) && metres > 0 ? metres : 0;
+}
+
+/** Pixels per square from a measured line: the line's length in pixels and how many squares it spans. */
+export function cellFromMeasurement(pixels: number, squares: number): number | null {
+  if (!Number.isFinite(pixels) || !Number.isFinite(squares) || pixels <= 0 || squares <= 0) return null;
+  const cell = pixels / squares;
+  return cell >= SCALE_CELL_MIN && cell <= SCALE_CELL_MAX ? cell : null;
+}
+
 export interface Measurement {
   /** Straight-line length in the map image's pixels. */
   pixels: number;
@@ -112,8 +146,17 @@ export function measureBetween(
   grid: GridSettings,
   metresPerSquare = 0,
 ): Measurement {
+  return measureWithCell(from, to, image, cellSize(grid), metresPerSquare);
+}
+
+export function measureWithCell(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  image: { width: number; height: number },
+  cell: number | null,
+  metresPerSquare = 0,
+): Measurement {
   const pixels = Math.hypot((to.x - from.x) * image.width, (to.y - from.y) * image.height);
-  const cell = cellSize(grid);
   const squares = cell ? pixels / cell : null;
   return { pixels, squares, metres: squares !== null && metresPerSquare > 0 ? squares * metresPerSquare : null };
 }

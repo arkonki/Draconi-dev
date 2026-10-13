@@ -7,6 +7,7 @@ import { TableCanvas, type TableTool } from './TableCanvas';
 import { TurnStrip } from './TurnStrip';
 import { TableCharacterBar } from './TableCharacterBar';
 import { TableImagePicker } from './TableImagePicker';
+import { TableScalePanel, type ScaleDraft } from './TableScalePanel';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useCharacterSheetModal } from '../../hooks/useCharacterSheetModal';
@@ -20,11 +21,13 @@ import { useTablePings } from '../../hooks/useTablePings';
 import { useTableTurn } from '../../hooks/useTableTurn';
 import {
   addTableItems,
+  clearMapScale,
   createMapFromImage,
   deleteTokenIcon,
   deleteTableItem,
   moveTableItem,
   pingTable,
+  saveMapScale,
   setItemsVisibility,
   setTableScene,
   updateTableItem,
@@ -34,7 +37,7 @@ import {
 } from '../../lib/api/virtualTable';
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { clampTokenScale } from '../../lib/tableGeometry';
-import type { TokenIconFile } from '../../lib/tokenIcons';
+import { nameCandidates, type TokenIconFile } from '../../lib/tokenIcons';
 import { queryKeys } from '../../lib/queryKeys';
 import type { Character } from '../../types/character';
 import type { NewTableItem, TableItem } from '../../types/virtualTable';
@@ -65,6 +68,9 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [combatOpen, setCombatOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [scaleMeasure, setScaleMeasure] = useState<number | null>(null);
+  const [scalePreview, setScalePreview] = useState<ScaleDraft | null>(null);
+  const [scaleError, setScaleError] = useState<string | null>(null);
   const [tokenPickerFor, setTokenPickerFor] = useState<TableItem | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [sizePreview, setSizePreview] = useState<{ id: string; size: number } | null>(null);
@@ -91,7 +97,14 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     if (ping.map_id === (viewMapId ?? liveMapId)) setFocusPoint({ x: ping.x, y: ping.y, nonce: Date.now() });
   });
 
-  const viewMap = useMemo(() => table.maps.find((map) => map.id === (viewMapId ?? liveMapId)) ?? null, [table.maps, viewMapId, liveMapId]);
+  const savedViewMap = useMemo(() => table.maps.find((map) => map.id === (viewMapId ?? liveMapId)) ?? null, [table.maps, viewMapId, liveMapId]);
+  // While the scale is being set, the map is drawn with the numbers being tried, before they are saved.
+  const viewMap = useMemo(
+    () => (savedViewMap && scalePreview && tool === 'scale'
+      ? { ...savedViewMap, scale_px_per_square: scalePreview.cell, scale_metres_per_square: scalePreview.metres }
+      : savedViewMap),
+    [savedViewMap, scalePreview, tool],
+  );
   const liveMap = useMemo(() => table.maps.find((map) => map.id === liveMapId) ?? null, [table.maps, liveMapId]);
   const items = useMemo(() => {
     const onMap = viewMap ? table.items.filter((item) => item.map_id === viewMap.id) : [];
@@ -247,6 +260,23 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     }
   };
 
+  const saveScaleMutation = useMutation({
+    mutationFn: ({ draft, showGrid }: { draft: ScaleDraft; showGrid: boolean }) => saveMapScale(viewMap!.id, { cell: draft.cell, metresPerSquare: draft.metres, showGrid }),
+    onSuccess: async () => {
+      setScaleError(null);
+      setTool('move');
+      await table.refreshAll();
+      showNotice('Scale saved. Tokens now follow it, for everyone.');
+    },
+    onError: (error: Error) => setScaleError(error.message),
+  });
+
+  const clearScaleMutation = useMutation({
+    mutationFn: () => clearMapScale(viewMap!.id),
+    onSuccess: async () => { setScaleError(null); setTool('move'); await table.refreshAll(); showNotice('The saved scale was removed.'); },
+    onError: (error: Error) => setScaleError(error.message),
+  });
+
   const handlePing = useCallback((x: number, y: number) => {
     const mapId = viewMapId ?? liveMapId;
     if (!mapId) return;
@@ -347,6 +377,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               onPing={handlePing}
               metresPerSquare={metresPerSquare}
               onMetresPerSquareChange={handleMetres}
+              onScaleMeasure={setScaleMeasure}
               tokenScale={tokenScale}
               onTokenScaleChange={handleTokenScale}
               onSelect={setSelectedItemId}
@@ -358,6 +389,21 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
                 <p className="text-lg font-semibold text-white">{isGm ? 'Nothing is on the table yet' : 'Waiting for the GM'}</p>
                 <p className="mt-2 text-sm">{isGm ? 'Open the Scenes tab of the drawer and show a map to your players.' : 'The map will appear here as soon as the GM shows it.'}</p>
               </div>
+            </div>
+          )}
+          {isGm && tool === 'scale' && savedViewMap && (
+            <div className="absolute left-3 top-3 z-[75]">
+              <TableScalePanel
+                key={savedViewMap.id}
+                map={savedViewMap}
+                measuredPixels={scaleMeasure}
+                saving={saveScaleMutation.isPending || clearScaleMutation.isPending}
+                error={scaleError}
+                onPreview={setScalePreview}
+                onSave={(draft, showGrid) => saveScaleMutation.mutate({ draft, showGrid })}
+                onReset={() => clearScaleMutation.mutate()}
+                onClose={() => { setTool('move'); setScaleError(null); }}
+              />
             </div>
           )}
           {notice && <div role="status" className="absolute left-1/2 top-3 z-[70] -translate-x-1/2 rounded-full bg-stone-900/90 px-4 py-2 text-sm text-white shadow-lg">{notice}</div>}
@@ -432,6 +478,8 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
           isOpen={tokenPickerFor !== null}
           partyId={partyId}
           mode="token"
+          // Start with the token's own name (without a number), so its icon is usually right at the top.
+          initialQuery={tokenPickerFor ? (nameCandidates(tokenPickerFor.label).slice(-1)[0] ?? '') : ''}
           usedImageUrls={usedImageUrls}
           saving={tokenImageMutation.isPending}
           error={pickerError}

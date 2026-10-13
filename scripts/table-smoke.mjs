@@ -146,6 +146,19 @@ try {
   await ok(rpc(tokens.player, 'set_table_items_visibility', { p_map_id: mapA.id, p_visible: false }), 403, 'players cannot hide tokens');
   results.revealAndHide = 'passed';
 
+  // --- Map scale: the GM sets it, players only read it, and nonsense is refused.
+  const mapScale = async (token, payload) => query(token, { table: 'party_maps', action: 'update', filters: [{ column: 'id', operator: 'eq', value: mapA.id }], payload });
+  await ok(mapScale(tokens.player, { scale_px_per_square: 80, scale_metres_per_square: 1.5 }), 403, 'players cannot change the scale');
+  await ok(mapScale(tokens.observer, { scale_px_per_square: 80 }), 403, 'observers cannot change the scale');
+  const saved = (await ok(mapScale(tokens.gm, { scale_px_per_square: 84.5, scale_metres_per_square: 1.5 }), 200, 'GM saves the scale')).data[0];
+  assert.deepEqual([Number(saved.scale_px_per_square), Number(saved.scale_metres_per_square)], [84.5, 1.5]);
+  const seenScale = (await ok(query(tokens.player, { table: 'party_maps', action: 'select', filters: [{ column: 'id', operator: 'eq', value: mapA.id }] }), 200, 'players read the scale')).data[0];
+  assert.deepEqual([seenScale.scale_px_per_square, seenScale.scale_metres_per_square], [84.5, 1.5], 'numbers come back as numbers');
+  const refused = await mapScale(tokens.gm, { scale_px_per_square: 2 });
+  assert.ok(refused.status >= 400 && refused.status < 500, `a scale of 2 pixels is refused (${refused.status})`);
+  await ok(mapScale(tokens.gm, { scale_px_per_square: null, scale_metres_per_square: null }), 200, 'GM forgets the scale');
+  results.mapScale = 'passed';
+
   // --- Pings: anyone who can write at the table, rate limited, and only the GM can move people's views.
   const pingCount = async () => Number((await database.query('SELECT count(*) AS n FROM table_pings WHERE party_id = $1', [party.id])).rows[0].n);
   const ping = (token, body) => rpc(token, 'ping_table', { p_map_id: mapA.id, ...body });
