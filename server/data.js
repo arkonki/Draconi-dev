@@ -12,7 +12,7 @@ const TABLES = new Set([
   'compendium', 'compendium_templates', 'encounters', 'encounter_combatants',
   'party_maps', 'party_map_pins', 'party_map_drawings', 'party_display_sessions',
   'party_display_slots', 'push_subscriptions', 'user_notification_settings',
-  'campaign_events',
+  'campaign_events', 'party_table_state', 'table_items',
 ]);
 
 const REFERENCE_TABLES = new Set([
@@ -86,6 +86,7 @@ const NUMERIC_OUTPUT_FIELDS = new Map([
   ['party_maps', ['grid_opacity', 'grid_offset_x', 'grid_offset_y', 'grid_rotation']],
   ['party_map_pins', ['x', 'y']],
   ['party_map_drawings', ['thickness']],
+  ['table_items', ['x', 'y', 'size']],
 ]);
 
 export function normalizeNumericOutput(table, row) {
@@ -283,7 +284,7 @@ function partyWriteAccess(ctx, partyId) {
   return ctx.admin || canCampaignRoleWrite(partyRole(ctx, partyId));
 }
 
-function canRead(table, row, ctx) {
+export function canRead(table, row, ctx) {
   if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return true;
   if (table === 'campaign_events') {
     return partyAccess(ctx, row.campaign_id)
@@ -298,7 +299,8 @@ function canRead(table, row, ctx) {
   if (table === 'party_members') {
     return row.user_id === ctx.user.id || ctx.characterIds.has(row.character_id) || partyAccess(ctx, row.party_id);
   }
-  if (table === 'campaign_memberships') return partyAccess(ctx, row.party_id);
+  if (table === 'campaign_memberships' || table === 'party_table_state') return partyAccess(ctx, row.party_id);
+  if (table === 'table_items') return partyAccess(ctx, row.party_id) && (row.visible === true || partyGmAccess(ctx, row.party_id));
   if (PARTY_SCOPED.has(table)) return partyAccess(ctx, row.party_id);
   if (table === 'notes') return row.user_id === ctx.user.id || partyAccess(ctx, row.party_id);
   if (table === 'compendium') return row.is_public || row.created_by === ctx.user.id || partyAccess(ctx, row.party_id);
@@ -311,7 +313,7 @@ function canRead(table, row, ctx) {
   return false;
 }
 
-function canWrite(table, row, ctx, inserting = false) {
+export function canWrite(table, row, ctx, inserting = false) {
   if (ctx.admin) return true;
   if (REFERENCE_TABLES.has(table) || table === 'users') return table === 'users' && row.id === ctx.user.id;
   if (table === 'characters') {
@@ -322,6 +324,8 @@ function canWrite(table, row, ctx, inserting = false) {
   }
   if (table === 'parties') return row.created_by === ctx.user.id;
   if (table === 'campaign_memberships') return ctx.admin || partyRole(ctx, row.party_id) === 'owner';
+  // Players move their own token through the move_table_item function, which checks ownership and locks.
+  if (table === 'table_items' || table === 'party_table_state') return partyGmAccess(ctx, row.party_id);
   if (table === 'party_members') {
     if (!partyWriteAccess(ctx, row.party_id)) return false;
     if (inserting) return partyGmAccess(ctx, row.party_id) || ctx.characterIds.has(row.character_id);
@@ -469,7 +473,12 @@ function authorizationSql(table, ctx, state) {
   if (table === 'party_members') {
     return `(t."user_id" = ${state.bind(ctx.user.id, 'uuid')} OR ${uuidArrayPredicate('t."character_id"', ctx.characterIds, state)} OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
   }
-  if (table === 'campaign_memberships' || PARTY_SCOPED.has(table) || table === 'party_display_sessions') {
+  if (table === 'table_items') {
+    // Players are only ever sent revealed items; a GM sees everything in their campaigns.
+    const gmPartyIds = partyIds.filter((partyId) => partyGmAccess(ctx, partyId));
+    return `(${uuidArrayPredicate('t."party_id"', partyIds, state)} AND (${uuidArrayPredicate('t."party_id"', gmPartyIds, state)} OR t."visible" = true))`;
+  }
+  if (table === 'campaign_memberships' || PARTY_SCOPED.has(table) || table === 'party_display_sessions' || table === 'party_table_state') {
     return uuidArrayPredicate('t."party_id"', partyIds, state);
   }
   if (table === 'notes') {
@@ -698,7 +707,7 @@ function applyOwnership(table, payload, user) {
   if (table === 'notes' || table === 'messages' || table === 'story_ideas') row.user_id = user.id;
   if (table === 'party_tasks') row.created_by_user_id = user.id;
   if (table === 'compendium' || table === 'compendium_templates') row.created_by = user.id;
-  if (table === 'party_map_pins' || table === 'party_map_drawings') row.created_by = user.id;
+  if (table === 'party_map_pins' || table === 'party_map_drawings' || table === 'table_items') row.created_by = user.id;
   if (table === 'push_subscriptions' || table === 'user_notification_settings') row.user_id = user.id;
   return row;
 }

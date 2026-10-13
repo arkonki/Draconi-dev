@@ -112,6 +112,126 @@ export async function executeRpc(user, name, args = {}) {
       return { transferred: true, previousOwnerId, newOwnerId };
     }
 
+    if (name === 'set_table_scene') {
+      const partyId = requireUuid(args.p_party_id, 'p_party_id');
+      const access = await loadCampaignAccess(client, user, partyId);
+      if (!access?.isGm) throw new HttpError(403, 'Only a GM can change the scene');
+      const mapId = args.p_map_id === null || args.p_map_id === undefined ? null : requireUuid(args.p_map_id, 'p_map_id');
+      if (mapId) {
+        const { rows } = await client.query('SELECT 1 FROM party_maps WHERE id = $1 AND party_id = $2', [mapId, partyId]);
+        if (!rows[0]) throw new HttpError(404, 'That map does not belong to this campaign');
+      }
+      const { rows } = await client.query(
+        `INSERT INTO party_table_state (party_id, map_id, revision) VALUES ($1, $2, 1)
+         ON CONFLICT (party_id) DO UPDATE SET map_id = $2, revision = party_table_state.revision + 1, updated_at = now()
+         RETURNING *`,
+        [partyId, mapId],
+      );
+      return rows[0];
+    }
+
+    if (name === 'add_table_items') {
+      const mapId = requireUuid(args.p_map_id, 'p_map_id');
+      const { rows: maps } = await client.query('SELECT party_id FROM party_maps WHERE id = $1', [mapId]);
+      if (!maps[0]) throw new HttpError(404, 'Map not found');
+      const partyId = maps[0].party_id;
+      const access = await loadCampaignAccess(client, user, partyId);
+      if (!access?.isGm) throw new HttpError(403, 'Only a GM can add tokens');
+      const wanted = Array.isArray(args.p_items) ? args.p_items : [];
+      if (wanted.length === 0 || wanted.length > 50) throw new HttpError(400, 'p_items must hold between 1 and 50 tokens');
+      const visible = args.p_visible === true;
+      const kinds = new Set(['character', 'monster', 'npc', 'prop']);
+      const defaultColors = { character: '#4f46e5', monster: '#dc2626', npc: '#059669', prop: '#78716c' };
+
+      const { rows: counts } = await client.query('SELECT count(*)::int AS n FROM table_items WHERE map_id = $1', [mapId]);
+      let placed = counts[0].n;
+      const created = [];
+      for (const entry of wanted) {
+        const kind = String(entry?.kind ?? 'prop');
+        if (!kinds.has(kind)) throw new HttpError(400, 'Unknown token kind');
+        let label = String(entry.label ?? '').trim().slice(0, 80);
+        let characterId = null;
+        let monsterId = null;
+        let imageUrl = entry.image_url ? String(entry.image_url).slice(0, 2000) : null;
+        if (kind === 'character') {
+          characterId = requireUuid(entry.character_id, 'character_id');
+          const { rows: characters } = await client.query(
+            `SELECT c.name, c.portrait_url FROM characters c
+             WHERE c.id = $1 AND (c.party_id = $2 OR EXISTS (SELECT 1 FROM party_members pm WHERE pm.party_id = $2 AND pm.character_id = c.id))`,
+            [characterId, partyId],
+          );
+          if (!characters[0]) throw new HttpError(404, 'That character is not in this campaign');
+          label = label || characters[0].name;
+          imageUrl = imageUrl || characters[0].portrait_url || null;
+        } else if (kind === 'monster' && entry.monster_id) {
+          monsterId = requireUuid(entry.monster_id, 'monster_id');
+          const { rows: monsters } = await client.query('SELECT name FROM monsters WHERE id = $1', [monsterId]);
+          if (!monsters[0]) throw new HttpError(404, 'Monster not found');
+          label = label || monsters[0].name;
+        }
+        if (!label) label = kind === 'prop' ? 'Marker' : 'Token';
+        // New tokens wait in a tidy row along the top edge until the GM drags them where they belong.
+        const column = placed % 10;
+        const row = Math.floor(placed / 10);
+        placed += 1;
+        const size = entry.size === undefined ? 1 : Number(entry.size);
+        if (!Number.isFinite(size) || size < 0.25 || size > 12) throw new HttpError(400, 'size must be between 0.25 and 12');
+        const color = /^#[0-9a-f]{6}$/i.test(String(entry.color ?? '')) ? entry.color : defaultColors[kind];
+        const inserted = await client.query(
+          `INSERT INTO table_items (party_id, map_id, kind, label, image_url, character_id, monster_id, x, y, size, color, visible, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           ON CONFLICT (map_id, character_id) WHERE character_id IS NOT NULL DO NOTHING
+           RETURNING *`,
+          [partyId, mapId, kind, label, imageUrl, characterId, monsterId, Math.min(0.95, 0.05 + column * 0.08), Math.min(0.95, 0.05 + row * 0.08), size, color, visible, user.id],
+        );
+        if (inserted.rows[0]) created.push(inserted.rows[0]);
+      }
+      return { items: created };
+    }
+
+    if (name === 'set_table_items_visibility') {
+      const mapId = requireUuid(args.p_map_id, 'p_map_id');
+      const { rows: maps } = await client.query('SELECT party_id FROM party_maps WHERE id = $1', [mapId]);
+      if (!maps[0]) throw new HttpError(404, 'Map not found');
+      const access = await loadCampaignAccess(client, user, maps[0].party_id);
+      if (!access?.isGm) throw new HttpError(403, 'Only a GM can reveal or hide tokens');
+      const ids = Array.isArray(args.p_item_ids) ? args.p_item_ids.map((id) => requireUuid(id, 'p_item_ids')) : null;
+      const result = await client.query(
+        `UPDATE table_items SET visible = $2
+         WHERE map_id = $1 AND visible <> $2 AND ($3::uuid[] IS NULL OR id = ANY($3::uuid[]))`,
+        [mapId, args.p_visible === true, ids],
+      );
+      return { changed: result.rowCount };
+    }
+
+    if (name === 'move_table_item') {
+      const itemId = requireUuid(args.p_item_id, 'p_item_id');
+      const x = Number(args.p_x);
+      const y = Number(args.p_y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new HttpError(400, 'p_x and p_y must be numbers');
+      const { rows } = await client.query(
+        `SELECT i.*, c.user_id AS character_owner
+         FROM table_items i LEFT JOIN characters c ON c.id = i.character_id
+         WHERE i.id = $1 FOR UPDATE OF i`,
+        [itemId],
+      );
+      const item = rows[0];
+      if (!item) throw new HttpError(404, 'Token not found');
+      const access = await loadCampaignAccess(client, user, item.party_id);
+      if (!access?.canWrite) throw new HttpError(403, 'Permission denied');
+      if (!access.isGm) {
+        // Players only ever see revealed tokens, and may only move their own unlocked one.
+        if (!item.visible) throw new HttpError(404, 'Token not found');
+        if (item.character_owner !== user.id) throw new HttpError(403, 'You can only move your own token');
+        if (item.locked) throw new HttpError(403, 'The GM has locked this token');
+      }
+      const updated = await client.query(
+        'UPDATE table_items SET x = $2, y = $3 WHERE id = $1 RETURNING *',
+        [itemId, Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))],
+      );
+      return updated.rows[0];
+    }
+
     if (name === 'leave_campaign') {
       const partyId = requireUuid(args.p_party_id, 'p_party_id');
       const { rows: parties } = await client.query('SELECT created_by FROM parties WHERE id = $1', [partyId]);

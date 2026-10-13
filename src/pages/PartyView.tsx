@@ -8,7 +8,7 @@ import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { Button } from '../components/shared/Button';
 import {
   Users, Trash2, UserX, ShieldAlert, ClipboardList, Backpack, Swords, FileText, MoreVertical, UserPlus, Sparkles, Hourglass,
-  MessageSquare, ChevronDown, Dices, Map, Monitor, CalendarClock, LogOut, Pencil
+  MessageSquare, ChevronDown, Dices, Map, Monitor, CalendarClock, LogOut, Pencil, Grid3x3
 } from 'lucide-react';
 import { CopyButton } from '../components/shared/CopyButton';
 import { PartyDetailsDialog } from '../components/party/PartyDetailsDialog';
@@ -31,8 +31,8 @@ import { SessionManager } from '../components/party/SessionManager';
 import { fetchCampaignTimeState } from '../lib/api/campaignTime';
 import { QUERY_STALE_TIME, queryKeys } from '../lib/queryKeys';
 
-type Tab = 'members' | 'solo' | 'rolls' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas';
-const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'rolls', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas'];
+type Tab = 'members' | 'solo' | 'rolls' | 'chat' | 'notes' | 'tasks' | 'inventory' | 'encounter' | 'time' | 'tables' | 'gmScreen' | 'storyhelper' | 'atlas' | 'table';
+const VALID_PARTY_TABS: Tab[] = ['members', 'solo', 'rolls', 'chat', 'notes', 'tasks', 'inventory', 'encounter', 'time', 'tables', 'gmScreen', 'storyhelper', 'atlas', 'table'];
 
 const StoryHelperApp = lazy(() =>
   import('../components/party/StoryHelper').then((module) => ({
@@ -49,6 +49,12 @@ const PartyNotes = lazy(() =>
     default: module.PartyNotes,
   }))
 );
+const VirtualTable = lazy(() =>
+  import('../components/table/VirtualTable').then((module) => ({
+    default: module.VirtualTable,
+  }))
+);
+
 const AtlasView = lazy(() =>
   import('../components/party/AtlasView').then((module) => ({
     default: module.AtlasView,
@@ -260,6 +266,7 @@ export function PartyView() {
     { id: 'rolls', label: 'Roll History', icon: Dices },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'notes', label: 'Journal', icon: FileText },
+    { id: 'table', label: 'Table', icon: Grid3x3 },
     { id: 'atlas', label: 'Atlas', icon: Map },
     { id: 'tasks', label: 'Quests', icon: ClipboardList },
     { id: 'inventory', label: 'Stash', icon: Backpack },
@@ -522,6 +529,12 @@ export function PartyView() {
               openNoteId={noteIdFromUrl}
               readOnly={party.campaign_role === 'observer' && !isAdmin()}
             />
+          </Suspense>
+        )}
+
+        {activeTab === 'table' && (
+          <Suspense fallback={lazyTabFallback}>
+            <VirtualTable partyId={partyId!} partyMembers={party.members} isGm={isCampaignGM} currentUserId={user?.id} />
           </Suspense>
         )}
 

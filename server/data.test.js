@@ -4,6 +4,8 @@ import {
   applyOrders,
   bindingMatchesChange,
   buildAuthorizedSelectQuery,
+  canRead,
+  canWrite,
   materializeAccessContext,
   normalizeNumericOutput,
 } from './data.js';
@@ -162,5 +164,44 @@ describe('realtime event bindings', () => {
       event,
       row,
     )).toBe(false);
+  });
+});
+
+describe('shared table access', () => {
+  const access = (user, partyAccess, characterIds = []) => materializeAccessContext(user, {
+    party_access: partyAccess, character_ids: characterIds, maps: [], encounters: [], sessions: [],
+  });
+  const gm = access({ id: 'gm', role: 'dm' }, [{ party_id: 'party', role: 'owner', owned: true }]);
+  const player = access({ id: 'player', role: 'player' }, [{ party_id: 'party', role: 'player', owned: false }], ['hero']);
+  const observer = access({ id: 'observer', role: 'player' }, [{ party_id: 'party', role: 'observer', owned: false }]);
+  const outsider = access({ id: 'outsider', role: 'player' }, []);
+  const hidden = { id: 'i1', party_id: 'party', visible: false, character_id: 'hero' };
+  const shown = { ...hidden, visible: true };
+
+  it('sends hidden tokens to the GM only, in reads and in live updates alike', () => {
+    expect(canRead('table_items', hidden, gm)).toBe(true);
+    expect(canRead('table_items', hidden, player)).toBe(false);
+    expect(canRead('table_items', hidden, observer)).toBe(false);
+    expect(canRead('table_items', hidden, outsider)).toBe(false);
+  });
+
+  it('shows revealed tokens to everyone in the campaign and nobody else', () => {
+    expect(canRead('table_items', shown, player)).toBe(true);
+    expect(canRead('table_items', shown, observer)).toBe(true);
+    expect(canRead('table_items', shown, outsider)).toBe(false);
+  });
+
+  it('lets only the GM write tokens and the scene directly', () => {
+    expect(canWrite('table_items', shown, gm)).toBe(true);
+    expect(canWrite('table_items', shown, player)).toBe(false);
+    expect(canWrite('party_table_state', { party_id: 'party' }, gm)).toBe(true);
+    expect(canWrite('party_table_state', { party_id: 'party' }, player)).toBe(false);
+    expect(canRead('party_table_state', { party_id: 'party' }, player)).toBe(true);
+  });
+
+  it('filters hidden tokens out of the SQL a player runs', () => {
+    const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }], ['visible', { data_type: 'boolean', udt_name: 'bool' }]]);
+    const playerQuery = buildAuthorizedSelectQuery('table_items', player, columns);
+    expect(playerQuery.text).toMatch(/"visible" = true/);
   });
 });
