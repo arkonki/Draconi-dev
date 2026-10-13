@@ -44,6 +44,43 @@ export async function executeRpc(user, name, args = {}) {
       return parties[0].id;
     }
 
+    if (name === 'preview_party_invite') {
+      // Lets the invite page say which campaign the link belongs to before the person commits to anything.
+      const inviteCode = String(args.p_invite_code ?? '').trim();
+      if (!inviteCode) throw new HttpError(404, 'Invalid invite code');
+      const { rows } = await client.query(
+        `SELECT p.id, p.name, u.username AS gm_name,
+                (SELECT role FROM campaign_memberships cm WHERE cm.party_id = p.id AND cm.user_id = $2) AS my_role
+           FROM parties p LEFT JOIN users u ON u.id = p.created_by
+          WHERE upper(p.invite_code) = upper($1)`,
+        [inviteCode, user.id],
+      );
+      if (!rows[0]) throw new HttpError(404, 'Invalid invite code');
+      return { party_id: rows[0].id, name: rows[0].name, gm_name: rows[0].gm_name, my_role: rows[0].my_role };
+    }
+
+    if (name === 'join_party_as_observer') {
+      const inviteCode = String(args.p_invite_code ?? '').trim();
+      const { rows: parties } = inviteCode
+        ? await client.query('SELECT id FROM parties WHERE upper(invite_code) = upper($1)', [inviteCode])
+        : { rows: [] };
+      if (!parties[0]) throw new HttpError(404, 'Invalid invite code');
+      // Someone who already has a seat keeps it; watching never replaces a stronger role.
+      // (Checked first because the owner-protection trigger fires before ON CONFLICT is considered.)
+      const { rows: existing } = await client.query(
+        'SELECT 1 FROM campaign_memberships WHERE party_id = $1 AND user_id = $2',
+        [parties[0].id, user.id],
+      );
+      if (!existing[0]) {
+        await client.query(
+          `INSERT INTO campaign_memberships (party_id, user_id, role)
+           VALUES ($1, $2, 'observer') ON CONFLICT (party_id, user_id) DO NOTHING`,
+          [parties[0].id, user.id],
+        );
+      }
+      return parties[0].id;
+    }
+
     if (name === 'create_campaign') {
       const campaignName = String(args.p_name ?? '').trim();
       if (!campaignName) throw new HttpError(400, 'The campaign needs a name');
@@ -627,7 +664,7 @@ export async function executeRpc(user, name, args = {}) {
 
     throw new HttpError(404, `Unknown RPC: ${name}`);
   });
-  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'leave_campaign' || name === 'create_campaign' || name === 'remove_party_member' || name === 'transfer_campaign_ownership' || name === 'duplicate_encounter_with_combatants') {
+  if (name === 'join_party_with_character' || name === 'join_party_secure' || name === 'join_party_as_observer' || name === 'leave_campaign' || name === 'create_campaign' || name === 'remove_party_member' || name === 'transfer_campaign_ownership' || name === 'duplicate_encounter_with_combatants') {
     invalidateAccessContextCache();
   }
   return result;

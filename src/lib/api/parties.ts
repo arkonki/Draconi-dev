@@ -218,6 +218,28 @@ export async function createParty(details: { name: string; description?: string;
   return data;
 }
 
+export interface PartyInvitePreview {
+  party_id: string;
+  name: string;
+  gm_name: string | null;
+  /** The viewer's role in this campaign if they already have one. */
+  my_role: 'owner' | 'gm' | 'player' | 'observer' | null;
+}
+
+/** Which campaign an invite link belongs to, so the invite page can say so. */
+export async function previewPartyInvite(inviteCode: string): Promise<PartyInvitePreview> {
+  const { data, error } = await supabase.rpc<PartyInvitePreview>('preview_party_invite', { p_invite_code: inviteCode });
+  if (error || !data) throw new Error('This invite link is invalid or has expired.');
+  return data;
+}
+
+/** Joins a campaign as a read-only observer. An existing role is never downgraded. Returns the campaign id. */
+export async function joinPartyAsObserver(inviteCode: string): Promise<string> {
+  const { data, error } = await supabase.rpc<string>('join_party_as_observer', { p_invite_code: inviteCode });
+  if (error || !data) throw new Error(error?.message || 'Could not join as an observer.');
+  return data;
+}
+
 /** Hands the campaign to another member. The previous owner stays on as a GM. */
 export async function transferCampaignOwnership(partyId: string, userId: string): Promise<void> {
   const { error } = await supabase.rpc('transfer_campaign_ownership', { p_party_id: partyId, p_user_id: userId });

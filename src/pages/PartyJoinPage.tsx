@@ -3,17 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase'; // Ensure this path is correct
 import { useAuth } from '../contexts/useAuth';
-import { Users, Check } from 'lucide-react';
+import { Users, Check, Eye } from 'lucide-react';
 import { Button } from '../components/shared/Button';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
-import { fetchAvailableCharacters } from '../lib/api/parties'; // Assuming this API is still valid
+import { fetchAvailableCharacters, joinPartyAsObserver, previewPartyInvite } from '../lib/api/parties';
 
 // This component no longer fetches party data directly
 export function PartyJoinPage() {
   // 1. Get inviteCode from URL params. Make sure your Route is `/party/join/:inviteCode`
   const { inviteCode } = useParams<{ inviteCode: string }>();
-	console.log("Invite Code from URL:", inviteCode); // <-- ADD THIS LINE
   const navigate = useNavigate();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -28,6 +27,22 @@ export function PartyJoinPage() {
     queryKey: ['availableCharacters', user?.id],
     queryFn: () => fetchAvailableCharacters(user?.id),
     enabled: !!user,
+  });
+
+  const { data: invite } = useQuery({
+    queryKey: ['partyInvite', inviteCode],
+    queryFn: () => previewPartyInvite(inviteCode!),
+    enabled: !!user && !!inviteCode,
+    retry: false,
+  });
+
+  const watchMutation = useMutation({
+    mutationFn: () => joinPartyAsObserver(inviteCode!),
+    onSuccess: (partyId) => {
+      queryClient.invalidateQueries({ queryKey: ['parties'] });
+      queryClient.invalidateQueries({ queryKey: ['party', partyId] });
+      navigate(`/party/${partyId}`);
+    },
   });
 
   // 3. The mutation is now completely different. It calls the RPC.
@@ -82,7 +97,7 @@ export function PartyJoinPage() {
   
   // 4. Simplified loading and error states
   const isLoading = isLoadingChars;
-  const error = errorChars?.message || joinPartyMutation.error?.message;
+  const error = errorChars?.message || joinPartyMutation.error?.message || watchMutation.error?.message;
 
   if (isLoading) {
     return (
@@ -114,10 +129,18 @@ export function PartyJoinPage() {
         <div className="text-center mb-8">
           <Users className="w-12 h-12 text-blue-600 mx-auto mb-4" />
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Join an Adventure</h1>
-          {/* We can't display party name anymore, so we use a generic title */}
           <p className="text-gray-600 text-lg">
-            You've been invited to join a new party!
+            {invite
+              ? <>You've been invited to <strong>{invite.name}</strong>{invite.gm_name ? <>, run by {invite.gm_name}</> : null}.</>
+              : "You've been invited to join a new party!"}
           </p>
+          {invite?.my_role && (
+            <p className="mt-2 text-sm text-gray-500">
+              You are already in this campaign as {invite.my_role === 'owner' ? 'its GM' : `a${invite.my_role === 'observer' ? 'n' : ''} ${invite.my_role}`}.
+              {' '}
+              <button type="button" className="text-blue-600 underline" onClick={() => navigate(`/party/${invite.party_id}`)}>Open it</button>
+            </p>
+          )}
         </div>
 
         {characters.length > 0 ? (
@@ -177,6 +200,23 @@ export function PartyJoinPage() {
               onClick={() => navigate('/')} // Redirect to character creation or dashboard
             >
               Create a Character
+            </Button>
+          </div>
+        )}
+
+        {!invite?.my_role && (
+          <div className="mt-8 border-t pt-6 text-center">
+            <p className="text-sm text-gray-600 mb-3">
+              Not playing a character? You can follow the game as an observer: you see the campaign but cannot change anything.
+            </p>
+            <Button
+              variant="secondary"
+              icon={Eye}
+              loading={watchMutation.isPending}
+              disabled={watchMutation.isPending || joinPartyMutation.isPending}
+              onClick={() => watchMutation.mutate()}
+            >
+              Watch as observer
             </Button>
           </div>
         )}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Plus, Users, Sword, X } from 'lucide-react';
+import { ArrowRight, Plus, Users, Sword, User as SoloIcon, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/useAuth';
 import { Button } from '../components/shared/Button';
@@ -17,6 +17,8 @@ export function AdventureParty() {
   const queryClient = useQueryClient();
 
   const [isCreating, setIsCreating] = useState(false);
+  // Solo quick-start: one hero, a campaign named after them, straight on to the solo settings.
+  const [isSolo, setIsSolo] = useState(false);
   const [newPartyName, setNewPartyName] = useState('');
   const [selectedCharacters, setSelectedCharacters] = useState<string[]>([]);
   const partyNameInputRef = useRef<HTMLInputElement>(null);
@@ -42,18 +44,44 @@ export function AdventureParty() {
 
   const createPartyMutation = useMutation({
     mutationFn: ({ name, characterIds }: { name: string; characterIds: string[] }) => createParty({ name, characterIds }),
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['parties', user?.id] });
       queryClient.invalidateQueries({ queryKey: ['availableCharacters', user?.id] });
       setNewPartyName('');
       setSelectedCharacters([]);
       setIsCreating(false);
+      if (isSolo) {
+        setIsSolo(false);
+        navigate(`/party/${created.id}?tab=solo`);
+      }
     },
   });
 
-  const handleCreateParty = () => {
-    createPartyMutation.mutate({ name: newPartyName, characterIds: selectedCharacters });
+  const startCreating = (solo: boolean) => {
+    setIsSolo(solo);
+    setSelectedCharacters([]);
+    setNewPartyName('');
+    setIsCreating(true);
   };
+
+  const stopCreating = () => {
+    setIsCreating(false);
+    setIsSolo(false);
+  };
+
+  const toggleCharacter = (id: string) => {
+    setSelectedCharacters((prev) => {
+      if (isSolo) return prev.includes(id) ? [] : [id];
+      return prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id];
+    });
+  };
+
+  const handleCreateParty = () => {
+    createPartyMutation.mutate({ name: partyName, characterIds: selectedCharacters });
+  };
+
+  const soloHero = isSolo ? availableCharacters.find((character) => character.id === selectedCharacters[0]) : undefined;
+  const partyName = newPartyName.trim() || (soloHero ? `${soloHero.name}'s solo adventure` : '');
 
   if (loading && !isCreating) {
     return <div className="p-8 flex justify-center h-96 items-center"><LoadingSpinner size="lg" /></div>;
@@ -76,9 +104,14 @@ export function AdventureParty() {
         </div>
         {!isCreating && (
           // Responsive Button: Icon only on mobile, text on desktop
-          <Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>
-            <span className="hidden md:inline">Create Party</span>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={SoloIcon} onClick={() => startCreating(true)} title="Play alone with one character">
+              <span className="hidden md:inline">Solo Game</span>
+            </Button>
+            <Button variant="primary" icon={Plus} onClick={() => startCreating(false)}>
+              <span className="hidden md:inline">Create Party</span>
+            </Button>
+          </div>
         )}
       </div>
 
@@ -90,8 +123,8 @@ export function AdventureParty() {
       {isCreating && (
         <div className="mb-8 bg-white rounded-xl shadow-sm border border-blue-200 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
           <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50/50">
-            <h2 className="text-lg font-bold text-gray-800">Create New Party</h2>
-            <button onClick={() => setIsCreating(false)} className="text-gray-400 hover:text-gray-600">
+            <h2 className="text-lg font-bold text-gray-800">{isSolo ? 'Start a Solo Game' : 'Create New Party'}</h2>
+            <button onClick={stopCreating} className="text-gray-400 hover:text-gray-600">
               <X size={20} />
             </button>
           </div>
@@ -102,7 +135,7 @@ export function AdventureParty() {
             )}
             
             <div>
-              <label htmlFor="partyName" className="block text-sm font-bold text-gray-700 mb-1">Party Name</label>
+              <label htmlFor="partyName" className="block text-sm font-bold text-gray-700 mb-1">{isSolo ? 'Campaign Name (optional)' : 'Party Name'}</label>
               <input
                 ref={partyNameInputRef}
                 type="text"
@@ -110,12 +143,12 @@ export function AdventureParty() {
                 value={newPartyName}
                 onChange={(e) => setNewPartyName(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none"
-                placeholder="e.g. The Fellowship of the Ring"
+                placeholder={isSolo ? (soloHero ? `${soloHero.name}'s solo adventure` : "Named after your hero by default") : "e.g. The Fellowship of the Ring"}
               />
             </div>
 
             <div>
-              <p className="block text-sm font-bold text-gray-700 mb-2">Select Initial Characters (Optional)</p>
+              <p className="block text-sm font-bold text-gray-700 mb-2">{isSolo ? 'Choose your hero' : 'Select Initial Characters (Optional)'}</p>
               {isLoadingChars ? <div className="py-8 flex justify-center"><LoadingSpinner /></div> : 
                errorChars ? <ErrorMessage message={errorChars.message} /> : 
                availableCharacters.length > 0 ? (
@@ -134,17 +167,13 @@ export function AdventureParty() {
                         `}
                         onClick={() => {
                           if (character.id) {
-                            setSelectedCharacters((prev) => 
-                              prev.includes(character.id!) ? prev.filter((id) => id !== character.id) : [...prev, character.id!]
-                            );
+                            toggleCharacter(character.id);
                           }
                         }}
                         onKeyDown={(event) => {
                           if ((event.key === 'Enter' || event.key === ' ') && character.id) {
                             event.preventDefault();
-                            setSelectedCharacters((prev) =>
-                              prev.includes(character.id!) ? prev.filter((id) => id !== character.id) : [...prev, character.id!]
-                            );
+                            toggleCharacter(character.id);
                           }
                         }}
                         role="button"
@@ -169,8 +198,8 @@ export function AdventureParty() {
             </div>
 
             <div className="flex flex-col-reverse md:flex-row justify-end gap-3 pt-4 border-t border-gray-100">
-              <Button variant="ghost" onClick={() => setIsCreating(false)} disabled={createPartyMutation.isPending} className="w-full md:w-auto">Cancel</Button>
-              <Button variant="primary" onClick={handleCreateParty} loading={createPartyMutation.isPending} disabled={!newPartyName.trim() || createPartyMutation.isPending} className="w-full md:w-auto">Create Party</Button>
+              <Button variant="ghost" onClick={stopCreating} disabled={createPartyMutation.isPending} className="w-full md:w-auto">Cancel</Button>
+              <Button variant="primary" onClick={handleCreateParty} loading={createPartyMutation.isPending} disabled={!partyName || (isSolo && selectedCharacters.length !== 1) || createPartyMutation.isPending} className="w-full md:w-auto">{isSolo ? 'Start Solo Game' : 'Create Party'}</Button>
             </div>
           </div>
         </div>
@@ -262,7 +291,7 @@ export function AdventureParty() {
               icon={Users}
               title="No Adventure Parties"
               description="You are not in any adventure parties yet. Create one to run a game as its GM or to play solo, or join one with an invite link."
-              action={<Button variant="primary" icon={Plus} onClick={() => setIsCreating(true)}>Create Your First Party</Button>}
+              action={<Button variant="primary" icon={Plus} onClick={() => startCreating(false)}>Create Your First Party</Button>}
             />
           </div>
         )

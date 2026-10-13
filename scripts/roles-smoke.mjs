@@ -84,6 +84,24 @@ try {
   await ok(query(tokens.bob, { table: 'parties', action: 'update', filters: [{ column: 'id', operator: 'eq', value: aliceParty.id }], payload: { name: 'nope' } }), 403, 'an observer cannot change it');
   results.observer = 'passed';
 
+  // --- Following a game by invite link, without a character.
+  const inviteOf = async (partyId) => (await database.query('SELECT invite_code FROM parties WHERE id = $1', [partyId])).rows[0].invite_code;
+  const code = await inviteOf(aliceParty.id);
+  const preview = (await ok(rpc(tokens.legacy, 'preview_party_invite', { p_invite_code: code }), 200, 'invite preview')).data;
+  assert.equal(preview.name, `RL Alice ${suffix}`);
+  assert.equal(preview.my_role, null, 'a stranger has no role yet');
+  await ok(rpc(tokens.legacy, 'preview_party_invite', { p_invite_code: 'NOPE-NOPE' }), 404, 'unknown invite');
+  await ok(rpc(tokens.legacy, 'join_party_as_observer', { p_invite_code: 'NOPE-NOPE' }), 404, 'unknown invite cannot be joined');
+  assert.equal((await ok(rpc(tokens.legacy, 'join_party_as_observer', { p_invite_code: code }), 200, 'observer join')).data, aliceParty.id);
+  assert.equal(await roleIn(aliceParty.id, emails.legacy), 'observer');
+  await ok(rpc(tokens.legacy, 'join_party_as_observer', { p_invite_code: code }), 200, 'joining twice is harmless');
+  assert.equal((await ok(query(tokens.legacy, { table: 'parties', action: 'select', filters: [{ column: 'id', operator: 'eq', value: aliceParty.id }] }), 200, 'new observer reads')).data.length, 1);
+  await ok(query(tokens.legacy, { table: 'parties', action: 'update', filters: [{ column: 'id', operator: 'eq', value: aliceParty.id }], payload: { name: 'nope' } }), 403, 'new observer cannot write');
+  await ok(rpc(tokens.alice, 'join_party_as_observer', { p_invite_code: code }), 200, 'the owner opening her own link');
+  assert.equal(await roleIn(aliceParty.id, emails.alice), 'owner', 'watching never downgrades a role');
+  await database.query('DELETE FROM campaign_memberships WHERE party_id = $1 AND user_id = (SELECT id FROM users WHERE email = $2)', [aliceParty.id, emails.legacy]);
+  results.observerByInvite = 'passed';
+
   // --- Solo play is available to anyone who runs a campaign, and to nobody who merely watches.
   const soloHero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `RL Solo Hero ${suffix}`, max_hp: 10, current_hp: 10, max_wp: 8, current_wp: 8 } }), 200, 'solo hero')).data[0];
   const soloParty = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `RL Solo ${suffix}`, p_character_ids: [soloHero.id] }), 200, 'Alice starts a solo campaign')).data;
