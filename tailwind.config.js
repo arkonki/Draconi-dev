@@ -66,7 +66,20 @@ export default {
           xl: '5rem',
         },
       },
+      animation: {
+        // A sheet that slides up from the bottom edge of the screen to its place in the middle.
+        'sheet-rise': 'sheet-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both',
+        'backdrop-in': 'backdrop-in 260ms ease-out both',
+      },
       keyframes: {
+        'sheet-rise': {
+          '0%': { transform: 'translateY(100vh)', opacity: '0.6' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        'backdrop-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
         shimmer: {
           '100%': {
             transform: 'translateX(100%)',

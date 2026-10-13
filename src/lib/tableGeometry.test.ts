@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMoveItem, cellSize, centerOn, clamp01, dragToFraction, fitView, initials, measureBetween, screenToFraction, tokenDiameter, zoomAround } from './tableGeometry';
+import { canMoveItem, clampTokenScale, cellSize, centerOn, clamp01, dragToFraction, fitView, initials, measureBetween, screenToFraction, tokenDiameter, zoomAround } from './tableGeometry';
 
 describe('tokenDiameter', () => {
   it('follows the grid when there is one', () => {
@@ -76,6 +76,15 @@ describe('canMoveItem', () => {
     expect(canMoveItem({ character_id: 'c1', locked: true }, false, mine)).toBe(false);
     expect(canMoveItem({ character_id: 'c2', locked: false }, false, mine)).toBe(false);
     expect(canMoveItem({ character_id: null, locked: false }, false, mine)).toBe(false);
+  });
+});
+
+describe('clampTokenScale', () => {
+  it('keeps the viewer scale within sensible limits', () => {
+    expect(clampTokenScale(1)).toBe(1);
+    expect(clampTokenScale(0.1)).toBe(0.5);
+    expect(clampTokenScale(9)).toBe(2.5);
+    expect(clampTokenScale(Number.NaN)).toBe(1);
   });
 });
 

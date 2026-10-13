@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { TOKEN_SIZE_MAX, TOKEN_SIZE_MIN, TOKEN_SIZE_STEP } from '../../lib/tableGeometry';
 import { Eye, EyeOff, Lock, LockOpen, MapPin, Monitor, Plus, Search, Trash2, Upload, Users } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { optimizedImageUrl } from '../../lib/images';
@@ -29,6 +30,8 @@ interface TableDrawerProps {
   onFocus: (item: TableItem) => void;
   onAdd: (items: NewTableItem[]) => void;
   onResize: (item: TableItem, size: number) => void;
+  /** Shows a new size on the map while the slider is still being dragged, without saving it. */
+  onPreviewSize: (item: TableItem, size: number | null) => void;
   /** Resolves true when the map was saved, so the form can reset. */
   onUpload: (file: File, name: string) => Promise<boolean>;
   uploading: boolean;
@@ -40,9 +43,23 @@ const formatSize = (size: number) => (Number.isInteger(size) ? String(size) : si
 
 export function TableDrawer({
   maps, liveMapId, viewMapId, items, partyMembers, monsters, selectedItemId, busy,
-  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd, onResize, onUpload, uploading, uploadError,
+  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd, onResize, onPreviewSize, onUpload, uploading, uploadError,
 }: TableDrawerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sizeCommitTimer = useRef<number | null>(null);
+  // The slider saves when it is let go, and also shortly after the last change, so a touch screen that never
+  // reports the release still saves.
+  const commitSize = (item: TableItem, size: number) => {
+    if (sizeCommitTimer.current) window.clearTimeout(sizeCommitTimer.current);
+    sizeCommitTimer.current = null;
+    onResize(item, size);
+    onPreviewSize(item, null);
+  };
+  const previewSize = (item: TableItem, size: number) => {
+    onPreviewSize(item, size);
+    if (sizeCommitTimer.current) window.clearTimeout(sizeCommitTimer.current);
+    sizeCommitTimer.current = window.setTimeout(() => commitSize(item, size), 500);
+  };
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [mapName, setMapName] = useState('');
   const [tab, setTab] = useState<'tokens' | 'scenes'>('tokens');
@@ -158,7 +175,8 @@ export function TableDrawer({
                   <h4 className="mb-1 text-xs font-bold uppercase tracking-wide text-stone-500">{KIND_LABEL[group.kind]}</h4>
                   <ul className="space-y-1">
                     {group.entries.map((item) => (
-                      <li key={item.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${selectedItemId === item.id ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
+                      <li key={item.id} className={`rounded-lg border px-2 py-1.5 ${selectedItemId === item.id ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
+                        <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
                           checked={item.visible}
@@ -183,6 +201,28 @@ export function TableDrawer({
                           {item.locked ? <Lock size={15} /> : <LockOpen size={15} />}
                         </button>
                         <button type="button" aria-label={`Remove ${item.label}`} onClick={() => onRemove(item)} className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+                        </div>
+                        {selectedItemId === item.id && (
+                          <div className="mt-1.5 flex items-center gap-2 pl-7 text-xs text-stone-600">
+                            <label htmlFor={`size-${item.id}`} className="flex-none">Size</label>
+                            <input
+                              id={`size-${item.id}`}
+                              type="range"
+                              min={TOKEN_SIZE_MIN}
+                              max={TOKEN_SIZE_MAX}
+                              step={TOKEN_SIZE_STEP}
+                              defaultValue={item.size}
+                              key={`${item.id}-${item.size}`}
+                              disabled={busy}
+                              onChange={(event) => previewSize(item, Number(event.target.value))}
+                              onPointerUp={(event) => commitSize(item, Number(event.currentTarget.value))}
+                              onKeyUp={(event) => commitSize(item, Number(event.currentTarget.value))}
+                              className="h-1.5 min-w-0 flex-1 cursor-pointer accent-indigo-600"
+                              aria-label={`Size of ${item.label} in grid squares`}
+                            />
+                            <span className="w-10 flex-none text-right font-mono">{formatSize(item.size)}×</span>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>

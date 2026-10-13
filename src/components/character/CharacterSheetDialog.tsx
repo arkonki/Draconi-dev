@@ -44,6 +44,7 @@ export function CharacterSheetDialog({
       size="sheet"
       layer={layer}
       fullScreenMobile
+      animation="rise"
       panelClassName="sm:h-[92dvh] border border-stone-300"
       headerClassName="bg-stone-800 text-white border-stone-700"
       titleClassName="font-serif text-white"

@@ -1,10 +1,15 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, Maximize, Minimize, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { TableCanvas, type TableTool } from './TableCanvas';
 import { TurnStrip } from './TurnStrip';
+import { TableCharacterBar } from './TableCharacterBar';
+import { AccessibleDialog } from '../shared/AccessibleDialog';
+import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
+import { useCharacterSheetModal } from '../../hooks/useCharacterSheetModal';
+import { useTableCharacters } from '../../hooks/useTableCharacters';
 import { TableDrawer } from './TableDrawer';
 import { useConfirm } from '../../hooks/useConfirm';
 import { tableKeys, useVirtualTable } from '../../hooks/useVirtualTable';
@@ -21,9 +26,13 @@ import {
   uploadTableMap,
 } from '../../lib/api/virtualTable';
 import { fetchAllMonsters } from '../../lib/api/monsters';
+import { clampTokenScale } from '../../lib/tableGeometry';
 import { queryKeys } from '../../lib/queryKeys';
 import type { Character } from '../../types/character';
 import type { NewTableItem, TableItem } from '../../types/virtualTable';
+
+// The combat page is large, and only a GM ever opens it, so it is loaded when first needed.
+const PartyEncounterView = lazy(() => import('../party/PartyEncounterView').then((module) => ({ default: module.PartyEncounterView })));
 
 interface VirtualTableProps {
   partyId: string;
@@ -46,6 +55,11 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const [lookHere, setLookHere] = useState(false);
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number; nonce: number } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [combatOpen, setCombatOpen] = useState(false);
+  const [sizePreview, setSizePreview] = useState<{ id: string; size: number } | null>(null);
+  const [tokenScale, setTokenScale] = useState(() => {
+    try { return clampTokenScale(Number(window.localStorage.getItem('table-token-scale') || 1)); } catch { return 1; }
+  });
   const [metresPerSquare, setMetresPerSquare] = useState(() => {
     try { return Number(window.localStorage.getItem('table-ruler-metres') || 0) || 0; } catch { return 0; }
   });
@@ -68,9 +82,22 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
 
   const viewMap = useMemo(() => table.maps.find((map) => map.id === (viewMapId ?? liveMapId)) ?? null, [table.maps, viewMapId, liveMapId]);
   const liveMap = useMemo(() => table.maps.find((map) => map.id === liveMapId) ?? null, [table.maps, liveMapId]);
-  const items = useMemo(() => (viewMap ? table.items.filter((item) => item.map_id === viewMap.id) : []), [table.items, viewMap]);
+  const items = useMemo(() => {
+    const onMap = viewMap ? table.items.filter((item) => item.map_id === viewMap.id) : [];
+    // While the GM drags the size slider, show the new size at once without saving every step.
+    return sizePreview ? onMap.map((item) => (item.id === sizePreview.id ? { ...item, size: sizePreview.size } : item)) : onMap;
+  }, [table.items, viewMap, sizePreview]);
 
   const turn = useTableTurn(partyId, items, isGm);
+
+  const memberIds = useMemo(() => partyMembers.map((member) => member.id).filter(Boolean) as string[], [partyMembers]);
+  const quickCharacters = useTableCharacters(partyId, memberIds);
+  // Inside the sheet modal a player can only switch between their own characters; the GM can open anyone's.
+  const sheetMembers = useMemo(
+    () => (isGm ? partyMembers : partyMembers.filter((member) => member.user_id === currentUserId)),
+    [isGm, partyMembers, currentUserId],
+  );
+  const sheet = useCharacterSheetModal(currentUserId, sheetMembers);
 
   const myCharacterIds = useMemo(
     () => new Set(partyMembers.filter((member) => member.user_id === currentUserId && member.id).map((member) => member.id as string)),
@@ -79,6 +106,12 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const portraits = useMemo(() => new Map(partyMembers.filter((member) => member.id).map((member) => [member.id as string, member.portrait_url ?? null])), [partyMembers]);
 
   const { data: monsters = [] } = useQuery({ queryKey: queryKeys.monsters, queryFn: fetchAllMonsters, enabled: isGm, staleTime: 5 * 60_000 });
+
+  const handleTokenScale = (value: number) => {
+    const next = clampTokenScale(value);
+    setTokenScale(next);
+    try { window.localStorage.setItem('table-token-scale', String(next)); } catch { /* a remembered setting is a convenience only */ }
+  };
 
   const handleMetres = (value: number) => {
     setMetresPerSquare(value);
@@ -239,6 +272,8 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               onPing={handlePing}
               metresPerSquare={metresPerSquare}
               onMetresPerSquareChange={handleMetres}
+              tokenScale={tokenScale}
+              onTokenScaleChange={handleTokenScale}
               onSelect={setSelectedItemId}
               onMove={handleMove}
             />
@@ -273,6 +308,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               onFocus={(item) => { setSelectedItemId(item.id); setFocusRequest({ itemId: item.id, nonce: Date.now() }); }}
               onAdd={(newItems) => addMutation.mutate(newItems)}
               onResize={(item, size) => resizeMutation.mutate({ item, size })}
+              onPreviewSize={(item, size) => setSizePreview(size === null ? null : { id: item.id, size })}
               onUpload={async (file, name) => {
                 try { await uploadMutation.mutateAsync({ file, name }); return true; } catch { return false; }
               }}
@@ -282,6 +318,37 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
           </div>
         )}
       </div>
+      <TableCharacterBar
+        characters={quickCharacters}
+        isGm={isGm}
+        currentUserId={currentUserId}
+        onOpenSheet={sheet.open}
+        onOpenCombat={isGm ? () => setCombatOpen(true) : undefined}
+        combatActive={turn.active}
+      />
+
+      <CharacterSheetDialog {...sheet.dialogProps} />
+
+      {isGm && combatOpen && (
+        <AccessibleDialog
+          isOpen
+          onClose={() => setCombatOpen(false)}
+          title="Combat"
+          description={turn.active ? 'An encounter is running.' : 'No encounter is running.'}
+          ariaLabel="Combat"
+          size="sheet"
+          fullScreenMobile
+          animation="rise"
+          panelClassName="sm:h-[92dvh] border border-stone-300"
+          headerClassName="bg-stone-800 text-white border-stone-700"
+          titleClassName="font-serif text-white"
+          bodyClassName="bg-stone-50"
+        >
+          <Suspense fallback={<div className="flex h-64 items-center justify-center"><LoadingSpinner size="lg" /></div>}>
+            <PartyEncounterView partyId={partyId} partyMembers={partyMembers} isDM />
+          </Suspense>
+        </AccessibleDialog>
+      )}
       {confirmDialog}
     </div>
   );

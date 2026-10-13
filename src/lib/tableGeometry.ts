@@ -11,6 +11,16 @@ export interface GridSettings {
 export const MIN_SCALE = 0.05;
 export const MAX_SCALE = 6;
 
+/** Each viewer can make every token bigger or smaller on their own screen, e.g. to read a phone. */
+export const TOKEN_SCALE_MIN = 0.5;
+export const TOKEN_SCALE_MAX = 2.5;
+export const clampTokenScale = (value: number) => (Number.isFinite(value) ? Math.min(TOKEN_SCALE_MAX, Math.max(TOKEN_SCALE_MIN, value)) : 1);
+
+/** Token size in grid squares is set per token (a quarter square to twelve). */
+export const TOKEN_SIZE_MIN = 0.25;
+export const TOKEN_SIZE_MAX = 12;
+export const TOKEN_SIZE_STEP = 0.25;
+
 export const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 /** How wide a token is, in the map image's pixels. */

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair, Hand, Maximize2, Minus, Plus, Radio, Ruler, Target, X } from 'lucide-react';
+import { CircleDot, Crosshair, Hand, Maximize2, Minus, Plus, Radio, Ruler, Target, X } from 'lucide-react';
 import type { PartyMap } from '../../types/atlas';
 import type { TableItem } from '../../types/virtualTable';
 import type { LivePing } from '../../hooks/useTablePings';
 import {
+  TOKEN_SCALE_MAX,
+  TOKEN_SCALE_MIN,
   canMoveItem,
   centerOn,
   dragToFraction,
@@ -48,6 +50,9 @@ interface TableCanvasProps {
   onPing: (x: number, y: number) => void;
   metresPerSquare: number;
   onMetresPerSquareChange: (value: number) => void;
+  /** This viewer's own multiplier for every token's size. */
+  tokenScale: number;
+  onTokenScaleChange: (value: number) => void;
   onSelect: (itemId: string | null) => void;
   /** Called while a token is dragged (throttled) and once more when it is dropped. */
   onMove: (itemId: string, x: number, y: number) => Promise<void> | void;
@@ -66,7 +71,7 @@ interface Ruler { from: { x: number; y: number }; to: { x: number; y: number } }
 
 export function TableCanvas({
   map, items, isGm, myCharacterIds, portraits, selectedItemId, turnItemIds, focusRequest, focusPoint, pings, tool, onToolChange,
-  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, onSelect, onMove,
+  lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, tokenScale, onTokenScaleChange, onSelect, onMove,
 }: TableCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -364,7 +369,7 @@ export function TableCanvas({
                   item={item}
                   centerX={position.x * natural.width}
                   centerY={position.y * natural.height}
-                  diameter={Math.max(tokenDiameter(item.size, grid, natural.width), MIN_TOKEN_SCREEN_PX / view.scale)}
+                  diameter={Math.max(tokenDiameter(item.size, grid, natural.width) * tokenScale, MIN_TOKEN_SCREEN_PX / view.scale)}
                   scale={view.scale}
                   imageUrl={item.image_url ?? (item.character_id ? portraits.get(item.character_id) ?? null : null)}
                   isMine={Boolean(item.character_id && myCharacterIds.has(item.character_id))}
@@ -448,6 +453,22 @@ export function TableCanvas({
             <Radio size={16} /> <span className="hidden sm:inline">Look here</span>
           </button>
         )}
+        <label className="flex items-center gap-1.5 px-2 text-xs text-white/80" title="Make every token bigger or smaller on your screen">
+          <CircleDot size={14} />
+          <span className="hidden sm:inline">Tokens</span>
+          <input
+            type="range"
+            min={TOKEN_SCALE_MIN}
+            max={TOKEN_SCALE_MAX}
+            step={0.1}
+            value={tokenScale}
+            onChange={(event) => onTokenScaleChange(Number(event.target.value))}
+            onDoubleClick={() => onTokenScaleChange(1)}
+            aria-label="Token size on your screen"
+            className="h-1.5 w-20 cursor-pointer accent-amber-300"
+          />
+          <span className="w-9 text-right font-mono">{Math.round(tokenScale * 100)}%</span>
+        </label>
         {tool === 'ruler' && (
           <>
             <label className="flex items-center gap-1 px-1 text-xs text-white/80">

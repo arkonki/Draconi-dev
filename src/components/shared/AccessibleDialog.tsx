@@ -67,6 +67,8 @@ export interface AccessibleDialogProps {
   bodyClassName?: string;
   footerClassName?: string;
   bodyScrollable?: boolean;
+  /** 'rise' slides the panel up from the bottom of the screen to the middle. Honours the reduced-motion setting. */
+  animation?: 'none' | 'rise';
 }
 
 export function AccessibleDialog({
@@ -93,6 +95,7 @@ export function AccessibleDialog({
   bodyClassName = '',
   footerClassName = '',
   bodyScrollable = true,
+  animation = 'none',
 }: AccessibleDialogProps) {
   const generatedId = useId();
   const titleId = `${generatedId}-title`;
@@ -174,7 +177,7 @@ export function AccessibleDialog({
     <div style={{ zIndex: layerIndex }} data-dialog-layer={layerIndex} className="fixed inset-0 flex items-center justify-center p-0 sm:p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className={`absolute inset-0 bg-black/60 backdrop-blur-sm ${animation === 'rise' ? 'animate-backdrop-in motion-reduce:animate-none' : ''}`}
         onClick={() => closeOnBackdrop && !closeDisabled && onClose()}
         aria-hidden="true"
         tabIndex={-1}
@@ -187,7 +190,7 @@ export function AccessibleDialog({
         aria-labelledby={ariaLabel || hideHeader ? undefined : titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className={`relative flex w-full flex-col overflow-hidden bg-white shadow-2xl outline-none ${sizeClasses[size]} ${mobilePanel} ${panelClassName}`}
+        className={`relative flex w-full flex-col overflow-hidden bg-white shadow-2xl outline-none ${sizeClasses[size]} ${mobilePanel} ${animation === 'rise' ? 'animate-sheet-rise motion-reduce:animate-none' : ''} ${panelClassName}`}
       >
         {!hideHeader && <div className={`flex shrink-0 flex-col items-stretch gap-3 border-b px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-4 ${headerClassName}`}>
           <div className="flex min-w-0 items-start gap-3 sm:flex-1">
