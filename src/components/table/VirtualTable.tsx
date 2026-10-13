@@ -6,10 +6,13 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { TableCanvas, type TableTool } from './TableCanvas';
 import { TurnStrip } from './TurnStrip';
 import { TableCharacterBar } from './TableCharacterBar';
+import { TableImagePicker } from './TableImagePicker';
 import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useCharacterSheetModal } from '../../hooks/useCharacterSheetModal';
 import { useTableCharacters } from '../../hooks/useTableCharacters';
+import { useTokenImages } from '../../hooks/useTokenImages';
+import { useTableEncounter } from '../../hooks/useTableEncounter';
 import { TableDrawer } from './TableDrawer';
 import { useConfirm } from '../../hooks/useConfirm';
 import { tableKeys, useVirtualTable } from '../../hooks/useVirtualTable';
@@ -17,6 +20,8 @@ import { useTablePings } from '../../hooks/useTablePings';
 import { useTableTurn } from '../../hooks/useTableTurn';
 import {
   addTableItems,
+  createMapFromImage,
+  deleteTokenIcon,
   deleteTableItem,
   moveTableItem,
   pingTable,
@@ -24,9 +29,12 @@ import {
   setTableScene,
   updateTableItem,
   uploadTableMap,
+  uploadTokenIcons,
+  uploadTokenImage,
 } from '../../lib/api/virtualTable';
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { clampTokenScale } from '../../lib/tableGeometry';
+import type { TokenIconFile } from '../../lib/tokenIcons';
 import { queryKeys } from '../../lib/queryKeys';
 import type { Character } from '../../types/character';
 import type { NewTableItem, TableItem } from '../../types/virtualTable';
@@ -56,6 +64,9 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number; nonce: number } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [combatOpen, setCombatOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [tokenPickerFor, setTokenPickerFor] = useState<TableItem | null>(null);
+  const [pickerError, setPickerError] = useState<string | null>(null);
   const [sizePreview, setSizePreview] = useState<{ id: string; size: number } | null>(null);
   const [tokenScale, setTokenScale] = useState(() => {
     try { return clampTokenScale(Number(window.localStorage.getItem('table-token-scale') || 1)); } catch { return 1; }
@@ -89,6 +100,9 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   }, [table.items, viewMap, sizePreview]);
 
   const turn = useTableTurn(partyId, items, isGm);
+  const tokenImages = useTokenImages();
+  const combatInfo = useTableEncounter(partyId, items, isGm);
+  const iconUrlFor = useCallback((item: TableItem) => tokenImages.iconFor(item)?.url ?? null, [tokenImages]);
 
   const memberIds = useMemo(() => partyMembers.map((member) => member.id).filter(Boolean) as string[], [partyMembers]);
   const quickCharacters = useTableCharacters(partyId, memberIds);
@@ -173,6 +187,66 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     onError: (error: Error) => setUploadError(error.message),
   });
 
+  const pickMutation = useMutation({
+    mutationFn: ({ imageUrl, name }: { imageUrl: string; name: string }) => createMapFromImage(partyId, imageUrl, name),
+    onSuccess: async (map) => {
+      setPickerError(null);
+      setPickerOpen(false);
+      await table.refreshAll();
+      setGmViewMapId(map.id);
+      setDrawerOpen(true);
+      showNotice(`“${map.name}” is ready. Add tokens, then show it to players.`);
+    },
+    onError: (error: Error) => setPickerError(error.message),
+  });
+
+  const usedImageUrls = useMemo(() => new Set(table.maps.map((map) => map.image_url).filter(Boolean) as string[]), [table.maps]);
+
+  const addCombatantsMutation = useMutation({
+    mutationFn: () => addTableItems(viewMapId!, combatInfo.missing, false),
+    onSuccess: async (created) => { await refreshItems(); showNotice(created.length ? `Added ${created.length} from the fight. They stay hidden until you tick them.` : 'Everyone was already here.'); },
+    onError,
+  });
+
+  const tokenImageMutation = useMutation({
+    mutationFn: ({ item, imageUrl }: { item: TableItem; imageUrl: string | null }) => updateTableItem(item.id, { image_url: imageUrl }),
+    onSuccess: async () => { setTokenPickerFor(null); await refreshItems(); },
+    onError,
+  });
+
+  const handleUploadTokenImage = async (item: TableItem, file: File) => {
+    try {
+      const imageUrl = await uploadTokenImage(partyId, file);
+      await tokenImageMutation.mutateAsync({ item, imageUrl });
+      return true;
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'Could not upload the image.');
+      return false;
+    }
+  };
+
+  const handleUploadIcons = async (files: File[], onProgress: (done: number, total: number) => void) => {
+    const result = await uploadTokenIcons(files, onProgress);
+    await tokenImages.refreshIcons();
+    await queryClient.invalidateQueries({ queryKey: ['table-image-library'] });
+    return result;
+  };
+
+  const handleDeleteIcon = async (icon: TokenIconFile) => {
+    const confirmed = await confirm({
+      title: `Remove the icon “${icon.name}”?`,
+      description: 'Tokens that used it fall back to their initials. Other tokens are not affected.',
+      confirmText: 'Remove icon',
+    });
+    if (!confirmed) return;
+    try {
+      await deleteTokenIcon(icon.path);
+      await tokenImages.refreshIcons();
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'Could not remove the icon.');
+    }
+  };
+
   const handlePing = useCallback((x: number, y: number) => {
     const mapId = viewMapId ?? liveMapId;
     if (!mapId) return;
@@ -216,7 +290,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     if (confirmed) removeMutation.mutate(item);
   };
 
-  const drawerBusy = addMutation.isPending || resizeMutation.isPending || visibilityMutation.isPending || allVisibleMutation.isPending || goLiveMutation.isPending || lockMutation.isPending;
+  const drawerBusy = addMutation.isPending || addCombatantsMutation.isPending || tokenImageMutation.isPending || resizeMutation.isPending || visibilityMutation.isPending || allVisibleMutation.isPending || goLiveMutation.isPending || lockMutation.isPending;
   const previewing = isGm && viewMap && viewMap.id !== liveMapId;
 
   if (table.loading) return <div className="flex h-96 items-center justify-center"><LoadingSpinner size="lg" /></div>;
@@ -260,6 +334,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               isGm={isGm}
               myCharacterIds={myCharacterIds}
               portraits={portraits}
+              iconFor={iconUrlFor}
               selectedItemId={selectedItemId}
               turnItemIds={turn.currentItemIds}
               focusRequest={focusRequest}
@@ -314,6 +389,17 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
               }}
               uploading={uploadMutation.isPending}
               uploadError={uploadError}
+              onOpenLibrary={() => { setPickerError(null); setPickerOpen(true); }}
+              combat={combatInfo.encounter ? { name: combatInfo.encounter.name, status: combatInfo.encounter.status, count: combatInfo.combatantCount, missing: combatInfo.missing.length } : null}
+              onAddCombatants={() => addCombatantsMutation.mutate()}
+              icons={tokenImages.icons}
+              iconsLoading={tokenImages.iconsLoading}
+              onUploadIcons={handleUploadIcons}
+              onDeleteIcon={(icon) => void handleDeleteIcon(icon)}
+              iconFor={tokenImages.iconFor}
+              onPickTokenImage={(item) => { setPickerError(null); setTokenPickerFor(item); }}
+              onUploadTokenImage={handleUploadTokenImage}
+              onClearTokenImage={(item) => tokenImageMutation.mutate({ item, imageUrl: null })}
             />
           </div>
         )}
@@ -328,6 +414,31 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
       />
 
       <CharacterSheetDialog {...sheet.dialogProps} />
+
+      {isGm && (
+        <TableImagePicker
+          isOpen={pickerOpen}
+          partyId={partyId}
+          usedImageUrls={usedImageUrls}
+          saving={pickMutation.isPending}
+          error={pickerError}
+          onClose={() => setPickerOpen(false)}
+          onPick={(imageUrl, name) => pickMutation.mutate({ imageUrl, name })}
+        />
+      )}
+
+      {isGm && (
+        <TableImagePicker
+          isOpen={tokenPickerFor !== null}
+          partyId={partyId}
+          mode="token"
+          usedImageUrls={usedImageUrls}
+          saving={tokenImageMutation.isPending}
+          error={pickerError}
+          onClose={() => setTokenPickerFor(null)}
+          onPick={(imageUrl) => { if (tokenPickerFor) tokenImageMutation.mutate({ item: tokenPickerFor, imageUrl }); }}
+        />
+      )}
 
       {isGm && combatOpen && (
         <AccessibleDialog

@@ -1,4 +1,6 @@
 import { supabase } from '../supabase';
+import { listProjectorImages, type ProjectorStoredImage } from './projectorDisplay';
+import { isImageFileName, sanitizeIconFileName, type TokenIconFile } from '../tokenIcons';
 import type { PartyMap } from '../../types/atlas';
 import type { NewTableItem, TableItem, TablePing, TableState } from '../../types/virtualTable';
 
@@ -93,4 +95,127 @@ export async function uploadTableMap(partyId: string, file: File, name: string):
     .single<PartyMap>();
   if (error || !data) throw new Error(error?.message || 'Could not save the map.');
   return data;
+}
+
+export interface ImageLibraryGroup {
+  /** The campaign the images were saved under (the folder name inside ProjectorDisplays). */
+  folderId: string;
+  /** A name for the group; the current campaign is labelled as such, others by their name when it is known. */
+  label: string;
+  isCurrent: boolean;
+  images: ProjectorStoredImage[];
+}
+
+const IMAGE_BUCKET = 'images';
+const PROJECTOR_FOLDER = 'ProjectorDisplays';
+
+/**
+ * Every image saved in the projector library: this campaign's first, then those saved under other campaigns on
+ * the same server (a GM often keeps their maps under an older campaign). Images are shared by reference, not copied.
+ */
+export async function listImageLibrary(partyId: string, options: { includeIcons?: boolean } = {}): Promise<ImageLibraryGroup[]> {
+  const { data: entries, error } = await supabase.storage.from(IMAGE_BUCKET).list(PROJECTOR_FOLDER, { limit: 200 });
+  if (error) throw new Error(error.message || 'Could not read the image library');
+  const folderIds = new Set<string>((entries ?? []).filter((entry) => entry.id?.endsWith('/')).map((entry) => entry.name));
+  folderIds.add(partyId);
+
+  const names = new Map<string, string>();
+  try {
+    const { data } = await supabase.from('parties').select('id, name').in('id', [...folderIds]);
+    for (const party of (data ?? []) as Array<{ id: string; name: string }>) names.set(party.id, party.name);
+  } catch {
+    // Names are a convenience; the images are still listed without them.
+  }
+
+  const groups: ImageLibraryGroup[] = [];
+  for (const folderId of folderIds) {
+    const images = (await listProjectorImages(folderId).catch(() => []))
+      .filter((image) => /\.(png|jpe?g|webp|gif|avif)$/i.test(image.name));
+    if (images.length === 0 && folderId !== partyId) continue;
+    groups.push({
+      folderId,
+      isCurrent: folderId === partyId,
+      label: folderId === partyId ? 'This campaign' : (names.get(folderId) ?? 'Another campaign'),
+      images,
+    });
+  }
+  groups.sort((left, right) => Number(right.isCurrent) - Number(left.isCurrent) || right.images.length - left.images.length);
+  if (options.includeIcons) {
+    const icons = await listTokenIcons().catch(() => []);
+    if (icons.length > 0) {
+      groups.unshift({
+        folderId: TOKEN_ICON_FOLDER,
+        isCurrent: false,
+        label: 'Token icons',
+        images: icons.map((icon) => ({ name: icon.name, path: icon.path, publicUrl: icon.url, updatedAt: null })),
+      });
+    }
+  }
+  return groups;
+}
+
+/** Makes a scene from an image that is already stored, without uploading anything again. */
+export async function createMapFromImage(partyId: string, imageUrl: string, name: string): Promise<PartyMap> {
+  const { data, error } = await supabase
+    .from('party_maps')
+    .insert([{ party_id: partyId, name: name.trim() || 'Map', image_url: imageUrl, is_active: false }])
+    .select()
+    .single<PartyMap>();
+  if (error || !data) throw new Error(error?.message || 'Could not save the scene.');
+  return data;
+}
+
+// --- Token icons and token images ---
+
+export const TOKEN_ICON_FOLDER = 'TokenIcons';
+const TOKEN_IMAGE_FOLDER = 'TokenImages';
+const ICON_PAGE_SIZE = 500;
+
+/** Every icon in the shared icon folder. Named after a monster, an icon is shown on that monster's tokens. */
+export async function listTokenIcons(): Promise<TokenIconFile[]> {
+  const icons: TokenIconFile[] = [];
+  for (let offset = 0; ; offset += ICON_PAGE_SIZE) {
+    const { data, error } = await supabase.storage.from(IMAGE_BUCKET).list(TOKEN_ICON_FOLDER, { limit: ICON_PAGE_SIZE, offset });
+    if (error) throw new Error(error.message || 'Could not read the icon folder');
+    const page = data ?? [];
+    for (const entry of page) {
+      if (!entry.name || entry.id?.endsWith('/') || !isImageFileName(entry.name)) continue;
+      const path = `${TOKEN_ICON_FOLDER}/${entry.name}`;
+      icons.push({ name: entry.name, path, url: supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl });
+    }
+    if (page.length < ICON_PAGE_SIZE) break;
+  }
+  return icons;
+}
+
+export interface IconUploadResult { uploaded: number; failed: Array<{ name: string; reason: string }> }
+
+/** Uploads icons one after another, keeping each file's own name so it can be matched to a monster. */
+export async function uploadTokenIcons(files: File[], onProgress?: (done: number, total: number) => void): Promise<IconUploadResult> {
+  const result: IconUploadResult = { uploaded: 0, failed: [] };
+  const images = files.filter((file) => file.type.startsWith('image/') || isImageFileName(file.name));
+  result.failed.push(...files.filter((file) => !images.includes(file)).map((file) => ({ name: file.name, reason: 'Not an image' })));
+  for (const [index, file] of images.entries()) {
+    const name = sanitizeIconFileName(file.name);
+    const { error } = await supabase.storage.from(IMAGE_BUCKET).upload(`${TOKEN_ICON_FOLDER}/${name}`, file, { upsert: true });
+    if (error) result.failed.push({ name: file.name, reason: error.message || 'Upload failed' });
+    else result.uploaded += 1;
+    onProgress?.(index + 1, images.length);
+  }
+  return result;
+}
+
+export async function deleteTokenIcon(path: string): Promise<void> {
+  const { error } = await supabase.storage.from(IMAGE_BUCKET).remove([path]);
+  if (error) throw new Error(error.message || 'Could not remove the icon');
+}
+
+/** A custom picture for one token. */
+export async function uploadTokenImage(partyId: string, file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  const extension = file.name.split('.').pop() || 'png';
+  const path = `${TOKEN_IMAGE_FOLDER}/${partyId}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${extension}`;
+  const { error } = await supabase.storage.from(IMAGE_BUCKET).upload(path, file);
+  if (error) throw new Error(error.message || 'The upload failed.');
+  return supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
 }

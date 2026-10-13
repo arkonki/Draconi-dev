@@ -318,7 +318,7 @@ const server = http.createServer(async (request, response) => {
       }
       if (request.method === 'GET') {
         const url = new URL(request.url, 'http://localhost');
-        sendJson(response, 200, { data: await listObjects(bucket, objectPath, url.searchParams.get('limit')) });
+        sendJson(response, 200, { data: await listObjects(bucket, objectPath, url.searchParams.get('limit'), url.searchParams.get('offset')) });
         return;
       }
       if (request.method === 'DELETE') {

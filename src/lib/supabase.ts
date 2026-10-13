@@ -818,9 +818,9 @@ class LocalStorageBucket {
     return { data: result.data, error: result.error };
   }
 
-  async list(folder = '', options: { limit?: number; sortBy?: { column: string; order: string } } = {}) {
+  async list(folder = '', options: { limit?: number; offset?: number; sortBy?: { column: string; order: string } } = {}) {
     const suffix = folder ? `/${encodeObjectPath(folder)}` : '';
-    const result = await apiRequest<QueryRow[]>(`/storage/${this.bucket}${suffix}?limit=${options.limit || 100}`);
+    const result = await apiRequest<QueryRow[]>(`/storage/${this.bucket}${suffix}?limit=${options.limit || 100}&offset=${options.offset || 0}`);
     return { data: result.data, error: result.error };
   }
 

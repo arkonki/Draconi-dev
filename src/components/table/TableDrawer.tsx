@@ -1,12 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
 import { TOKEN_SIZE_MAX, TOKEN_SIZE_MIN, TOKEN_SIZE_STEP } from '../../lib/tableGeometry';
-import { Eye, EyeOff, Lock, LockOpen, MapPin, Monitor, Plus, Search, Trash2, Upload, Users } from 'lucide-react';
+import { Eye, EyeOff, FolderUp, ImageIcon, Lock, LockOpen, MapPin, Monitor, Plus, Search, Swords, Trash2, Upload, Users } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { optimizedImageUrl } from '../../lib/images';
 import type { PartyMap } from '../../types/atlas';
 import type { MonsterData } from '../../types/bestiary';
 import type { Character } from '../../types/character';
 import type { NewTableItem, TableItem, TableItemKind } from '../../types/virtualTable';
+import { normalizeIconName, type TokenIconFile } from '../../lib/tokenIcons';
+import type { IconUploadResult } from '../../lib/api/virtualTable';
 
 const KIND_LABEL: Record<TableItemKind, string> = { character: 'Characters', monster: 'Monsters', npc: 'NPCs', prop: 'Markers' };
 const KIND_ORDER: TableItemKind[] = ['character', 'npc', 'monster', 'prop'];
@@ -36,6 +38,20 @@ interface TableDrawerProps {
   onUpload: (file: File, name: string) => Promise<boolean>;
   uploading: boolean;
   uploadError: string | null;
+  /** Opens the picker for images already saved in the projector library. */
+  onOpenLibrary: () => void;
+  /** The encounter being prepared or run, and how many of its creatures are not on the map yet. */
+  combat: { name: string; status: string; count: number; missing: number } | null;
+  onAddCombatants: () => void;
+  icons: TokenIconFile[];
+  iconsLoading: boolean;
+  onUploadIcons: (files: File[], onProgress: (done: number, total: number) => void) => Promise<IconUploadResult>;
+  onDeleteIcon: (icon: TokenIconFile) => void;
+  /** The icon a token takes from its name, if any. */
+  iconFor: (item: TableItem) => TokenIconFile | null;
+  onPickTokenImage: (item: TableItem) => void;
+  onUploadTokenImage: (item: TableItem, file: File) => Promise<boolean>;
+  onClearTokenImage: (item: TableItem) => void;
 }
 
 const SIZE_PRESETS = [0.5, 1, 2, 3, 4, 6];
@@ -43,7 +59,8 @@ const formatSize = (size: number) => (Number.isInteger(size) ? String(size) : si
 
 export function TableDrawer({
   maps, liveMapId, viewMapId, items, partyMembers, monsters, selectedItemId, busy,
-  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd, onResize, onPreviewSize, onUpload, uploading, uploadError,
+  onViewMap, onGoLive, onToggleVisible, onToggleLocked, onSetAllVisible, onRemove, onFocus, onAdd, onResize, onPreviewSize, onUpload, uploading, uploadError, onOpenLibrary, combat, onAddCombatants, icons, iconsLoading, onUploadIcons, onDeleteIcon, iconFor,
+  onPickTokenImage, onUploadTokenImage, onClearTokenImage,
 }: TableDrawerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sizeCommitTimer = useRef<number | null>(null);
@@ -62,7 +79,14 @@ export function TableDrawer({
   };
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [mapName, setMapName] = useState('');
-  const [tab, setTab] = useState<'tokens' | 'scenes'>('tokens');
+  const [tab, setTab] = useState<'tokens' | 'scenes' | 'icons'>('tokens');
+  const [iconQuery, setIconQuery] = useState('');
+  const [showAllIcons, setShowAllIcons] = useState(false);
+  const [iconProgress, setIconProgress] = useState<{ done: number; total: number } | null>(null);
+  const [iconNotice, setIconNotice] = useState<string | null>(null);
+  const iconFilesRef = useRef<HTMLInputElement>(null);
+  const tokenFileRef = useRef<HTMLInputElement>(null);
+  const tokenFileTarget = useRef<TableItem | null>(null);
   const [monsterQuery, setMonsterQuery] = useState('');
   const [markerLabel, setMarkerLabel] = useState('');
   const [markerColor, setMarkerColor] = useState(COLORS[3]);
@@ -85,7 +109,7 @@ export function TableDrawer({
   return (
     <aside className="flex h-full w-full flex-col border-l border-stone-200 bg-white text-stone-800" aria-label="GM drawer">
       <div className="flex border-b border-stone-200" role="tablist">
-        {([['tokens', 'Tokens', Users], ['scenes', 'Scenes', MapPin]] as const).map(([id, label, Icon]) => (
+        {([['tokens', 'Tokens', Users], ['scenes', 'Scenes', MapPin], ['icons', 'Icons', ImageIcon]] as const).map(([id, label, Icon]) => (
           <button
             key={id}
             type="button"
@@ -115,7 +139,10 @@ export function TableDrawer({
               }}
             />
             {!pendingFile ? (
-              <Button size="sm" variant="outline" icon={Upload} className="w-full" onClick={() => fileInputRef.current?.click()}>Upload a map</Button>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" icon={ImageIcon} className="flex-1" onClick={onOpenLibrary}>Choose from library</Button>
+                <Button size="sm" variant="outline" icon={Upload} className="flex-1" onClick={() => fileInputRef.current?.click()}>Upload</Button>
+              </div>
             ) : (
               <div className="space-y-2">
                 <label htmlFor="table-map-name" className="block text-xs text-stone-600">Name for {pendingFile.name} ({(pendingFile.size / 1024 / 1024).toFixed(1)} MB)</label>
@@ -223,11 +250,32 @@ export function TableDrawer({
                             <span className="w-10 flex-none text-right font-mono">{formatSize(item.size)}×</span>
                           </div>
                         )}
+                        {selectedItemId === item.id && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-7 text-xs text-stone-600">
+                            <span className="flex-none">Picture</span>
+                            <span className="min-w-0 flex-1 truncate text-stone-500">
+                              {item.image_url ? 'Custom image' : item.kind === 'character' ? 'Portrait' : iconFor(item) ? `Icon: ${iconFor(item)?.name}` : 'None'}
+                            </span>
+                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onPickTokenImage(item)}>Choose</Button>
+                            <Button size="sm" variant="outline" icon={Upload} disabled={busy} onClick={() => { tokenFileTarget.current = item; tokenFileRef.current?.click(); }}>Upload</Button>
+                            {item.image_url && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onClearTokenImage(item)}>Clear</Button>}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
                 </section>
               ))}
+
+              {combat && (
+                <section className="space-y-2 border-t border-stone-200 pt-3" aria-label="Combat">
+                  <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Swords size={13} aria-hidden="true" /> Combat</h4>
+                  <p className="text-sm text-stone-600"><strong>{combat.name}</strong> <span className="text-stone-400">({combat.status}, {combat.count} combatants)</span></p>
+                  <Button size="sm" variant="primary" icon={Swords} className="w-full" disabled={busy || combat.missing === 0} onClick={onAddCombatants}>
+                    {combat.missing === 0 ? 'Everyone in this fight is on the map' : `Add the combatants (${combat.missing})`}
+                  </Button>
+                </section>
+              )}
 
               <section className="space-y-3 border-t border-stone-200 pt-3" aria-label="Add tokens">
                 <h4 className="text-xs font-bold uppercase tracking-wide text-stone-500">Add to this scene</h4>
@@ -275,6 +323,99 @@ export function TableDrawer({
               </section>
             </>
           )}
+        </div>
+      )}
+      <input
+        ref={tokenFileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          const target = tokenFileTarget.current;
+          event.target.value = '';
+          if (file && target) void onUploadTokenImage(target, file);
+        }}
+      />
+
+      {tab === 'icons' && (
+        <div className="flex-1 space-y-3 overflow-y-auto p-3">
+          <p className="text-xs text-stone-500">
+            Upload an icon pack here. A picture named after a monster, such as <strong>Goblin.png</strong>, shows on every token with that name (also "Goblin 2"), for you and your players. A picture you choose for one token always wins.
+          </p>
+          <input
+            ref={iconFilesRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = '';
+              if (files.length === 0) return;
+              setIconNotice(null);
+              setIconProgress({ done: 0, total: files.length });
+              void onUploadIcons(files, (done, total) => setIconProgress({ done, total })).then((result) => {
+                setIconProgress(null);
+                setIconNotice(`Uploaded ${result.uploaded} icon${result.uploaded === 1 ? '' : 's'}${result.failed.length ? `; ${result.failed.length} skipped (${result.failed.slice(0, 3).map((failure) => `${failure.name}: ${failure.reason}`).join(', ')}${result.failed.length > 3 ? ', …' : ''})` : ''}.`);
+              });
+            }}
+          />
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            id="table-icon-folder"
+            ref={(element) => { if (element) element.setAttribute('webkitdirectory', ''); }}
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = '';
+              if (files.length === 0) return;
+              setIconNotice(null);
+              setIconProgress({ done: 0, total: files.length });
+              void onUploadIcons(files, (done, total) => setIconProgress({ done, total })).then((result) => {
+                setIconProgress(null);
+                setIconNotice(`Uploaded ${result.uploaded} icon${result.uploaded === 1 ? '' : 's'}${result.failed.length ? `; ${result.failed.length} skipped (not images or failed)` : ''}.`);
+              });
+            }}
+          />
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" icon={Upload} className="flex-1" disabled={iconProgress !== null} onClick={() => iconFilesRef.current?.click()}>Upload icons</Button>
+            <Button size="sm" variant="outline" icon={FolderUp} className="flex-1" disabled={iconProgress !== null} onClick={() => document.getElementById('table-icon-folder')?.click()}>Upload a folder</Button>
+          </div>
+          {iconProgress && (
+            <div role="status" aria-live="polite" className="space-y-1">
+              <div className="h-2 overflow-hidden rounded-full bg-stone-200"><div className="h-full bg-indigo-600 transition-all" style={{ width: `${(iconProgress.done / Math.max(1, iconProgress.total)) * 100}%` }} /></div>
+              <p className="text-xs text-stone-600">Uploading {iconProgress.done} of {iconProgress.total}…</p>
+            </div>
+          )}
+          {iconNotice && <p role="status" className="rounded-md bg-green-50 p-2 text-xs text-green-900">{iconNotice}</p>}
+
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-2 top-2.5 text-stone-400" />
+            <input value={iconQuery} onChange={(event) => { setIconQuery(event.target.value); setShowAllIcons(false); }} placeholder={`Search ${icons.length} icons`} aria-label="Search icons" className="w-full rounded-md border border-stone-300 py-1.5 pl-7 pr-2 text-sm" />
+          </div>
+          {iconsLoading && <p className="text-sm text-stone-500">Loading the icons…</p>}
+          {!iconsLoading && icons.length === 0 && <p className="rounded-lg border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500">No icons yet.</p>}
+          {(() => {
+            const needle = normalizeIconName(iconQuery);
+            const matches = needle ? icons.filter((icon) => normalizeIconName(icon.name).includes(needle)) : icons;
+            const shown = showAllIcons ? matches : matches.slice(0, 60);
+            return (
+              <>
+                <ul className="grid grid-cols-3 gap-2">
+                  {shown.map((icon) => (
+                    <li key={icon.path} className="group relative rounded-lg border border-stone-200 p-1 text-center">
+                      <img src={optimizedImageUrl(icon.url, 'thumbnail')} alt="" loading="lazy" decoding="async" className="mx-auto h-14 w-14 rounded-full object-cover" />
+                      <p className="mt-1 truncate text-[11px] text-stone-600" title={icon.name}>{icon.name.replace(/\.[^.]+$/, '')}</p>
+                      <button type="button" aria-label={`Remove the icon ${icon.name}`} onClick={() => onDeleteIcon(icon)} className="absolute right-0.5 top-0.5 rounded bg-white/90 p-1 text-stone-500 opacity-0 shadow hover:text-red-600 focus:opacity-100 group-hover:opacity-100"><Trash2 size={12} /></button>
+                    </li>
+                  ))}
+                </ul>
+                {matches.length > shown.length && <Button size="sm" variant="ghost" className="w-full" onClick={() => setShowAllIcons(true)}>Show all {matches.length}</Button>}
+              </>
+            );
+          })()}
         </div>
       )}
     </aside>

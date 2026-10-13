@@ -211,7 +211,7 @@ export async function uploadObject(request, bucket, objectPath) {
   };
 }
 
-export async function listObjects(bucket, folder = '', limit = 100) {
+export async function listObjects(bucket, folder = '', limit = 100, offset = 0) {
   const target = safePath(bucket, folder);
   let entries;
   try {
@@ -220,7 +220,10 @@ export async function listObjects(bucket, folder = '', limit = 100) {
     if (error.code === 'ENOENT') return [];
     throw error;
   }
-  const values = await Promise.all(entries.slice(0, Math.min(Number(limit) || 100, 500)).map(async (entry) => {
+  // Sort the whole folder before taking a page, so paging through it with `offset` returns every entry once.
+  const pageSize = Math.min(Number(limit) || 100, 500);
+  const start = Math.max(0, Math.trunc(Number(offset) || 0));
+  const all = await Promise.all(entries.slice(0, 20_000).map(async (entry) => {
     const entryPath = path.join(target, entry.name);
     const details = await stat(entryPath);
     return {
@@ -232,7 +235,7 @@ export async function listObjects(bucket, folder = '', limit = 100) {
       metadata: { size: details.size },
     };
   }));
-  return values.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return all.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.name.localeCompare(b.name)).slice(start, start + pageSize);
 }
 
 export async function removeObjects(bucket, paths) {

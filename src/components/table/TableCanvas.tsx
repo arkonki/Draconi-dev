@@ -34,6 +34,8 @@ interface TableCanvasProps {
   myCharacterIds: ReadonlySet<string>;
   /** Portrait for each character token, by character id. */
   portraits: ReadonlyMap<string, string | null>;
+  /** The icon picture for a token that has no picture of its own, found by name. */
+  iconFor: (item: TableItem) => string | null;
   selectedItemId: string | null;
   /** Tokens whose turn it is in the running encounter. */
   turnItemIds: ReadonlySet<string>;
@@ -70,7 +72,7 @@ interface DragState {
 interface Ruler { from: { x: number; y: number }; to: { x: number; y: number } }
 
 export function TableCanvas({
-  map, items, isGm, myCharacterIds, portraits, selectedItemId, turnItemIds, focusRequest, focusPoint, pings, tool, onToolChange,
+  map, items, isGm, myCharacterIds, portraits, iconFor, selectedItemId, turnItemIds, focusRequest, focusPoint, pings, tool, onToolChange,
   lookHere, onLookHereChange, onPing, metresPerSquare, onMetresPerSquareChange, tokenScale, onTokenScaleChange, onSelect, onMove,
 }: TableCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -371,7 +373,7 @@ export function TableCanvas({
                   centerY={position.y * natural.height}
                   diameter={Math.max(tokenDiameter(item.size, grid, natural.width) * tokenScale, MIN_TOKEN_SCREEN_PX / view.scale)}
                   scale={view.scale}
-                  imageUrl={item.image_url ?? (item.character_id ? portraits.get(item.character_id) ?? null : null)}
+                  imageUrl={item.image_url ?? (item.character_id ? portraits.get(item.character_id) ?? null : iconFor(item))}
                   isMine={Boolean(item.character_id && myCharacterIds.has(item.character_id))}
                   draggable={draggable}
                   dragging={draggingId === item.id}
