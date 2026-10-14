@@ -25,7 +25,6 @@ import {
   ScrollText,
   Search,
   Settings2,
-  Shield,
   ShieldQuestion,
   Skull,
   Sparkles,
@@ -83,6 +82,7 @@ import { Button } from '../shared/Button';
 import { SoloNarrator } from './SoloNarrator';
 import { SoloEndStory } from './SoloEndStory';
 import { SoloStartStory } from './SoloStartStory';
+import { SoloGear } from './SoloGear';
 import { useConfirm } from '../../hooks/useConfirm';
 import { SoloStoryLibrary } from './SoloStoryLibrary';
 import { continueFromStory, type SoloStory } from '../../lib/api/soloStories';
@@ -196,13 +196,22 @@ function journalValue(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-export function SoloGameTimeSummary({ gameTime }: { gameTime: Record<string, unknown> }) {
+/**
+ * The clock of the story that is under way. The campaign clock keeps running between stories, so the days are counted
+ * from the moment this story began; with no story under way there is nothing to show.
+ */
+export function SoloGameTimeSummary({ gameTime, storyActive = true }: { gameTime: Record<string, unknown>; storyActive?: boolean }) {
   const t = useT();
+  if (!storyActive) {
+    return <p className="mt-2 text-sm text-stone-500">{t('No story is under way. The clock starts when the next story begins.')}</p>;
+  }
   if (Object.keys(gameTime || {}).length === 0) {
     return <p className="mt-2 text-sm text-stone-500">{t('No campaign time has been recorded yet.')}</p>;
   }
 
-  const elapsedSeconds = Math.max(0, Math.floor(Number(gameTime.elapsedSeconds) || 0));
+  const campaignSeconds = Math.max(0, Math.floor(Number(gameTime.elapsedSeconds) || 0));
+  const storyStart = Math.floor(Number(gameTime.storyStartElapsedSeconds));
+  const elapsedSeconds = Number.isFinite(storyStart) && storyStart >= 0 && storyStart <= campaignSeconds ? campaignSeconds - storyStart : campaignSeconds;
   const clock = formatCampaignClock(elapsedSeconds);
 
   return (
@@ -1091,7 +1100,6 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const hero = state.playerCharacter;
   const standardConditions = hero?.conditions.filter((condition) => standardConditionKeys.has(condition.key)) || [];
-  const equippedItems = hero?.inventory.filter((item) => item.equipped) || [];
   const skillOptions = Object.entries(hero?.skills || {}).sort(([left], [right]) => left.localeCompare(right));
   const attributeOptions = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA']
     .flatMap((name) => Number.isInteger(hero?.attributes?.[name]) ? [[name, hero!.attributes![name]] as const] : []);
@@ -1102,7 +1110,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     sessions: [],
     recentEvents: [],
   };
-  const currentSceneEntries = Object.entries(journal.currentScene || {});
+  const savedScene = journal.currentScene || {};
+  const sceneHasContent = Boolean(savedScene.location || savedScene.description || savedScene.situation)
+    || ['activeObjects', 'exits', 'dangers'].some((key) => Array.isArray(savedScene[key]) && savedScene[key].length > 0);
+  const currentSceneEntries = sceneHasContent ? Object.entries(savedScene).filter(([key]) => key !== 'schemaVersion') : [];
   const activeJournalSession = journal.sessions.find((session) => session.status === 'active') || null;
   const completedJournalSessions = journal.sessions.filter((session) => session.status === 'completed');
   const pushedSourceIds = new Set(state.latestRolls.map((roll) => roll.previousRollId).filter(Boolean));
@@ -1513,7 +1524,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
                     <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">{t('Game time')}</h4>
-                    <SoloGameTimeSummary gameTime={state.gameTime || {}} />
+                    <SoloGameTimeSummary gameTime={state.gameTime || {}} storyActive={Boolean(state.activeMission) || state.gameTime?.storyStartElapsedSeconds === undefined} />
                   </div>
                 </div>
                 )}
@@ -1886,12 +1897,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </div>
               )}
 
-              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && (
+              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && hero && (
               <div className="mt-4 border-t border-stone-100 pt-4">
-                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Shield className="h-3.5 w-3.5" /> {t('Equipped')}</div>
-                <div className="mt-2 space-y-1 text-sm text-stone-700">
-                  {equippedItems.length > 0 ? equippedItems.map((item) => <div key={item.id}>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</div>) : <span className="text-stone-400">{t('No equipped items')}</span>}
-                </div>
+                <SoloGear hero={hero} />
               </div>
               )}
             </section>

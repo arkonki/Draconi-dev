@@ -30,6 +30,19 @@ export interface SoloActorInventoryItem {
   properties?: { category?: string | null };
 }
 
+/** A weapon, armor or shield the hero has in hand or on, as the game records it. */
+export interface SoloActorGear {
+  id: string;
+  name: string;
+  damage?: string | null;
+  range?: string | number | null;
+  grip?: string | null;
+  durability?: number | string | null;
+  armorRating?: number | string | null;
+  features?: string[];
+  state?: { broken?: boolean | null; isLit?: boolean | null } | null;
+}
+
 export interface SoloActor {
   id: string;
   name: string;
@@ -46,6 +59,11 @@ export interface SoloActor {
   lifeStatus: 'active' | 'dying' | 'dead';
   armor?: number | null;
   inventory: SoloActorInventoryItem[];
+  weapons?: SoloActorGear[];
+  bodyArmor?: SoloActorGear | null;
+  helmet?: SoloActorGear | null;
+  shield?: SoloActorGear | null;
+  heldItems?: SoloActorGear[];
   tags: string[];
 }
 

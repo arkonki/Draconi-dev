@@ -17,6 +17,41 @@ const compactJson = (value, length) => {
   try { return clip(JSON.stringify(value ?? {}), length); } catch { return ''; }
 };
 
+const GRIPS = { '1H': 'one hand', '2H': 'two hands' };
+
+/** One piece of gear in a few words: what it is and the numbers that matter for it. */
+function gearName(item) {
+  const facts = [];
+  if (item.damage) facts.push(`damage ${item.damage}`);
+  if (item.range && String(item.range) !== '0') facts.push(`range ${item.range}`);
+  if (item.grip) facts.push(GRIPS[item.grip] ?? String(item.grip));
+  if (item.armorRating !== null && item.armorRating !== undefined && item.armorRating !== '') facts.push(`armor ${item.armorRating}`);
+  if (Array.isArray(item.features) && item.features.length) facts.push(item.features.slice(0, 3).map((feature) => String(feature).toLowerCase()).join('/'));
+  if (item.durability) facts.push(`durability ${item.durability}`);
+  if (item.state?.broken) facts.push('BROKEN');
+  return `${clip(item.name, 60)}${facts.length ? ` (${facts.join(', ')})` : ''}`;
+}
+
+/**
+ * What the hero actually wears and holds right now, so the narrator describes the right weapon and armor and does not
+ * invent gear. Built fresh every turn, which is how a change of gear between turns reaches the story.
+ */
+function gearLines(hero) {
+  const lines = [];
+  const weapons = (hero.weapons ?? []).filter(Boolean);
+  lines.push(weapons.length
+    ? `Weapons in hand: ${weapons.slice(0, 4).map(gearName).join('; ')}.`
+    : 'Weapons in hand: none. The hero is unarmed.');
+  const worn = [hero.bodyArmor, hero.helmet].filter(Boolean);
+  lines.push(worn.length ? `Armor worn: ${worn.map(gearName).join('; ')}.` : 'Armor worn: none.');
+  if (hero.shield) lines.push(`Shield: ${gearName(hero.shield)}.`);
+  const others = (hero.inventory ?? []).filter((item) => item.equipped).map((item) => clip(item.name, 60));
+  const lit = (hero.heldItems ?? []).filter((item) => item.state?.isLit).map((item) => clip(item.name, 60));
+  if (others.length) lines.push(`Other equipped: ${others.slice(0, 6).join(', ')}.`);
+  if (lit.length) lines.push(`Lit: ${lit.join(', ')}.`);
+  return lines;
+}
+
 /** Scene entries the hero may know about: anything not marked as hidden from the player. */
 const knownEntries = (entries) => (Array.isArray(entries) ? entries : []).filter((entry) => entry && entry.visibility !== 'gm');
 
@@ -29,10 +64,9 @@ export function buildNarratorContext(state, extras = {}) {
   const hero = state?.playerCharacter;
   if (hero) {
     const conditions = (hero.conditions ?? []).map((condition) => condition.name).filter(Boolean);
-    const equipped = (hero.inventory ?? []).filter((item) => item.equipped).map((item) => item.name);
     lines.push(`HERO: ${hero.name}. HP ${hero.hp?.current}/${hero.hp?.max}, WP ${hero.wp?.current}/${hero.wp?.max}. Status: ${hero.lifeStatus ?? 'active'}.`);
     if (conditions.length) lines.push(`Conditions: ${conditions.join(', ')}.`);
-    if (equipped.length) lines.push(`Equipped: ${equipped.slice(0, 8).join(', ')}.`);
+    lines.push(...gearLines(hero));
     if (hero.description) lines.push(`About: ${clip(hero.description, 300)}`);
   }
   const attributeNames = ATTRIBUTES.filter((name) => Number.isInteger(hero?.attributes?.[name]));
@@ -116,6 +150,7 @@ export function buildNarratorContext(state, extras = {}) {
 export const NARRATOR_SYSTEM_PROMPT = [
   'You are the narrator of a solo game of the Dragonbane tabletop roleplaying game. The player is the only hero.',
   'The app handles every rule and every die. You only describe and suggest. Never roll dice, never invent a result, and never say that a check succeeded or failed unless LATEST ROLLS says so.',
+  'The lines Weapons in hand, Armor worn and Shield list what the hero has right now, and they override anything said earlier in the conversation or in the story so far. Describe only those weapons and that armor. Never give the hero a weapon or armor that is not listed, and if the hero is unarmed or unarmored, say so when it matters. If the player reaches for gear the hero does not have, say so and offer what is at hand. Let the gear shape what happens: a heavy weapon swings slowly, a bow needs room, armor turns blows aside and clanks when the hero tries to sneak, a broken weapon will not hold. When the hero fights, suggest a check with the skill that fits the weapon in hand (from Skills the hero has).',
   'Never change hit points, willpower, conditions, items, injuries or mission progress yourself; the player does that with the app. Use only the facts in the game summary and in the conversation, and do not reveal anything not listed there.',
   'Write in second person, present tense, in a grounded and slightly dark fantasy tone. Keep it under 150 words unless the player asks for more.',
   'End the story text with two or three short options for what the hero might do next.',

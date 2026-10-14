@@ -108,6 +108,18 @@ describe('Solo adventure game time', () => {
     expect(screen.queryByText(/elapsedSeconds/)).not.toBeInTheDocument();
   });
 
+  it('counts the days from the start of the story under way', () => {
+    render(<SoloGameTimeSummary gameTime={{ elapsedSeconds: (9 * 24 * 60 * 60) + (7 * 60 * 60), storyStartElapsedSeconds: 9 * 24 * 60 * 60 }} />);
+    expect(screen.getByText('Day 1')).toBeInTheDocument();
+    expect(screen.getByText('Day · 07:00')).toBeInTheDocument();
+  });
+
+  it('shows no clock when no story is under way', () => {
+    render(<SoloGameTimeSummary gameTime={{ elapsedSeconds: 9 * 24 * 60 * 60 }} storyActive={false} />);
+    expect(screen.queryByText(/^Day /)).not.toBeInTheDocument();
+    expect(screen.getByText('No story is under way. The clock starts when the next story begins.')).toBeInTheDocument();
+  });
+
   it('shows an empty-state message when no campaign clock exists', () => {
     render(<SoloGameTimeSummary gameTime={{}} />);
     expect(screen.getByText('No campaign time has been recorded yet.')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { MAX_CONTEXT_CHARS, buildNarratorContext, buildNarratorMessages, buildSummaryMessages, parseNarratorReply, sanitizeHistory } from './soloNarratorContext.js';
+import { MAX_CONTEXT_CHARS, NARRATOR_SYSTEM_PROMPT, buildNarratorContext, buildNarratorMessages, buildSummaryMessages, parseNarratorReply, sanitizeHistory } from './soloNarratorContext.js';
 
 const state = {
   restState: { available: { round: true, stretch: false, shift: true } },
@@ -30,12 +30,36 @@ describe('solo narrator context', () => {
   it('summarises the hero, the mission and the place', () => {
     expect(context).toContain('HERO: Mara. HP 7/12, WP 5/10.');
     expect(context).toContain('Conditions: Dazed.');
-    expect(context).toContain('Equipped: Short sword.');
+    expect(context).toContain('Other equipped: Short sword.');
     expect(context).toContain('MISSION: The lost shrine.');
     expect(context).toContain('HERE: Forest path');
     expect(context).toContain('Creature: Wolf');
     expect(context).toContain('Looming threat: The cult hunts you.');
     expect(context).toContain('ACTIONS THE APP OFFERS NOW: resolve_solo_check, take_solo_rest.');
+  });
+
+  it('tells the narrator which weapons and armor the hero has right now', () => {
+    const geared = buildNarratorContext({
+      ...state,
+      playerCharacter: {
+        ...state.playerCharacter,
+        weapons: [{ name: 'Battle axe', damage: '2D8', range: '2', grip: '2H', durability: 9, features: ['TOPPLING', 'SLASHING'] }, { name: 'Shield (Small)', damage: 'D8', range: '2', grip: '1H', state: { broken: true } }],
+        bodyArmor: { name: 'Chainmail', armorRating: 5 },
+        helmet: { name: 'Open helmet', armorRating: 1 },
+        shield: null,
+        heldItems: [{ name: 'Torch', state: { isLit: true } }, { name: 'Battle axe', state: { isLit: null } }],
+      },
+    });
+    expect(geared).toContain('Weapons in hand: Battle axe (damage 2D8, range 2, two hands, toppling/slashing, durability 9); Shield (Small) (damage D8, range 2, one hand, BROKEN).');
+    expect(geared).toContain('Armor worn: Chainmail (armor 5); Open helmet (armor 1).');
+    expect(geared).toContain('Lit: Torch.');
+    expect(geared).not.toContain('Shield:');
+  });
+
+  it('says plainly when the hero is unarmed and unarmored, so nothing is made up', () => {
+    expect(context).toContain('Weapons in hand: none. The hero is unarmed.');
+    expect(context).toContain('Armor worn: none.');
+    expect(NARRATOR_SYSTEM_PROMPT).toContain('Never give the hero a weapon or armor that is not listed');
   });
 
   it('leaves out what the hero has not found yet', () => {

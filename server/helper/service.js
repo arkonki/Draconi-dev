@@ -1964,15 +1964,30 @@ export async function getSoloState(user, campaignId) {
     }
     if (activeInjuries.length > 0) allowedNextActions.push('resolve_solo_injury_action');
   }
+  // A story that ended before scenes were cleared on completion leaves its last scene behind. With no mission under
+  // way, a scene that nothing has set since the last mission ended belongs to that finished story, so it is not shown.
+  let shownScene = access.campaign.current_scene;
+  if (!activeMission) {
+    const { rows: [marks] } = await pool.query(
+      `SELECT
+         max(sequence) FILTER (WHERE type = 'solo.mission_completed') AS ended,
+         max(sequence) FILTER (WHERE type IN ('session.started', 'session.checkpointed')
+           OR (type = 'session.completed' AND payload ? 'endingScene')) AS scene_set
+       FROM campaign_events
+       WHERE campaign_id = $1 AND type IN ('solo.mission_completed', 'session.started', 'session.checkpointed', 'session.completed')`,
+      [campaignId],
+    );
+    if (marks?.ended !== null && marks?.ended !== undefined && !(Number(marks.scene_set) > Number(marks.ended))) shownScene = {};
+  }
   return {
     campaignRevision: Number(access.campaign.helper_revision || 0),
     solo: soloStateForOutput(state),
     playerCharacter,
     soloHeroicAbility,
     activeSessionId: access.campaign.active_session_id,
-    currentScene: sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm }),
+    currentScene: sceneForOutput(shownScene, { includeGm: access.isGm }),
     journal: {
-      currentScene: sceneForOutput(access.campaign.current_scene, { includeGm: access.isGm }),
+      currentScene: sceneForOutput(shownScene, { includeGm: access.isGm }),
       openThreads: access.isGm ? access.campaign.open_threads || [] : [],
       sessions: journalSessionRows.map((session) => sessionForOutput(session, { includeGm: access.isGm })),
       recentEvents: journalEvents,
@@ -3726,9 +3741,12 @@ export async function startSoloMission(user, input, { sourceClient } = {}) {
       [mission.id, input.campaign_id],
     );
     const resultingRevision = previousRevision + 1;
+    // The campaign clock keeps running (reminders and burning torches depend on it), but each story counts its own
+    // days from the moment it begins, so a new story does not open on the last one's day.
+    const startedGameTime = gameTimeForOutput(access.campaign.game_time);
     await client.query(
-      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
-      [resultingRevision, input.campaign_id],
+      'UPDATE parties SET helper_revision = $1, game_time = $3::jsonb WHERE id = $2',
+      [resultingRevision, input.campaign_id, JSON.stringify({ ...startedGameTime, storyStartElapsedSeconds: startedGameTime.elapsedSeconds })],
     );
     const sequence = await nextEventSequence(client, input.campaign_id);
     const eventId = await insertEvent(client, {
@@ -6177,8 +6195,9 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
       advancement = rows[0];
     }
     const resultingRevision = previousRevision + 1;
+    // The story is over, so the scene it left behind is cleared rather than shown as if it were still going on.
     await client.query(
-      'UPDATE parties SET helper_revision = $1 WHERE id = $2',
+      `UPDATE parties SET helper_revision = $1, current_scene = '{}'::jsonb WHERE id = $2`,
       [resultingRevision, input.campaign_id],
     );
     const sequence = await nextEventSequence(client, input.campaign_id);

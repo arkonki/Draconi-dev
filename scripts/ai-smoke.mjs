@@ -131,6 +131,7 @@ try {
   const hero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `AI Hero ${suffix}`, max_hp: 10, current_hp: 6, max_wp: 8, current_wp: 8, attributes: { STR: 13, CON: 12, AGL: 14, INT: 10, WIL: 11, CHA: 9 } } }), 200, 'hero')).data[0];
   const party = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `AI Solo ${suffix}`, p_character_ids: [hero.id] }), 200, 'campaign')).data;
   const narrate = (token, body) => call('POST', '/ai/solo-narrator', { token, body });
+  const soloSnapshotEarly = async () => (await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state')).data;
   const conversation = (token, partyId = party.id) => call('GET', `/ai/solo-narrator?partyId=${partyId}`, { token });
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'I look around' }), 409, 'solo must be switched on first');
   const options = (await ok(call('GET', `/v1/campaigns/${party.id}/solo/options`, { token: tokens.alice }), 200, 'solo options')).data;
@@ -167,6 +168,21 @@ try {
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'I cross' }), 200, 'a second turn');
   assert.deepEqual(seenRequests.at(-1).messages.slice(1).map((entry) => entry.role), ['user', 'assistant', 'user'], 'the earlier exchange is sent as history');
 
+  // The narrator is told what the hero carries right now, and a change of gear reaches the very next turn.
+  const setGear = (equipped) => database.query('UPDATE characters SET equipment = $1::jsonb WHERE id = $2', [JSON.stringify({ equipped, inventory: [] }), hero.id]);
+  const lastContext = () => seenRequests.at(-1).messages.at(-1).content;
+  await narrate(tokens.alice, { partyId: party.id, message: 'I draw my weapon' });
+  assert.ok(lastContext().includes('Weapons in hand: none. The hero is unarmed.') && lastContext().includes('Armor worn: none.'), 'an empty-handed hero is described as unarmed');
+  await setGear({ armor: 'Chainmail', weapons: [{ name: 'Battle axe', grip: '2H', range: '2', damage: '2D8', durability: 9, features: ['SLASHING'] }] });
+  await narrate(tokens.alice, { partyId: party.id, message: 'I swing' });
+  assert.ok(lastContext().includes('Weapons in hand: Battle axe (damage 2D8, range 2, two hands, slashing, durability 9).'), 'the weapon in hand is listed with its numbers');
+  assert.match(lastContext(), /Armor worn: Chainmail/, 'and so is the armor');
+  const withGear = (await soloSnapshotEarly()).playerCharacter;
+  assert.equal(withGear.weapons[0].name, 'Battle axe', 'the solo state carries the weapons for the sidebar');
+  assert.equal(withGear.bodyArmor.name, 'Chainmail');
+  await setGear({ weapons: [] });
+  results.narratorGear = 'passed';
+
   // Streaming: the answer arrives in pieces and ends with the finished turn.
   const streamResponse = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.alice}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'I look down' }) });
   assert.equal(streamResponse.status, 200);
@@ -178,7 +194,7 @@ try {
   assert.match(done.text, /bridge/);
   assert.equal(done.actions.length, 3);
   assert.equal(done.usage.promptTokens, 321, 'usage comes from the final chunk');
-  assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 6, 'a streamed turn is stored too');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 10, 'a streamed turn is stored too');
   const failedStream = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.bob}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'hi' }) });
   assert.equal(failedStream.status, 403, 'a problem before the first word is an ordinary error');
 
@@ -250,13 +266,19 @@ try {
   };
   const statusOf = async (table, missionId) => (await database.query(`SELECT status FROM ${table} WHERE mission_id = $1`, [missionId])).rows.map((row) => row.status);
 
+  await database.query("UPDATE parties SET game_time = '{\"elapsedSeconds\": 5000}'::jsonb WHERE id = $1", [party.id]);
   await startMission('The first story');
+  assert.equal((await soloSnapshot()).gameTime.storyStartElapsedSeconds, 5000, 'a story remembers when its own clock began');
   const failedMission = await leaveBehind();
+  await database.query("UPDATE parties SET current_scene = '{\"location\": \"The old bridge\"}'::jsonb WHERE id = $1", [party.id]);
   const failed = (await ok(call('POST', `/v1/campaigns/${party.id}/solo/missions/${failedMission}/complete`, { token: tokens.alice, headers: writeHeaders((await soloSnapshot()).campaignRevision), body: { outcome: 'failure', summary: 'The hero fled.', rewards: {}, reason: 'smoke' } }), 200, 'fail the mission')).data;
   assert.deepEqual(failed.state_excerpt.cleanup, { settledDangers: 1, retiredNpcs: 1 }, 'leftovers are counted');
   assert.deepEqual(await statusOf('solo_dangers', failedMission), ['avoided'], 'a danger left behind is avoided after a failure');
   assert.deepEqual(await statusOf('solo_npcs', failedMission), ['retired'], 'the mission\'s creature leaves play');
   const afterFailure = await soloSnapshot();
+  assert.equal(afterFailure.journal.currentScene.location, '', 'the scene of a finished story is cleared');
+  await database.query("UPDATE parties SET current_scene = '{\"location\": \"Left over\"}'::jsonb WHERE id = $1", [party.id]);
+  assert.equal((await soloSnapshot()).journal.currentScene.location, '', 'a scene that nothing has set since the story ended is not shown');
   assert.ok(!afterFailure.pendingAdvancement, 'a failed story earns no advancement');
   assert.equal(afterFailure.activeDangers.length, 0);
   assert.ok(afterFailure.npcs.some((npc) => npc.status === 'retired'), 'the retired creature is still on record');
