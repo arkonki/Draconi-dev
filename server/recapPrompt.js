@@ -1,5 +1,5 @@
 // What the model is told when it polishes a session recap.
-import { languageInstruction } from './soloNarrationLanguage.js';
+import { plainLanguageInstruction } from './soloNarrationLanguage.js';
 
 export const RECAP_SYSTEM_PROMPT = [
   'You help a game master write the recap of a tabletop roleplaying session (Dragonbane).',
@@ -8,7 +8,7 @@ export const RECAP_SYSTEM_PROMPT = [
   'Output only the recap text.',
 ].join('\n');
 
-export const buildRecapMessages = (draft, language = 'en') => [
-  { role: 'system', content: [RECAP_SYSTEM_PROMPT, languageInstruction(language).replace(/ Inside the ACTIONS line.*$/, '')].filter(Boolean).join('\n') },
+export const buildRecapMessages = (draft, language = 'en', glossary = null) => [
+  { role: 'system', content: [RECAP_SYSTEM_PROMPT, plainLanguageInstruction(language, glossary)].filter(Boolean).join('\n') },
   { role: 'user', content: String(draft).slice(0, 8000) },
 ];

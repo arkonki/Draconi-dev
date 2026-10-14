@@ -55,9 +55,13 @@ describe('solo narrator context', () => {
     const history = Array.from({ length: 12 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `turn ${index}` }));
     const messages = buildNarratorMessages({ state, history, message: '  I climb the tree  ' });
     expect(messages[0].role).toBe('system');
-    expect(messages[0].content).toContain('GAME SUMMARY');
-    expect(messages[0].content).toContain('HERO: Mara');
-    expect(messages.at(-1)).toEqual({ role: 'user', content: 'I climb the tree' });
+    expect(messages[0].content).not.toContain('HERO: Mara');
+    // the game state changes every turn, so it comes last, together with what the player said
+    const last = messages.at(-1);
+    expect(last.role).toBe('user');
+    expect(last.content).toContain('CURRENT GAME STATE');
+    expect(last.content).toContain('HERO: Mara');
+    expect(last.content.endsWith('WHAT THE PLAYER SAYS OR DOES NOW\nI climb the tree')).toBe(true);
     expect(messages).toHaveLength(1 + 8 + 1);
   });
 
@@ -74,9 +78,8 @@ describe('solo narrator context', () => {
 
   it('includes the story so far in the system message', () => {
     const messages = buildNarratorMessages({ state, summary: 'Mara fled the burning inn and swore revenge.', history: [], message: 'Go on' });
-    expect(messages[0].content).toContain('THE STORY SO FAR');
-    expect(messages[0].content).toContain('swore revenge');
-    expect(buildNarratorMessages({ state, history: [], message: 'x' })[0].content).not.toContain('THE STORY SO FAR');
+    expect(messages[1]).toEqual({ role: 'system', content: 'THE STORY SO FAR (what happened earlier)\nMara fled the burning inn and swore revenge.' });
+    expect(buildNarratorMessages({ state, history: [], message: 'x' }).some((message) => message.content.includes('THE STORY SO FAR'))).toBe(false);
   });
 
   it('builds the request that folds old turns into the summary', () => {
@@ -137,6 +140,17 @@ describe('the shared campaign story', () => {
   });
 });
 
+describe('prompt caching order', () => {
+  it('starts every request with the same fixed text, however the game changes', () => {
+    const one = buildNarratorMessages({ state, history: [], message: 'first', language: 'et' });
+    const two = buildNarratorMessages({ state: { ...state, playerCharacter: { ...state.playerCharacter, hp: { current: 1, max: 12 } } }, history: [{ role: 'user', content: 'first' }, { role: 'assistant', content: 'reply' }], message: 'second', language: 'et' });
+    expect(two[0]).toEqual(one[0]);
+    // and a growing conversation only appends to what came before the newest turn
+    expect(two[1]).toEqual({ role: 'user', content: 'first' });
+    expect(two.at(-1).content).not.toBe(one.at(-1).content);
+  });
+});
+
 describe('narration language', () => {
   it('leaves English prompts as they are and adds the instruction for Estonian', () => {
     const english = buildNarratorMessages({ state, history: [], message: 'x' })[0].content;
@@ -144,7 +158,7 @@ describe('narration language', () => {
     expect(buildNarratorMessages({ state, history: [], message: 'x', language: 'en' })[0].content).toBe(english);
     const estonian = buildNarratorMessages({ state, history: [], message: 'x', language: 'et' })[0].content;
     expect(estonian).toContain('LANGUAGE: Write everything the player reads in Estonian (eesti keel)');
-    expect(estonian).toContain('GAME SUMMARY');
+    expect(estonian).not.toContain('GAME SUMMARY');
   });
 
   it('asks for the story so far in the same language, without the action rules', () => {
@@ -152,6 +166,27 @@ describe('narration language', () => {
     expect(summary).toContain('Estonian (eesti keel)');
     expect(summary).not.toContain('ACTIONS');
     expect(buildSummaryMessages({ turns: [] })[0].content).not.toContain('LANGUAGE:');
+  });
+});
+
+describe('game term glossary', () => {
+  it('puts the built-in Estonian terms into the instruction', () => {
+    const system = buildNarratorMessages({ state, history: [], message: 'x', language: 'et' })[0].content;
+    expect(system).toContain('TERMS: use exactly these translations');
+    expect(system).toContain('Hit points = Elupunktid');
+    expect(system).toContain('Dragon (a roll of 1) = Draakon');
+  });
+
+  it('uses a campaign\'s own glossary instead of the built-in one', () => {
+    const system = buildNarratorMessages({ state, history: [], message: 'x', language: 'et', glossary: '# my terms\nHit points = Elu\nbroken line\nDragon = Lohe' })[0].content;
+    expect(system).toContain('Hit points = Elu; Dragon = Lohe');
+    expect(system).not.toContain('Elupunktid');
+  });
+
+  it('gives the summary and recap prompts the terms too, without the action rules', () => {
+    const summary = buildSummaryMessages({ turns: [], language: 'et' })[0].content;
+    expect(summary).toContain('Hit points = Elupunktid');
+    expect(summary).not.toContain('ACTIONS');
   });
 });
 

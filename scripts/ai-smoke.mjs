@@ -47,7 +47,7 @@ const mock = http.createServer((request, response) => {
         : isNarrator
         ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"npc","name":"Bridge Troll","template":"boss","roles":["melee","ranged","wizard"],"notes":"Mossy and huge"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"damage","amount":9},{"type":"scene","location":"The old bridge","description":"A rope bridge over a gorge.","situation":"Wind is rising.","threads":["The troll"]},{"type":"fortune","question":"Is the bridge safe?"}]'
         : 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks';
-    const usage = { prompt_tokens: 321, completion_tokens: 45, cost: 0.0002 };
+    const usage = { prompt_tokens: 321, completion_tokens: 45, prompt_tokens_details: { cached_tokens: 128 }, cost: 0.0002 };
     if (parsed.stream) {
       response.setHeader('content-type', 'text/event-stream');
       response.write(': OPENROUTER PROCESSING\n\n');
@@ -142,8 +142,9 @@ try {
   assert.ok(!turn.text.includes('ACTIONS'), 'the machine line is not part of the story');
   const sent = seenRequests.at(-1).messages;
   assert.equal(sent[0].role, 'system');
-  assert.ok(sent[0].content.includes('GAME SUMMARY') && sent[0].content.includes(`HERO: AI Hero ${suffix}. HP 6/10`), 'the system message carries the hero');
-  assert.ok(sent[0].content.includes('Never roll dice'), 'and the rules for the narrator');
+  assert.ok(sent[0].content.includes('Never roll dice'), 'the fixed instructions come first');
+  assert.ok(!sent[0].content.includes('HERO:'), 'and hold nothing that changes from turn to turn, so providers can cache them');
+  assert.ok(sent.at(-1).content.includes('CURRENT GAME STATE') && sent.at(-1).content.includes(`HERO: AI Hero ${suffix}. HP 6/10`), 'the game state comes last, with what the player said');
   assert.deepEqual(sent.slice(1).map((entry) => entry.role), ['user'], 'the first turn has no history');
   assert.ok(JSON.stringify(sent).length < 12_000, 'the request stays small');
   // Actions: only what the game can honour, with names fixed up.
@@ -189,7 +190,7 @@ try {
   assert.match(memory, /shrine gate/, 'older turns were folded into a summary');
   assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1 AND summarized', [party.id])).rows[0].n > 0, true);
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'And then?' }), 200, 'a turn after summarising');
-  assert.ok(seenRequests.at(-1).messages[0].content.includes('THE STORY SO FAR') && seenRequests.at(-1).messages[0].content.includes('shrine gate'), 'the summary is given to the narrator');
+  assert.ok(seenRequests.at(-1).messages.some((message) => message.role === 'system' && message.content.includes('THE STORY SO FAR') && message.content.includes('shrine gate')), 'the summary is given to the narrator');
   assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'solo-summary'")).rows[0].n >= 1, 'the summary call is counted as usage');
 
   // --- One story, whoever plays: an assistant over MCP and the built-in narrator share the campaign record ---
@@ -206,7 +207,7 @@ try {
 
   const revisionBefore = await revisionNow();
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'I enter the gate' }), 200, 'the narrator continues the assistant story');
-  const system = seenRequests.at(-1).messages[0].content;
+  const system = seenRequests.at(-1).messages.at(-1).content;
   assert.ok(system.includes('LATEST CHECKPOINT') && system.includes('MCP checkpoint: the hero reached the shrine gate at dusk.'), 'the narrator reads the assistant\'s checkpoint');
   assert.ok(system.includes('SCENE: The shrine gate'), 'and the scene it saved');
   assert.ok(system.includes('OPEN THREADS: Who lit the beacon?'), 'and the open threads');
@@ -244,12 +245,49 @@ try {
   const estonianSystem = seenRequests.at(-1).messages[0].content;
   assert.ok(estonianSystem.includes('LANGUAGE: Write everything the player reads in Estonian (eesti keel)'), 'the narrator is told to write Estonian');
   assert.ok(estonianSystem.includes('exactly as specified in English'), 'and to keep the machine fields in English');
+  assert.ok(estonianSystem.includes('Hit points = Elupunktid'), 'with the built-in glossary of game terms');
   await ok(polish(tokens.alice, { partyId: party.id, draft: 'Goblin ambush: 4 rounds.' }), 200, 'an Estonian recap');
   assert.ok(seenRequests.at(-1).messages[0].content.includes('Estonian (eesti keel)'), 'the recap follows the campaign language');
   await ok(setLanguage(tokens.alice, 'en'), 200, 'back to English');
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'And now?' }), 200, 'an English turn again');
   assert.ok(!seenRequests.at(-1).messages[0].content.includes('LANGUAGE:'), 'English needs no instruction');
   results.storyLanguage = 'passed';
+
+  // --- The campaign's own glossary of game terms ---
+  const glossary = (token, text) => call('PUT', '/ai/solo-narrator/glossary', { token, body: { partyId: party.id, glossary: text } });
+  assert.equal((await ok(conversation(tokens.alice), 200, 'glossary default')).glossary.custom, null);
+  await ok(setLanguage(tokens.alice, 'et'), 200, 'Estonian again');
+  await ok(glossary(tokens.bob, 'Dragon = Lohe'), 403, 'a stranger cannot change the glossary');
+  await ok(glossary(tokens.alice, 'x'.repeat(2001)), 400, 'a glossary that is too long');
+  assert.equal((await ok(glossary(tokens.alice, 'Hit points = Elu\nDragon = Lohe'), 200, 'a custom glossary')).glossary.custom, 'Hit points = Elu\nDragon = Lohe');
+  const soloWithGlossary = (await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state')).data.solo;
+  assert.equal(soloWithGlossary.narrationGlossary, 'Hit points = Elu\nDragon = Lohe', 'assistants get the campaign\'s own terms');
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'Edasi' }), 200, 'a turn with custom terms');
+  const customSystem = seenRequests.at(-1).messages[0].content;
+  assert.ok(customSystem.includes('Hit points = Elu; Dragon = Lohe') && !customSystem.includes('Elupunktid'), 'the narrator uses the custom terms instead of the built-in ones');
+  assert.equal((await ok(glossary(tokens.alice, ''), 200, 'back to the built-in list')).glossary.custom, null);
+  await ok(setLanguage(tokens.alice, 'en'), 200, 'English again');
+  assert.equal((await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'English state')).data.solo.narrationGlossary, undefined, 'English campaigns publish no glossary');
+  results.glossary = 'passed';
+
+  // --- Prompt caching is counted ---
+  const cachedUse = (await ok(call('GET', '/account/ai', { token: tokens.alice }), 200, 'usage with cache')).usageThisMonth;
+  assert.ok(cachedUse.cachedTokens >= 128 && cachedUse.cachedTokens % 128 === 0, `cached tokens are recorded per call (got ${cachedUse.cachedTokens})`);
+  const cachedTurn = (await ok(conversation(tokens.alice), 200, 'turn usage')).turns.filter((turn) => turn.role === 'assistant').at(-1);
+  assert.equal(cachedTurn.cachedTokens, 128, 'and shown on the reply');
+
+  // --- The administrator sees who uses it ---
+  const aliceId = (await database.query('SELECT id FROM users WHERE email = $1', [emails.alice])).rows[0].id;
+  const overview = await ok(call('GET', '/admin/ai-usage', { token: admin }), 200, 'admin usage');
+  const mine = overview.users.find((user) => user.userId === aliceId);
+  assert.ok(mine && mine.calls >= 5 && mine.hasKey === true, 'the person who used it is listed');
+  assert.ok(mine.byPurpose.solo.calls >= 1 && mine.byPurpose.story.calls >= 1, 'with what it was used for');
+  assert.ok(overview.totals.calls >= mine.calls && overview.totals.cachedTokens >= 128 && overview.months.length === 6);
+  assert.ok(!JSON.stringify(overview).includes(VALID_KEY) && !JSON.stringify(overview).includes('v1:'), 'no key, encrypted or not, is ever shown');
+  await ok(call('GET', '/admin/ai-usage', { token: tokens.bob }), 403, 'an ordinary user cannot see it');
+  await ok(call('GET', '/admin/ai-usage?month=October', { token: admin }), 400, 'a bad month');
+  assert.equal((await ok(call('GET', '/admin/ai-usage?month=2020-01', { token: admin }), 200, 'an old month')).totals.calls, 0);
+  results.adminAiUsage = 'passed';
 
   // The player can correct the summary, and start over.
   await ok(call('PUT', '/ai/solo-narrator', { token: tokens.alice, body: { partyId: party.id, summary: 'Mara is at the gate. The wolf is dead.' } }), 200, 'edit the summary');
@@ -262,7 +300,7 @@ try {
   await ok(narrate(tokens.alice, { partyId: 'not-a-uuid', message: 'hi' }), 400, 'a bad campaign id');
   await ok(narrate(tokens.alice, { partyId: party.id, message: '  ' }), 400, 'an empty message');
   const reset = await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.alice }), 200, 'start over');
-  assert.deepEqual(reset, { turns: [], summary: '', language: 'en', campaign: null });
+  assert.deepEqual(reset, { turns: [], summary: '', language: 'en', glossary: { custom: null, builtIn: '', terms: 0 }, campaign: null });
   assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1', [party.id])).rows[0].n, 0);
   results.soloNarrator = 'passed';
 

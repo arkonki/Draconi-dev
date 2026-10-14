@@ -167,6 +167,7 @@ export function BuiltInAiSettings() {
 
       <p className="text-sm text-gray-700">
         <strong>This month:</strong> {number(usage.calls)} request{usage.calls === 1 ? '' : 's'}, {number(usage.promptTokens)} tokens sent and {number(usage.completionTokens)} received
+        {usage.cachedTokens > 0 && usage.promptTokens > 0 ? `, ${Math.round((usage.cachedTokens / usage.promptTokens) * 100)}% of what was sent came from the provider's cache at a discount` : ''}
         {usage.costUsd !== null ? `, about $${usage.costUsd.toFixed(4)} according to OpenRouter` : ''}.
       </p>
       {confirmDialog}

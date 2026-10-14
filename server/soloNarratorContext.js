@@ -3,7 +3,7 @@
 // Anything the hero has not found yet (hidden places, dangers there, creatures there) is left out, so the narrator
 // cannot spoil it. The model is asked to describe, never to decide: dice and rules stay with the app.
 
-import { languageInstruction } from './soloNarrationLanguage.js';
+import { languageInstruction, plainLanguageInstruction } from './soloNarrationLanguage.js';
 
 export const MAX_CONTEXT_CHARS = 9000;
 const ATTRIBUTES = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'];
@@ -146,22 +146,29 @@ export function sanitizeHistory(history) {
     .map((entry) => ({ role: entry.role, content: entry.content.slice(0, MAX_MESSAGE_CHARS) }));
 }
 
-export function buildNarratorMessages({ state, checkpoint = null, summary = '', history, message, language = 'en' }) {
+/**
+ * The conversation sent to the model, ordered so as much of the start as possible is identical from one turn to the next,
+ * which lets providers that cache prompts reuse it at a discount: the fixed instructions first, then the story so far
+ * (which changes only now and then), then the conversation (which only grows), and last the current game state and
+ * what the player said (which change every turn).
+ */
+export function buildNarratorMessages({ state, checkpoint = null, summary = '', history, message, language = 'en', glossary = null }) {
   const trimmed = String(message ?? '').trim().slice(0, MAX_MESSAGE_CHARS);
   const story = String(summary ?? '').trim();
-  const instruction = languageInstruction(language);
+  const instruction = languageInstruction(language, glossary);
   return [
-    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}${instruction ? `\n${instruction}` : ''}\n\nGAME SUMMARY\n${buildNarratorContext(state, { checkpoint })}${story ? `\n\nTHE STORY SO FAR (what happened earlier)\n${story}` : ''}` },
+    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}${instruction ? `\n${instruction}` : ''}` },
+    ...(story ? [{ role: 'system', content: `THE STORY SO FAR (what happened earlier)\n${story}` }] : []),
     ...sanitizeHistory(history),
-    { role: 'user', content: trimmed },
+    { role: 'user', content: `CURRENT GAME STATE\n${buildNarratorContext(state, { checkpoint })}\n\nWHAT THE PLAYER SAYS OR DOES NOW\n${trimmed}` },
   ];
 }
 
 /** The messages that fold older exchanges into the running summary. */
-export function buildSummaryMessages({ summary = '', turns, language = 'en' }) {
+export function buildSummaryMessages({ summary = '', turns, language = 'en', glossary = null }) {
   const transcript = turns.map((turn) => `${turn.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${String(turn.content).slice(0, MAX_MESSAGE_CHARS)}`).join('\n\n');
   return [
-    { role: 'system', content: [SUMMARY_SYSTEM_PROMPT, languageInstruction(language).replace(/ Inside the ACTIONS line.*$/, '')].filter(Boolean).join('\n') },
+    { role: 'system', content: [SUMMARY_SYSTEM_PROMPT, plainLanguageInstruction(language, glossary)].filter(Boolean).join('\n') },
     { role: 'user', content: `STORY SO FAR:\n${String(summary).trim() || '(nothing yet)'}\n\nNEWEST EXCHANGES:\n${transcript}` },
   ];
 }

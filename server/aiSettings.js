@@ -82,14 +82,34 @@ export function capReached({ costCapUsd, tokenCap }, used) {
 const monthlyUse = async (userId) => {
   const { rows } = await pool.query(
     `SELECT count(*)::int AS calls, COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens,
-            COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, COALESCE(sum(cost_usd), 0) AS cost_usd,
+            COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, COALESCE(sum(cost_usd), 0) AS cost_usd, COALESCE(sum(cached_tokens), 0)::bigint AS cached_tokens,
             count(cost_usd)::int AS priced_calls
      FROM ai_usage WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
     [userId],
   );
   const row = rows[0];
-  return { calls: row.calls, promptTokens: Number(row.prompt_tokens), completionTokens: Number(row.completion_tokens), tokens: Number(row.prompt_tokens) + Number(row.completion_tokens), costUsd: Number(row.cost_usd), pricedCalls: row.priced_calls };
+  return { calls: row.calls, promptTokens: Number(row.prompt_tokens), completionTokens: Number(row.completion_tokens), cachedTokens: Number(row.cached_tokens), tokens: Number(row.prompt_tokens) + Number(row.completion_tokens), costUsd: Number(row.cost_usd), pricedCalls: row.priced_calls };
 };
+
+/** Reads the provider's usage block. `cachedTokens` is the part of the input served from the provider's prompt cache. */
+export function readUsage(usage) {
+  const block = usage ?? {};
+  return {
+    promptTokens: Math.max(0, Math.round(Number(block.prompt_tokens) || 0)),
+    completionTokens: Math.max(0, Math.round(Number(block.completion_tokens) || 0)),
+    cachedTokens: Math.max(0, Math.round(Number(block.prompt_tokens_details?.cached_tokens) || 0)),
+    costUsd: block.cost !== null && block.cost !== undefined && Number.isFinite(Number(block.cost)) ? Number(block.cost) : null,
+  };
+}
+
+/**
+ * Providers that cache prompts only when asked (Anthropic's models do) need the fixed start of the conversation marked.
+ * Others cache a repeated start by themselves, so nothing is changed for them.
+ */
+export function withCacheControl(model, messages) {
+  if (!String(model).startsWith('anthropic/') || messages[0]?.role !== 'system' || typeof messages[0].content !== 'string') return messages;
+  return [{ role: 'system', content: [{ type: 'text', text: messages[0].content, cache_control: { type: 'ephemeral' } }] }, ...messages.slice(1)];
+}
 
 /** Turns the provider's answer into text and usage, or a clear error. Pure. */
 export function interpretModelResponse(status, payload) {
@@ -104,15 +124,7 @@ export function interpretModelResponse(status, payload) {
   }
   const text = payload?.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
-  const usage = payload?.usage ?? {};
-  return {
-    text: text.trim(),
-    usage: {
-      promptTokens: Math.max(0, Math.round(Number(usage.prompt_tokens) || 0)),
-      completionTokens: Math.max(0, Math.round(Number(usage.completion_tokens) || 0)),
-      costUsd: Number.isFinite(Number(usage.cost)) && usage.cost !== null && usage.cost !== undefined ? Number(usage.cost) : null,
-    },
-  };
+  return { text: text.trim(), usage: readUsage(payload?.usage) };
 }
 
 const recentCalls = new Map();
@@ -180,6 +192,7 @@ export async function getAiSettings(user) {
       calls: usage.calls,
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
+      cachedTokens: usage.cachedTokens,
       costUsd: usage.pricedCalls > 0 ? usage.costUsd : null,
     },
     limits: { monthlyCostCapUsd: costCapUsd, monthlyTokenCap: tokenCap, reached: capReached({ costCapUsd, tokenCap }, usage) !== null },
@@ -268,8 +281,8 @@ const requestHeaders = (apiKey) => ({
 
 async function recordUsage(user, { partyId, purpose, model, usage }) {
   await pool.query(
-    'INSERT INTO ai_usage (user_id, party_id, purpose, model, prompt_tokens, completion_tokens, cost_usd) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [user.id, partyId, purpose, model, usage.promptTokens, usage.completionTokens, usage.costUsd],
+    'INSERT INTO ai_usage (user_id, party_id, purpose, model, prompt_tokens, completion_tokens, cached_tokens, cost_usd) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+    [user.id, partyId, purpose, model, usage.promptTokens, usage.completionTokens, usage.cachedTokens ?? 0, usage.costUsd],
   );
 }
 
@@ -284,7 +297,7 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
     response = await fetchImpl(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
       headers: requestHeaders(apiKey),
-      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
+      body: JSON.stringify({ model, messages: withCacheControl(model, messages), temperature, max_tokens: maxTokens, usage: { include: true } }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
@@ -308,7 +321,7 @@ export async function callModelStream(user, { messages, purpose, partyId = null,
     response = await fetchImpl(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
       headers: requestHeaders(apiKey),
-      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, usage: { include: true } }),
+      body: JSON.stringify({ model, messages: withCacheControl(model, messages), temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, usage: { include: true } }),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
   } catch {
@@ -335,11 +348,9 @@ export async function callModelStream(user, { messages, purpose, partyId = null,
     throw new HttpError(504, 'The AI service stopped answering.', 'AI_STREAM_INTERRUPTED');
   }
   if (!text.trim()) throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
-  const usage = {
-    promptTokens: reported ? Math.max(0, Math.round(Number(reported.prompt_tokens) || 0)) : estimateTokens(JSON.stringify(messages)),
-    completionTokens: reported ? Math.max(0, Math.round(Number(reported.completion_tokens) || 0)) : estimateTokens(text),
-    costUsd: reported && reported.cost !== null && reported.cost !== undefined && Number.isFinite(Number(reported.cost)) ? Number(reported.cost) : null,
-  };
+  const usage = reported
+    ? readUsage(reported)
+    : { promptTokens: estimateTokens(JSON.stringify(messages)), completionTokens: estimateTokens(text), cachedTokens: 0, costUsd: null };
   await recordUsage(user, { partyId, purpose, model, usage });
   return { text: text.trim(), model, usage };
 }

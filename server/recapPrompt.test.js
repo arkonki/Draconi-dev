@@ -18,6 +18,7 @@ describe('recap polishing', () => {
     const system = buildRecapMessages('Draft', 'et')[0].content;
     expect(system).toContain('Estonian (eesti keel)');
     expect(system).not.toContain('ACTIONS');
+    expect(system).toContain('Hit points = Elupunktid');
     expect(buildRecapMessages('Draft')[0].content).toBe(RECAP_SYSTEM_PROMPT);
   });
 });

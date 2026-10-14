@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { NARRATION_LANGUAGES, isNarrationLanguage, languageInstruction, normalizeNarrationLanguage } from './soloNarrationLanguage.js';
+import { DEFAULT_GLOSSARIES, NARRATION_LANGUAGES, effectiveGlossary, isNarrationLanguage, languageInstruction, normalizeNarrationLanguage, parseGlossary, plainLanguageInstruction, sanitizeGlossaryInput } from './soloNarrationLanguage.js';
 
 describe('narration language', () => {
   it('knows English and Estonian only', () => {
@@ -22,5 +22,31 @@ describe('narration language', () => {
     const instruction = languageInstruction('et');
     expect(instruction).toContain('Estonian (eesti keel)');
     expect(instruction).toContain('skill, attribute, template, role and modifier value exactly as specified in English');
+  });
+
+  it('reads a glossary written one term per line', () => {
+    expect(parseGlossary('Hit points = Elu\n# note\n\n  Dragon =  Lohe  \nno equals sign\n= nothing\nLeft =')).toEqual([['Hit points', 'Elu'], ['Dragon', 'Lohe']]);
+    expect(parseGlossary(undefined)).toEqual([]);
+  });
+
+  it('uses the campaign\'s list when it has one and the built-in one otherwise', () => {
+    expect(effectiveGlossary('et', null)).toEqual(parseGlossary(DEFAULT_GLOSSARIES.et));
+    expect(effectiveGlossary('et', '   ')).toEqual(parseGlossary(DEFAULT_GLOSSARIES.et));
+    expect(effectiveGlossary('et', 'Dragon = Lohe')).toEqual([['Dragon', 'Lohe']]);
+    expect(effectiveGlossary('en', null)).toEqual([]);
+    expect(DEFAULT_GLOSSARIES.et.split('\n').every((line) => line.includes(' = '))).toBe(true);
+  });
+
+  it('leaves the action rules out of the plain instruction and drops everything for English', () => {
+    expect(plainLanguageInstruction('et')).not.toContain('ACTIONS');
+    expect(plainLanguageInstruction('et')).toContain('TERMS:');
+    expect(plainLanguageInstruction('en')).toBe('');
+  });
+
+  it('checks a glossary someone saved', () => {
+    expect(sanitizeGlossaryInput('  Dragon = Lohe \r\n')).toBe('Dragon = Lohe');
+    expect(sanitizeGlossaryInput('   ')).toBeNull();
+    expect(sanitizeGlossaryInput(null)).toBeNull();
+    expect(() => sanitizeGlossaryInput('x'.repeat(2001))).toThrow();
   });
 });

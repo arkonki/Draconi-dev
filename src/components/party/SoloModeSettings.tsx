@@ -23,6 +23,7 @@ import {
 import { Button } from '../shared/Button';
 import { ConfirmationDialog } from '../shared/ConfirmationDialog';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import { createTranslator, tr, useScreenLanguage } from '../../i18n/translate';
 
 interface SoloModeSettingsProps {
   partyId: string;
@@ -32,9 +33,9 @@ interface SoloModeSettingsProps {
 }
 
 function activationLabel(value?: string | null) {
-  if (value === 'passive') return 'Passive';
-  if (value === 'contextual') return 'Contextual';
-  return 'Manual';
+  if (value === 'passive') return tr('Passive');
+  if (value === 'contextual') return tr('Contextual');
+  return tr('Manual');
 }
 
 export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloModeSettingsProps) {
@@ -62,6 +63,9 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
 
   const options = settingsQuery.data?.options;
   const state = settingsQuery.data?.state;
+  // The same screen language as the Solo page itself: this person's choice, or the language of the story.
+  const { language: screenLanguage } = useScreenLanguage(settingsQuery.data?.options.solo.narrationLanguage);
+  const t = useMemo(() => createTranslator(screenLanguage), [screenLanguage]);
 
   useEffect(() => {
     if (!options) return;
@@ -100,12 +104,12 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
   const saveMutation = useMutation({
     onMutate: () => setSuccessMessage(null),
     mutationFn: async () => {
-      if (!options) throw new Error('Solo settings are not loaded.');
-      if (!characterId) throw new Error('Select the character who will be the solo hero.');
-      if (!abilityId) throw new Error('Select the additional heroic ability for the solo hero.');
+      if (!options) throw new Error(t('Solo settings are not loaded.'));
+      if (!characterId) throw new Error(t('Select the character who will be the solo hero.'));
+      if (!abilityId) throw new Error(t('Select the additional heroic ability for the solo hero.'));
 
       let revision = options.campaignRevision;
-      let summary = 'Solo-mode settings are already up to date.';
+      let summary = t('Solo-mode settings are already up to date.');
       const characterChanged = options.solo.playerCharacterId !== characterId;
       const settingsChanged = !options.solo.enabled
         || characterChanged
@@ -152,7 +156,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
   const disableMutation = useMutation({
     onMutate: () => setSuccessMessage(null),
     mutationFn: async () => {
-      if (!options) throw new Error('Solo settings are not loaded.');
+      if (!options) throw new Error(t('Solo settings are not loaded.'));
       return disableSoloMode(partyId, options.campaignRevision);
     },
     onSuccess: async (result) => {
@@ -176,7 +180,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
     onMutate: () => setSuccessMessage(null),
     mutationFn: async () => {
       if (!options || !removedAbilityName || !replacementAbilityId) {
-        throw new Error('Choose both the unsuitable ability and its replacement.');
+        throw new Error(t('Choose both the unsuitable ability and its replacement.'));
       }
       return replaceSoloHeroicAbility(partyId, options.campaignRevision, {
         removedAbilityName,
@@ -207,16 +211,16 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
           <div className="flex items-start justify-between border-b border-stone-200 bg-gradient-to-r from-indigo-50 to-amber-50 px-5 py-4">
             <div>
               <h2 className="flex items-center gap-2 text-xl font-bold text-stone-900">
-                <Sparkles className="h-5 w-5 text-indigo-600" /> Solo mode
+                <Sparkles className="h-5 w-5 text-indigo-600" /> {t('Solo mode')}
               </h2>
-              <p className="mt-1 text-sm text-stone-600">Campaign-specific solo configuration for {partyName}.</p>
+              <p className="mt-1 text-sm text-stone-600">{t('Campaign-specific solo configuration for {partyName}.', { partyName })}</p>
             </div>
             <button
               type="button"
               onClick={onClose}
               disabled={isMutating}
               className="rounded-lg p-1.5 text-stone-400 hover:bg-white/70 hover:text-stone-700 disabled:opacity-40"
-              aria-label="Close solo-mode settings"
+              aria-label={t('Close solo-mode settings')}
             >
               <X className="h-5 w-5" />
             </button>
@@ -227,9 +231,9 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
               <div className="flex min-h-72 items-center justify-center"><LoadingSpinner size="lg" /></div>
             ) : settingsQuery.error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                <div className="font-bold">Could not load solo-mode settings</div>
+                <div className="font-bold">{t('Could not load solo-mode settings')}</div>
                 <p className="mt-1">{settingsQuery.error.message}</p>
-                <Button className="mt-4" variant="outline" size="sm" onClick={() => settingsQuery.refetch()}>Try again</Button>
+                <Button className="mt-4" variant="outline" size="sm" onClick={() => settingsQuery.refetch()}>{t('Try again')}</Button>
               </div>
             ) : options ? (
               <div className="space-y-6">
@@ -239,12 +243,12 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     : <Shield className="mt-0.5 h-5 w-5 shrink-0 text-stone-500" />}
                   <div>
                     <div className={`font-bold ${isEnabled ? 'text-emerald-950' : 'text-stone-800'}`}>
-                      Solo mode is {isEnabled ? 'enabled' : 'not enabled'}
+                      {t(isEnabled ? 'Solo mode is enabled' : 'Solo mode is not enabled')}
                     </div>
                     <p className={`mt-1 text-sm ${isEnabled ? 'text-emerald-800' : 'text-stone-600'}`}>
                       {isEnabled
-                        ? 'Solo rules, oracles and the selected heroic ability are active for this campaign.'
-                        : 'Choose the solo hero and their additional ability, then save to enable solo play.'}
+                        ? t('Solo rules, oracles and the selected heroic ability are active for this campaign.')
+                        : t('Choose the solo hero and their additional ability, then save to enable solo play.')}
                     </p>
                   </div>
                 </div>
@@ -252,7 +256,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                 {options.prerequisites.issues.length > 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                     <div className="flex items-center gap-2 font-bold text-amber-950">
-                      <AlertTriangle className="h-4 w-4" /> Setup note
+                      <AlertTriangle className="h-4 w-4" /> {t('Setup note')}
                     </div>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-800">
                       {options.prerequisites.issues.map((issue) => <li key={issue}>{issue}</li>)}
@@ -263,7 +267,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="block">
                     <span className="flex items-center gap-2 text-sm font-bold text-stone-800">
-                      <UserRound className="h-4 w-4 text-indigo-600" /> Solo hero
+                      <UserRound className="h-4 w-4 text-indigo-600" /> {t('Solo hero')}
                     </span>
                     <select
                       value={characterId}
@@ -271,7 +275,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                       disabled={isMutating || options.characters.length === 0 || hasBlockingSoloActivity}
                       className="mt-2 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 disabled:bg-stone-100"
                     >
-                      <option value="">Select character…</option>
+                      <option value="">{t('Select character…')}</option>
                       {options.characters.map((character) => (
                         <option key={character.id} value={character.id}>
                           {character.name}{character.profession ? ` · ${character.profession}` : ''}
@@ -280,14 +284,14 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     </select>
                     {selectedCharacter && (
                       <span className="mt-1 block text-xs text-stone-500">
-                        {[selectedCharacter.kin, selectedCharacter.profession].filter(Boolean).join(' · ') || 'Campaign character'}
+                        {[selectedCharacter.kin, selectedCharacter.profession].filter(Boolean).join(' · ') || t('Campaign character')}
                       </span>
                     )}
                   </label>
 
                   <label className="block">
                     <span className="flex items-center gap-2 text-sm font-bold text-stone-800">
-                      <Gauge className="h-4 w-4 text-indigo-600" /> Fortune default
+                      <Gauge className="h-4 w-4 text-indigo-600" /> {t('Fortune default')}
                     </span>
                     <select
                       value={oracleTilt}
@@ -295,32 +299,32 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                       disabled={isMutating}
                       className="mt-2 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 disabled:bg-stone-100"
                     >
-                      <option value="ask">Ask each time</option>
-                      <option value="even">Even by default</option>
+                      <option value="ask">{t('Ask each time')}</option>
+                      <option value="even">{t('Even by default')}</option>
                     </select>
-                    <span className="mt-1 block text-xs text-stone-500">You can still choose likely or unlikely for individual questions.</span>
+                    <span className="mt-1 block text-xs text-stone-500">{t('You can still choose likely or unlikely for individual questions.')}</span>
                   </label>
                 </div>
 
                 <div className="grid gap-3 rounded-xl border border-stone-200 bg-stone-50 p-4 sm:grid-cols-2">
                   <div>
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-stone-500">
-                      <BookOpen className="h-4 w-4" /> Ruleset
+                      <BookOpen className="h-4 w-4" /> {t('Ruleset')}
                     </div>
-                    <div className="mt-1 font-semibold text-stone-900">Dragonbane Solo Adventure v1.2</div>
+                    <div className="mt-1 font-semibold text-stone-900">{t('Dragonbane Solo Adventure v1.2')}</div>
                   </div>
                   <div>
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-stone-500">
-                      <Swords className="h-4 w-4" /> Adventure mode
+                      <Swords className="h-4 w-4" /> {t('Adventure mode')}
                     </div>
-                    <div className="mt-1 font-semibold text-stone-900">Custom solo adventure</div>
-                    <div className="text-xs text-stone-500">Deepfall Breach requires an authorized data pack.</div>
+                    <div className="mt-1 font-semibold text-stone-900">{t('Custom solo adventure')}</div>
+                    <div className="text-xs text-stone-500">{t('Deepfall Breach requires an authorized data pack.')}</div>
                   </div>
                 </div>
 
                 <label className="block">
                   <span className="flex items-center gap-2 text-sm font-bold text-stone-800">
-                    <Sparkles className="h-4 w-4 text-indigo-600" /> Additional heroic ability
+                    <Sparkles className="h-4 w-4 text-indigo-600" /> {t('Additional heroic ability')}
                   </span>
                   <select
                     value={abilityId}
@@ -328,14 +332,14 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     disabled={isMutating || hasBlockingSoloActivity}
                     className="mt-2 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 disabled:bg-stone-100"
                   >
-                    <option value="">Select heroic ability…</option>
+                    <option value="">{t('Select heroic ability…')}</option>
                     {orderedAbilities.map((ability) => (
                       <option
                         key={ability.id}
                         value={ability.id}
                         disabled={ability.id !== options.solo.soloHeroicAbilityId && ability.knownByCharacterIds?.includes(characterId)}
                       >
-                        {ability.ruleKey?.startsWith('solo.') ? 'Solo · ' : ''}{ability.name}{ability.knownByCharacterIds?.includes(characterId) && ability.id !== options.solo.soloHeroicAbilityId ? ' · already known' : ''}
+                        {ability.ruleKey?.startsWith('solo.') ? `${t('Solo')} · ` : ''}{ability.name}{ability.knownByCharacterIds?.includes(characterId) && ability.id !== options.solo.soloHeroicAbilityId ? ` · ${t('already known')}` : ''}
                       </option>
                     ))}
                   </select>
@@ -346,11 +350,11 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-bold text-indigo-950">{selectedAbility.name}</h3>
                       <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-indigo-700">
-                        {activationLabel(selectedAbility.activationType)}
+                        {t(activationLabel(selectedAbility.activationType))}
                       </span>
                       {selectedAbility.willpowerCost !== null && (
                         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                          {selectedAbility.willpowerCost} WP
+                          {t('{willpowerCost} WP', { willpowerCost: selectedAbility.willpowerCost })}
                         </span>
                       )}
                     </div>
@@ -362,12 +366,12 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     )}
                     {selectedAbility.ruleKey === 'solo.army_of_one' && (
                       <p className="mt-3 rounded-lg bg-white/70 p-3 text-xs font-medium text-indigo-800">
-                        In combat while alone, the hero receives two distinct initiative cards and two turns per round.
+                        {t('In combat while alone, the hero receives two distinct initiative cards and two turns per round.')}
                       </p>
                     )}
                     {selectedAbility.ruleKey === 'solo.sole_survivor' && (
                       <p className="mt-3 rounded-lg bg-white/70 p-3 text-xs font-medium text-indigo-800">
-                        After an eligible failed test, the hero may spend exactly 3 WP to push without taking a condition.
+                        {t('After an eligible failed test, the hero may spend exactly 3 WP to push without taking a condition.')}
                       </p>
                     )}
                   </div>
@@ -375,46 +379,45 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
 
                 {isEnabled && selectedCharacter && (
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-                    <h3 className="font-bold text-stone-900">Replace an unsuitable existing ability</h3>
-                    <p className="mt-1 text-xs text-stone-500">Between missions, Solo v1.2 permits a one-for-one replacement. The additional Solo setup ability is managed above.</p>
+                    <h3 className="font-bold text-stone-900">{t('Replace an unsuitable existing ability')}</h3>
+                    <p className="mt-1 text-xs text-stone-500">{t('Between missions, Solo v1.2 permits a one-for-one replacement. The additional Solo setup ability is managed above.')}</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <select value={removedAbilityName} onChange={(event) => setRemovedAbilityName(event.target.value)} disabled={isMutating || hasBlockingSoloActivity} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm">
-                        <option value="">Unsuitable ability…</option>
+                        <option value="">{t('Unsuitable ability…')}</option>
                         {selectedCharacter.heroicAbilities
                           .filter((name) => name.toLocaleLowerCase() !== configuredSoloAbility?.name.toLocaleLowerCase())
                           .map((name) => <option key={name} value={name}>{name}</option>)}
                       </select>
                       <select value={replacementAbilityId} onChange={(event) => setReplacementAbilityId(event.target.value)} disabled={isMutating || hasBlockingSoloActivity} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm">
-                        <option value="">Replacement ability…</option>
+                        <option value="">{t('Replacement ability…')}</option>
                         {orderedAbilities.filter((ability) => !ability.knownByCharacterIds?.includes(characterId)).map((ability) => (
-                          <option key={ability.id} value={ability.id}>{ability.name}{ability.soloCompatible === false ? ' · party-dependent' : ''}</option>
+                          <option key={ability.id} value={ability.id}>{ability.name}{ability.soloCompatible === false ? ` · ${t('party-dependent')}` : ''}</option>
                         ))}
                       </select>
                     </div>
                     <Button className="mt-3" size="sm" variant="outline" loading={replaceAbilityMutation.isPending} disabled={!removedAbilityName || !replacementAbilityId || hasBlockingSoloActivity} onClick={() => replaceAbilityMutation.mutate()}>
-                      Confirm one-for-one replacement
+                      {t('Confirm one-for-one replacement')}
                     </Button>
                   </div>
                 )}
 
                 {state?.activeMission && (
                   <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
-                    <div className="text-xs font-bold uppercase tracking-wide text-violet-600">Active mission</div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-violet-600">{t('Active mission')}</div>
                     <div className="mt-1 font-bold text-violet-950">{state.activeMission.title}</div>
-                    {state.currentWaypoint?.title && <div className="mt-1 text-sm text-violet-800">Current waypoint: {state.currentWaypoint.title}</div>}
+                    {state.currentWaypoint?.title && <div className="mt-1 text-sm text-violet-800">{t('Current waypoint: {title}', { title: state.currentWaypoint.title })}</div>}
                     {state.activeThreat && (
                       <div className="mt-2 text-sm text-violet-800">
-                        Threat {state.activeThreat.counter}/6: {state.activeThreat.description}
-                      </div>
+                        {t('Threat {counter}/6: {description}', { counter: state.activeThreat.counter, description: state.activeThreat.description })}</div>
                     )}
                   </div>
                 )}
 
                 {state?.activeCombat && (
                   <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <div className="text-xs font-bold uppercase tracking-wide text-rose-600">Active combat</div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-rose-600">{t('Active combat')}</div>
                     <div className="mt-1 font-bold text-rose-950">{state.activeCombat.name}</div>
-                    <p className="mt-1 text-sm text-rose-800">End this encounter before changing the solo hero, heroic ability, or disabling solo mode.</p>
+                    <p className="mt-1 text-sm text-rose-800">{t('End this encounter before changing the solo hero, heroic ability, or disabling solo mode.')}</p>
                   </div>
                 )}
 
@@ -425,7 +428,7 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                     {mutationError.message}
                     {mutationError instanceof SoloApiError && mutationError.code === 'REVISION_CONFLICT' && (
-                      <span className="mt-1 block text-xs">Settings were refreshed. Review them and save again.</span>
+                      <span className="mt-1 block text-xs">{t('Settings were refreshed. Review them and save again.')}</span>
                     )}
                   </div>
                 )}
@@ -441,22 +444,22 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
                     variant="danger"
                     size="sm"
                     disabled={isMutating || hasBlockingSoloActivity}
-                    title={hasBlockingSoloActivity ? 'Complete the active solo mission or combat first.' : undefined}
+                    title={hasBlockingSoloActivity ? t('Complete the active solo mission or combat first.') : undefined}
                     onClick={() => setIsDisableConfirmOpen(true)}
                   >
-                    Disable solo mode
+                    {t('Disable solo mode')}
                   </Button>
                 )}
               </div>
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={onClose} disabled={isMutating}>Close</Button>
+                <Button variant="ghost" onClick={onClose} disabled={isMutating}>{t('Close')}</Button>
                 <Button
                   variant="primary"
                   loading={saveMutation.isPending}
                   disabled={isMutating || !options.prerequisites.hasCharacter || !characterId || !abilityId}
                   onClick={() => saveMutation.mutate()}
                 >
-                  {isEnabled ? 'Save solo settings' : 'Enable solo mode'}
+                  {t(isEnabled ? 'Save solo settings' : 'Enable solo mode')}
                 </Button>
               </div>
             </div>
@@ -468,9 +471,9 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
         isOpen={isDisableConfirmOpen}
         onClose={() => setIsDisableConfirmOpen(false)}
         onConfirm={() => disableMutation.mutate()}
-        title="Disable solo mode?"
-        description="Solo oracles and special ability behavior will stop for this campaign. Draconi removes only an additional heroic ability it originally granted; abilities the character already owned are preserved."
-        confirmText="Disable Solo Mode"
+        title={t('Disable solo mode?')}
+        description={t('Solo oracles and special ability behavior will stop for this campaign. Draconi removes only an additional heroic ability it originally granted; abilities the character already owned are preserved.')}
+        confirmText={t('Disable Solo Mode')}
         isDestructive={true}
         isLoading={disableMutation.isPending}
         icon={<AlertTriangle className="h-6 w-6 text-red-500" />}

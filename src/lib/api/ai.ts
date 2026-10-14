@@ -9,7 +9,7 @@ export interface AiSettings {
   model: string;
   defaultModel: string;
   suggestedModels: string[];
-  usageThisMonth: { calls: number; promptTokens: number; completionTokens: number; costUsd: number | null };
+  usageThisMonth: { calls: number; promptTokens: number; completionTokens: number; cachedTokens: number; costUsd: number | null };
   /** Optional monthly limits the person set for themselves. `reached` is true when one has been hit. */
   limits: { monthlyCostCapUsd: number | null; monthlyTokenCap: number | null; reached: boolean };
 }
@@ -39,6 +39,7 @@ export interface NarratorMessage {
   createdAt?: string;
   /** What this reply used, when known. */
   tokens?: number | null;
+  cachedTokens?: number | null;
   costUsd?: number | null;
 }
 
@@ -56,12 +57,20 @@ export const NARRATION_LANGUAGE_OPTIONS: ReadonlyArray<{ value: NarrationLanguag
   { value: 'et', label: 'Eesti' },
 ];
 
+/** The game's own words in the story's language. `custom` is what this campaign saved; null means the built-in list is used. */
+export interface NarratorGlossary {
+  custom: string | null;
+  builtIn: string;
+  terms: number;
+}
+
 export interface NarratorConversation {
   turns: NarratorMessage[];
   /** The running summary of everything older than the recent turns. */
   summary: string;
   /** The language the campaign is narrated in. */
   language: NarrationLanguage;
+  glossary: NarratorGlossary;
   campaign: NarratorCampaignContext | null;
 }
 
@@ -102,6 +111,8 @@ export const fetchNarratorConversation = (partyId: string) => send<NarratorConve
 export const saveNarratorSummary = (partyId: string, summary: string) => send<{ summary: string }>('/ai/solo-narrator', json('PUT', { partyId, summary }));
 /** Changes the language the campaign is narrated in, for the built-in narrator and for assistants over MCP. */
 export const setNarrationLanguage = (partyId: string, language: NarrationLanguage) => send<{ language: NarrationLanguage }>('/ai/solo-narrator/language', json('PUT', { partyId, language }));
+/** Saves this campaign's own glossary of game terms ("English = local" per line), or null to use the built-in one. */
+export const setNarrationGlossary = (partyId: string, glossary: string | null) => send<{ glossary: NarratorGlossary }>('/ai/solo-narrator/glossary', json('PUT', { partyId, glossary }));
 export const resetNarrator = (partyId: string) => send<NarratorConversation>(`/ai/solo-narrator?partyId=${encodeURIComponent(partyId)}`, { method: 'DELETE' });
 
 /** Reads server-sent events from a response body. Exported for tests. */

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { allowCall, capReached, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate } from './aiSettings.js';
+import { allowCall, capReached, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate, readUsage, withCacheControl } from './aiSettings.js';
 
 describe('AI settings', () => {
   it('accepts a key and a model, and trims them', () => {
@@ -21,8 +21,8 @@ describe('AI settings', () => {
 
   it('reads an answer with its usage and cost', () => {
     const result = interpretModelResponse(200, { choices: [{ message: { content: '  The door creaks.  ' } }], usage: { prompt_tokens: 120, completion_tokens: 40, cost: 0.0004 } });
-    expect(result).toEqual({ text: 'The door creaks.', usage: { promptTokens: 120, completionTokens: 40, costUsd: 0.0004 } });
-    expect(interpretModelResponse(200, { choices: [{ message: { content: 'ok' } }] }).usage).toEqual({ promptTokens: 0, completionTokens: 0, costUsd: null });
+    expect(result).toEqual({ text: 'The door creaks.', usage: { promptTokens: 120, completionTokens: 40, cachedTokens: 0, costUsd: 0.0004 } });
+    expect(interpretModelResponse(200, { choices: [{ message: { content: 'ok' } }] }).usage).toEqual({ promptTokens: 0, completionTokens: 0, cachedTokens: 0, costUsd: null });
   });
 
   it('turns provider failures into clear messages', () => {
@@ -82,5 +82,20 @@ describe('AI settings', () => {
     expect(capReached({ costCapUsd: 5, tokenCap: null }, { tokens: 1, costUsd: 5 })).toMatch(/\$5\.00/);
     expect(capReached({ costCapUsd: null, tokenCap: 100000 }, { tokens: 100000, costUsd: 0 })).toMatch(/100,000 tokens/);
     expect(capReached({ costCapUsd: 5, tokenCap: 100000 }, { tokens: 10, costUsd: 0 })).toBeNull();
+  });
+
+  it('reads how much of the input came from the provider\'s cache', () => {
+    expect(readUsage({ prompt_tokens: 2000, completion_tokens: 100, prompt_tokens_details: { cached_tokens: 1536 }, cost: 0.001 })).toEqual({ promptTokens: 2000, completionTokens: 100, cachedTokens: 1536, costUsd: 0.001 });
+    expect(readUsage(undefined)).toEqual({ promptTokens: 0, completionTokens: 0, cachedTokens: 0, costUsd: null });
+  });
+
+  it('marks the fixed start of the conversation for caching only on models that need it', () => {
+    const messages = [{ role: 'system', content: 'Fixed instructions' }, { role: 'user', content: 'Hello' }];
+    expect(withCacheControl('openai/gpt-4o-mini', messages)).toBe(messages);
+    expect(withCacheControl('google/gemini-2.0-flash-001', messages)).toBe(messages);
+    const marked = withCacheControl('anthropic/claude-3.5-haiku', messages);
+    expect(marked[0]).toEqual({ role: 'system', content: [{ type: 'text', text: 'Fixed instructions', cache_control: { type: 'ephemeral' } }] });
+    expect(marked[1]).toBe(messages[1]);
+    expect(withCacheControl('anthropic/claude-3.5-haiku', [{ role: 'user', content: 'x' }])).toEqual([{ role: 'user', content: 'x' }]);
   });
 });

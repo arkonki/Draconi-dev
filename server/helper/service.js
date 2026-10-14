@@ -14,6 +14,10 @@ import { elapsedSecondsFromLegacyTimeTracker } from './campaignTime.js';
 import { conditionId } from './identifiers.js';
 import { projectResumeState } from './resumeProfiles.js';
 import { loadPublishedStory } from '../soloStory.js';
+import { effectiveGlossary } from '../soloNarrationLanguage.js';
+
+/** The glossary a campaign uses, as "English = local" lines, for assistants that narrate it. */
+const effectiveGlossaryText = (language, custom) => effectiveGlossary(language, custom).map(([english, local]) => `${english} = ${local}`).join('\n');
 import { applyActorChangeSet, consumeRalliedAction, validateActorCanAct } from './rules.js';
 import { actorChangesForOutput } from './writeDeltas.js';
 import {
@@ -502,6 +506,7 @@ function soloStateForOutput(row) {
     soloHeroicAbilityGranted: Boolean(row.solo_heroic_ability_granted),
     oracleSettings: { defaultTilt: row.oracle_default_tilt },
     narrationLanguage: row.narration_language || 'en',
+    ...(row.narration_language && row.narration_language !== 'en' ? { narrationGlossary: effectiveGlossaryText(row.narration_language, row.narration_glossary) } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

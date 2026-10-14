@@ -83,6 +83,7 @@ import { SoloNarrator } from './SoloNarrator';
 import type { NarratorAction } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
+import { ScreenLanguageProvider, createTranslator, tr, useScreenLanguage, useT, type ScreenLanguagePreference, type Translator } from '../../i18n/translate';
 
 interface SoloDashboardProps {
   partyId: string;
@@ -99,18 +100,18 @@ type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
 
 const fortuneCategories: Array<{ value: FortuneCategory; label: string }> = [
-  { value: 'yes_no', label: 'Yes / No' },
-  { value: 'number', label: 'Number' },
-  { value: 'scale', label: 'Scale' },
-  { value: 'power', label: 'Power' },
-  { value: 'quality', label: 'Quality' },
-  { value: 'reaction', label: 'Reaction' },
+  { value: 'yes_no', label: tr('Yes / No') },
+  { value: 'number', label: tr('Number') },
+  { value: 'scale', label: tr('Scale') },
+  { value: 'power', label: tr('Power') },
+  { value: 'quality', label: tr('Quality') },
+  { value: 'reaction', label: tr('Reaction') },
 ];
 
 const inspirationColumns: Array<{ value: InspirationColumn; label: string }> = [
-  { value: 'action', label: 'Action' },
-  { value: 'attribute', label: 'Attribute' },
-  { value: 'thing', label: 'Thing' },
+  { value: 'action', label: tr('Action') },
+  { value: 'attribute', label: tr('Attribute') },
+  { value: 'thing', label: tr('Thing') },
 ];
 
 function percentage(current: number, maximum: number) {
@@ -126,15 +127,15 @@ function updatePair<T>(pair: [T, T], index: number, value: T): [T, T] {
   return index === 0 ? [value, pair[1]] : [pair[0], value];
 }
 
-function injuryRecoveryLabel(shifts?: number | null) {
-  if (shifts === null || shifts === undefined) return 'No natural recovery';
-  if (shifts === 0) return 'Healed';
+function injuryRecoveryLabel(shifts: number | null | undefined, t: Translator) {
+  if (shifts === null || shifts === undefined) return t('No natural recovery');
+  if (shifts === 0) return t('Healed');
   const days = Math.floor(shifts / 4);
   const remainingShifts = shifts % 4;
-  const parts = [];
-  if (days > 0) parts.push(`${days} day${days === 1 ? '' : 's'}`);
-  if (remainingShifts > 0) parts.push(`${remainingShifts} shift${remainingShifts === 1 ? '' : 's'}`);
-  return `${parts.join(' ')} remaining`;
+  const parts: string[] = [];
+  if (days > 0) parts.push(t(days === 1 ? '{count} day' : '{count} days', { count: days }));
+  if (remainingShifts > 0) parts.push(t(remainingShifts === 1 ? '{count} shift' : '{count} shifts', { count: remainingShifts }));
+  return t('{time} remaining', { time: parts.join(' ') });
 }
 
 function rollResultLabel(roll: SoloRecordedRoll) {
@@ -174,9 +175,9 @@ function treasureCardsAwarded(value: unknown): number {
   ), 0);
 }
 
-function waypointLabel(waypoint: SoloWaypoint) {
-  if (waypoint.status === 'hidden') return 'Unknown waypoint';
-  return waypoint.title || `Waypoint ${waypoint.position + 1}`;
+function waypointLabel(waypoint: SoloWaypoint, t: Translator) {
+  if (waypoint.status === 'hidden') return t('Unknown waypoint');
+  return waypoint.title || t('Waypoint {number}', { number: waypoint.position + 1 });
 }
 
 function journalValue(value: unknown): string {
@@ -190,8 +191,9 @@ function journalValue(value: unknown): string {
 }
 
 export function SoloGameTimeSummary({ gameTime }: { gameTime: Record<string, unknown> }) {
+  const t = useT();
   if (Object.keys(gameTime || {}).length === 0) {
-    return <p className="mt-2 text-sm text-stone-500">No campaign time has been recorded yet.</p>;
+    return <p className="mt-2 text-sm text-stone-500">{t('No campaign time has been recorded yet.')}</p>;
   }
 
   const elapsedSeconds = Math.max(0, Math.floor(Number(gameTime.elapsedSeconds) || 0));
@@ -204,7 +206,7 @@ export function SoloGameTimeSummary({ gameTime }: { gameTime: Record<string, unk
           <CalendarClock className="h-5 w-5" aria-hidden="true" />
         </div>
         <div>
-          <div className="text-xl font-black text-stone-900">Day {clock.day}</div>
+          <div className="text-xl font-black text-stone-900">{t('Day {day}', { day: clock.day })}</div>
           <div className="text-sm font-semibold text-stone-600">{clock.shift} · {clock.time}</div>
         </div>
       </div>
@@ -236,6 +238,7 @@ export function OracleActionResult({
   result: SoloWriteResult;
   onDone: () => void;
 }) {
+  const t = useT();
   const roll = recordedRollFromWrite(result);
   const answer = roll?.result.value;
   const phrase = roll?.result.phrase;
@@ -258,14 +261,14 @@ export function OracleActionResult({
           {action === 'fortune' ? <Gauge className="h-6 w-6" /> : <Wand2 className="h-6 w-6" />}
         </div>
         <div className="mt-3 text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-700">
-          {action === 'fortune' ? 'Fortune answers' : 'Inspiration drawn'}
+          {t(action === 'fortune' ? 'Fortune answers' : 'Inspiration drawn')}
         </div>
         <div className="mt-2 font-serif text-3xl font-bold text-stone-950">{primaryResult}</div>
         {action === 'fortune' && typeof question === 'string' && (
           <p className="mt-3 text-sm italic text-stone-600">“{question}”</p>
         )}
         {extreme && (
-          <span className="mt-3 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900">Extreme result</span>
+          <span className="mt-3 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900">{t('Extreme result')}</span>
         )}
       </div>
 
@@ -285,10 +288,10 @@ export function OracleActionResult({
         <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-bold">{roll.expression}</span>
-            <span>Rolled: <strong>{roll.dice.join(', ')}</strong></span>
+            <span>{t('Rolled:')} <strong>{roll.dice.join(', ')}</strong></span>
           </div>
           {action === 'fortune' && roll.keptValues.length > 0 && (
-            <div className="mt-1 text-xs text-stone-500">Kept result: {roll.keptValues.join(', ')}</div>
+            <div className="mt-1 text-xs text-stone-500">{t('Kept result: {keptValues}', { keptValues: roll.keptValues.join(', ') })}</div>
           )}
         </div>
       )}
@@ -297,7 +300,7 @@ export function OracleActionResult({
         <p className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">{notice}</p>
       )}
 
-      <Button type="button" fullWidth icon={CheckCircle2} onClick={onDone}>Done</Button>
+      <Button type="button" fullWidth icon={CheckCircle2} onClick={onDone}>{t('Done')}</Button>
     </div>
   );
 }
@@ -315,29 +318,30 @@ function ActionModal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const titles: Record<SoloAction, string> = {
-    check: 'Resolve a Solo check',
-    push: 'Push the failed Solo check',
-    consequence: 'Resolve the complication',
-    fortune: 'Ask Fortune',
-    inspiration: 'Draw Inspiration',
-    treasure: 'Record physical treasure cards',
-    'npc-create': 'Create a simple NPC',
-    'npc-behavior': 'Resolve NPC behavior',
-    'start-mission': 'Start a custom mission',
-    'reveal-waypoint': 'Reveal the next waypoint',
-    search: 'Search the current waypoint',
-    scavenge: 'Scavenge the current waypoint',
-    rest: 'Rest and recover',
-    dying: 'Resolve a dying action',
-    damage: 'Resolve narrative damage',
-    injury: 'Treat a severe injury',
-    'advance-threat': 'Advance the threat',
-    'resolve-threat': 'Resolve the triggered threat',
-    'set-threat': 'Set a replacement threat',
-    'add-waypoints': 'Add route waypoints',
-    return: 'Begin the return journey',
-    'complete-mission': 'Conclude the mission',
+    check: t('Resolve a Solo check'),
+    push: t('Push the failed Solo check'),
+    consequence: t('Resolve the complication'),
+    fortune: t('Ask Fortune'),
+    inspiration: t('Draw Inspiration'),
+    treasure: t('Record physical treasure cards'),
+    'npc-create': t('Create a simple NPC'),
+    'npc-behavior': t('Resolve NPC behavior'),
+    'start-mission': t('Start a custom mission'),
+    'reveal-waypoint': t('Reveal the next waypoint'),
+    search: t('Search the current waypoint'),
+    scavenge: t('Scavenge the current waypoint'),
+    rest: t('Rest and recover'),
+    dying: t('Resolve a dying action'),
+    damage: t('Resolve narrative damage'),
+    injury: t('Treat a severe injury'),
+    'advance-threat': t('Advance the threat'),
+    'resolve-threat': t('Resolve the triggered threat'),
+    'set-threat': t('Set a replacement threat'),
+    'add-waypoints': t('Add route waypoints'),
+    return: t('Begin the return journey'),
+    'complete-mission': t('Conclude the mission'),
   };
 
   return (
@@ -347,7 +351,7 @@ function ActionModal({
           <h2 className="flex items-center gap-2 text-lg font-bold text-stone-900">
             <Sparkles className="h-5 w-5 text-indigo-600" /> {titles[action]}
           </h2>
-          <button type="button" onClick={onClose} disabled={busy} className="rounded-lg p-1.5 text-stone-400 hover:bg-white hover:text-stone-700 disabled:opacity-40" aria-label="Close action">
+          <button type="button" onClick={onClose} disabled={busy} className="rounded-lg p-1.5 text-stone-400 hover:bg-white hover:text-stone-700 disabled:opacity-40" aria-label={t('Close action')}>
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -357,7 +361,7 @@ function ActionModal({
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
               {error.message}
               {error instanceof SoloApiError && error.code === 'REVISION_CONFLICT' && (
-                <span className="mt-1 block text-xs">The campaign changed elsewhere. State was refreshed; review and try again.</span>
+                <span className="mt-1 block text-xs">{t('The campaign changed elsewhere. State was refreshed; review and try again.')}</span>
               )}
             </div>
           )}
@@ -480,6 +484,11 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     staleTime: 0,
   });
   const state = stateQuery.data;
+  // The screens follow the language the story is told in, unless this person chose another one for themselves.
+  const { language: screenLanguage, preference: screenPreference, setPreference: setScreenPreference } = useScreenLanguage(state?.solo.narrationLanguage);
+  const t = useMemo(() => createTranslator(screenLanguage), [screenLanguage]);
+  /** A word from the game's data (a status, a role, a condition) in the screen language. */
+  const tc = (value: string) => t(titleCase(value));
   const optionsQuery = useQuery({
     queryKey: ['solo-settings', partyId],
     queryFn: () => fetchSoloOptions(partyId),
@@ -617,7 +626,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const actionMutation = useMutation({
     mutationFn: async () => {
-      if (!state || !activeAction) throw new Error('Solo state is not ready.');
+      if (!state || !activeAction) throw new Error(t('Solo state is not ready.'));
       const revision = state.campaignRevision;
       switch (activeAction) {
         case 'check':
@@ -628,14 +637,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             context: checkContext.trim(),
           });
         case 'push':
-          if (!pushRollId) throw new Error('Choose the failed Solo check to push.');
+          if (!pushRollId) throw new Error(t('Choose the failed Solo check to push.'));
           return pushSoloCheck(partyId, pushRollId, revision, {
             cost: pushCost,
             condition: pushCost === 'condition' ? pushCondition : undefined,
             explanation: pushExplanation.trim(),
           });
         case 'consequence': {
-          if (!consequenceRollId) throw new Error('Choose the failed Solo check to resolve.');
+          if (!consequenceRollId) throw new Error(t('Choose the failed Solo check to resolve.'));
           const first = consequenceOption(0);
           return resolveSoloCheckConsequence(
             partyId,
@@ -668,7 +677,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             notes: npcNotes.trim() || undefined,
           });
         case 'npc-behavior':
-          if (!selectedNpc) throw new Error('Choose an active Solo NPC.');
+          if (!selectedNpc) throw new Error(t('Choose an active Solo NPC.'));
           return resolveSoloNpcBehavior(partyId, selectedNpc.id, revision, {
             behavior: npcBehavior,
             role: npcBehavior === 'attack' ? npcBehaviorRole : undefined,
@@ -699,20 +708,20 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           });
           }
         case 'reveal-waypoint':
-          if (!nextWaypoint) throw new Error('There is no next waypoint to reveal.');
+          if (!nextWaypoint) throw new Error(t('There is no next waypoint to reveal.'));
           return revealSoloWaypoint(partyId, nextWaypoint.id, revision, {
             title: nextWaypoint.kind === 'unknown' ? revealTitle.trim() : undefined,
             description: nextWaypoint.kind === 'unknown' ? revealDescription.trim() : undefined,
           });
         case 'search':
-          if (!state.currentWaypoint) throw new Error('There is no active waypoint to search.');
+          if (!state.currentWaypoint) throw new Error(t('There is no active waypoint to search.'));
           return searchSoloWaypoint(partyId, state.currentWaypoint.id, revision, {
             knownLocation: knownSearchLocation,
             knownNature: knownSearchNature,
             context: searchContext.trim(),
           });
         case 'scavenge':
-          if (!state.currentWaypoint) throw new Error('There is no active waypoint to scavenge.');
+          if (!state.currentWaypoint) throw new Error(t('There is no active waypoint to scavenge.'));
           return scavengeSoloWaypoint(partyId, state.currentWaypoint.id, revision, {
             spendStretch: scavengeStretch,
             context: scavengeContext.trim(),
@@ -750,19 +759,19 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             context: damageContext.trim(),
           });
         case 'injury':
-          if (!selectedInjury) throw new Error('Choose an active severe injury.');
+          if (!selectedInjury) throw new Error(t('Choose an active severe injury.'));
           return resolveSoloInjuryAction(partyId, selectedInjury.id, revision, {
             action: injuryAction,
             context: injuryContext.trim(),
           });
         case 'advance-threat':
-          if (!state.activeThreat) throw new Error('There is no active threat.');
+          if (!state.activeThreat) throw new Error(t('There is no active threat.'));
           return advanceSoloThreat(partyId, state.activeThreat.id, revision, {
             amount: threatAmount,
             reason: threatReason.trim(),
           });
         case 'resolve-threat':
-          if (!state.activeThreat) throw new Error('There is no triggered threat.');
+          if (!state.activeThreat) throw new Error(t('There is no triggered threat.'));
           return resolveSoloThreat(partyId, state.activeThreat.id, revision, threatResolution.trim());
         case 'set-threat':
           return setSoloThreat(partyId, revision, {
@@ -782,7 +791,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             checkSkill: returnRouteType === 'dangerous' ? returnCheckSkill : undefined,
           });
         case 'complete-mission':
-          if (!state.activeMission) throw new Error('There is no active mission.');
+          if (!state.activeMission) throw new Error(t('There is no active mission.'));
           return completeSoloMission(partyId, state.activeMission.id, revision, {
             outcome: missionOutcome,
             summary: missionSummary.trim(),
@@ -818,10 +827,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
   const advancementMutation = useMutation({
     mutationFn: async (step: 'marks' | 'resolve' | 'ability') => {
-      if (!state) throw new Error('Solo state is not ready.');
+      if (!state) throw new Error(t('Solo state is not ready.'));
       if (step === 'marks') return selectSoloMissionMarks(partyId, state.campaignRevision, selectedAdvancementSkills);
       if (step === 'resolve') return resolveSoloAdvancement(partyId, state.campaignRevision);
-      if (!advancementAbilityId) throw new Error('Choose a heroic ability reward.');
+      if (!advancementAbilityId) throw new Error(t('Choose a heroic ability reward.'));
       return claimSoloAdvancementAbility(partyId, state.campaignRevision, advancementAbilityId);
     },
     onSuccess: async (result) => {
@@ -1029,9 +1038,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     return (
       <div className="p-6">
         <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-900">
-          <h2 className="font-bold">Could not load the Solo Dashboard</h2>
+          <h2 className="font-bold">{t('Could not load the Solo Dashboard')}</h2>
           <p className="mt-1 text-sm">{stateQuery.error.message}</p>
-          <Button className="mt-4" variant="outline" icon={RefreshCw} onClick={() => stateQuery.refetch()}>Try again</Button>
+          <Button className="mt-4" variant="outline" icon={RefreshCw} onClick={() => stateQuery.refetch()}>{t('Try again')}</Button>
         </div>
       </div>
     );
@@ -1044,12 +1053,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700">
             <Sparkles className="h-8 w-8" />
           </div>
-          <h2 className="mt-5 text-2xl font-bold text-stone-900">Prepare a solo adventure</h2>
-          <p className="mt-2 text-stone-600">Choose the campaign's solo hero and additional heroic ability before beginning the adventure.</p>
+          <h2 className="mt-5 text-2xl font-bold text-stone-900">{t('Prepare a solo adventure')}</h2>
+          <p className="mt-2 text-stone-600">{t("Choose the campaign's solo hero and additional heroic ability before beginning the adventure.")}</p>
           {canManage ? (
-            <Button className="mt-5" icon={Settings2} onClick={onOpenSettings}>Configure Solo Mode</Button>
+            <Button className="mt-5" icon={Settings2} onClick={onOpenSettings}>{t('Configure Solo Mode')}</Button>
           ) : (
-            <p className="mt-5 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">A campaign owner or GM must enable Solo Mode.</p>
+            <p className="mt-5 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{t('A campaign owner or GM must enable Solo Mode.')}</p>
           )}
         </div>
       </div>
@@ -1094,38 +1103,53 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     }))
     .filter(({ roll, cardCount }) => cardCount > 0 && !recordedTreasureSourceIds.has(roll.id));
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
-    { id: 'adventure', label: 'Adventure', icon: Route, badge: unresolvedRolls.length || undefined },
-    { id: 'narrator', label: 'Narrator', icon: MessageSquareText },
-    { id: 'state', label: 'State', icon: HeartPulse, badge: state.activeInjuries.length || undefined },
-    { id: 'journal', label: 'Journal', icon: BookOpen, badge: journal.openThreads.length || undefined },
-    { id: 'logs', label: 'Logs', icon: ScrollText },
+    { id: 'adventure', label: t('Adventure'), icon: Route, badge: unresolvedRolls.length || undefined },
+    { id: 'narrator', label: t('Narrator'), icon: MessageSquareText },
+    { id: 'state', label: t('State'), icon: HeartPulse, badge: state.activeInjuries.length || undefined },
+    { id: 'journal', label: t('Journal'), icon: BookOpen, badge: journal.openThreads.length || undefined },
+    { id: 'logs', label: t('Logs'), icon: ScrollText },
   ];
 
   return (
+    <ScreenLanguageProvider value={screenLanguage}>
     <div className="bg-stone-50/70">
       <div className="border-b border-indigo-100 bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-800 px-5 py-6 text-white sm:px-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-indigo-200">
-              <Sparkles className="h-4 w-4" /> Solo Adventure
+              <Sparkles className="h-4 w-4" /> {t('Solo Adventure')}
             </div>
             <h2 className="mt-2 text-2xl font-extrabold">{partyName}</h2>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-indigo-100">
-              <span className="rounded-full bg-white/10 px-2.5 py-1">Dragonbane Solo v1.2</span>
-              <span className="rounded-full bg-white/10 px-2.5 py-1">Revision {state.campaignRevision}</span>
-              <span className="rounded-full bg-white/10 px-2.5 py-1">{state.activeSessionId ? 'Session active' : 'No active session'}</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-1">{t('Dragonbane Solo v1.2')}</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-1">{t('Revision {campaignRevision}', { campaignRevision: state.campaignRevision })}</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-1">{t(state.activeSessionId ? 'Session active' : 'No active session')}</span>
             </div>
           </div>
-          {canManage && (
-            <Button variant="outline" size="sm" icon={Settings2} onClick={onOpenSettings} className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
-              Solo settings
-            </Button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-100" title={t('The language of the buttons and texts on this page, for you only')}>
+              {t('Screen language')}
+              <select
+                value={screenPreference}
+                onChange={(event) => setScreenPreference(event.target.value as ScreenLanguagePreference)}
+                className="rounded-md border border-white/30 bg-white/10 px-2 py-1 text-xs font-normal text-white"
+              >
+                <option value="same" className="text-stone-900">{t('Same as the story')}</option>
+                <option value="en" className="text-stone-900">English</option>
+                <option value="et" className="text-stone-900">Eesti</option>
+              </select>
+            </label>
+            {canManage && (
+              <Button variant="outline" size="sm" icon={Settings2} onClick={onOpenSettings} className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                {t('Solo settings')}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="overflow-x-auto border-b border-stone-200 bg-white px-3 sm:px-6">
-        <div className="flex min-w-max gap-1" role="tablist" aria-label="Solo adventure sections">
+        <div className="flex min-w-max gap-1" role="tablist" aria-label={t('Solo adventure sections')}>
           {dashboardTabs.map(({ id, label, icon: Icon, badge }) => (
             <button
               key={id}
@@ -1156,7 +1180,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
         {!canManage && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            You can follow the solo adventure here. Only the campaign owner or a GM can resolve authoritative Solo actions.
+            {t('You can follow the solo adventure here. Only the campaign owner or a GM can resolve authoritative Solo actions.')}
           </div>
         )}
 
@@ -1186,15 +1210,15 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <section className="order-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><AlertTriangle className="h-5 w-5 text-amber-600" /> Complication awaiting resolution</h3>
-                    <p className="mt-1 text-sm text-amber-800">The latest failed check may be pushed once if eligible, or resolved with a consequence.</p>
+                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><AlertTriangle className="h-5 w-5 text-amber-600" /> {t('Complication awaiting resolution')}</h3>
+                    <p className="mt-1 text-sm text-amber-800">{t('The latest failed check may be pushed once if eligible, or resolved with a consequence.')}</p>
                   </div>
                   {canManage && (
                     <div className="flex gap-2">
                       {pushableRolls.some((roll) => roll.id === unresolvedRolls[0].id) && (
-                        <Button size="sm" icon={Dices} onClick={() => openPushAction(unresolvedRolls[0].id)}>Push</Button>
+                        <Button size="sm" icon={Dices} onClick={() => openPushAction(unresolvedRolls[0].id)}>{t('Push')}</Button>
                       )}
-                      <Button size="sm" variant="outline" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>Take consequence</Button>
+                      <Button size="sm" variant="outline" icon={AlertTriangle} onClick={() => openConsequenceAction(unresolvedRolls[0].id)}>{t('Take consequence')}</Button>
                     </div>
                   )}
                 </div>
@@ -1205,14 +1229,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <section className="order-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><PackageSearch className="h-5 w-5 text-amber-600" /> Physical treasure draw pending</h3>
+                    <h3 className="flex items-center gap-2 font-bold text-amber-950"><PackageSearch className="h-5 w-5 text-amber-600" /> {t('Physical treasure draw pending')}</h3>
                     <p className="mt-1 text-sm text-amber-800">
-                      The latest result awards {pendingTreasureRolls[0].cardCount} treasure card{pendingTreasureRolls[0].cardCount === 1 ? '' : 's'}. Shuffle and draw from your official deck, then enter what you drew.
+                      {t(pendingTreasureRolls[0].cardCount === 1 ? 'The latest result awards {count} treasure card. Shuffle and draw from your official deck, then enter what you drew.' : 'The latest result awards {count} treasure cards. Shuffle and draw from your official deck, then enter what you drew.', { count: pendingTreasureRolls[0].cardCount })}
                     </p>
                   </div>
                   {canManage && (
                     <Button size="sm" icon={PackageSearch} onClick={() => openTreasureAction(pendingTreasureRolls[0].cardCount, pendingTreasureRolls[0].roll.id)}>
-                      Record {pendingTreasureRolls[0].cardCount} card{pendingTreasureRolls[0].cardCount === 1 ? '' : 's'}
+                      {t(pendingTreasureRolls[0].cardCount === 1 ? 'Record {count} card' : 'Record {count} cards', { count: pendingTreasureRolls[0].cardCount })}
                     </Button>
                   )}
                 </div>
@@ -1222,8 +1246,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeDashboardTab === 'adventure' && (
             <section className="order-3 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
-                <h3 className="flex items-center gap-2 font-bold text-stone-900"><Route className="h-5 w-5 text-violet-600" /> Current mission</h3>
-                {state.activeMission && <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-700">{titleCase(state.activeMission.status)}</span>}
+                <h3 className="flex items-center gap-2 font-bold text-stone-900"><Route className="h-5 w-5 text-violet-600" /> {t('Current mission')}</h3>
+                {state.activeMission && <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-700">{tc(state.activeMission.status)}</span>}
               </div>
 
               {!state.activeMission ? (
@@ -1231,11 +1255,11 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   {state.pendingAdvancement ? (
                     <div className="mx-auto max-w-2xl text-left">
                       <Sparkles className="h-10 w-10 text-amber-500" />
-                      <h4 className="mt-3 text-lg font-bold text-stone-900">Mission advancement</h4>
-                      <p className="mt-1 text-sm text-stone-600">Complete the between-mission advancement before starting the next mission.</p>
+                      <h4 className="mt-3 text-lg font-bold text-stone-900">{t('Mission advancement')}</h4>
+                      <p className="mt-1 text-sm text-stone-600">{t('Complete the between-mission advancement before starting the next mission.')}</p>
                       {state.pendingAdvancement.status === 'selecting_marks' && (
                         <div className="mt-4">
-                          <div className="text-sm font-bold text-stone-800">Choose exactly five unmarked skills</div>
+                          <div className="text-sm font-bold text-stone-800">{t('Choose exactly five unmarked skills')}</div>
                           <div className="mt-2 grid gap-2 sm:grid-cols-2">
                             {skillOptions.filter(([name]) => !hero?.markedSkills?.some((marked) => titleCase(marked) === titleCase(name))).map(([name, value]) => (
                               <label key={name} className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${selectedAdvancementSkills.includes(name) ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
@@ -1244,24 +1268,24 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                               </label>
                             ))}
                           </div>
-                          {canManage && <Button className="mt-4" loading={advancementMutation.isPending} disabled={selectedAdvancementSkills.length !== 5} onClick={() => advancementMutation.mutate('marks')}>Apply five marks</Button>}
+                          {canManage && <Button className="mt-4" loading={advancementMutation.isPending} disabled={selectedAdvancementSkills.length !== 5} onClick={() => advancementMutation.mutate('marks')}>{t('Apply five marks')}</Button>}
                         </div>
                       )}
                       {state.pendingAdvancement.status === 'ready_to_roll' && (
                         <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                          <div className="font-bold text-indigo-950">Marks ready: {state.pendingAdvancement.selectedSkills.join(', ')}</div>
-                          <p className="mt-1 text-sm text-indigo-800">Draconi will roll D20 for every marked skill. A roll above the current value improves it by one, to a maximum of 18.</p>
-                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} onClick={() => advancementMutation.mutate('resolve')}>Roll advancement</Button>}
+                          <div className="font-bold text-indigo-950">{t('Marks ready: {selectedSkills}', { selectedSkills: state.pendingAdvancement.selectedSkills.join(', ') })}</div>
+                          <p className="mt-1 text-sm text-indigo-800">{t('Draconi will roll D20 for every marked skill. A roll above the current value improves it by one, to a maximum of 18.')}</p>
+                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} onClick={() => advancementMutation.mutate('resolve')}>{t('Roll advancement')}</Button>}
                         </div>
                       )}
                       {state.pendingAdvancement.status === 'claiming_abilities' && (
                         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                          <div className="font-bold text-amber-950">Choose {state.pendingAdvancement.pendingHeroicAbilities} heroic ability reward(s)</div>
+                          <div className="font-bold text-amber-950">{t('Choose {pendingHeroicAbilities} heroic ability reward(s)', { pendingHeroicAbilities: state.pendingAdvancement.pendingHeroicAbilities })}</div>
                           <select value={advancementAbilityId} onChange={(event) => setAdvancementAbilityId(event.target.value)} className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm">
-                            <option value="">Choose heroic ability…</option>
+                            <option value="">{t('Choose heroic ability…')}</option>
                             {(optionsQuery.data?.heroicAbilities || []).filter((ability) => !ability.knownByCharacterIds?.includes(hero?.id || '')).map((ability) => <option key={ability.id} value={ability.id}>{ability.name}</option>)}
                           </select>
-                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} disabled={!advancementAbilityId} onClick={() => advancementMutation.mutate('ability')}>Claim ability</Button>}
+                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} disabled={!advancementAbilityId} onClick={() => advancementMutation.mutate('ability')}>{t('Claim ability')}</Button>}
                         </div>
                       )}
                       {advancementMutation.error && <p className="mt-3 text-sm text-red-700">{advancementMutation.error.message}</p>}
@@ -1269,9 +1293,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   ) : (
                     <>
                       <Flag className="mx-auto h-10 w-10 text-stone-300" />
-                      <h4 className="mt-3 font-bold text-stone-800">No active mission</h4>
-                      <p className="mt-1 text-sm text-stone-500">Create a custom objective, route, and threat to begin the playable solo loop.</p>
-                      {canManage && <Button className="mt-5" icon={Flag} onClick={() => openAction('start-mission')}>Start a mission</Button>}
+                      <h4 className="mt-3 font-bold text-stone-800">{t('No active mission')}</h4>
+                      <p className="mt-1 text-sm text-stone-500">{t('Create a custom objective, route, and threat to begin the playable solo loop.')}</p>
+                      {canManage && <Button className="mt-5" icon={Flag} onClick={() => openAction('start-mission')}>{t('Start a mission')}</Button>}
                     </>
                   )}
                 </div>
@@ -1283,19 +1307,19 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
 
                   <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
-                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-violet-600"><MapPin className="h-4 w-4" /> Current waypoint</div>
-                    <h4 className="mt-2 font-bold text-violet-950">{state.currentWaypoint?.title || 'Uncharted location'}</h4>
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-violet-600"><MapPin className="h-4 w-4" /> {t('Current waypoint')}</div>
+                    <h4 className="mt-2 font-bold text-violet-950">{state.currentWaypoint?.title || t('Uncharted location')}</h4>
                     {state.currentWaypoint?.description && <p className="mt-1 text-sm leading-relaxed text-violet-900">{state.currentWaypoint.description}</p>}
                     {state.currentWaypoint && (
                       <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-violet-700">
-                        <span className="rounded-full bg-white/70 px-2.5 py-1">Searches {state.currentWaypoint.exploration.searchCount}</span>
-                        <span className="rounded-full bg-white/70 px-2.5 py-1">Scavenges {state.currentWaypoint.exploration.scavengeCount}</span>
-                        <span className="rounded-full bg-white/70 px-2.5 py-1">Stretches {state.currentWaypoint.exploration.stretchesSpent}</span>
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">{t('Searches {searchCount}', { searchCount: state.currentWaypoint.exploration.searchCount })}</span>
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">{t('Scavenges {scavengeCount}', { scavengeCount: state.currentWaypoint.exploration.scavengeCount })}</span>
+                        <span className="rounded-full bg-white/70 px-2.5 py-1">{t('Stretches {stretchesSpent}', { stretchesSpent: state.currentWaypoint.exploration.stretchesSpent })}</span>
                       </div>
                     )}
                     {state.activeDangers.filter((danger) => danger.waypointId === state.currentWaypoint?.id).length > 0 && (
                       <div className="mt-3 space-y-1.5 border-t border-violet-200 pt-3">
-                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Active dangers</div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> {t('Active dangers')}</div>
                         {state.activeDangers
                           .filter((danger) => danger.waypointId === state.currentWaypoint?.id)
                           .map((danger) => <div key={danger.id} className="text-sm font-semibold text-red-900">{danger.description}</div>)}
@@ -1315,8 +1339,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                               ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
                               : <CircleDot className={`h-4 w-4 shrink-0 ${active ? 'text-violet-600' : 'text-stone-400'}`} />}
                           <div className="min-w-0 flex-1">
-                            <div className={`truncate text-sm font-semibold ${active ? 'text-violet-950' : 'text-stone-700'}`}>{waypointLabel(waypoint)}</div>
-                            <div className="text-xs text-stone-500">{titleCase(waypoint.kind)} · {titleCase(waypoint.status)}</div>
+                            <div className={`truncate text-sm font-semibold ${active ? 'text-violet-950' : 'text-stone-700'}`}>{waypointLabel(waypoint, t)}</div>
+                            <div className="text-xs text-stone-500">{tc(waypoint.kind)} · {tc(waypoint.status)}</div>
                           </div>
                           <span className="text-xs font-bold text-stone-400">{waypoint.position + 1}</span>
                         </li>
@@ -1328,18 +1352,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     <div className="flex flex-wrap gap-2 border-t border-stone-100 pt-4">
                       {state.currentWaypoint && (
                         <>
-                          <Button icon={Search} onClick={() => openAction('search')}>Search</Button>
-                          <Button variant="outline" icon={PackageSearch} onClick={() => openAction('scavenge')}>Scavenge</Button>
+                          <Button icon={Search} onClick={() => openAction('search')}>{t('Search')}</Button>
+                          <Button variant="outline" icon={PackageSearch} onClick={() => openAction('scavenge')}>{t('Scavenge')}</Button>
                         </>
                       )}
                       {nextWaypoint && (
-                        <Button icon={ChevronRight} onClick={() => openAction('reveal-waypoint')}>Reveal next waypoint</Button>
+                        <Button icon={ChevronRight} onClick={() => openAction('reveal-waypoint')}>{t('Reveal next waypoint')}</Button>
                       )}
-                      <Button variant="outline" icon={Route} onClick={() => openAction('add-waypoints')}>Add route</Button>
+                      <Button variant="outline" icon={Route} onClick={() => openAction('add-waypoints')}>{t('Add route')}</Button>
                       {atObjectiveWaypoint && state.activeMission.status === 'active' && (
-                        <Button variant="outline" icon={Route} onClick={() => openAction('return')}>Leave the site</Button>
+                        <Button variant="outline" icon={Route} onClick={() => openAction('return')}>{t('Leave the site')}</Button>
                       )}
-                      <Button variant="outline" icon={Flag} onClick={() => openAction('complete-mission')}>Conclude mission</Button>
+                      <Button variant="outline" icon={Flag} onClick={() => openAction('complete-mission')}>{t('Conclude mission')}</Button>
                     </div>
                   )}
                 </div>
@@ -1352,14 +1376,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900">
                   {activeDashboardTab === 'state' ? <HeartPulse className="h-5 w-5 text-red-600" /> : activeDashboardTab === 'journal' ? <BookOpen className="h-5 w-5 text-teal-700" /> : <ScrollText className="h-5 w-5 text-amber-700" />}
-                  {activeDashboardTab === 'state' ? 'Adventure State' : activeDashboardTab === 'journal' ? 'Journal' : 'Event Log'}
+                  {t(activeDashboardTab === 'state' ? 'Adventure State' : activeDashboardTab === 'journal' ? 'Journal' : 'Event Log')}
                 </h3>
                 <p className="mt-1 text-sm text-stone-500">
                   {activeDashboardTab === 'state'
-                    ? 'Current scene and mechanical campaign state at a glance.'
+                    ? t('Current scene and mechanical campaign state at a glance.')
                     : activeDashboardTab === 'journal'
-                      ? 'Persistent session memory and unresolved story threads. Entries marked GM remain private.'
-                      : 'What was saved to the campaign by the app and by AI assistants, with the saved details. The built-in narrator and any assistant read this same record.'}
+                      ? t('Persistent session memory and unresolved story threads. Entries marked GM remain private.')
+                      : t('What was saved to the campaign by the app and by AI assistants, with the saved details. The built-in narrator and any assistant read this same record.')}
                 </p>
               </div>
 
@@ -1368,16 +1392,16 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <div className="grid gap-4">
                   <div className="rounded-xl border border-teal-100 bg-teal-50/70 p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <h4 className="text-xs font-bold uppercase tracking-wide text-teal-800">Current scene</h4>
-                      {activeJournalSession && <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-800">Session active</span>}
+                      <h4 className="text-xs font-bold uppercase tracking-wide text-teal-800">{t('Current scene')}</h4>
+                      {activeJournalSession && <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-800">{t('Session active')}</span>}
                     </div>
                     {currentSceneEntries.length === 0 ? (
-                      <p className="mt-2 text-sm text-teal-900/60">No current scene has been saved yet.</p>
+                      <p className="mt-2 text-sm text-teal-900/60">{t('No current scene has been saved yet.')}</p>
                     ) : (
                       <dl className="mt-3 space-y-3">
                         {currentSceneEntries.map(([key, value]) => (
                           <div key={key}>
-                            <dt className="text-[11px] font-bold uppercase tracking-wide text-teal-700">{titleCase(key)}</dt>
+                            <dt className="text-[11px] font-bold uppercase tracking-wide text-teal-700">{tc(key)}</dt>
                             <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-teal-950">{journalValue(value)}</dd>
                           </div>
                         ))}
@@ -1385,7 +1409,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     )}
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Game time</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">{t('Game time')}</h4>
                     <SoloGameTimeSummary gameTime={state.gameTime || {}} />
                   </div>
                 </div>
@@ -1393,35 +1417,35 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                 {activeDashboardTab === 'journal' && (
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Session</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">{t('Session')}</h4>
                     {activeJournalSession ? (
                       <div className="mt-2">
                         <div className="font-bold text-stone-900">{activeJournalSession.title}</div>
-                        {activeJournalSession.startedAt && <div className="mt-1 text-xs text-stone-500">Started {new Date(activeJournalSession.startedAt).toLocaleString()}</div>}
+                        {activeJournalSession.startedAt && <div className="mt-1 text-xs text-stone-500">{t('Started {startedAt}', { startedAt: new Date(activeJournalSession.startedAt).toLocaleString() })}</div>}
                         {activeJournalSession.gmNotes && (
                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700">Private GM notes</div>
+                            <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700">{t('Private GM notes')}</div>
                             <div className="mt-1 whitespace-pre-wrap">{activeJournalSession.gmNotes}</div>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <p className="mt-2 text-sm text-stone-500">No active game session.</p>
+                      <p className="mt-2 text-sm text-stone-500">{t('No active game session.')}</p>
                     )}
                   </div>
                 )}
 
                 {activeDashboardTab === 'journal' && state.story && (
                   <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
-                    <h4 className="text-xs font-bold uppercase tracking-wide text-indigo-800">The story so far</h4>
-                    <p className="mt-1 text-xs text-indigo-700">One story for everyone: the narrator in this app and any AI assistant connected over MCP read and continue the same record.</p>
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-indigo-800">{t('The story so far')}</h4>
+                    <p className="mt-1 text-xs text-indigo-700">{t('One story for everyone: the narrator in this app and any AI assistant connected over MCP read and continue the same record.')}</p>
                     {state.story.storySoFar && <p className="mt-2 whitespace-pre-wrap text-sm text-stone-900">{state.story.storySoFar}</p>}
                     {state.story.recentExchanges.length > 0 && (
                       <details className="mt-2 text-sm">
-                        <summary className="cursor-pointer text-xs font-semibold text-indigo-800">Latest exchanges with the narrator</summary>
+                        <summary className="cursor-pointer text-xs font-semibold text-indigo-800">{t('Latest exchanges with the narrator')}</summary>
                         <ul className="mt-2 space-y-1.5">
                           {state.story.recentExchanges.map((exchange) => (
-                            <li key={exchange.at + exchange.role} className="whitespace-pre-wrap text-stone-800"><strong>{exchange.role === 'player' ? 'You' : 'Narrator'}:</strong> {exchange.text}</li>
+                            <li key={exchange.at + exchange.role} className="whitespace-pre-wrap text-stone-800"><strong>{exchange.role === 'player' ? t('You') : t('Narrator')}:</strong> {exchange.text}</li>
                           ))}
                         </ul>
                       </details>
@@ -1431,7 +1455,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                 {activeDashboardTab === 'journal' && journal.openThreads.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Unresolved threads · GM</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">{t('Unresolved threads · GM')}</h4>
                     <ul className="mt-2 space-y-2">
                       {journal.openThreads.map((thread, index) => (
                         <li key={index} className="whitespace-pre-wrap break-words rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">{journalValue(thread)}</li>
@@ -1442,9 +1466,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                 {activeDashboardTab === 'logs' && (
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Recent journal entries</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">{t('Recent journal entries')}</h4>
                   {journal.recentEvents.length === 0 ? (
-                    <p className="mt-2 text-sm text-stone-500">Nothing has been saved to the campaign journal yet.</p>
+                    <p className="mt-2 text-sm text-stone-500">{t('Nothing has been saved to the campaign journal yet.')}</p>
                   ) : (
                     <ol className="mt-2 space-y-2">
                       {journal.recentEvents.map((event) => {
@@ -1457,13 +1481,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                                 {summary && <p className="mt-0.5 text-sm text-stone-700">{summary}</p>}
                               </div>
                               <div className="flex shrink-0 items-center gap-2 text-[11px] font-semibold text-stone-400">
-                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{event.sourceType === 'chatgpt' ? 'AI assistant' : event.sourceType === 'system' ? 'System' : 'App'}</span>
-                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{titleCase(event.visibility)}</span>
+                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{t(event.sourceType === 'chatgpt' ? 'AI assistant' : event.sourceType === 'system' ? 'System' : 'App')}</span>
+                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{tc(event.visibility)}</span>
                                 <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
                               </div>
                             </div>
                             <details className="mt-2 text-xs text-stone-500">
-                              <summary className="cursor-pointer font-semibold hover:text-stone-800">Saved details</summary>
+                              <summary className="cursor-pointer font-semibold hover:text-stone-800">{t('Saved details')}</summary>
                               <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-stone-950 p-3 text-stone-100">{JSON.stringify(event.payload, null, 2)}</pre>
                             </details>
                           </li>
@@ -1476,7 +1500,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                 {activeDashboardTab === 'journal' && completedJournalSessions.length > 0 && (
                   <details>
-                    <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-stone-600 hover:text-stone-900">Previous session summaries ({completedJournalSessions.length})</summary>
+                    <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-stone-600 hover:text-stone-900">{t('Previous session summaries ({length})', { length: completedJournalSessions.length })}</summary>
                     <div className="mt-3 space-y-2">
                       {completedJournalSessions.map((session) => (
                         <div key={session.id} className="rounded-lg border border-stone-200 bg-stone-50 p-3">
@@ -1484,8 +1508,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                             <div className="text-sm font-bold text-stone-900">{session.title}</div>
                             {session.endedAt && <time className="text-xs text-stone-400" dateTime={session.endedAt}>{new Date(session.endedAt).toLocaleString()}</time>}
                           </div>
-                          <p className="mt-1 whitespace-pre-wrap text-sm text-stone-700">{session.summary || 'No summary was saved.'}</p>
-                          {session.gmNotes && <p className="mt-2 whitespace-pre-wrap rounded bg-amber-50 p-2 text-xs text-amber-900"><strong>Private GM notes:</strong> {session.gmNotes}</p>}
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-stone-700">{session.summary || t('No summary was saved.')}</p>
+                          {session.gmNotes && <p className="mt-2 whitespace-pre-wrap rounded bg-amber-50 p-2 text-xs text-amber-900"><strong>{t('Private GM notes:')}</strong> {session.gmNotes}</p>}
                         </div>
                       ))}
                     </div>
@@ -1499,21 +1523,21 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-indigo-600" /> Solo tools</h3>
-                  <p className="mt-1 text-sm text-stone-500">Use an oracle only when the answer is genuinely uncertain.</p>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-indigo-600" /> {t('Solo tools')}</h3>
+                  <p className="mt-1 text-sm text-stone-500">{t('Use an oracle only when the answer is genuinely uncertain.')}</p>
                 </div>
                 {canManage && (
                   <div className="flex flex-wrap gap-2">
-                    <Button icon={Dices} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('check')}>Act</Button>
-                    <Button icon={Gauge} onClick={() => openAction('fortune')}>Ask Fortune</Button>
-                    <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>Inspire</Button>
-                    <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>Treasure</Button>
-                    <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>Rest</Button>
+                    <Button icon={Dices} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('check')}>{t('Act')}</Button>
+                    <Button icon={Gauge} onClick={() => openAction('fortune')}>{t('Ask Fortune')}</Button>
+                    <Button variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>{t('Inspire')}</Button>
+                    <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>{t('Treasure')}</Button>
+                    <Button variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>{t('Rest')}</Button>
                     {hero && hero.hp.current > 0 && (
-                      <Button variant="outline" icon={HeartPulse} disabled={Boolean(state.activeCombat)} onClick={() => openAction('damage')}>Narrative damage</Button>
+                      <Button variant="outline" icon={HeartPulse} disabled={Boolean(state.activeCombat)} onClick={() => openAction('damage')}>{t('Narrative damage')}</Button>
                     )}
                     {hero && hero.hp.current === 0 && hero.lifeStatus !== 'dead' && (
-                      <Button icon={Skull} onClick={() => openAction('dying')}>Dying action</Button>
+                      <Button icon={Skull} onClick={() => openAction('dying')}>{t('Dying action')}</Button>
                     )}
                   </div>
                 )}
@@ -1525,19 +1549,19 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><PackageSearch className="h-5 w-5 text-amber-600" /> Physical treasure deck</h3>
-                  <p className="mt-1 text-sm text-stone-500">You shuffle and draw the official cards. Draconi only records the contents you enter.</p>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><PackageSearch className="h-5 w-5 text-amber-600" /> {t('Physical treasure deck')}</h3>
+                  <p className="mt-1 text-sm text-stone-500">{t('You shuffle and draw the official cards. Draconi only records the contents you enter.')}</p>
                 </div>
-                {canManage && <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>Record a draw</Button>}
+                {canManage && <Button variant="outline" icon={PackageSearch} onClick={() => openTreasureAction()}>{t('Record a draw')}</Button>}
               </div>
               {(state.treasureDraws || []).length === 0 ? (
-                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">No physical treasure-card draws recorded yet.</p>
+                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">{t('No physical treasure-card draws recorded yet.')}</p>
               ) : (
                 <div className="mt-4 space-y-2">
                   {state.treasureDraws.slice(0, 3).map((draw) => (
                     <details key={draw.id} className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                       <summary className="cursor-pointer text-sm font-bold text-stone-900">
-                        {draw.cardCount} card{draw.cardCount === 1 ? '' : 's'} · {new Date(draw.createdAt).toLocaleString()}
+                        {t(draw.cardCount === 1 ? '{count} card' : '{count} cards', { count: draw.cardCount })} · {new Date(draw.createdAt).toLocaleString()}
                       </summary>
                       <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-stone-700">
                         {draw.cards.map((card, index) => <li key={index}><strong>{card.title || `Card ${index + 1}`}:</strong> {card.contents}</li>)}
@@ -1554,32 +1578,32 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             <section className="order-2 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><Ghost className="h-5 w-5 text-violet-600" /> Solo NPCs</h3>
-                  <p className="mt-1 text-sm text-stone-500">Rules-compliant Minions and Bosses with role-based actions.</p>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><Ghost className="h-5 w-5 text-violet-600" /> {t('Solo NPCs')}</h3>
+                  <p className="mt-1 text-sm text-stone-500">{t('Rules-compliant Minions and Bosses with role-based actions.')}</p>
                 </div>
                 {canManage && (
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" icon={Ghost} onClick={() => openAction('npc-create')}>Create NPC</Button>
+                    <Button variant="outline" icon={Ghost} onClick={() => openAction('npc-create')}>{t('Create NPC')}</Button>
                     <Button
                       icon={Dices}
                       disabled={!(state.npcs || []).some((npc) => npc.status === 'active')}
                       onClick={() => openAction('npc-behavior')}
-                    >Resolve behavior</Button>
+                    >{t('Resolve behavior')}</Button>
                   </div>
                 )}
               </div>
               {(state.npcs || []).length === 0 ? (
-                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">No simple Solo NPCs have been created.</p>
+                <p className="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-stone-500">{t('No simple Solo NPCs have been created.')}</p>
               ) : (
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {(state.npcs || []).map((npc) => (
                     <div key={npc.id} className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="font-bold text-stone-900">{npc.name}</div>
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${npc.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'}`}>{titleCase(npc.status)}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${npc.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'}`}>{tc(npc.status)}</span>
                       </div>
-                      <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-violet-700">{titleCase(npc.template)} · {npc.roles.map(titleCase).join(' / ')}</div>
-                      <div className="mt-2 text-xs text-stone-600">HP {npc.profile.hp ?? '—'} · Armor {npc.profile.armor || '—'} · Damage {npc.profile.damage?.toUpperCase() || '—'} · Skill {npc.profile.relevantSkill ?? '—'}</div>
+                      <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-violet-700">{tc(npc.template)} · {npc.roles.map(tc).join(' / ')}</div>
+                      <div className="mt-2 text-xs text-stone-600">{t('HP {hp} · Armor {armor} · Damage {value} · Skill {relevantSkill}', { hp: npc.profile.hp ?? '—', armor: npc.profile.armor || '—', value: npc.profile.damage?.toUpperCase() || '—', relevantSkill: npc.profile.relevantSkill ?? '—' })}</div>
                     </div>
                   ))}
                 </div>
@@ -1590,10 +1614,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeDashboardTab === 'logs' && (
             <section className="rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
-                <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-amber-600" /> Recent authoritative rolls</h3>
+                <h3 className="flex items-center gap-2 font-bold text-stone-900"><Dices className="h-5 w-5 text-amber-600" /> {t('Recent authoritative rolls')}</h3>
               </div>
               {state.latestRolls.length === 0 ? (
-                <p className="p-5 text-sm text-stone-500">No Solo rolls have been recorded yet.</p>
+                <p className="p-5 text-sm text-stone-500">{t('No Solo rolls have been recorded yet.')}</p>
               ) : (
                 <div className="divide-y divide-stone-100">
                   {state.latestRolls.map((roll) => {
@@ -1613,20 +1637,20 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-stone-600">
                           <span className="rounded bg-stone-100 px-2 py-1">{roll.expression}</span>
-                          <span>Dice: {roll.dice.join(', ')}</span>
-                          {roll.keptValues.length > 0 && <span className="text-indigo-700">Kept: {roll.keptValues.join(', ')}</span>}
+                          <span>{t('Dice: {dice}', { dice: roll.dice.join(', ') })}</span>
+                          {roll.keptValues.length > 0 && <span className="text-indigo-700">{t('Kept: {keptValues}', { keptValues: roll.keptValues.join(', ') })}</span>}
                           {roll.tableVersion && <span className="text-stone-400">{roll.tableVersion}</span>}
                         </div>
                         {roll.consequence && (
                           <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                            <div className="font-bold">Complication resolved</div>
+                            <div className="font-bold">{t('Complication resolved')}</div>
                             <div className="mt-0.5">{roll.consequence.selectedDescription}</div>
                             <div className="mt-1 text-xs text-emerald-700">{roll.consequence.appliedSummary}</div>
                           </div>
                         )}
                         {canManage && needsConsequence && !state.activeCombat && (
                           <Button className="mt-3" size="sm" icon={AlertTriangle} onClick={() => openConsequenceAction(roll.id)}>
-                            Resolve complication
+                            {t('Resolve complication')}
                           </Button>
                         )}
                       </div>
@@ -1661,21 +1685,21 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     className="group flex max-w-full items-center gap-1.5 text-left text-lg font-bold text-stone-900 hover:text-indigo-700 disabled:cursor-default disabled:hover:text-stone-900"
                     title={hero ? `Open ${hero.name}'s character sheet` : undefined}
                   >
-                    <span className="truncate">{hero?.name || 'Solo hero'}</span>
+                    <span className="truncate">{hero?.name || t('Solo hero')}</span>
                     {hero && <BookOpen className="h-4 w-4 shrink-0 text-stone-400 transition-colors group-hover:text-indigo-600" />}
                   </button>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{hero?.tags.join(' · ') || 'Player character'}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{hero?.tags.join(' · ') || t('Player character')}</p>
                 </div>
               </div>
 
               {hero && (
                 <div className="mt-5 space-y-4">
                   <div>
-                    <div className="mb-1.5 flex justify-between text-xs font-bold text-stone-600"><span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5 text-red-500" /> HP</span><span>{hero.hp.current} / {hero.hp.max}</span></div>
+                    <div className="mb-1.5 flex justify-between text-xs font-bold text-stone-600"><span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5 text-red-500" /> {t('HP')}</span><span>{hero.hp.current} / {hero.hp.max}</span></div>
                     <div className="h-2 overflow-hidden rounded-full bg-red-100"><div className="h-full rounded-full bg-red-500" style={{ width: `${percentage(hero.hp.current, hero.hp.max)}%` }} /></div>
                   </div>
                   <div>
-                    <div className="mb-1.5 flex justify-between text-xs font-bold text-stone-600"><span className="flex items-center gap-1"><Brain className="h-3.5 w-3.5 text-blue-500" /> WP</span><span>{hero.wp.current} / {hero.wp.max}</span></div>
+                    <div className="mb-1.5 flex justify-between text-xs font-bold text-stone-600"><span className="flex items-center gap-1"><Brain className="h-3.5 w-3.5 text-blue-500" /> {t('WP')}</span><span>{hero.wp.current} / {hero.wp.max}</span></div>
                     <div className="h-2 overflow-hidden rounded-full bg-blue-100"><div className="h-full rounded-full bg-blue-500" style={{ width: `${percentage(hero.wp.current, hero.wp.max)}%` }} /></div>
                   </div>
                 </div>
@@ -1684,52 +1708,52 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               {hero?.hp.current === 0 && (
                 <div className={`mt-4 rounded-xl border p-3 ${hero.lifeStatus === 'dead' ? 'border-stone-700 bg-stone-900 text-white' : 'border-red-200 bg-red-50 text-red-950'}`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5 text-sm font-bold"><Skull className="h-4 w-4" /> {hero.lifeStatus === 'dead' ? 'Dead' : hero.isRallied ? 'Dying · rallied' : 'Dying'}</span>
-                    <span className="text-xs font-bold">CON {hero.attributes?.CON ?? '—'}</span>
+                    <span className="flex items-center gap-1.5 text-sm font-bold"><Skull className="h-4 w-4" /> {t(hero.lifeStatus === 'dead' ? 'Dead' : hero.isRallied ? 'Dying · rallied' : 'Dying')}</span>
+                    <span className="text-xs font-bold">{t('CON {CON}', { CON: hero.attributes?.CON ?? '—' })}</span>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold">
-                    <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">Successes {hero.deathRolls.passed}/3</span>
-                    <span className="rounded bg-red-100 px-2 py-1 text-red-800">Failures {hero.deathRolls.failed}/3</span>
+                    <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">{t('Successes {passed}/3', { passed: hero.deathRolls.passed })}</span>
+                    <span className="rounded bg-red-100 px-2 py-1 text-red-800">{t('Failures {failed}/3', { failed: hero.deathRolls.failed })}</span>
                   </div>
                 </div>
               )}
 
               <div className="mt-5 border-t border-stone-100 pt-4">
-                <div className="text-xs font-bold uppercase tracking-wide text-stone-500">Conditions</div>
+                <div className="text-xs font-bold uppercase tracking-wide text-stone-500">{t('Conditions')}</div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {hero?.conditions.length ? hero.conditions.map((condition) => (
-                    <span key={condition.id} className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{titleCase(condition.name)}</span>
-                  )) : <span className="text-sm text-stone-400">None</span>}
+                    <span key={condition.id} className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{tc(condition.name)}</span>
+                  )) : <span className="text-sm text-stone-400">{t('None')}</span>}
                 </div>
               </div>
 
               {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
-                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Bed className="h-3.5 w-3.5" /> Rest this shift</div>
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Bed className="h-3.5 w-3.5" /> {t('Rest this shift')}</div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
-                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.round ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Round {state.restState.available.round ? 'available' : 'used'}</span>
-                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.stretch ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>Stretch {state.restState.available.stretch ? 'available' : 'used'}</span>
+                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.round ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>{t(state.restState.available.round ? 'Round available' : 'Round used')}</span>
+                  <span className={`rounded-full px-2.5 py-1 ${state.restState.available.stretch ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>{t(state.restState.available.stretch ? 'Stretch available' : 'Stretch used')}</span>
                 </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Tracked by Solo Rest actions. Character-sheet rests do not update this availability.</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-stone-400">{t('Tracked by Solo Rest actions. Character-sheet rests do not update this availability.')}</p>
               </div>
               )}
 
               {activeDashboardTab === 'state' && state.activeInjuries.length > 0 && (
                 <div className="mt-4 border-t border-stone-100 pt-4">
-                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><HeartPulse className="h-3.5 w-3.5" /> Severe injuries</div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><HeartPulse className="h-3.5 w-3.5" /> {t('Severe injuries')}</div>
                   <div className="mt-2 space-y-2">
                     {state.activeInjuries.map((injury) => (
                       <div key={injury.id} className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-950">
-                        <div className="font-bold">{injury.name} · {injury.permanent ? 'permanent' : injuryRecoveryLabel(injury.remainingHealingShifts)}</div>
+                        <div className="font-bold">{injury.name} · {injury.permanent ? 'permanent' : injuryRecoveryLabel(injury.remainingHealingShifts, t)}</div>
                         <div className="mt-0.5 text-amber-800">{injury.effect}</div>
                         <div className="mt-1 text-[11px] font-semibold text-amber-700">
                           {injury.permanent
-                            ? 'Permanent injury'
+                            ? t('Permanent injury')
                             : injury.medicalCareApplied
-                              ? 'Medical care applied · recovery time halved'
+                              ? t('Medical care applied · recovery time halved')
                               : injury.lastTreatmentShift === state.restState.shiftCount
-                                ? 'Medical care already attempted this shift'
-                                : `${titleCase(injury.recoveryStatus)} · original recovery ${injury.healingDays || '—'} days`}
+                                ? t('Medical care already attempted this shift')
+                                : t('{status} · original recovery {days} days', { status: t(titleCase(injury.recoveryStatus)), days: injury.healingDays || '—' })}
                         </div>
                         {canManage && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1740,10 +1764,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                                 disabled={Boolean(state.activeCombat) || injury.lastTreatmentShift === state.restState.shiftCount}
                                 onClick={() => openInjuryAction(injury.id, 'medical_care')}
                               >
-                                Medical care
+                                {t('Medical care')}
                               </Button>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => openInjuryAction(injury.id, 'mark_healed')}>Mark healed</Button>
+                            <Button size="sm" variant="outline" onClick={() => openInjuryAction(injury.id, 'mark_healed')}>{t('Mark healed')}</Button>
                           </div>
                         )}
                       </div>
@@ -1754,16 +1778,16 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
               {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
-                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Sparkles className="h-3.5 w-3.5" /> Solo ability</div>
-                <div className="mt-1.5 text-sm font-semibold text-stone-800">{state.soloHeroicAbility?.name || 'Not selected'}</div>
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Sparkles className="h-3.5 w-3.5" /> {t('Solo ability')}</div>
+                <div className="mt-1.5 text-sm font-semibold text-stone-800">{state.soloHeroicAbility?.name || t('Not selected')}</div>
               </div>
               )}
 
               {activeDashboardTab === 'state' && (
               <div className="mt-4 border-t border-stone-100 pt-4">
-                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Shield className="h-3.5 w-3.5" /> Equipped</div>
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Shield className="h-3.5 w-3.5" /> {t('Equipped')}</div>
                 <div className="mt-2 space-y-1 text-sm text-stone-700">
-                  {equippedItems.length > 0 ? equippedItems.map((item) => <div key={item.id}>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</div>) : <span className="text-stone-400">No equipped items</span>}
+                  {equippedItems.length > 0 ? equippedItems.map((item) => <div key={item.id}>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</div>) : <span className="text-stone-400">{t('No equipped items')}</span>}
                 </div>
               </div>
               )}
@@ -1773,8 +1797,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             <section className={`rounded-2xl border p-5 shadow-sm ${state.activeThreat ? 'border-amber-200 bg-amber-50' : 'border-stone-200 bg-white'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><AlertTriangle className={`h-5 w-5 ${state.activeThreat ? 'text-amber-600' : 'text-stone-400'}`} /> Threat</h3>
-                  <p className="mt-1 text-sm text-stone-600">{state.activeThreat?.description || 'No active mission threat.'}</p>
+                  <h3 className="flex items-center gap-2 font-bold text-stone-900"><AlertTriangle className={`h-5 w-5 ${state.activeThreat ? 'text-amber-600' : 'text-stone-400'}`} /> {t('Threat')}</h3>
+                  <p className="mt-1 text-sm text-stone-600">{state.activeThreat?.description || t('No active mission threat.')}</p>
                 </div>
                 {state.activeThreat && <span className="shrink-0 text-lg font-extrabold text-amber-800">{threatCounter}/6</span>}
               </div>
@@ -1785,27 +1809,27 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       <div key={index} className={`h-3 rounded-full ${index < threatCounter ? 'bg-amber-500' : 'bg-amber-100'}`} />
                     ))}
                   </div>
-                  <div className="mt-2 text-xs text-amber-800">{state.activeThreat.recurring ? 'Recurring: resolves at 6, then resets to 1.' : 'One-time: resolve at 6, then replace it while delving.'}</div>
+                  <div className="mt-2 text-xs text-amber-800">{t(state.activeThreat.recurring ? 'Recurring: resolves at 6, then resets to 1.' : 'One-time: resolve at 6, then replace it while delving.')}</div>
                   {canManage && state.activeThreat.status === 'active' && (
                     <div className="mt-4 flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => { setThreatAmount(1); openAction('advance-threat'); }}>Advance +1</Button>
-                      <Button size="sm" variant="outline" onClick={() => { setThreatAmount(2); openAction('advance-threat'); }}>Dire +2</Button>
+                      <Button size="sm" variant="outline" onClick={() => { setThreatAmount(1); openAction('advance-threat'); }}>{t('Advance +1')}</Button>
+                      <Button size="sm" variant="outline" onClick={() => { setThreatAmount(2); openAction('advance-threat'); }}>{t('Dire +2')}</Button>
                     </div>
                   )}
                   {canManage && state.activeThreat.status === 'triggered' && (
-                    <Button className="mt-4" size="sm" icon={AlertTriangle} onClick={() => openAction('resolve-threat')}>Resolve triggered event</Button>
+                    <Button className="mt-4" size="sm" icon={AlertTriangle} onClick={() => openAction('resolve-threat')}>{t('Resolve triggered event')}</Button>
                   )}
                 </>
               )}
               {canManage && state.activeMission && !state.activeThreat && (
-                <Button className="mt-4" size="sm" variant="outline" onClick={() => openAction('set-threat')}>Set replacement threat</Button>
+                <Button className="mt-4" size="sm" variant="outline" onClick={() => openAction('set-threat')}>{t('Set replacement threat')}</Button>
               )}
             </section>
             )}
 
             {activeDashboardTab === 'adventure' && state.activeCombat && (
               <section className="rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm">
-                <h3 className="flex items-center gap-2 font-bold text-red-950"><Swords className="h-5 w-5 text-red-600" /> Combat active</h3>
+                <h3 className="flex items-center gap-2 font-bold text-red-950"><Swords className="h-5 w-5 text-red-600" /> {t('Combat active')}</h3>
                 <p className="mt-1 text-sm text-red-800">{state.activeCombat.name}</p>
               </section>
             )}
@@ -1816,7 +1840,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
       <CharacterSheetDialog
         isOpen={isCharacterSheetOpen}
-        title={state.playerCharacter?.name || 'Solo hero'}
+        title={state.playerCharacter?.name || t('Solo hero')}
         soloState={state}
         isLoading={isCharacterSheetLoading}
         isReady={isSoloCharacterSheetReady}
@@ -1845,19 +1869,19 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 <div className="space-y-4" role="status" aria-live="polite">
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
                     <div className="text-lg font-extrabold">{explorationActionResult.summary}</div>
-                    <div className="mt-2 text-xs text-emerald-700">The roll and its time/threat effects are already recorded.</div>
+                    <div className="mt-2 text-xs text-emerald-700">{t('The roll and its time/threat effects are already recorded.')}</div>
                   </div>
                   {requiresChoice ? (
                     <div className="space-y-3">
-                      <p className="text-sm font-bold text-stone-800">A Dragon produced two possible finds. Choose the one that best fits the fiction before continuing.</p>
+                      <p className="text-sm font-bold text-stone-800">{t('A Dragon produced two possible finds. Choose the one that best fits the fiction before continuing.')}</p>
                       {findingGroups.map((group, index) => {
                         const cardCount = treasureCardsAwarded(group);
                         return (
                           <div key={index} className="rounded-xl border border-stone-200 p-4">
-                            <div className="text-xs font-extrabold uppercase tracking-wide text-indigo-600">Choice {index + 1}</div>
-                            <div className="mt-1 text-sm text-stone-800">{group.map((entry) => String(entry.label || entry.key || 'Finding')).join(' + ')}</div>
+                            <div className="text-xs font-extrabold uppercase tracking-wide text-indigo-600">{t('Choice {index}', { index: index + 1 })}</div>
+                            <div className="mt-1 text-sm text-stone-800">{group.map((entry) => String(entry.label || entry.key || t('Finding'))).join(' + ')}</div>
                             <Button className="mt-3" type="button" size="sm" icon={cardCount > 0 ? PackageSearch : CheckCircle2} onClick={() => cardCount > 0 && roll ? openTreasureAction(cardCount, roll.id) : closeAction()}>
-                              {cardCount > 0 ? `Choose and record ${cardCount} treasure card${cardCount === 1 ? '' : 's'}` : 'Choose this result'}
+                              {cardCount > 0 ? t(cardCount === 1 ? 'Choose and record {count} treasure card' : 'Choose and record {count} treasure cards', { count: cardCount }) : t('Choose this result')}
                             </Button>
                           </div>
                         );
@@ -1866,12 +1890,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   ) : (
                     <>
                       <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-800">
-                        {findingGroups.flat().map((entry, index) => <div key={index}>{String(entry.label || entry.key || 'Finding')}</div>)}
+                        {findingGroups.flat().map((entry, index) => <div key={index}>{String(entry.label || entry.key || t('Finding'))}</div>)}
                       </div>
                       {totalTreasure > 0 && roll ? (
-                        <Button type="button" fullWidth icon={PackageSearch} onClick={() => openTreasureAction(totalTreasure, roll.id)}>Record {totalTreasure} physical treasure card{totalTreasure === 1 ? '' : 's'}</Button>
+                        <Button type="button" fullWidth icon={PackageSearch} onClick={() => openTreasureAction(totalTreasure, roll.id)}>{t(totalTreasure === 1 ? 'Record {count} physical treasure card' : 'Record {count} physical treasure cards', { count: totalTreasure })}</Button>
                       ) : (
-                        <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>Done</Button>
+                        <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>{t('Done')}</Button>
                       )}
                     </>
                   )}
@@ -1882,10 +1906,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeAction === 'check' && hero && (
               <>
                 <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
-                  The server uses {hero.name}&apos;s stored target and records every die. This action is for checks outside combat.
+                  {t("The server uses {name}'s stored target and records every die. This action is for checks outside combat.", { name: hero.name })}
                 </div>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Check type</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Check type')}</legend>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {(['skill', 'attribute'] as const).map((type) => (
                       <label key={type} className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm font-bold ${checkType === type ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-stone-200 text-stone-700'}`}>
@@ -1899,79 +1923,79 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                           }}
                           className="h-4 w-4 border-stone-300 text-indigo-600"
                         />
-                        {titleCase(type)}
+                        {tc(type)}
                       </label>
                     ))}
                   </div>
                 </fieldset>
                 <label className="block text-sm font-bold text-stone-700">
-                  {checkType === 'skill' ? 'Skill' : 'Attribute'}
+                  {t(checkType === 'skill' ? 'Skill' : 'Attribute')}
                   <select value={checkName} onChange={(event) => setCheckName(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="">Choose a {checkType}…</option>
+                    <option value="">{t('Choose a {checkType}…', { checkType })}</option>
                     {(checkType === 'skill' ? skillOptions : attributeOptions).map(([name, target]) => (
                       <option key={name} value={name}>{titleCase(name)} · {target}</option>
                     ))}
                   </select>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Roll modifier
+                <label className="block text-sm font-bold text-stone-700">{t('Roll modifier')}
                   <select value={checkModifier} onChange={(event) => setCheckModifier(event.target.value as SoloCheckModifier)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="normal">Normal · 1D20</option>
-                    <option value="boon">Boon · 2D20, keep lower</option>
-                    <option value="bane">Bane · 2D20, keep higher</option>
+                    <option value="normal">{t('Normal · 1D20')}</option>
+                    <option value="boon">{t('Boon · 2D20, keep lower')}</option>
+                    <option value="bane">{t('Bane · 2D20, keep higher')}</option>
                   </select>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">What is the hero trying to do?
-                  <textarea value={checkContext} onChange={(event) => setCheckContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Climb the crumbling wall before the patrol returns…" />
+                <label className="block text-sm font-bold text-stone-700">{t('What is the hero trying to do?')}
+                  <textarea value={checkContext} onChange={(event) => setCheckContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Climb the crumbling wall before the patrol returns…')} />
                 </label>
                 <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
-                  A Dragon or Demon marks the selected skill once and rolls a generic critical-effect prompt. A failure requires a complication that moves the story forward; it does not silently alter HP, inventory, or threat.
+                  {t('A Dragon or Demon marks the selected skill once and rolls a generic critical-effect prompt. A failure requires a complication that moves the story forward; it does not silently alter HP, inventory, or threat.')}
                 </div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!checkName} icon={Dices}>Roll {titleCase(checkName || 'Check')}</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!checkName} icon={Dices}>{t('Roll {name}', { name: titleCase(checkName || t('Check')) })}</Button>
               </>
             )}
 
             {activeAction === 'push' && hero && pushRollId && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  Describe how the condition or Sole Survivor effort applies before rerolling. A Demon and an already-pushed roll can never be pushed.
+                  {t('Describe how the condition or Sole Survivor effort applies before rerolling. A Demon and an already-pushed roll can never be pushed.')}
                 </div>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Push cost</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Push cost')}</legend>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     <label className={`rounded-lg border p-3 text-sm ${pushCost === 'condition' ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
-                      <input type="radio" name="push-cost" checked={pushCost === 'condition'} onChange={() => setPushCost('condition')} className="mr-2" /> Take a condition
+                      <input type="radio" name="push-cost" checked={pushCost === 'condition'} onChange={() => setPushCost('condition')} className="mr-2" /> {t('Take a condition')}
                     </label>
                     <label className={`rounded-lg border p-3 text-sm ${pushCost === 'sole_survivor' ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'} ${state.soloHeroicAbility?.name !== 'Sole Survivor' ? 'opacity-50' : ''}`}>
-                      <input type="radio" name="push-cost" checked={pushCost === 'sole_survivor'} disabled={state.soloHeroicAbility?.name !== 'Sole Survivor'} onChange={() => setPushCost('sole_survivor')} className="mr-2" /> Sole Survivor · 3 WP
+                      <input type="radio" name="push-cost" checked={pushCost === 'sole_survivor'} disabled={state.soloHeroicAbility?.name !== 'Sole Survivor'} onChange={() => setPushCost('sole_survivor')} className="mr-2" /> {t('Sole Survivor · 3 WP')}
                     </label>
                   </div>
                 </fieldset>
                 {pushCost === 'condition' && (
-                  <label className="block text-sm font-bold text-stone-700">Condition
+                  <label className="block text-sm font-bold text-stone-700">{t('Condition')}
                     <select value={pushCondition} onChange={(event) => setPushCondition(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      <option value="">Choose an inactive condition…</option>
-                      {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{titleCase(key)}</option>)}
+                      <option value="">{t('Choose an inactive condition…')}</option>
+                      {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{tc(key)}</option>)}
                     </select>
                   </label>
                 )}
-                <label className="block text-sm font-bold text-stone-700">How does this push apply?
-                  <textarea value={pushExplanation} onChange={(event) => setPushExplanation(event.target.value)} required maxLength={1000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="I force the rusted gate while my muscles tremble, becoming exhausted…" />
+                <label className="block text-sm font-bold text-stone-700">{t('How does this push apply?')}
+                  <textarea value={pushExplanation} onChange={(event) => setPushExplanation(event.target.value)} required maxLength={1000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('I force the rusted gate while my muscles tremble, becoming exhausted…')} />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!pushExplanation.trim() || (pushCost === 'condition' && !pushCondition) || (pushCost === 'sole_survivor' && hero.wp.current < 3)} icon={Dices}>Pay cost and reroll</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!pushExplanation.trim() || (pushCost === 'condition' && !pushCondition) || (pushCost === 'sole_survivor' && hero.wp.current < 3)} icon={Dices}>{t('Pay cost and reroll')}</Button>
               </>
             )}
 
             {activeAction === 'consequence' && hero && consequenceRollId && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  A failed check must move the story forward. Record one accepted consequence, or provide two reasonable alternatives and let the server choose: 1-3 selects A, 4-6 selects B.
+                  {t('A failed check must move the story forward. Record one accepted consequence, or provide two reasonable alternatives and let the server choose: 1-3 selects A, 4-6 selects B.')}
                 </div>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Resolution</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Resolution')}</legend>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {([
-                      ['manual', 'Accept one consequence'],
-                      ['roll_choice', 'Roll between two'],
+                      ['manual', t('Accept one consequence')],
+                      ['roll_choice', t('Roll between two')],
                     ] as const).map(([mode, label]) => (
                       <label key={mode} className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm font-bold ${consequenceMode === mode ? 'border-amber-400 bg-amber-50 text-amber-950' : 'border-stone-200 text-stone-700'}`}>
                         <input type="radio" name="consequence-mode" checked={consequenceMode === mode} onChange={() => setConsequenceMode(mode)} className="h-4 w-4 border-stone-300 text-amber-600" />
@@ -1986,9 +2010,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   return (
                     <fieldset key={index} className="space-y-3 rounded-xl border border-stone-200 p-4">
                       <legend className="px-1 text-sm font-bold text-stone-800">
-                        {consequenceMode === 'manual' ? 'Consequence' : `Option ${index === 0 ? 'A · 1-3' : 'B · 4-6'}`}
+                        {consequenceMode === 'manual' ? t('Consequence') : t(index === 0 ? 'Option A · 1-3' : 'Option B · 4-6')}
                       </legend>
-                      <label className="block text-sm font-bold text-stone-700">What happens?
+                      <label className="block text-sm font-bold text-stone-700">{t('What happens?')}
                         <textarea
                           value={consequenceDescriptions[index]}
                           onChange={(event) => setConsequenceDescriptions((current) => updatePair(current, index, event.target.value))}
@@ -1996,74 +2020,74 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                           maxLength={2000}
                           rows={2}
                           className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal"
-                          placeholder="The hero succeeds, but the noise alerts something below…"
+                          placeholder={t('The hero succeeds, but the noise alerts something below…')}
                         />
                       </label>
-                      <label className="block text-sm font-bold text-stone-700">Mechanical effect
+                      <label className="block text-sm font-bold text-stone-700">{t('Mechanical effect')}
                         <select
                           value={effectType}
                           onChange={(event) => setConsequenceEffectTypes((current) => updatePair(current, index, event.target.value as SoloConsequenceEffectType))}
                           className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"
                         >
-                          <option value="story_event">Story event only</option>
-                          <option value="advance_threat">Advance threat</option>
-                          <option value="damage">Damage hero</option>
-                          <option value="add_condition">Add condition</option>
-                          <option value="lose_item">Lose or expend item</option>
-                          <option value="new_danger">Add danger here</option>
-                          <option value="add_diversion_waypoint">Insert diversion waypoint</option>
+                          <option value="story_event">{t('Story event only')}</option>
+                          <option value="advance_threat">{t('Advance threat')}</option>
+                          <option value="damage">{t('Damage hero')}</option>
+                          <option value="add_condition">{t('Add condition')}</option>
+                          <option value="lose_item">{t('Lose or expend item')}</option>
+                          <option value="new_danger">{t('Add danger here')}</option>
+                          <option value="add_diversion_waypoint">{t('Insert diversion waypoint')}</option>
                         </select>
                       </label>
                       {effectType === 'advance_threat' && (
-                        <label className="block text-sm font-bold text-stone-700">Threat increase
+                        <label className="block text-sm font-bold text-stone-700">{t('Threat increase')}
                           <select value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                            <option value={1}>+1 · normal delay or opening</option>
-                            <option value={2}>+2 · dire or time-sensitive setback</option>
+                            <option value={1}>{t('+1 · normal delay or opening')}</option>
+                            <option value={2}>{t('+2 · dire or time-sensitive setback')}</option>
                           </select>
                         </label>
                       )}
                       {effectType === 'damage' && (
                         <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="block text-sm font-bold text-stone-700">Damage
+                          <label className="block text-sm font-bold text-stone-700">{t('Damage')}
                             <input type="number" min={1} max={100} value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} required className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                           </label>
-                          <label className="block text-sm font-bold text-stone-700">Damage type <span className="font-normal text-stone-400">optional</span>
-                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} maxLength={80} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="falling" />
+                          <label className="block text-sm font-bold text-stone-700">{t('Damage type')}<span className="font-normal text-stone-400">{t('optional')}</span>
+                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} maxLength={80} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('falling')} />
                           </label>
                         </div>
                       )}
                       {effectType === 'add_condition' && (
-                        <label className="block text-sm font-bold text-stone-700">Condition
+                        <label className="block text-sm font-bold text-stone-700">{t('Condition')}
                           <select value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                            <option value="">Choose a condition…</option>
-                            {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{titleCase(key)}</option>)}
+                            <option value="">{t('Choose a condition…')}</option>
+                            {[...standardConditionKeys].map((key) => <option key={key} value={key} disabled={hero.conditions.some((condition) => condition.key === key)}>{tc(key)}</option>)}
                           </select>
                         </label>
                       )}
                       {effectType === 'lose_item' && (
                         <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
-                          <label className="block text-sm font-bold text-stone-700">Item
+                          <label className="block text-sm font-bold text-stone-700">{t('Item')}
                             <select value={consequenceItemIds[index]} onChange={(event) => setConsequenceItemIds((current) => updatePair(current, index, event.target.value))} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                              <option value="">Choose an item…</option>
+                              <option value="">{t('Choose an item…')}</option>
                               {hero.inventory.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.quantity}</option>)}
                             </select>
                           </label>
-                          <label className="block text-sm font-bold text-stone-700">Quantity
+                          <label className="block text-sm font-bold text-stone-700">{t('Quantity')}
                             <input type="number" min={1} max={999} value={consequenceAmounts[index]} onChange={(event) => setConsequenceAmounts((current) => updatePair(current, index, Number(event.target.value)))} required className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                           </label>
                         </div>
                       )}
                       {effectType === 'new_danger' && (
-                        <label className="block text-sm font-bold text-stone-700">Danger
-                          <textarea value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="A patrol enters the chamber from the east." />
+                        <label className="block text-sm font-bold text-stone-700">{t('Danger')}
+                          <textarea value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('A patrol enters the chamber from the east.')} />
                         </label>
                       )}
                       {effectType === 'add_diversion_waypoint' && (
                         <div className="space-y-3">
-                          <label className="block text-sm font-bold text-stone-700">Diversion title
-                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The Collapsed Passage" />
+                          <label className="block text-sm font-bold text-stone-700">{t('Diversion title')}
+                            <input value={consequenceDetails[index]} onChange={(event) => setConsequenceDetails((current) => updatePair(current, index, event.target.value))} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The Collapsed Passage')} />
                           </label>
-                          <label className="block text-sm font-bold text-stone-700">Hidden waypoint description
+                          <label className="block text-sm font-bold text-stone-700">{t('Hidden waypoint description')}
                             <textarea value={consequenceWaypointDescriptions[index]} onChange={(event) => setConsequenceWaypointDescriptions((current) => updatePair(current, index, event.target.value))} required maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                           </label>
                         </div>
@@ -2072,58 +2096,58 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   );
                 })}
                 <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">
-                  The selected consequence is permanent in the audit trail. Only its declared mechanical effect is applied; Draconi will not infer extra damage, threat, inventory, or condition changes.
+                  {t('The selected consequence is permanent in the audit trail. Only its declared mechanical effect is applied; Draconi will not infer extra damage, threat, inventory, or condition changes.')}
                 </div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={AlertTriangle}>Resolve and continue</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={AlertTriangle}>{t('Resolve and continue')}</Button>
               </>
             )}
 
             {activeAction === 'fortune' && !oracleActionResult && (
               <>
-                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Ask only when the answer is genuinely uncertain. A certain or more interesting answer may be decided without rolling.</p>
-                <label className="block text-sm font-bold text-stone-700">Question
-                  <textarea value={fortuneQuestion} onChange={(event) => setFortuneQuestion(event.target.value)} required maxLength={1000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder="Is the old bridge still safe to cross?" />
+                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{t('Ask only when the answer is genuinely uncertain. A certain or more interesting answer may be decided without rolling.')}</p>
+                <label className="block text-sm font-bold text-stone-700">{t('Question')}
+                  <textarea value={fortuneQuestion} onChange={(event) => setFortuneQuestion(event.target.value)} required maxLength={1000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder={t('Is the old bridge still safe to cross?')} />
                 </label>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block text-sm font-bold text-stone-700">Category
+                  <label className="block text-sm font-bold text-stone-700">{t('Category')}
                     <select value={fortuneCategory} onChange={(event) => setFortuneCategory(event.target.value as FortuneCategory)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      {fortuneCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                      {fortuneCategories.map((category) => <option key={category.value} value={category.value}>{t(category.label)}</option>)}
                     </select>
                   </label>
-                  <label className="block text-sm font-bold text-stone-700">Likelihood
+                  <label className="block text-sm font-bold text-stone-700">{t('Likelihood')}
                     <select value={fortuneTilt} onChange={(event) => setFortuneTilt(event.target.value as FortuneTilt)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      <option value="unlikely">Unlikely · 2d6 keep low</option>
-                      <option value="even">Even · 1d6</option>
-                      <option value="likely">Likely · 2d6 keep high</option>
+                      <option value="unlikely">{t('Unlikely · 2d6 keep low')}</option>
+                      <option value="even">{t('Even · 1d6')}</option>
+                      <option value="likely">{t('Likely · 2d6 keep high')}</option>
                     </select>
                   </label>
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Context <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={fortuneContext} onChange={(event) => setFortuneContext(event.target.value)} maxLength={5000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Relevant facts from the current scene" />
+                <label className="block text-sm font-bold text-stone-700">{t('Context')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={fortuneContext} onChange={(event) => setFortuneContext(event.target.value)} maxLength={5000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Relevant facts from the current scene')} />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!fortuneQuestion.trim()} icon={Dices}>Ask Fortune</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!fortuneQuestion.trim()} icon={Dices}>{t('Ask Fortune')}</Button>
               </>
             )}
 
             {activeAction === 'inspiration' && !oracleActionResult && (
               <>
-                <p className="text-sm text-stone-600">Choose one or more independent prompt columns. The generated phrase is inspiration, not an authoritative story fact until you apply it.</p>
+                <p className="text-sm text-stone-600">{t('Choose one or more independent prompt columns. The generated phrase is inspiration, not an authoritative story fact until you apply it.')}</p>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Columns</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Columns')}</legend>
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     {inspirationColumns.map((column) => (
                       <label key={column.value} className={`cursor-pointer rounded-lg border p-3 text-center text-sm font-semibold ${selectedColumns.includes(column.value) ? 'border-indigo-400 bg-indigo-50 text-indigo-800' : 'border-stone-200 text-stone-600'}`}>
                         <input type="checkbox" className="sr-only" checked={selectedColumns.includes(column.value)} onChange={(event) => setSelectedColumns((current) => event.target.checked ? [...current, column.value] : current.filter((value) => value !== column.value))} />
-                        {column.label}
+                        {t(column.label)}
                       </label>
                     ))}
                   </div>
                 </fieldset>
-                <label className="block text-sm font-bold text-stone-700">Context <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={inspirationContext} onChange={(event) => setInspirationContext(event.target.value)} maxLength={5000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="What are you trying to discover or create?" />
+                <label className="block text-sm font-bold text-stone-700">{t('Context')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={inspirationContext} onChange={(event) => setInspirationContext(event.target.value)} maxLength={5000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('What are you trying to discover or create?')} />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">This uses the installed versioned Solo inspiration table.</div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={selectedColumns.length === 0} icon={Wand2}>Draw Inspiration</Button>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">{t('This uses the installed versioned Solo inspiration table.')}</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={selectedColumns.length === 0} icon={Wand2}>{t('Draw Inspiration')}</Button>
               </>
             )}
 
@@ -2135,15 +2159,15 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     {treasureCards.map((card, index) => <li key={index}><strong>{card.title || `Card ${index + 1}`}:</strong> {card.contents}</li>)}
                   </ol>
                 </div>
-                <p className="text-xs text-stone-500">The entered contents are saved in the adventure record. No inventory item was created automatically.</p>
-                <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>Done</Button>
+                <p className="text-xs text-stone-500">{t('The entered contents are saved in the adventure record. No inventory item was created automatically.')}</p>
+                <Button type="button" fullWidth icon={CheckCircle2} onClick={closeAction}>{t('Done')}</Button>
               </div>
             ) : activeAction === 'treasure' && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  Use your official physical treasure deck. Draconi does not know, generate, or reproduce its card contents.
+                  {t('Use your official physical treasure deck. Draconi does not know, generate, or reproduce its card contents.')}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Number of cards to draw
+                <label className="block text-sm font-bold text-stone-700">{t('Number of cards to draw')}
                   <input
                     type="number"
                     min={1}
@@ -2159,52 +2183,52 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     }}
                     className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal"
                   />
-                  {treasureSourceRollId && <span className="mt-1 block text-xs font-normal text-amber-700">This draw will resolve the treasure awarded by the linked Search or Scavenge result.</span>}
+                  {treasureSourceRollId && <span className="mt-1 block text-xs font-normal text-amber-700">{t('This draw will resolve the treasure awarded by the linked Search or Scavenge result.')}</span>}
                 </label>
                 <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                   <input type="checkbox" checked={treasureShuffled} onChange={(event) => setTreasureShuffled(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                  <span className="font-bold">I shuffled, then physically drew {treasureCardCount} card{treasureCardCount === 1 ? '' : 's'}<span className="mt-0.5 block text-xs font-normal text-stone-500">Keep duplicate cards if they occur.</span></span>
+                  <span className="font-bold">{t(treasureCardCount === 1 ? 'I shuffled, then physically drew {count} card' : 'I shuffled, then physically drew {count} cards', { count: treasureCardCount })}<span className="mt-0.5 block text-xs font-normal text-stone-500">{t('Keep duplicate cards if they occur.')}</span></span>
                 </label>
                 <div className="space-y-3">
                   {treasureCards.map((card, index) => (
                     <fieldset key={index} className="rounded-xl border border-stone-200 p-3">
-                      <legend className="px-1 text-sm font-bold text-stone-800">Card {index + 1}</legend>
-                      <label className="block text-xs font-bold uppercase tracking-wide text-stone-500">Name <span className="font-normal normal-case">optional</span>
+                      <legend className="px-1 text-sm font-bold text-stone-800">{t('Card {index}', { index: index + 1 })}</legend>
+                      <label className="block text-xs font-bold uppercase tracking-wide text-stone-500">{t('Name')}<span className="font-normal normal-case">{t('optional')}</span>
                         <input value={card.title} onChange={(event) => setTreasureCards((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, title: event.target.value } : entry))} maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal" />
                       </label>
-                      <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-stone-500">Contents
-                        <textarea value={card.contents} onChange={(event) => setTreasureCards((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, contents: event.target.value } : entry))} required maxLength={5000} rows={3} placeholder="Enter the card contents or your concise record of them" className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal" />
+                      <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-stone-500">{t('Contents')}
+                        <textarea value={card.contents} onChange={(event) => setTreasureCards((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, contents: event.target.value } : entry))} required maxLength={5000} rows={3} placeholder={t('Enter the card contents or your concise record of them')} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal" />
                       </label>
                     </fieldset>
                   ))}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Adventure notes <span className="font-normal text-stone-400">optional</span>
-                  <textarea value={treasureNotes} onChange={(event) => setTreasureNotes(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Where it was found or how it enters the story" />
+                <label className="block text-sm font-bold text-stone-700">{t('Adventure notes')}<span className="font-normal text-stone-400">{t('optional')}</span>
+                  <textarea value={treasureNotes} onChange={(event) => setTreasureNotes(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Where it was found or how it enters the story')} />
                 </label>
                 <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                   <input type="checkbox" checked={treasureReturnedShuffled} onChange={(event) => setTreasureReturnedShuffled(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                  <span className="font-bold">I returned every drawn card and shuffled the deck again</span>
+                  <span className="font-bold">{t('I returned every drawn card and shuffled the deck again')}</span>
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!treasureShuffled || !treasureReturnedShuffled || treasureCards.some((card) => !card.contents.trim())} icon={PackageSearch}>Save treasure draw</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!treasureShuffled || !treasureReturnedShuffled || treasureCards.some((card) => !card.contents.trim())} icon={PackageSearch}>{t('Save treasure draw')}</Button>
               </>
             )}
 
             {activeAction === 'npc-create' && (
               <>
                 <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
-                  Minions use attributes 10, HP 12 and skills 12/6. Bosses use attributes 14, HP 20, armor 4 and skills 15/8. Simple magic attackers ignore WP.
+                  {t('Minions use attributes 10, HP 12 and skills 12/6. Bosses use attributes 14, HP 20, armor 4 and skills 15/8. Simple magic attackers ignore WP.')}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Name
-                  <input value={npcName} onChange={(event) => setNpcName(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Ashfang Captain" />
+                <label className="block text-sm font-bold text-stone-700">{t('Name')}
+                  <input value={npcName} onChange={(event) => setNpcName(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Ashfang Captain')} />
                 </label>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block text-sm font-bold text-stone-700">Template
+                  <label className="block text-sm font-bold text-stone-700">{t('Template')}
                     <select value={npcTemplate} onChange={(event) => setNpcTemplate(event.target.value as typeof npcTemplate)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      <option value="minion">Minion</option><option value="boss">Boss</option>
+                      <option value="minion">{t('Minion')}</option><option value="boss">{t('Boss')}</option>
                     </select>
                   </label>
                   <fieldset>
-                    <legend className="text-sm font-bold text-stone-700">Roles · choose up to two</legend>
+                    <legend className="text-sm font-bold text-stone-700">{t('Roles · choose up to two')}</legend>
                     <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                       {(['melee', 'ranged', 'sneaky', 'magic'] as const).map((role) => (
                         <label key={role} className={`rounded border px-2 py-1.5 text-xs font-semibold ${npcRoles.includes(role) ? 'border-violet-400 bg-violet-50 text-violet-800' : 'border-stone-200 text-stone-600'}`}>
@@ -2214,16 +2238,16 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                             disabled={!npcRoles.includes(role) && npcRoles.length >= 2}
                             onChange={(event) => setNpcRoles((current) => event.target.checked ? [...current, role] : current.filter((value) => value !== role))}
                             className="mr-1.5"
-                          />{titleCase(role)}
+                          />{tc(role)}
                         </label>
                       ))}
                     </div>
                   </fieldset>
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Description or notes <span className="font-normal text-stone-400">optional</span>
+                <label className="block text-sm font-bold text-stone-700">{t('Description or notes')}<span className="font-normal text-stone-400">{t('optional')}</span>
                   <textarea value={npcNotes} onChange={(event) => setNpcNotes(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!npcName.trim() || npcRoles.length < 1} icon={Ghost}>Create {titleCase(npcTemplate)}</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!npcName.trim() || npcRoles.length < 1} icon={Ghost}>{t('Create {value}', { value: tc(npcTemplate) })}</Button>
               </>
             )}
 
@@ -2233,12 +2257,12 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   <div className="text-lg font-extrabold">{npcActionResult.summary}</div>
                   <div className="mt-2 text-sm">{journalValue(npcActionResult.state_excerpt.resolution)}</div>
                 </div>
-                <p className="text-xs text-stone-500">The result is recorded. Apply any required attack roll, defense, damage, fear, or condition through the encounter controls.</p>
-                <Button type="button" fullWidth onClick={closeAction}>Done</Button>
+                <p className="text-xs text-stone-500">{t('The result is recorded. Apply any required attack roll, defense, damage, fear, or condition through the encounter controls.')}</p>
+                <Button type="button" fullWidth onClick={closeAction}>{t('Done')}</Button>
               </div>
             ) : activeAction === 'npc-behavior' && (
               <>
-                <label className="block text-sm font-bold text-stone-700">NPC
+                <label className="block text-sm font-bold text-stone-700">{t('NPC')}
                   <select
                     value={selectedNpcId}
                     onChange={(event) => {
@@ -2250,133 +2274,135 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     required
                     className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"
                   >
-                    <option value="">Choose an active NPC…</option>
-                    {state.npcs.filter((npc) => npc.status === 'active').map((npc) => <option key={npc.id} value={npc.id}>{npc.name} · {titleCase(npc.template)}</option>)}
+                    <option value="">{t('Choose an active NPC…')}</option>
+                    {state.npcs.filter((npc) => npc.status === 'active').map((npc) => <option key={npc.id} value={npc.id}>{npc.name} · {tc(npc.template)}</option>)}
                   </select>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Behavior
+                <label className="block text-sm font-bold text-stone-700">{t('Behavior')}
                   <select value={npcBehavior} onChange={(event) => setNpcBehavior(event.target.value as typeof npcBehavior)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="attack">Attack action · role D6 table</option>
-                    <option value="intent">Uncertain intent</option>
-                    <option value="morale">Possible flight or surrender</option>
+                    <option value="attack">{t('Attack action · role D6 table')}</option>
+                    <option value="intent">{t('Uncertain intent')}</option>
+                    <option value="morale">{t('Possible flight or surrender')}</option>
                   </select>
                 </label>
                 {npcBehavior === 'attack' && selectedNpc && (
-                  <label className="block text-sm font-bold text-stone-700">Attacker role
+                  <label className="block text-sm font-bold text-stone-700">{t('Attacker role')}
                     <select value={npcBehaviorRole} onChange={(event) => setNpcBehaviorRole(event.target.value as typeof npcBehaviorRole)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      {selectedNpc.roles.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}
+                      {selectedNpc.roles.map((role) => <option key={role} value={role}>{tc(role)}</option>)}
                     </select>
                   </label>
                 )}
                 {npcBehavior === 'intent' && (
-                  <label className="block text-sm font-bold text-stone-700">Oracle
+                  <label className="block text-sm font-bold text-stone-700">{t('Oracle')}
                     <select value={npcOracle} onChange={(event) => setNpcOracle(event.target.value as typeof npcOracle)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      <option value="fortune">Fortune · reaction</option><option value="inspiration">Inspiration · Action + Thing</option>
+                      <option value="fortune">{t('Fortune · reaction')}</option><option value="inspiration">{t('Inspiration · Action + Thing')}</option>
                     </select>
                   </label>
                 )}
                 {npcBehavior === 'morale' && (
-                  <label className="block text-sm font-bold text-stone-700">Possible outcome
+                  <label className="block text-sm font-bold text-stone-700">{t('Possible outcome')}
                     <select value={npcDisposition} onChange={(event) => setNpcDisposition(event.target.value as typeof npcDisposition)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                      <option value="fled">Flee</option><option value="surrendered">Surrender</option>
+                      <option value="fled">{t('Flee')}</option><option value="surrendered">{t('Surrender')}</option>
                     </select>
                   </label>
                 )}
                 {npcBehavior !== 'attack' && (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block text-sm font-bold text-stone-700">Likelihood
+                    <label className="block text-sm font-bold text-stone-700">{t('Likelihood')}
                       <select value={npcTilt} onChange={(event) => setNpcTilt(event.target.value as FortuneTilt)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                        <option value="unlikely">Unlikely</option><option value="even">Even</option><option value="likely">Likely</option>
+                        <option value="unlikely">{t('Unlikely')}</option><option value="even">{t('Even')}</option><option value="likely">{t('Likely')}</option>
                       </select>
                     </label>
                   </div>
                 )}
-                <label className="block text-sm font-bold text-stone-700">Question or context <span className="font-normal text-stone-400">optional</span>
+                <label className="block text-sm font-bold text-stone-700">{t('Question or context')}<span className="font-normal text-stone-400">{t('optional')}</span>
                   <textarea value={npcQuestion} onChange={(event) => setNpcQuestion(event.target.value)} maxLength={1000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                 </label>
-                {state.activeCombat && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800">This resolves against the active encounter and is allowed only when the selected NPC is the active combatant.</p>}
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!selectedNpc || (npcBehavior === 'attack' && !npcBehaviorRole)} icon={Dices}>Resolve behavior</Button>
+                {state.activeCombat && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800">{t('This resolves against the active encounter and is allowed only when the selected NPC is the active combatant.')}</p>}
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!selectedNpc || (npcBehavior === 'attack' && !npcBehaviorRole)} icon={Dices}>{t('Resolve behavior')}</Button>
               </>
             )}
 
             {activeAction === 'start-mission' && (
               <>
-                <label className="block text-sm font-bold text-stone-700">Mission title
-                  <input value={missionTitle} onChange={(event) => setMissionTitle(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The Vanished Lantern" />
+                <label className="block text-sm font-bold text-stone-700">{t('Mission title')}
+                  <input value={missionTitle} onChange={(event) => setMissionTitle(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The Vanished Lantern')} />
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Objective
-                  <textarea value={missionObjective} onChange={(event) => setMissionObjective(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Find the missing lantern before the ruins flood." />
+                <label className="block text-sm font-bold text-stone-700">{t('Objective')}
+                  <textarea value={missionObjective} onChange={(event) => setMissionObjective(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Find the missing lantern before the ruins flood.')} />
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Unknown waypoints
+                <label className="block text-sm font-bold text-stone-700">{t('Unknown waypoints')}
                   <input type="number" min={0} max={10} value={unknownWaypointCount} onChange={(event) => setUnknownWaypointCount(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
-                  <span className="mt-1 block text-xs font-normal text-stone-500">Unknown waypoints remain hidden until reached. Opening, planned, unknown, and objective waypoints may total at most 12.</span>
+                  <span className="mt-1 block text-xs font-normal text-stone-500">{t('Unknown waypoints remain hidden until reached. Opening, planned, unknown, and objective waypoints may total at most 12.')}</span>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Planned foreseen waypoints <span className="font-normal text-stone-400">(optional)</span>
+                <label className="block text-sm font-bold text-stone-700">{t('Planned foreseen waypoints')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
                   <textarea value={foreseenWaypointsText} onChange={(event) => setForeseenWaypointsText(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={'Ruined Bridge :: The only crossing over the chasm\nSealed Gate :: A runed door guards the lower vault'} />
-                  <span className="mt-1 block text-xs font-normal text-stone-500">One per line: Title :: Description</span>
+                  <span className="mt-1 block text-xs font-normal text-stone-500">{t('One per line: Title :: Description')}</span>
                 </label>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block text-sm font-bold text-stone-700">Opening waypoint
+                  <label className="block text-sm font-bold text-stone-700">{t('Opening waypoint')}
                     <input value={openingTitle} onChange={(event) => setOpeningTitle(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                   </label>
-                  <label className="block text-sm font-bold text-stone-700">Threat
-                    <input value={threatDescription} onChange={(event) => setThreatDescription(event.target.value)} required maxLength={2000} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The water keeps rising" />
+                  <label className="block text-sm font-bold text-stone-700">{t('Threat')}
+                    <input value={threatDescription} onChange={(event) => setThreatDescription(event.target.value)} required maxLength={2000} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The water keeps rising')} />
                   </label>
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Opening description
-                  <textarea value={openingDescription} onChange={(event) => setOpeningDescription(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Describe where the hero begins." />
+                <label className="block text-sm font-bold text-stone-700">{t('Opening description')}
+                  <textarea value={openingDescription} onChange={(event) => setOpeningDescription(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Describe where the hero begins.')} />
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Threat trigger effect <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={threatEffect} onChange={(event) => setThreatEffect(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="What happens when the counter reaches 6?" />
+                <label className="block text-sm font-bold text-stone-700">{t('Threat trigger effect')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={threatEffect} onChange={(event) => setThreatEffect(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('What happens when the counter reaches 6?')} />
                 </label>
                 <label className="flex items-center gap-2 text-sm font-semibold text-stone-700">
-                  <input type="checkbox" checked={threatRecurring} onChange={(event) => setThreatRecurring(event.target.checked)} className="h-4 w-4 rounded border-stone-300 text-indigo-600" /> Recurring threat (reset to 1 after its event is resolved)
+                  <input type="checkbox" checked={threatRecurring} onChange={(event) => setThreatRecurring(event.target.checked)} className="h-4 w-4 rounded border-stone-300 text-indigo-600" /> {t('Recurring threat (reset to 1 after its event is resolved)')}
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionTitle.trim() || !missionObjective.trim() || !openingTitle.trim() || !openingDescription.trim() || !threatDescription.trim() || unknownWaypointCount < 0 || unknownWaypointCount + foreseenWaypointsText.split('\n').filter((line) => line.trim()).length + 2 > 12} icon={Flag}>Start Mission</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionTitle.trim() || !missionObjective.trim() || !openingTitle.trim() || !openingDescription.trim() || !threatDescription.trim() || unknownWaypointCount < 0 || unknownWaypointCount + foreseenWaypointsText.split('\n').filter((line) => line.trim()).length + 2 > 12} icon={Flag}>{t('Start Mission')}</Button>
               </>
             )}
 
             {activeAction === 'reveal-waypoint' && nextWaypoint && (
               <>
-                <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">Leaving <strong>{state.currentWaypoint?.title || 'the current waypoint'}</strong> for waypoint {nextWaypoint.position + 1}.</div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">{t('Leaving {place} for waypoint {number}.', { place: state.currentWaypoint?.title || t('the current waypoint'), number: nextWaypoint.position + 1 })}</div>
                 {nextWaypoint.kind === 'unknown' ? (
                   <>
-                    <p className="text-sm text-stone-600">This waypoint was deliberately hidden. Describe it only now that the hero reaches it.</p>
-                    <label className="block text-sm font-bold text-stone-700">Waypoint title
-                      <input value={revealTitle} onChange={(event) => setRevealTitle(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The Flooded Gallery" />
+                    <p className="text-sm text-stone-600">{t('This waypoint was deliberately hidden. Describe it only now that the hero reaches it.')}</p>
+                    <label className="block text-sm font-bold text-stone-700">{t('Waypoint title')}
+                      <input value={revealTitle} onChange={(event) => setRevealTitle(event.target.value)} required maxLength={200} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The Flooded Gallery')} />
                     </label>
-                    <label className="block text-sm font-bold text-stone-700">What is revealed?
-                      <textarea value={revealDescription} onChange={(event) => setRevealDescription(event.target.value)} required maxLength={2000} rows={4} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Describe only the facts now visible to the hero." />
+                    <label className="block text-sm font-bold text-stone-700">{t('What is revealed?')}
+                      <textarea value={revealDescription} onChange={(event) => setRevealDescription(event.target.value)} required maxLength={2000} rows={4} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Describe only the facts now visible to the hero.')} />
                     </label>
                   </>
                 ) : (
                   <div className="rounded-lg bg-violet-50 p-4 text-violet-900"><div className="font-bold">{nextWaypoint.title}</div><p className="mt-1 text-sm">{nextWaypoint.description}</p></div>
                 )}
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={nextWaypoint.kind === 'unknown' && (!revealTitle.trim() || !revealDescription.trim())} icon={ChevronRight}>Resolve and Continue</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={nextWaypoint.kind === 'unknown' && (!revealTitle.trim() || !revealDescription.trim())} icon={ChevronRight}>{t('Resolve and Continue')}</Button>
               </>
             )}
 
             {activeAction === 'search' && state.currentWaypoint && !explorationActionResult && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  A thorough Search always consumes one stretch{state.activeThreat ? <> and advances <strong>{state.activeThreat.description}</strong> by 1</> : '. No threat advances until a replacement is set'}.
+                  {state.activeThreat
+                    ? t('A thorough Search always consumes one stretch and advances {threat} by 1.', { threat: state.activeThreat.description })
+                    : t('A thorough Search always consumes one stretch. No threat advances until a replacement is set.')}
                 </div>
-                <p className="text-sm text-stone-600">The server rolls Spot Hidden and records every die. A Dragon produces two possible finds; choose the one that best fits the fiction.</p>
+                <p className="text-sm text-stone-600">{t('The server rolls Spot Hidden and records every die. A Dragon produces two possible finds; choose the one that best fits the fiction.')}</p>
                 <label htmlFor="solo-known-search-location" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                   <input id="solo-known-search-location" type="checkbox" checked={knownSearchLocation} onChange={(event) => { setKnownSearchLocation(event.target.checked); if (!event.target.checked) setKnownSearchNature(false); }} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                  <span className="font-bold">Specific known hiding place<span className="mt-0.5 block text-xs font-normal text-stone-500">Skip Spot Hidden because the hero already knows exactly where to look.</span></span>
+                  <span className="font-bold">{t('Specific known hiding place')}<span className="mt-0.5 block text-xs font-normal text-stone-500">{t('Skip Spot Hidden because the hero already knows exactly where to look.')}</span></span>
                 </label>
                 {knownSearchLocation && (
                   <label htmlFor="solo-known-search-nature" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                     <input id="solo-known-search-nature" type="checkbox" checked={knownSearchNature} onChange={(event) => setKnownSearchNature(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                    <span className="font-bold">Nature of the hidden item is known<span className="mt-0.5 block text-xs font-normal text-stone-500">Skip the Search table as well; the known item is simply found.</span></span>
+                    <span className="font-bold">{t('Nature of the hidden item is known')}<span className="mt-0.5 block text-xs font-normal text-stone-500">{t('Skip the Search table as well; the known item is simply found.')}</span></span>
                   </label>
                 )}
-                <label className="block text-sm font-bold text-stone-700">What is being searched? <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={searchContext} onChange={(event) => setSearchContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The carved desk and the loose stones behind it" />
+                <label className="block text-sm font-bold text-stone-700">{t('What is being searched?')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={searchContext} onChange={(event) => setSearchContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The carved desk and the loose stones behind it')} />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server uses the Solo v1.2 Search table. Traps, secret paths, location details, and treasure are returned as explicit follow-ups; no effect is applied silently.</div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Search}>Search · spend 1 stretch</Button>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">{t('The server uses the Solo v1.2 Search table. Traps, secret paths, location details, and treasure are returned as explicit follow-ups; no effect is applied silently.')}</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Search}>{t('Search · spend 1 stretch')}</Button>
               </>
             )}
 
@@ -2384,21 +2410,21 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <>
                 <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
                   {state.currentWaypoint.exploration.scavengeCount === 0
-                    ? 'This is the first quick pass at this waypoint. It takes only a few minutes and does not advance the threat unless you choose a full stretch.'
+                    ? t('This is the first quick pass at this waypoint. It takes only a few minutes and does not advance the threat unless you choose a full stretch.')
                     : `This waypoint has already been scavenged ${state.currentWaypoint.exploration.scavengeCount} time(s). Another attempt automatically consumes one stretch and advances the threat by 1.`}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">What is being scavenged? <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={scavengeContext} onChange={(event) => setScavengeContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Search the abandoned camp for anything useful" />
+                <label className="block text-sm font-bold text-stone-700">{t('What is being scavenged?')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={scavengeContext} onChange={(event) => setScavengeContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Search the abandoned camp for anything useful')} />
                 </label>
                 {state.currentWaypoint.exploration.scavengeCount === 0 && (
                   <label htmlFor="solo-scavenge-stretch" className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                     <input id="solo-scavenge-stretch" type="checkbox" checked={scavengeStretch} onChange={(event) => setScavengeStretch(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                    <span className="font-bold">Take a full stretch<span className="mt-0.5 block text-xs font-normal text-stone-500">Advances the active threat by 1. Choose this when the fiction makes the scavenging prolonged.</span></span>
+                    <span className="font-bold">{t('Take a full stretch')}<span className="mt-0.5 block text-xs font-normal text-stone-500">{t('Advances the active threat by 1. Choose this when the fiction makes the scavenging prolonged.')}</span></span>
                   </label>
                 )}
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">The server records the Solo v1.2 D10 result and any required D4/D6 subroll. No item is silently added to inventory.</div>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-500">{t('The server records the Solo v1.2 D10 result and any required D4/D6 subroll. No item is silently added to inventory.')}</div>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={PackageSearch}>
-                  Scavenge{state.currentWaypoint.exploration.scavengeCount > 0 || scavengeStretch ? ' · spend 1 stretch' : ' · quick pass'}
+                  {t(state.currentWaypoint.exploration.scavengeCount > 0 || scavengeStretch ? 'Scavenge · spend 1 stretch' : 'Scavenge · quick pass')}
                 </Button>
               </>
             )}
@@ -2406,17 +2432,17 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeAction === 'rest' && hero && (
               <>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Rest type</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Rest type')}</legend>
                   <div className="mt-2 grid gap-2">
                     {([
-                      { type: 'round' as const, title: 'Round rest · 10 seconds', detail: 'Recover D6 WP. Once per shift.', available: state.restState.available.round },
-                      { type: 'stretch' as const, title: 'Stretch rest · 15 minutes', detail: 'Recover D6 HP and D6 WP, and clear one chosen standard condition. Once per shift.', available: state.restState.available.stretch },
-                      { type: 'shift' as const, title: 'Shift rest · 6 hours', detail: 'Requires safety. Fully restore HP/WP, clear standard conditions, and advance temporary injury recovery by one shift.', available: true },
+                      { type: 'round' as const, title: t('Round rest · 10 seconds'), detail: t('Recover D6 WP. Once per shift.'), available: state.restState.available.round },
+                      { type: 'stretch' as const, title: t('Stretch rest · 15 minutes'), detail: t('Recover D6 HP and D6 WP, and clear one chosen standard condition. Once per shift.'), available: state.restState.available.stretch },
+                      { type: 'shift' as const, title: t('Shift rest · 6 hours'), detail: t('Requires safety. Fully restore HP/WP, clear standard conditions, and advance temporary injury recovery by one shift.'), available: true },
                     ]).map((option) => (
                       <label key={option.type} htmlFor={`solo-rest-${option.type}`} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${restType === option.type ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'} ${option.available ? '' : 'cursor-not-allowed opacity-50'}`}>
                         <input id={`solo-rest-${option.type}`} type="radio" name="solo-rest-type" value={option.type} checked={restType === option.type} disabled={!option.available} onChange={() => { setRestType(option.type); setRestUseHealing(false); setRestCondition(''); setRestSafeLocation(false); }} className="mt-1 h-4 w-4 border-stone-300 text-indigo-600" />
-                        <span className="sr-only">Rest type option</span>
-                        <span className="text-sm"><strong className="block text-stone-800">{option.title}</strong><span className="text-stone-500">{option.detail}{option.available ? '' : ' Already used this shift.'}</span></span>
+                        <span className="sr-only">{t('Rest type option')}</span>
+                        <span className="text-sm"><strong className="block text-stone-800">{option.title}</strong><span className="text-stone-500">{option.detail}{option.available ? '' : ` ${t('Already used this shift.')}`}</span></span>
                       </label>
                     ))}
                   </div>
@@ -2426,13 +2452,13 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   <>
                     <label className="flex items-start gap-2 rounded-lg border border-stone-200 p-3 text-sm text-stone-700">
                       <input type="checkbox" checked={restUseHealing} onChange={(event) => setRestUseHealing(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-stone-300 text-indigo-600" />
-                      <span className="font-bold">Make a solo Healing test<span className="mt-0.5 block text-xs font-normal text-stone-500">On success, recover 2D6 HP instead of D6. A failed test keeps the normal D6 recovery.</span></span>
+                      <span className="font-bold">{t('Make a solo Healing test')}<span className="mt-0.5 block text-xs font-normal text-stone-500">{t('On success, recover 2D6 HP instead of D6. A failed test keeps the normal D6 recovery.')}</span></span>
                     </label>
                     {standardConditions.length > 0 && (
-                      <label className="block text-sm font-bold text-stone-700">Condition to clear
+                      <label className="block text-sm font-bold text-stone-700">{t('Condition to clear')}
                         <select value={restCondition} onChange={(event) => setRestCondition(event.target.value)} required className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                          <option value="">Choose an active condition…</option>
-                          {standardConditions.map((condition) => <option key={condition.key} value={condition.key}>{titleCase(condition.name)}</option>)}
+                          <option value="">{t('Choose an active condition…')}</option>
+                          {standardConditions.map((condition) => <option key={condition.key} value={condition.key}>{tc(condition.name)}</option>)}
                         </select>
                       </label>
                     )}
@@ -2442,18 +2468,18 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 {restType === 'shift' && (
                   <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
                     <input type="checkbox" checked={restSafeLocation} onChange={(event) => setRestSafeLocation(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-indigo-600" />
-                    <span className="font-bold">I confirm this is a safe location<span className="mt-0.5 block text-xs font-normal">The app will not infer safety from the scene.</span></span>
+                    <span className="font-bold">{t('I confirm this is a safe location')}<span className="mt-0.5 block text-xs font-normal">{t('The app will not infer safety from the scene.')}</span></span>
                   </label>
                 )}
 
                 {restType !== 'round' && state.activeMission && state.activeThreat?.status === 'active' && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                    This rest advances <strong>{state.activeThreat.description}</strong> from {state.activeThreat.counter}/6 by 1.
+                    {t('This rest advances {threat} from {counter}/6 by 1.', { threat: state.activeThreat.description, counter: state.activeThreat.counter })}
                   </div>
                 )}
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">Only standard conditions are cleared. Poison, fear effects, and custom statuses remain active and must be resolved separately.</div>
-                <label className="block text-sm font-bold text-stone-700">Narrative context <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={restContext} onChange={(event) => setRestContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Where and how does the hero rest?" />
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">{t('Only standard conditions are cleared. Poison, fear effects, and custom statuses remain active and must be resolved separately.')}</div>
+                <label className="block text-sm font-bold text-stone-700">{t('Narrative context')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={restContext} onChange={(event) => setRestContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Where and how does the hero rest?')} />
                 </label>
                 <Button
                   type="submit"
@@ -2464,7 +2490,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                     || (restType === 'shift' && !restSafeLocation)}
                   icon={Bed}
                 >
-                  Take {titleCase(restType)} Rest
+                  {t('Take {value} Rest', { value: tc(restType) })}
                 </Button>
               </>
             )}
@@ -2472,52 +2498,52 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeAction === 'dying' && hero && (
               <>
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-950">
-                  <div className="font-bold">{hero.name} is at 0 HP</div>
-                  <div className="mt-1">Death rolls: {hero.deathRolls.passed}/3 successes · {hero.deathRolls.failed}/3 failures{hero.isRallied ? ' · currently rallied' : ''}</div>
+                  <div className="font-bold">{t('{name} is at 0 HP', { name: hero.name })}</div>
+                  <div className="mt-1">{t('Death rolls: {passed}/3 successes · {failed}/3 failures', { passed: hero.deathRolls.passed, failed: hero.deathRolls.failed })}{hero.isRallied ? ` · ${t('currently rallied')}` : ''}</div>
                 </div>
                 <fieldset>
-                  <legend className="text-sm font-bold text-stone-700">Choose the action</legend>
+                  <legend className="text-sm font-bold text-stone-700">{t('Choose the action')}</legend>
                   <div className="mt-2 grid gap-2">
                     {([
-                      { action: 'death_roll' as const, title: `Death roll · CON ${hero.attributes?.CON ?? '—'}`, detail: 'Success adds one success; Dragon adds two. Failure adds one failure; Demon adds two.', disabled: hero.deathRolls.passed >= 3 },
-                      { action: 'self_rally' as const, title: `Self-rally · Persuasion ${hero.skills?.Persuasion ?? '—'}`, detail: 'Solo exception: roll without a bane. Success lets the hero act at 0 HP.', disabled: hero.isRallied || hero.deathRolls.passed >= 3 },
-                      { action: 'life_saving_healing' as const, title: `Save your life · Healing ${hero.skills?.Healing ?? '—'}`, detail: 'On success, recover D6 HP and roll a severe injury.', disabled: hero.deathRolls.passed >= 3 },
-                      { action: 'recover_stabilized' as const, title: 'Recover after three successes', detail: 'Recover D6 HP and roll a severe injury. Available only for persisted legacy stabilized state.', disabled: hero.deathRolls.passed < 3 },
+                      { action: 'death_roll' as const, title: t('Death roll · CON {value}', { value: hero.attributes?.CON ?? '—' }), detail: t('Success adds one success; Dragon adds two. Failure adds one failure; Demon adds two.'), disabled: hero.deathRolls.passed >= 3 },
+                      { action: 'self_rally' as const, title: t('Self-rally · Persuasion {value}', { value: hero.skills?.Persuasion ?? '—' }), detail: t('Solo exception: roll without a bane. Success lets the hero act at 0 HP.'), disabled: hero.isRallied || hero.deathRolls.passed >= 3 },
+                      { action: 'life_saving_healing' as const, title: t('Save your life · Healing {value}', { value: hero.skills?.Healing ?? '—' }), detail: t('On success, recover D6 HP and roll a severe injury.'), disabled: hero.deathRolls.passed >= 3 },
+                      { action: 'recover_stabilized' as const, title: t('Recover after three successes'), detail: t('Recover D6 HP and roll a severe injury. Available only for persisted legacy stabilized state.'), disabled: hero.deathRolls.passed < 3 },
                     ]).map((option) => (
                       <label key={option.action} htmlFor={`solo-dying-${option.action}`} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${dyingAction === option.action ? 'border-red-400 bg-red-50' : 'border-stone-200'} ${option.disabled ? 'cursor-not-allowed opacity-50' : ''}`}>
                         <input id={`solo-dying-${option.action}`} type="radio" name="solo-dying-action" checked={dyingAction === option.action} disabled={option.disabled} onChange={() => setDyingAction(option.action)} className="mt-1 h-4 w-4 border-stone-300 text-red-600" />
-                        <span className="sr-only">Dying action option</span>
+                        <span className="sr-only">{t('Dying action option')}</span>
                         <span className="text-sm"><strong className="block text-stone-800">{option.title}</strong><span className="text-stone-500">{option.detail}</span></span>
                       </label>
                     ))}
                   </div>
                 </fieldset>
-                <label className="block text-sm font-bold text-stone-700">What happens in the fiction? <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={dyingContext} onChange={(event) => setDyingContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The hero grips the altar and refuses to fall…" />
+                <label className="block text-sm font-bold text-stone-700">{t('What happens in the fiction?')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={dyingContext} onChange={(event) => setDyingContext(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The hero grips the altar and refuses to fall…')} />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">The server decides the mechanical result. Recovery automatically creates a persisted severe injury and its healing time.</div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={ShieldQuestion}>Resolve {titleCase(dyingAction)}</Button>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">{t('The server decides the mechanical result. Recovery automatically creates a persisted severe injury and its healing time.')}</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={ShieldQuestion}>{t('Resolve {value}', { value: tc(dyingAction) })}</Button>
               </>
             )}
 
             {activeAction === 'damage' && hero && (
               <>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  Apply this only after confirming that the fiction causes damage. Active combat damage belongs in the encounter action flow.
+                  {t('Apply this only after confirming that the fiction causes damage. Active combat damage belongs in the encounter action flow.')}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">Severity
+                <label className="block text-sm font-bold text-stone-700">{t('Severity')}
                   <select value={damageSeverity} onChange={(event) => setDamageSeverity(event.target.value as typeof damageSeverity)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="unknown">Unknown · roll D6 severity</option>
-                    <option value="slight">Slight · D6 damage</option>
-                    <option value="moderate">Moderate · 2D6 damage</option>
-                    <option value="severe">Severe · 2D10 damage</option>
+                    <option value="unknown">{t('Unknown · roll D6 severity')}</option>
+                    <option value="slight">{t('Slight · D6 damage')}</option>
+                    <option value="moderate">{t('Moderate · 2D6 damage')}</option>
+                    <option value="severe">{t('Severe · 2D10 damage')}</option>
                   </select>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Cause and context <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={damageContext} onChange={(event) => setDamageContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The collapsing ceiling catches the hero beneath falling stone." />
+                <label className="block text-sm font-bold text-stone-700">{t('Cause and context')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={damageContext} onChange={(event) => setDamageContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The collapsing ceiling catches the hero beneath falling stone.')} />
                 </label>
-                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">The server records the severity die (when unknown), every damage die, HP before/after, and any transition to dying or death.</div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse}>Roll and Apply Damage</Button>
+                <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600">{t('The server records the severity die (when unknown), every damage die, HP before/after, and any transition to dying or death.')}</div>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse}>{t('Roll and Apply Damage')}</Button>
               </>
             )}
 
@@ -2528,36 +2554,36 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   <div className="mt-1">{selectedInjury.effect}</div>
                   <div className="mt-2 text-xs font-semibold">
                     {selectedInjury.permanent
-                      ? 'Permanent injury'
-                      : injuryRecoveryLabel(selectedInjury.remainingHealingShifts)}
+                      ? t('Permanent injury')
+                      : injuryRecoveryLabel(selectedInjury.remainingHealingShifts, t)}
                   </div>
                 </div>
                 {injuryAction === 'medical_care' ? (
                   <div className="rounded-lg bg-stone-50 p-3 text-sm text-stone-700">
-                    Roll Healing {hero.skills?.Healing ?? '—'}. Success halves the remaining recovery time. A failed attempt can be tried again after completing the next shift rest.
+                    {t('Roll Healing {Healing}. Success halves the remaining recovery time. A failed attempt can be tried again after completing the next shift rest.', { Healing: hero.skills?.Healing ?? '—' })}
                   </div>
                 ) : (
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
-                    This is a manual GM override. It immediately removes the injury from the active list, including permanent injuries, and records the correction in campaign history.
+                    {t('This is a manual GM override. It immediately removes the injury from the active list, including permanent injuries, and records the correction in campaign history.')}
                   </div>
                 )}
                 <label className="block text-sm font-bold text-stone-700">
-                  {injuryAction === 'medical_care' ? 'How is the injury treated?' : 'Why is this injury resolved?'} <span className="font-normal text-stone-400">(optional)</span>
-                  <textarea value={injuryContext} onChange={(event) => setInjuryContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={injuryAction === 'medical_care' ? 'The hero cleans the wound and binds it carefully…' : 'The injury was already healed during downtime…'} />
+                  {t(injuryAction === 'medical_care' ? 'How is the injury treated?' : 'Why is this injury resolved?')} <span className="font-normal text-stone-400">{t('(optional)')}</span>
+                  <textarea value={injuryContext} onChange={(event) => setInjuryContext(event.target.value)} maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t(injuryAction === 'medical_care' ? 'The hero cleans the wound and binds it carefully…' : 'The injury was already healed during downtime…')} />
                 </label>
                 <Button type="submit" fullWidth loading={actionMutation.isPending} icon={HeartPulse} variant={injuryAction === 'mark_healed' ? 'danger' : 'primary'}>
-                  {injuryAction === 'medical_care' ? 'Roll Healing and Apply Care' : 'Confirm and Mark Healed'}
+                  {t(injuryAction === 'medical_care' ? 'Roll Healing and Apply Care' : 'Confirm and Mark Healed')}
                 </Button>
               </>
             )}
 
             {activeAction === 'advance-threat' && state.activeThreat && (
               <>
-                <div className="rounded-lg bg-amber-50 p-4 text-amber-950"><div className="font-bold">{state.activeThreat.description}</div><p className="mt-1 text-sm">Current {state.activeThreat.counter}/6 · advancing by {threatAmount}</p></div>
-                <label className="block text-sm font-bold text-stone-700">Why does the threat advance?
-                  <textarea value={threatReason} onChange={(event) => setThreatReason(event.target.value)} required maxLength={500} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="The hero spent a stretch searching the chamber." />
+                <div className="rounded-lg bg-amber-50 p-4 text-amber-950"><div className="font-bold">{state.activeThreat.description}</div><p className="mt-1 text-sm">{t('Current {counter}/6 · advancing by {threatAmount}', { counter: state.activeThreat.counter, threatAmount })}</p></div>
+                <label className="block text-sm font-bold text-stone-700">{t('Why does the threat advance?')}
+                  <textarea value={threatReason} onChange={(event) => setThreatReason(event.target.value)} required maxLength={500} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('The hero spent a stretch searching the chamber.')} />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!threatReason.trim()} icon={AlertTriangle}>Advance Threat +{threatAmount}</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!threatReason.trim()} icon={AlertTriangle}>{t('Advance Threat +{threatAmount}', { threatAmount })}</Button>
               </>
             )}
 
@@ -2567,82 +2593,83 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   <div className="font-bold">{state.activeThreat.description}</div>
                   {state.activeThreat.triggerEffect && <p className="mt-1 text-sm">{journalValue(state.activeThreat.triggerEffect)}</p>}
                 </div>
-                <label className="block text-sm font-bold text-stone-700">How was the threat event resolved?
+                <label className="block text-sm font-bold text-stone-700">{t('How was the threat event resolved?')}
                   <textarea value={threatResolution} onChange={(event) => setThreatResolution(event.target.value)} required maxLength={2000} rows={4} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!threatResolution.trim()} icon={CheckCircle2}>{state.activeThreat.recurring ? 'Resolve and reset to 1' : 'Resolve and remove threat'}</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!threatResolution.trim()} icon={CheckCircle2}>{t(state.activeThreat.recurring ? 'Resolve and reset to 1' : 'Resolve and remove threat')}</Button>
               </>
             )}
 
             {activeAction === 'set-threat' && state.activeMission && (
               <>
-                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">A delve should retain an active threat. The replacement begins at 1.</p>
-                <label className="block text-sm font-bold text-stone-700">Threat
+                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{t('A delve should retain an active threat. The replacement begins at 1.')}</p>
+                <label className="block text-sm font-bold text-stone-700">{t('Threat')}
                   <textarea value={replacementThreatDescription} onChange={(event) => setReplacementThreatDescription(event.target.value)} required maxLength={2000} rows={3} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Effect at 6 <span className="font-normal text-stone-400">(optional)</span>
+                <label className="block text-sm font-bold text-stone-700">{t('Effect at 6')}<span className="font-normal text-stone-400">{t('(optional)')}</span>
                   <textarea value={replacementThreatEffect} onChange={(event) => setReplacementThreatEffect(event.target.value)} maxLength={2000} rows={2} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                 </label>
-                <label className="flex items-center gap-2 text-sm font-semibold text-stone-700"><input type="checkbox" checked={replacementThreatRecurring} onChange={(event) => setReplacementThreatRecurring(event.target.checked)} /> Recurring inherent threat</label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!replacementThreatDescription.trim()} icon={AlertTriangle}>Set threat at 1</Button>
+                <label className="flex items-center gap-2 text-sm font-semibold text-stone-700"><input type="checkbox" checked={replacementThreatRecurring} onChange={(event) => setReplacementThreatRecurring(event.target.checked)} /> {t('Recurring inherent threat')}</label>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!replacementThreatDescription.trim()} icon={AlertTriangle}>{t('Set threat at 1')}</Button>
               </>
             )}
 
             {activeAction === 'add-waypoints' && state.activeMission && (
               <>
-                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">Use this when fleeing, following a secret path, or changing route. Locations are generated now with recorded Solo table rolls but remain hidden until reached.</p>
+                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">{t('Use this when fleeing, following a secret path, or changing route. Locations are generated now with recorded Solo table rolls but remain hidden until reached.')}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block text-sm font-bold text-stone-700">Kind
-                    <select value={addedWaypointKind} onChange={(event) => setAddedWaypointKind(event.target.value as typeof addedWaypointKind)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="diversion">Diversion</option><option value="unknown">Unknown route</option></select>
+                  <label className="block text-sm font-bold text-stone-700">{t('Kind')}
+                    <select value={addedWaypointKind} onChange={(event) => setAddedWaypointKind(event.target.value as typeof addedWaypointKind)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="diversion">{t('Diversion')}</option><option value="unknown">{t('Unknown route')}</option></select>
                   </label>
-                  <label className="block text-sm font-bold text-stone-700">Count
+                  <label className="block text-sm font-bold text-stone-700">{t('Count')}
                     <input type="number" min={1} max={6} value={addedWaypointCount} onChange={(event) => setAddedWaypointCount(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" />
                   </label>
                 </div>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={addedWaypointCount < 1 || addedWaypointCount > 6} icon={Route}>Generate hidden waypoints</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={addedWaypointCount < 1 || addedWaypointCount > 6} icon={Route}>{t('Generate hidden waypoints')}</Button>
               </>
             )}
 
             {activeAction === 'return' && state.activeMission && (
               <>
-                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">Choose the route that matches the fiction after the objective is reached.</p>
-                <label className="block text-sm font-bold text-stone-700">Return route
+                <p className="rounded-lg bg-violet-50 p-3 text-sm text-violet-900">{t('Choose the route that matches the fiction after the objective is reached.')}</p>
+                <label className="block text-sm font-bold text-stone-700">{t('Return route')}
                   <select value={returnRouteType} onChange={(event) => setReturnRouteType(event.target.value as typeof returnRouteType)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="cleared">Cleared route · no incident</option>
-                    <option value="dangerous">Dangerous route · Awareness or Sneaking</option>
-                    <option value="alternative">Direct return impossible · D4+2 waypoints</option>
+                    <option value="cleared">{t('Cleared route · no incident')}</option>
+                    <option value="dangerous">{t('Dangerous route · Awareness or Sneaking')}</option>
+                    <option value="alternative">{t('Direct return impossible · D4+2 waypoints')}</option>
                   </select>
                 </label>
                 {returnRouteType === 'dangerous' && (
-                  <label className="block text-sm font-bold text-stone-700">Skill
-                    <select value={returnCheckSkill} onChange={(event) => setReturnCheckSkill(event.target.value as typeof returnCheckSkill)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="Awareness">Awareness</option><option value="Sneaking">Sneaking</option></select>
+                  <label className="block text-sm font-bold text-stone-700">{t('Skill')}
+                    <select value={returnCheckSkill} onChange={(event) => setReturnCheckSkill(event.target.value as typeof returnCheckSkill)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal"><option value="Awareness">{t('Awareness')}</option><option value="Sneaking">{t('Sneaking')}</option></select>
                   </label>
                 )}
-                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Route}>Begin return journey</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} icon={Route}>{t('Begin return journey')}</Button>
               </>
             )}
 
             {activeAction === 'complete-mission' && state.activeMission && (
               <>
                 {!canCompleteSuccessfully && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Success becomes available at the final objective waypoint. You may record failure or abandonment now.</div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{t('Success becomes available at the final objective waypoint. You may record failure or abandonment now.')}</div>
                 )}
-                <label className="block text-sm font-bold text-stone-700">Outcome
+                <label className="block text-sm font-bold text-stone-700">{t('Outcome')}
                   <select value={missionOutcome} onChange={(event) => setMissionOutcome(event.target.value as typeof missionOutcome)} className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-normal">
-                    <option value="success" disabled={!canCompleteSuccessfully}>Success</option>
-                    <option value="failure">Failure</option>
-                    <option value="abandoned">Abandoned</option>
+                    <option value="success" disabled={!canCompleteSuccessfully}>{t('Success')}</option>
+                    <option value="failure">{t('Failure')}</option>
+                    <option value="abandoned">{t('Abandoned')}</option>
                   </select>
                 </label>
-                <label className="block text-sm font-bold text-stone-700">Mission summary
-                  <textarea value={missionSummary} onChange={(event) => setMissionSummary(event.target.value)} required maxLength={10000} rows={5} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder="Record what happened and what remains unresolved." />
+                <label className="block text-sm font-bold text-stone-700">{t('Mission summary')}
+                  <textarea value={missionSummary} onChange={(event) => setMissionSummary(event.target.value)} required maxLength={10000} rows={5} className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 font-normal" placeholder={t('Record what happened and what remains unresolved.')} />
                 </label>
-                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionSummary.trim() || (missionOutcome === 'success' && !canCompleteSuccessfully)} icon={Flag}>Conclude Mission</Button>
+                <Button type="submit" fullWidth loading={actionMutation.isPending} disabled={!missionSummary.trim() || (missionOutcome === 'success' && !canCompleteSuccessfully)} icon={Flag}>{t('Conclude Mission')}</Button>
               </>
             )}
           </form>
         </ActionModal>
       )}
     </div>
+    </ScreenLanguageProvider>
   );
 }
