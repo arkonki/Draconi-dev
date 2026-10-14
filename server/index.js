@@ -35,6 +35,8 @@ import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
 import { listAllConnections, revokeConnections } from './adminConnections.js';
+import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
+import { generateStory, narrateSolo } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -149,6 +151,22 @@ const server = http.createServer(async (request, response) => {
     const connectionAppMatch = matchPath(pathname, /^\/api\/account\/connections\/apps\/([^/]+)$/);
     if (connectionAppMatch && request.method === 'DELETE') {
       sendJson(response, 200, await revokeApp(await currentUser(request), connectionAppMatch[0]));
+      return;
+    }
+
+    // The person's own AI key and model for the built-in AI. A web session is required.
+    if (pathname === '/api/account/ai') {
+      const actor = await currentUser(request);
+      if (request.method === 'GET') { sendJson(response, 200, await getAiSettings(actor)); return; }
+      if (request.method === 'PUT') { sendJson(response, 200, await saveAiSettings(actor, await readJson(request))); return; }
+      if (request.method === 'DELETE') { sendJson(response, 200, await removeAiKey(actor)); return; }
+    }
+    if (pathname === '/api/ai/story' && request.method === 'POST') {
+      sendJson(response, 200, await generateStory(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/solo-narrator' && request.method === 'POST') {
+      sendJson(response, 200, await narrateSolo(await currentUser(request), await readJson(request)));
       return;
     }
 

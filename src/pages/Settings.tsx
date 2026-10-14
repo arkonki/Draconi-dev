@@ -23,6 +23,7 @@ import { AdminSettings } from '../components/settings/AdminSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
 import { ConnectionSettings } from '../components/settings/ConnectionSettings';
+import { BuiltInAiSettings } from '../components/settings/BuiltInAiSettings';
 import { useAdminOverview } from '../hooks/useAdminOverview';
 
 type SettingsSection = 
@@ -105,7 +106,11 @@ export function Settings() {
   };
   
   // State
-  const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
+  // A link such as /settings?section=connections opens that section straight away.
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
+    const requested = new URLSearchParams(window.location.search).get('section');
+    return menuItems.find((item) => item.id === requested && (!item.adminOnly || isAdmin()))?.id ?? 'profile';
+  });
   
   // Mobile Navigation State
   const [showMobileMenu, setShowMobileMenu] = useState(true);
@@ -144,7 +149,7 @@ export function Settings() {
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
       case 'recovery': return <RecoverySettings />;
-      case 'connections': return <ConnectionSettings />;
+      case 'connections': return <><BuiltInAiSettings /><ConnectionSettings /></>;
       case 'admin': return <AdminSettings onOpenBackups={() => handleSectionChange('recovery')} />;
       default: return <ProfileSettings />;
     }

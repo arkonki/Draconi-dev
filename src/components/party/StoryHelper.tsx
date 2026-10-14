@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saveStoryIdea, getStoryIdeasForParty, deleteStoryIdea, updateStoryIdea } from '../../lib/api/storyIdeas';
 import type { StoryIdea } from '../../lib/api/storyIdeas';
 import { supabase } from '../../lib/supabase';
+import { Link } from 'react-router-dom';
+import { fetchAiSettings, generateStory } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
 import {
@@ -153,7 +155,6 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
   // Navigation & UI State
   const [activeTab, setActiveTab] = useState<'generate' | 'saved'>('generate');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showConfig, setShowConfig] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
 
   // Generator State
@@ -173,8 +174,9 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
   const [isCopied, setIsCopied] = useState(false);
 
   // API State
-  const [apiKey, setApiKey] = useState(localStorage.getItem('openrouter_api_key') || '');
-  const [tempApiKey, setTempApiKey] = useState(apiKey);
+  // The key lives on the server (Settings > AI Assistants); the page only needs to know whether one is saved.
+  const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000 });
+  const apiKey = Boolean(aiSettings.data?.hasKey);
   const [loading, setLoading] = useState(false);
 
   // Library State
@@ -360,44 +362,17 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
         ${contextNpc ? `Involved NPCs: ${contextNpc}` : ''}
       `;
 
-      // 1. Connection Fix (Headers & Model)
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': window.location.href, // Required by OpenRouter
-          'X-Title': 'Dragonbane Manager'
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-001', // Using 2.0 Flash (Stable & Fast)
-          messages: [{ role: 'user', content: fullPrompt }],
-          temperature: 0.7
-        })
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error?.message || `API Error: ${res.status}`);
-      }
-
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content || 'No response.';
-      setResponse(content);
+      const answer = await generateStory(fullPrompt, partyId);
+      setResponse(answer.text || 'No response.');
     } catch (err: unknown) {
       console.error(err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setResponse(`Error: ${errorMessage}. Please check your API key.`);
+      setResponse(`Error: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveKey = () => {
-    localStorage.setItem('openrouter_api_key', tempApiKey);
-    setApiKey(tempApiKey);
-    setShowConfig(false);
-  };
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(editorContent);
@@ -420,38 +395,14 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
             <BookOpen size={16} /> Library
           </button>
         </div>
-        <Button variant={apiKey ? 'ghost' : 'outline'} size="sm" onClick={() => setShowConfig(!showConfig)} className={!apiKey ? "border-orange-300 text-orange-600 bg-orange-50" : ""}>
-          <Settings size={16} className={!apiKey ? "animate-pulse" : ""} />
-          {!apiKey && <span className="ml-2">Set API Key</span>}
-        </Button>
-      </div>
-
-      {/* --- CONFIG SLIDE-DOWN (FIXED HEIGHT & LAYOUT) --- */}
-      <div className={`bg-gray-50 border-b border-gray-200 overflow-hidden transition-all duration-300 ease-in-out ${showConfig && !isMaximized ? 'max-h-96 py-4 px-4' : 'max-h-0'}`}>
-        {/* Fix: Changed to flex-col on mobile to prevent squashing */}
-        <div className="max-w-2xl mx-auto flex flex-col sm:flex-row sm:items-end gap-3">
-          <div className="flex-1 w-full">
-            <label htmlFor="story-helper-api-key" className="block text-xs font-bold text-gray-500 uppercase mb-1">OpenRouter API Key</label>
-            <div className="relative">
-              <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                id="story-helper-api-key"
-                type="password"
-                value={tempApiKey}
-                onChange={e => setTempApiKey(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                placeholder="sk-or-..."
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            <Button className="flex-1 sm:flex-none" variant="primary" onClick={handleSaveKey}>Save Key</Button>
-            <Button className="flex-1 sm:flex-none" variant="ghost" onClick={() => setShowConfig(false)}>Cancel</Button>
-          </div>
-        </div>
-        <p className="text-center text-xs text-gray-400 mt-2">
-          Keys are stored locally in your browser. Get one at <a href="https://openrouter.ai/" target="_blank" rel="noreferrer" className="underline hover:text-indigo-600">openrouter.ai</a>
-        </p>
+        <Link
+          to="/settings?section=connections"
+          title="Your OpenRouter key and model are set in Settings > AI Assistants"
+          className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${apiKey ? 'text-gray-500 hover:bg-gray-100' : 'border border-orange-300 bg-orange-50 text-orange-600'}`}
+        >
+          <Settings size={16} className={!apiKey ? 'animate-pulse' : ''} />
+          {!apiKey && <span>Set up AI</span>}
+        </Link>
       </div>
 
       <div className="flex-grow overflow-hidden flex flex-col md:flex-row bg-gray-50">
@@ -464,7 +415,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
               <div className="flex-grow flex flex-col items-center justify-center p-6 text-center text-gray-500">
                 <KeyRound size={40} className="mb-4 text-orange-300" />
                 <p className="text-sm font-medium">API Key Required</p>
-                <p className="text-xs mt-1 max-w-[200px]">Please configure your OpenRouter API key in the settings above to start generating.</p>
+                <p className="text-xs mt-1 max-w-[200px]">Add your OpenRouter key in Settings, under AI Assistants, to start generating.</p>
               </div>
             ) : (
               <>

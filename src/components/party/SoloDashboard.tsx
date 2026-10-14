@@ -18,6 +18,7 @@ import {
   LockKeyhole,
   MapPin,
   PackageSearch,
+  MessageSquareText,
   RefreshCw,
   Route,
   ScrollText,
@@ -78,6 +79,7 @@ import type { Character } from '../../types/character';
 import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
+import { SoloNarrator } from './SoloNarrator';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 
@@ -90,7 +92,7 @@ interface SoloDashboardProps {
 }
 
 type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'treasure' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
-type SoloDashboardTab = 'adventure' | 'state' | 'journal' | 'logs';
+type SoloDashboardTab = 'adventure' | 'narrator' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
@@ -1057,6 +1059,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     .filter(({ roll, cardCount }) => cardCount > 0 && !recordedTreasureSourceIds.has(roll.id));
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
     { id: 'adventure', label: 'Adventure', icon: Route, badge: unresolvedRolls.length || undefined },
+    { id: 'narrator', label: 'Narrator', icon: MessageSquareText },
     { id: 'state', label: 'State', icon: HeartPulse, badge: state.activeInjuries.length || undefined },
     { id: 'journal', label: 'Journal', icon: BookOpen, badge: journal.openThreads.length || undefined },
     { id: 'logs', label: 'Logs', icon: ScrollText },
@@ -1119,6 +1122,10 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             You can follow the solo adventure here. Only the campaign owner or a GM can resolve authoritative Solo actions.
           </div>
+        )}
+
+        {activeDashboardTab === 'narrator' && (
+          <SoloNarrator partyId={partyId} heroId={state.playerCharacter?.id ?? null} currentUserId={currentUserId} canUse={canManage} />
         )}
 
         <div className={activeDashboardTab === 'adventure' || activeDashboardTab === 'state'
@@ -1290,7 +1297,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             </section>
             )}
 
-            {activeDashboardTab !== 'adventure' && (
+            {activeDashboardTab !== 'adventure' && activeDashboardTab !== 'narrator' && (
             <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900">
