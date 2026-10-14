@@ -7,6 +7,7 @@ import console from 'node:console';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import process from 'node:process';
+import { setTimeout } from 'node:timers';
 import pg from 'pg';
 
 const { Client } = pg;
@@ -36,10 +37,23 @@ const mock = http.createServer((request, response) => {
     if (request.url.endsWith('/auth/key')) { response.end(JSON.stringify({ data: { label: 'test' } })); return; }
     const parsed = JSON.parse(body || '{}');
     seenRequests.push(parsed);
-    response.end(JSON.stringify({
-      choices: [{ message: { content: 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks' } }],
-      usage: { prompt_tokens: 321, completion_tokens: 45, cost: 0.0002 },
-    }));
+    const isSummary = String(parsed.messages?.[0]?.content ?? '').includes('You keep the running record');
+    const isNarrator = String(parsed.messages?.[0]?.content ?? '').includes('narrator of a solo game');
+    const text = isSummary
+      ? 'Mara crossed the old bridge and now stands at the shrine gate.'
+      : isNarrator
+        ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"fortune","question":"Is the bridge safe?"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"damage","amount":9}]'
+        : 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks';
+    const usage = { prompt_tokens: 321, completion_tokens: 45, cost: 0.0002 };
+    if (parsed.stream) {
+      response.setHeader('content-type', 'text/event-stream');
+      response.write(': OPENROUTER PROCESSING\n\n');
+      for (const piece of text.match(/[\s\S]{1,12}/g)) response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [], usage })}\n\n`);
+      response.end('data: [DONE]\n\n');
+      return;
+    }
+    response.end(JSON.stringify({ choices: [{ message: { content: text } }], usage }));
   });
 });
 
@@ -108,9 +122,10 @@ try {
   results.story = 'passed';
 
   // --- The Solo narrator ---
-  const hero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `AI Hero ${suffix}`, max_hp: 10, current_hp: 6, max_wp: 8, current_wp: 8 } }), 200, 'hero')).data[0];
+  const hero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `AI Hero ${suffix}`, max_hp: 10, current_hp: 6, max_wp: 8, current_wp: 8, attributes: { STR: 13, CON: 12, AGL: 14, INT: 10, WIL: 11, CHA: 9 } } }), 200, 'hero')).data[0];
   const party = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `AI Solo ${suffix}`, p_character_ids: [hero.id] }), 200, 'campaign')).data;
   const narrate = (token, body) => call('POST', '/ai/solo-narrator', { token, body });
+  const conversation = (token, partyId = party.id) => call('GET', `/ai/solo-narrator?partyId=${partyId}`, { token });
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'I look around' }), 409, 'solo must be switched on first');
   const options = (await ok(call('GET', `/v1/campaigns/${party.id}/solo/options`, { token: tokens.alice }), 200, 'solo options')).data;
   await ok(call('POST', `/v1/campaigns/${party.id}/solo`, {
@@ -118,17 +133,71 @@ try {
     headers: { 'if-match': `"${options.campaignRevision}"`, 'idempotency-key': `ai-${randomUUID()}` },
     body: { player_character_id: hero.id, mode: 'custom', reason: 'AI smoke test' },
   }), 200, 'switch solo on');
-  const turn = await ok(narrate(tokens.alice, { partyId: party.id, message: 'I step onto the bridge', history: [{ role: 'user', content: 'Where am I?' }, { role: 'assistant', content: 'In a forest.' }] }), 200, 'a narrator turn');
+
+  const turn = await ok(narrate(tokens.alice, { partyId: party.id, message: 'I step onto the bridge' }), 200, 'a narrator turn');
   assert.match(turn.text, /bridge/);
+  assert.ok(!turn.text.includes('ACTIONS'), 'the machine line is not part of the story');
   const sent = seenRequests.at(-1).messages;
   assert.equal(sent[0].role, 'system');
   assert.ok(sent[0].content.includes('GAME SUMMARY') && sent[0].content.includes(`HERO: AI Hero ${suffix}. HP 6/10`), 'the system message carries the hero');
-  assert.ok(sent[0].content.includes('never roll dice') || sent[0].content.includes('Never roll dice'), 'and the rules for the narrator');
-  assert.deepEqual(sent.slice(1).map((entry) => entry.role), ['user', 'assistant', 'user'], 'the history comes before the new message');
+  assert.ok(sent[0].content.includes('Never roll dice'), 'and the rules for the narrator');
+  assert.deepEqual(sent.slice(1).map((entry) => entry.role), ['user'], 'the first turn has no history');
   assert.ok(JSON.stringify(sent).length < 12_000, 'the request stays small');
+  // Actions: only what the game can honour, with names fixed up.
+  const kinds = turn.actions.map((action) => `${action.type}:${action.name ?? ''}`);
+  assert.deepEqual(kinds, ['check:STR', 'fortune:'], `unsupported actions were dropped (got ${kinds.join(', ')})`);
+  assert.equal(turn.actions[0].modifier, 'bane');
+  assert.equal(turn.actions[1].category, 'yes_no');
+
+  // The story is remembered on the server, and the next turn is given it.
+  const remembered = (await ok(conversation(tokens.alice), 200, 'conversation')).turns;
+  assert.deepEqual(remembered.map((entry) => entry.role), ['user', 'assistant']);
+  assert.equal(remembered[1].actions.length, 2, 'the proposed actions are kept with the reply');
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'I cross' }), 200, 'a second turn');
+  assert.deepEqual(seenRequests.at(-1).messages.slice(1).map((entry) => entry.role), ['user', 'assistant', 'user'], 'the earlier exchange is sent as history');
+
+  // Streaming: the answer arrives in pieces and ends with the finished turn.
+  const streamResponse = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.alice}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'I look down' }) });
+  assert.equal(streamResponse.status, 200);
+  assert.match(streamResponse.headers.get('content-type'), /text\/event-stream/);
+  const raw = await streamResponse.text();
+  const deltas = [...raw.matchAll(/event: delta\ndata: (.*)\n/g)].map((match) => JSON.parse(match[1]).text);
+  assert.ok(deltas.length > 3, `several pieces arrive (got ${deltas.length})`);
+  const done = JSON.parse(raw.match(/event: done\ndata: (.*)\n/)[1]);
+  assert.match(done.text, /bridge/);
+  assert.equal(done.actions.length, 2);
+  assert.equal(done.usage.promptTokens, 321, 'usage comes from the final chunk');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 6, 'a streamed turn is stored too');
+  const failedStream = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.bob}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'hi' }) });
+  assert.equal(failedStream.status, 403, 'a problem before the first word is an ordinary error');
+
+  // Long conversations are folded into the story so far.
+  for (let index = 0; index < 6; index += 1) await ok(narrate(tokens.alice, { partyId: party.id, message: `Step ${index}` }), 200, `turn ${index}`);
+  let memory;
+  for (let attempt = 0; attempt < 20 && !memory; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const summary = (await ok(conversation(tokens.alice), 200, 'memory')).summary;
+    if (summary) memory = summary;
+  }
+  assert.match(memory, /shrine gate/, 'older turns were folded into a summary');
+  assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1 AND summarized', [party.id])).rows[0].n > 0, true);
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'And then?' }), 200, 'a turn after summarising');
+  assert.ok(seenRequests.at(-1).messages[0].content.includes('THE STORY SO FAR') && seenRequests.at(-1).messages[0].content.includes('shrine gate'), 'the summary is given to the narrator');
+  assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'solo-summary'")).rows[0].n >= 1, 'the summary call is counted as usage');
+
+  // The player can correct the summary, and start over.
+  await ok(call('PUT', '/ai/solo-narrator', { token: tokens.alice, body: { partyId: party.id, summary: 'Mara is at the gate. The wolf is dead.' } }), 200, 'edit the summary');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'edited')).summary, 'Mara is at the gate. The wolf is dead.');
+  await ok(call('PUT', '/ai/solo-narrator', { token: tokens.alice, body: { partyId: party.id, summary: 'x'.repeat(2001) } }), 400, 'a summary that is too long');
+  await ok(conversation(tokens.bob), 403, 'a stranger cannot read the story');
+  await ok(call('PUT', '/ai/solo-narrator', { token: tokens.bob, body: { partyId: party.id, summary: 'hack' } }), 403, 'nor change it');
+  await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.bob }), 403, 'nor erase it');
   await ok(narrate(tokens.bob, { partyId: party.id, message: 'hi' }), 403, 'a stranger cannot use the narrator');
   await ok(narrate(tokens.alice, { partyId: 'not-a-uuid', message: 'hi' }), 400, 'a bad campaign id');
   await ok(narrate(tokens.alice, { partyId: party.id, message: '  ' }), 400, 'an empty message');
+  const reset = await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.alice }), 200, 'start over');
+  assert.deepEqual(reset, { turns: [], summary: '' });
+  assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1', [party.id])).rows[0].n, 0);
   results.soloNarrator = 'passed';
 
   // --- Removing the key ---

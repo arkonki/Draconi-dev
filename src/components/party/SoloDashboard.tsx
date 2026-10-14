@@ -80,6 +80,7 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
 import { SoloNarrator } from './SoloNarrator';
+import type { NarratorAction } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 
@@ -947,6 +948,25 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     setActiveAction(action);
   };
 
+  /** A button from the narrator: show the rules dialog it points to, filled in. Nothing is rolled until the player confirms. */
+  const startNarratorAction = (proposal: NarratorAction) => {
+    setActiveDashboardTab('adventure');
+    if (proposal.type === 'check') {
+      openAction('check');
+      setCheckType(proposal.checkType);
+      setCheckName(proposal.name);
+      setCheckModifier(proposal.modifier);
+      setCheckContext(proposal.label);
+    } else if (proposal.type === 'fortune') {
+      openAction('fortune');
+      setFortuneQuestion(proposal.question);
+      setFortuneCategory(fortuneCategories.some((category) => category.value === proposal.category) ? proposal.category as FortuneCategory : 'yes_no');
+    } else {
+      openAction('rest');
+      setRestType(proposal.rest);
+    }
+  };
+
   const closeAction = () => {
     setActiveAction(null);
     setOracleActionResult(null);
@@ -1125,7 +1145,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         )}
 
         {activeDashboardTab === 'narrator' && (
-          <SoloNarrator partyId={partyId} heroId={state.playerCharacter?.id ?? null} currentUserId={currentUserId} canUse={canManage} />
+          <SoloNarrator partyId={partyId} heroId={state.playerCharacter?.id ?? null} currentUserId={currentUserId} canUse={canManage} onAction={startNarratorAction} />
         )}
 
         <div className={activeDashboardTab === 'adventure' || activeDashboardTab === 'state'

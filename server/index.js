@@ -36,7 +36,7 @@ import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
 import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
-import { generateStory, narrateSolo } from './soloNarrator.js';
+import { generateStory, getNarratorConversation, narrateSolo, resetNarrator, saveNarratorSummary } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -165,8 +165,38 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, await generateStory(await currentUser(request), await readJson(request)));
       return;
     }
-    if (pathname === '/api/ai/solo-narrator' && request.method === 'POST') {
-      sendJson(response, 200, await narrateSolo(await currentUser(request), await readJson(request)));
+    if (pathname === '/api/ai/solo-narrator') {
+      const actor = await currentUser(request);
+      const partyId = new URL(request.url, 'http://localhost').searchParams.get('partyId');
+      if (request.method === 'GET') { sendJson(response, 200, await getNarratorConversation(actor, partyId)); return; }
+      if (request.method === 'DELETE') { sendJson(response, 200, await resetNarrator(actor, partyId)); return; }
+      if (request.method === 'PUT') { sendJson(response, 200, await saveNarratorSummary(actor, await readJson(request))); return; }
+      if (request.method === 'POST') { sendJson(response, 200, await narrateSolo(actor, await readJson(request))); return; }
+    }
+    // The same turn, with the answer sent as it is written (server-sent events). Problems found before the first
+    // word is written come back as an ordinary error response.
+    if (pathname === '/api/ai/solo-narrator/stream' && request.method === 'POST') {
+      const actor = await currentUser(request);
+      const body = await readJson(request);
+      const controller = new AbortController();
+      response.on('close', () => controller.abort());
+      let started = false;
+      const begin = () => {
+        if (started) return;
+        started = true;
+        response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+      };
+      const emit = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      try {
+        const result = await narrateSolo(actor, body, { signal: controller.signal, onDelta: (text) => { begin(); emit('delta', { text }); } });
+        begin();
+        emit('done', result);
+        response.end();
+      } catch (error) {
+        if (!started) throw error;
+        emit('error', { message: error instanceof Error ? error.message : 'The narrator stopped.', code: error?.code });
+        response.end();
+      }
       return;
     }
 

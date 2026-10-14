@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { MAX_CONTEXT_CHARS, buildNarratorContext, buildNarratorMessages, sanitizeHistory } from './soloNarratorContext.js';
+import { MAX_CONTEXT_CHARS, buildNarratorContext, buildNarratorMessages, buildSummaryMessages, parseNarratorReply, sanitizeHistory } from './soloNarratorContext.js';
 
 const state = {
-  playerCharacter: { name: 'Mara', hp: { current: 7, max: 12 }, wp: { current: 5, max: 10 }, lifeStatus: 'active', conditions: [{ name: 'Dazed' }], inventory: [{ name: 'Short sword', equipped: true }, { name: 'Rope', equipped: false }] },
+  restState: { available: { round: true, stretch: false, shift: true } },
+  playerCharacter: { name: 'Mara', skills: { Sneaking: 12, Bows: 8 }, attributes: { STR: 13, AGL: 14 }, hp: { current: 7, max: 12 }, wp: { current: 5, max: 10 }, lifeStatus: 'active', conditions: [{ name: 'Dazed' }], inventory: [{ name: 'Short sword', equipped: true }, { name: 'Rope', equipped: false }] },
   soloHeroicAbility: { name: 'Army of One' },
   activeInjuries: [{ name: 'Broken arm', effect: 'Weapon skills are harder.' }],
   activeMission: { title: 'The lost shrine', objective: 'Find the shrine.', status: 'active', discoveredClues: ['Moss on the north side'] },
@@ -63,5 +64,59 @@ describe('solo narrator context', () => {
   it('ignores malformed history entries', () => {
     expect(sanitizeHistory('nope')).toEqual([]);
     expect(sanitizeHistory([{ role: 'system', content: 'x' }, { role: 'user', content: '  ' }, { role: 'user', content: 'ok' }, null])).toEqual([{ role: 'user', content: 'ok' }]);
+  });
+
+  it('tells the narrator which skills and rests exist', () => {
+    expect(context).toContain('Skills the hero has: Bows, Sneaking.');
+    expect(context).toContain('Attributes the hero has: STR, AGL.');
+    expect(context).toContain('Rests available now: round, shift.');
+  });
+
+  it('includes the story so far in the system message', () => {
+    const messages = buildNarratorMessages({ state, summary: 'Mara fled the burning inn and swore revenge.', history: [], message: 'Go on' });
+    expect(messages[0].content).toContain('THE STORY SO FAR');
+    expect(messages[0].content).toContain('swore revenge');
+    expect(buildNarratorMessages({ state, history: [], message: 'x' })[0].content).not.toContain('THE STORY SO FAR');
+  });
+
+  it('builds the request that folds old turns into the summary', () => {
+    const messages = buildSummaryMessages({ summary: 'Earlier text.', turns: [{ role: 'user', content: 'I open the door' }, { role: 'assistant', content: 'It creaks.' }] });
+    expect(messages[0].role).toBe('system');
+    expect(messages[1].content).toContain('STORY SO FAR:\nEarlier text.');
+    expect(messages[1].content).toContain('PLAYER: I open the door');
+    expect(messages[1].content).toContain('NARRATOR: It creaks.');
+    expect(buildSummaryMessages({ turns: [] })[1].content).toContain('(nothing yet)');
+  });
+});
+
+describe('narrator reply parsing', () => {
+  it('splits the story from valid actions and fixes the names', () => {
+    const reply = parseNarratorReply('The bridge sways.\n1. Cross\n2. Wait\nACTIONS: [{"type":"check","name":"sneaking","modifier":"bane","label":"Cross quietly"},{"type":"fortune","question":"Is the bridge safe?","category":"yes_no"},{"type":"rest","rest":"shift"}]', state);
+    expect(reply.text).toBe('The bridge sways.\n1. Cross\n2. Wait');
+    expect(reply.actions).toEqual([
+      { type: 'check', checkType: 'skill', name: 'Sneaking', modifier: 'bane', label: 'Cross quietly' },
+      { type: 'fortune', question: 'Is the bridge safe?', category: 'yes_no', label: 'Ask Fortune' },
+      { type: 'rest', rest: 'shift', label: 'Take a shift rest' },
+    ]);
+  });
+
+  it('accepts an attribute and tolerates a code fence', () => {
+    const reply = parseNarratorReply('Text.\nACTIONS: ```json\n[{"type":"check","name":"str","label":"Force the door"}]\n```', state);
+    expect(reply.actions).toEqual([{ type: 'check', checkType: 'attribute', name: 'STR', modifier: 'normal', label: 'Force the door' }]);
+    // an attribute the hero does not have cannot be rolled in the dialog, so it is not offered
+    expect(parseNarratorReply('Text.\nACTIONS: [{"type":"check","name":"CHA"}]', state).actions).toEqual([]);
+  });
+
+  it('drops anything the game cannot honour', () => {
+    const reply = parseNarratorReply('Text.\nACTIONS: [{"type":"check","name":"Flying"},{"type":"rest","rest":"stretch"},{"type":"fortune","question":"  "},{"type":"damage","amount":5},{"type":"check","name":"Bows"},"nonsense",null]', state);
+    expect(reply.actions).toEqual([{ type: 'check', checkType: 'skill', name: 'Bows', modifier: 'normal', label: 'Roll Bows' }]);
+  });
+
+  it('keeps at most three actions, and copes with missing or broken lines', () => {
+    const many = JSON.stringify(Array.from({ length: 6 }, () => ({ type: 'check', name: 'Bows' })));
+    expect(parseNarratorReply(`Text.\nACTIONS: ${many}`, state).actions).toHaveLength(3);
+    expect(parseNarratorReply('Just a story.', state)).toEqual({ text: 'Just a story.', actions: [] });
+    expect(parseNarratorReply('Story.\nACTIONS: not json', state)).toEqual({ text: 'Story.', actions: [] });
+    expect(parseNarratorReply('Story.\nACTIONS: {"type":"check"}', state)).toEqual({ text: 'Story.', actions: [] });
   });
 });

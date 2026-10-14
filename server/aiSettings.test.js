@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { allowCall, interpretModelResponse, keyHint, parseSettingsUpdate } from './aiSettings.js';
+import { allowCall, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate } from './aiSettings.js';
 
 describe('AI settings', () => {
   it('accepts a key and a model, and trims them', () => {
@@ -39,5 +39,30 @@ describe('AI settings', () => {
     expect(allowCall('user-limit', start + 25)).toBe(false);
     expect(allowCall('user-limit', start + 61_000)).toBe(true);
     expect(allowCall('another-user', start)).toBe(true);
+  });
+
+  it('reads a stream however it is cut into pieces', () => {
+    const events = [];
+    let done = 0;
+    const parser = createSseParser({ onEvent: (event) => events.push(event), onDone: () => { done += 1; } });
+    const stream = ': PROCESSING\n\ndata: {"choices":[{"delta":{"content":"The "}}]}\r\n\ndata: {"choices":[{"delta":{"content":"door."}}]}\n\ndata: {"usage":{"prompt_tokens":5}}\n\ndata: [DONE]\n\n';
+    for (let index = 0; index < stream.length; index += 7) parser.feed(stream.slice(index, index + 7));
+    parser.end();
+    expect(events.map((event) => event.choices?.[0]?.delta?.content ?? null)).toEqual(['The ', 'door.', null]);
+    expect(events[2].usage.prompt_tokens).toBe(5);
+    expect(done).toBe(1);
+  });
+
+  it('ignores broken lines and handles a final line without a newline', () => {
+    const events = [];
+    const parser = createSseParser({ onEvent: (event) => events.push(event) });
+    parser.feed('data: {broken\ndata: {"a":1}');
+    parser.end();
+    expect(events).toEqual([{ a: 1 }]);
+  });
+
+  it('estimates tokens when none are reported', () => {
+    expect(estimateTokens('12345678')).toBe(2);
+    expect(estimateTokens('')).toBe(0);
   });
 });

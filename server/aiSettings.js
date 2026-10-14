@@ -83,6 +83,39 @@ export function allowCall(userId, now = Date.now()) {
   return true;
 }
 
+/**
+ * Reads the provider's server-sent events. Feed it text as it arrives; it calls `onEvent` with each parsed JSON
+ * event and `onDone` at the end marker. Lines that are comments or not JSON are ignored. Pure.
+ */
+export function createSseParser({ onEvent, onDone }) {
+  let buffer = '';
+  const handleLine = (line) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data) return;
+    if (data === '[DONE]') { onDone?.(); return; }
+    try { onEvent(JSON.parse(data)); } catch { /* a partial or foreign line is skipped */ }
+  };
+  return {
+    feed(chunk) {
+      buffer += chunk;
+      let index = buffer.indexOf('\n');
+      while (index !== -1) {
+        handleLine(buffer.slice(0, index).replace(/\r$/, ''));
+        buffer = buffer.slice(index + 1);
+        index = buffer.indexOf('\n');
+      }
+    },
+    end() {
+      if (buffer) handleLine(buffer.replace(/\r$/, ''));
+      buffer = '';
+    },
+  };
+}
+
+/** A rough token count (about four characters each) for when the provider reports none. */
+export const estimateTokens = (text) => Math.ceil(String(text ?? '').length / 4);
+
 export async function getAiSettings(user) {
   const [{ rows: settings }, { rows: usage }] = await Promise.all([
     pool.query('SELECT api_key_encrypted IS NOT NULL AS has_key, key_hint, model FROM user_ai_settings WHERE user_id = $1', [user.id]),
@@ -152,11 +185,8 @@ export async function removeAiKey(user) {
   return getAiSettings(user);
 }
 
-/**
- * Sends a conversation to the person's model and records what it cost. `purpose` says what it was for ('story',
- * 'solo'), `partyId` which campaign.
- */
-export async function callModel(user, { messages, purpose, partyId = null, temperature = 0.7, maxTokens = 1200 }, { fetchImpl = fetch } = {}) {
+/** The person's stored key and model, with the checks every model call needs. */
+async function prepareCall(user) {
   const { rows } = await pool.query('SELECT api_key_encrypted, model FROM user_ai_settings WHERE user_id = $1', [user.id]);
   const row = rows[0];
   if (!row?.api_key_encrypted) {
@@ -167,18 +197,35 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
     throw new HttpError(409, 'Your stored API key can no longer be read. Enter it again in Settings → AI Assistants.', 'AI_KEY_UNREADABLE');
   }
   if (!allowCall(user.id)) throw new HttpError(429, 'Too many AI requests in a minute. Wait a moment.', 'AI_TOO_MANY_REQUESTS');
+  return { apiKey, model: row.model };
+}
 
+const requestHeaders = (apiKey) => ({
+  authorization: `Bearer ${apiKey}`,
+  'content-type': 'application/json',
+  'http-referer': process.env.PUBLIC_BASE_URL || 'http://localhost',
+  'x-title': 'Dragonbane Manager',
+});
+
+async function recordUsage(user, { partyId, purpose, model, usage }) {
+  await pool.query(
+    'INSERT INTO ai_usage (user_id, party_id, purpose, model, prompt_tokens, completion_tokens, cost_usd) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [user.id, partyId, purpose, model, usage.promptTokens, usage.completionTokens, usage.costUsd],
+  );
+}
+
+/**
+ * Sends a conversation to the person's model and records what it cost. `purpose` says what it was for ('story',
+ * 'solo'), `partyId` which campaign.
+ */
+export async function callModel(user, { messages, purpose, partyId = null, temperature = 0.7, maxTokens = 1200 }, { fetchImpl = fetch } = {}) {
+  const { apiKey, model } = await prepareCall(user);
   let response;
   try {
     response = await fetchImpl(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        'http-referer': process.env.PUBLIC_BASE_URL || 'http://localhost',
-        'x-title': 'Dragonbane Manager',
-      },
-      body: JSON.stringify({ model: row.model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
+      headers: requestHeaders(apiKey),
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
@@ -186,9 +233,54 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
   }
   const payload = await response.json().catch(() => ({}));
   const result = interpretModelResponse(response.status, payload);
-  await pool.query(
-    'INSERT INTO ai_usage (user_id, party_id, purpose, model, prompt_tokens, completion_tokens, cost_usd) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [user.id, partyId, purpose, row.model, result.usage.promptTokens, result.usage.completionTokens, result.usage.costUsd],
-  );
-  return { text: result.text, model: row.model, usage: result.usage };
+  await recordUsage(user, { partyId, purpose, model, usage: result.usage });
+  return { text: result.text, model, usage: result.usage };
+}
+
+/**
+ * Like callModel, but hands the answer over piece by piece through `onDelta` as it is written. `signal` stops the
+ * request, for example when the reader goes away. Returns the full text and usage at the end.
+ */
+export async function callModelStream(user, { messages, purpose, partyId = null, temperature = 0.7, maxTokens = 1200 }, { onDelta, signal, fetchImpl = fetch } = {}) {
+  const { apiKey, model } = await prepareCall(user);
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS * 2);
+  let response;
+  try {
+    response = await fetchImpl(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: requestHeaders(apiKey),
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, usage: { include: true } }),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  } catch {
+    throw new HttpError(504, 'The AI service did not answer in time.', 'AI_TIMEOUT');
+  }
+  if (!response.ok) {
+    interpretModelResponse(response.status, await response.json().catch(() => ({})));
+  }
+
+  let text = '';
+  let reported = null;
+  const parser = createSseParser({
+    onEvent: (event) => {
+      const piece = event?.choices?.[0]?.delta?.content;
+      if (typeof piece === 'string' && piece) { text += piece; onDelta?.(piece); }
+      if (event?.usage) reported = event.usage;
+    },
+  });
+  try {
+    const decoder = new TextDecoder();
+    for await (const chunk of response.body) parser.feed(decoder.decode(chunk, { stream: true }));
+    parser.end();
+  } catch {
+    throw new HttpError(504, 'The AI service stopped answering.', 'AI_STREAM_INTERRUPTED');
+  }
+  if (!text.trim()) throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
+  const usage = {
+    promptTokens: reported ? Math.max(0, Math.round(Number(reported.prompt_tokens) || 0)) : estimateTokens(JSON.stringify(messages)),
+    completionTokens: reported ? Math.max(0, Math.round(Number(reported.completion_tokens) || 0)) : estimateTokens(text),
+    costUsd: reported && reported.cost !== null && reported.cost !== undefined && Number.isFinite(Number(reported.cost)) ? Number(reported.cost) : null,
+  };
+  await recordUsage(user, { partyId, purpose, model, usage });
+  return { text: text.trim(), model, usage };
 }
