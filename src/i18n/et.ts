@@ -766,4 +766,6 @@ export const ET: Record<string, string> = {
   "Treat the injury: {name}": "Ravi vigastust: {name}",
   "Let time pass: {amount} {unit}": "Lase aega mööduda: {amount} {unit}",
   "Update the scene: {place}": "Uuenda stseeni: {place}",
+  "Move the narrator to the left": "Liiguta jutustaja vasakule",
+  "Move the narrator to the right": "Liiguta jutustaja paremale",
 };

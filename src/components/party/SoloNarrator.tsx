@@ -461,20 +461,31 @@ function ToolCallList({ calls, deciding, busy, onDecide }: {
         const title = toolTitle({ name: call.name, args: call.args ?? {}, label: call.label }, t);
         return (
           <li key={call.id} className={`rounded-lg border px-2.5 py-1.5 text-xs ${STATUS_STYLE[call.status]}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <span className="font-semibold">{call.status === 'declined' ? t('Declined: {title}', { title }) : call.status === 'expired' ? t('No longer needed: {title}', { title }) : title}</span>
-                {call.status === 'done' && call.summary && <div className="mt-0.5 break-words opacity-80">{call.summary}</div>}
-                {call.status === 'failed' && <div className="mt-0.5 break-words">{call.error}</div>}
-                {call.status === 'pending' && <div className="mt-0.5 opacity-80">{t('The narrator is waiting for your answer.')}</div>}
-              </div>
-              {call.status === 'pending' && !busy && (
-                <div className="flex shrink-0 gap-1">
-                  <Button type="button" size="sm" loading={deciding === call.id} disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'approve')}>{t('Approve')}</Button>
-                  <Button type="button" size="sm" variant="ghost" disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'decline')}>{t('Decline')}</Button>
+            {call.status === 'done' && call.summary ? (
+              // What a tool returned can be long (a whole game summary), so it is folded away; one line stays visible.
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5">
+                  <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
+                  <span className="shrink-0 font-semibold">{title}</span>
+                  <span className="min-w-0 truncate opacity-70 group-open:hidden">{call.summary}</span>
+                </summary>
+                <div className="mt-1.5 max-h-60 overflow-y-auto whitespace-pre-wrap break-words border-t border-current/10 pt-1.5 opacity-90">{call.summary}</div>
+              </details>
+            ) : (
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="font-semibold">{call.status === 'declined' ? t('Declined: {title}', { title }) : call.status === 'expired' ? t('No longer needed: {title}', { title }) : title}</span>
+                  {call.status === 'failed' && <div className="mt-0.5 break-words">{call.error}</div>}
+                  {call.status === 'pending' && <div className="mt-0.5 opacity-80">{t('The narrator is waiting for your answer.')}</div>}
                 </div>
-              )}
-            </div>
+                {call.status === 'pending' && !busy && (
+                  <div className="flex shrink-0 gap-1">
+                    <Button type="button" size="sm" loading={deciding === call.id} disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'approve')}>{t('Approve')}</Button>
+                    <Button type="button" size="sm" variant="ghost" disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'decline')}>{t('Decline')}</Button>
+                  </div>
+                )}
+              </div>
+            )}
           </li>
         );
       })}

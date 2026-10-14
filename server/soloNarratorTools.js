@@ -385,7 +385,8 @@ export async function runTool(user, partyId, name, rawArguments, { approved = fa
     let state = await getState(user, partyId);
     if (!state?.solo?.enabled) throw new ToolProblem('Solo mode is not switched on for this campaign.');
     const prepared = tool.prepare(args, state);
-    if (prepared.read) return { ok: true, summary: clip(prepared.read(state), 6000) };
+    // Keep the line breaks: the game summary is read by the model and shown, folded, to the player.
+    if (prepared.read) return { ok: true, summary: String(prepared.read(state)).slice(0, 6000) };
 
     const reason = clip(prepared.reason || `The Solo narrator: ${tool.label(args)}${approved ? ' (approved by the player)' : ''}`, 500);
     const attempt = async (current) => {
