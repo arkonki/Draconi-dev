@@ -10,6 +10,8 @@ export interface AiSettings {
   defaultModel: string;
   suggestedModels: string[];
   usageThisMonth: { calls: number; promptTokens: number; completionTokens: number; costUsd: number | null };
+  /** Optional monthly limits the person set for themselves. `reached` is true when one has been hit. */
+  limits: { monthlyCostCapUsd: number | null; monthlyTokenCap: number | null; reached: boolean };
 }
 
 export interface AiAnswer {
@@ -22,7 +24,12 @@ export interface AiAnswer {
 export type NarratorAction =
   | { type: 'check'; checkType: 'skill' | 'attribute'; name: string; modifier: 'normal' | 'boon' | 'bane'; label: string }
   | { type: 'fortune'; question: string; category: string; label: string }
-  | { type: 'rest'; rest: 'round' | 'stretch' | 'shift'; label: string };
+  | { type: 'rest'; rest: 'round' | 'stretch' | 'shift'; label: string }
+  | { type: 'search'; context: string; label: string }
+  | { type: 'scavenge'; context: string; label: string }
+  | { type: 'npc'; name: string; template: 'minion' | 'boss'; roles: Array<'melee' | 'ranged' | 'sneaky' | 'magic'>; notes: string; label: string }
+  | { type: 'reveal'; title: string; description: string; label: string }
+  | { type: 'scene'; location: string; description: string; situation: string; threads: string[]; label: string };
 
 export interface NarratorMessage {
   id: string;
@@ -30,6 +37,9 @@ export interface NarratorMessage {
   content: string;
   actions: NarratorAction[];
   createdAt?: string;
+  /** What this reply used, when known. */
+  tokens?: number | null;
+  costUsd?: number | null;
 }
 
 /** What the narrator also reads from the campaign. It is the same record an AI assistant over MCP reads and writes. */
@@ -39,10 +49,19 @@ export interface NarratorCampaignContext {
   sessions: Array<{ title: string; summary: string; endedAt: string | null }>;
 }
 
+export type NarrationLanguage = 'en' | 'et';
+
+export const NARRATION_LANGUAGE_OPTIONS: ReadonlyArray<{ value: NarrationLanguage; label: string }> = [
+  { value: 'en', label: 'English' },
+  { value: 'et', label: 'Eesti' },
+];
+
 export interface NarratorConversation {
   turns: NarratorMessage[];
   /** The running summary of everything older than the recent turns. */
   summary: string;
+  /** The language the campaign is narrated in. */
+  language: NarrationLanguage;
   campaign: NarratorCampaignContext | null;
 }
 
@@ -73,12 +92,16 @@ const json = (method: string, body: unknown): RequestInit => ({
 });
 
 export const fetchAiSettings = () => send<AiSettings>('/account/ai');
-export const saveAiSettings = (input: { apiKey?: string; model?: string }) => send<AiSettings>('/account/ai', json('PUT', input));
+export const saveAiSettings = (input: { apiKey?: string; model?: string; monthlyCostCapUsd?: number | null; monthlyTokenCap?: number | null }) => send<AiSettings>('/account/ai', json('PUT', input));
 export const removeAiKey = () => send<AiSettings>('/account/ai', { method: 'DELETE' });
 
+/** Rewrites the session recap draft as readable prose. The GM edits the result before using it. */
+export const polishRecap = (partyId: string, draft: string) => send<AiAnswer>('/ai/recap', json('POST', { partyId, draft }));
 export const generateStory = (prompt: string, partyId?: string) => send<AiAnswer>('/ai/story', json('POST', { prompt, partyId }));
 export const fetchNarratorConversation = (partyId: string) => send<NarratorConversation>(`/ai/solo-narrator?partyId=${encodeURIComponent(partyId)}`);
 export const saveNarratorSummary = (partyId: string, summary: string) => send<{ summary: string }>('/ai/solo-narrator', json('PUT', { partyId, summary }));
+/** Changes the language the campaign is narrated in, for the built-in narrator and for assistants over MCP. */
+export const setNarrationLanguage = (partyId: string, language: NarrationLanguage) => send<{ language: NarrationLanguage }>('/ai/solo-narrator/language', json('PUT', { partyId, language }));
 export const resetNarrator = (partyId: string) => send<NarratorConversation>(`/ai/solo-narrator?partyId=${encodeURIComponent(partyId)}`, { method: 'DELETE' });
 
 /** Reads server-sent events from a response body. Exported for tests. */

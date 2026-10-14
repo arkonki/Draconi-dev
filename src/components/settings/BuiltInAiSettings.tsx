@@ -15,6 +15,19 @@ const clearLegacyKey = () => {
 
 const number = (value: number) => value.toLocaleString();
 
+function UsageBar({ label, used, cap, format }: { label: string; used: number; cap: number; format: (value: number) => string }) {
+  const fraction = cap > 0 ? Math.min(1, used / cap) : 1;
+  const color = fraction >= 1 ? 'bg-red-500' : fraction >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500';
+  return (
+    <div>
+      <div className="mb-1 flex justify-between text-xs text-gray-600"><span>{label}</span><span>{format(used)} of {format(cap)}</span></div>
+      <div className="h-2 overflow-hidden rounded-full bg-gray-200" role="meter" aria-label={`${label} used this month`} aria-valuemin={0} aria-valuemax={cap} aria-valuenow={Math.min(used, cap)}>
+        <div className={`h-full ${color}`} style={{ width: `${fraction * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
 /** Your own OpenRouter key and model for the built-in AI: the Story Helper and the Solo narrator. */
 export function BuiltInAiSettings() {
   const queryClient = useQueryClient();
@@ -25,6 +38,8 @@ export function BuiltInAiSettings() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [legacyKey, setLegacyKey] = useState(readLegacyKey);
+  const [costCap, setCostCap] = useState<string | null>(null);
+  const [tokenCap, setTokenCap] = useState<string | null>(null);
 
   const done = (message: string) => async () => {
     setError(null);
@@ -46,6 +61,11 @@ export function BuiltInAiSettings() {
   const saveModel = useMutation({
     mutationFn: (value: string) => saveAiSettings({ model: value }),
     onSuccess: async () => { setModel(null); await done('Model saved.')(); },
+    onError: fail,
+  });
+  const saveLimits = useMutation({
+    mutationFn: (input: { monthlyCostCapUsd: number | null; monthlyTokenCap: number | null }) => saveAiSettings(input),
+    onSuccess: async () => { setCostCap(null); setTokenCap(null); await done('Limits saved.')(); },
     onError: fail,
   });
   const removeKey = useMutation({ mutationFn: removeAiKey, onSuccess: done('Key removed.'), onError: fail });
@@ -114,6 +134,35 @@ export function BuiltInAiSettings() {
           {shownModel !== data.defaultModel && <Button type="button" variant="ghost" onClick={() => setModel(data.defaultModel)}>Use the default</Button>}
         </form>
         <p className="mt-2 text-xs text-gray-500">Any model id from <a href="https://openrouter.ai/models" target="_blank" rel="noreferrer" className="underline hover:text-indigo-600">openrouter.ai/models</a> works. A small, fast model is plenty for narration and keeps the cost low.</p>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 p-4">
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Monthly limits <span className="font-normal normal-case text-gray-400">(optional, only for your own key)</span></h4>
+        <form
+          className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const cost = (costCap ?? (data.limits.monthlyCostCapUsd ?? '')).toString().trim();
+            const tokens = (tokenCap ?? (data.limits.monthlyTokenCap ?? '')).toString().trim();
+            saveLimits.mutate({ monthlyCostCapUsd: cost === '' ? null : Number(cost), monthlyTokenCap: tokens === '' ? null : Number(tokens) });
+          }}
+        >
+          <label className="block text-sm text-gray-700">Money (US dollars)
+            <input type="number" min="0" step="0.5" inputMode="decimal" value={costCap ?? data.limits.monthlyCostCapUsd ?? ''} onChange={(event) => setCostCap(event.target.value)} placeholder="No limit" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm text-gray-700">Tokens
+            <input type="number" min="0" step="1000" inputMode="numeric" value={tokenCap ?? data.limits.monthlyTokenCap ?? ''} onChange={(event) => setTokenCap(event.target.value)} placeholder="No limit" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </label>
+          <Button type="submit" variant="outline" loading={saveLimits.isPending} disabled={costCap === null && tokenCap === null}>Save limits</Button>
+        </form>
+        {(data.limits.monthlyCostCapUsd !== null || data.limits.monthlyTokenCap !== null) && (
+          <div className="mt-3 space-y-2">
+            {data.limits.monthlyTokenCap !== null && <UsageBar label="Tokens" used={usage.promptTokens + usage.completionTokens} cap={data.limits.monthlyTokenCap} format={number} />}
+            {data.limits.monthlyCostCapUsd !== null && <UsageBar label="Money" used={usage.costUsd ?? 0} cap={data.limits.monthlyCostCapUsd} format={(value) => `$${value.toFixed(2)}`} />}
+            {data.limits.reached && <p role="alert" className="text-sm font-semibold text-red-700">A limit has been reached. The narrator and the Story Helper stay off until next month or until you raise it.</p>}
+          </div>
+        )}
+        <p className="mt-2 text-xs text-gray-500">The money limit counts only requests where OpenRouter reports a cost; the token limit counts everything. Your own OpenRouter account can also cap spending on the key itself, which is the stricter safeguard.</p>
       </div>
 
       <p className="text-sm text-gray-700">

@@ -39,10 +39,13 @@ const mock = http.createServer((request, response) => {
     seenRequests.push(parsed);
     const isSummary = String(parsed.messages?.[0]?.content ?? '').includes('You keep the running record');
     const isNarrator = String(parsed.messages?.[0]?.content ?? '').includes('narrator of a solo game');
+    const isRecap = String(parsed.messages?.[0]?.content ?? '').includes('write the recap');
     const text = isSummary
       ? 'Mara crossed the old bridge and now stands at the shrine gate.'
-      : isNarrator
-        ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"fortune","question":"Is the bridge safe?"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"damage","amount":9}]'
+      : isRecap
+        ? 'The party fought bravely and won the day.'
+        : isNarrator
+        ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"npc","name":"Bridge Troll","template":"boss","roles":["melee","ranged","wizard"],"notes":"Mossy and huge"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"damage","amount":9},{"type":"scene","location":"The old bridge","description":"A rope bridge over a gorge.","situation":"Wind is rising.","threads":["The troll"]},{"type":"fortune","question":"Is the bridge safe?"}]'
         : 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks';
     const usage = { prompt_tokens: 321, completion_tokens: 45, cost: 0.0002 };
     if (parsed.stream) {
@@ -145,14 +148,18 @@ try {
   assert.ok(JSON.stringify(sent).length < 12_000, 'the request stays small');
   // Actions: only what the game can honour, with names fixed up.
   const kinds = turn.actions.map((action) => `${action.type}:${action.name ?? ''}`);
-  assert.deepEqual(kinds, ['check:STR', 'fortune:'], `unsupported actions were dropped (got ${kinds.join(', ')})`);
+  assert.deepEqual(kinds, ['check:STR', 'npc:Bridge Troll', 'scene:'], `unsupported actions were dropped and at most three kept (got ${kinds.join(', ')})`);
   assert.equal(turn.actions[0].modifier, 'bane');
-  assert.equal(turn.actions[1].category, 'yes_no');
+  assert.deepEqual(turn.actions[1], { type: 'npc', name: 'Bridge Troll', template: 'boss', roles: ['melee', 'ranged'], notes: 'Mossy and huge', label: 'Face Bridge Troll' });
+  assert.deepEqual(turn.actions[2], { type: 'scene', location: 'The old bridge', description: 'A rope bridge over a gorge.', situation: 'Wind is rising.', threads: ['The troll'], label: 'Update the scene' });
 
   // The story is remembered on the server, and the next turn is given it.
   const remembered = (await ok(conversation(tokens.alice), 200, 'conversation')).turns;
   assert.deepEqual(remembered.map((entry) => entry.role), ['user', 'assistant']);
-  assert.equal(remembered[1].actions.length, 2, 'the proposed actions are kept with the reply');
+  assert.equal(remembered[1].actions.length, 3, 'the proposed actions are kept with the reply');
+  assert.equal(remembered[1].tokens, 366, 'and what the reply used');
+  assert.equal(remembered[1].costUsd, 0.0002);
+  assert.equal(remembered[0].tokens, null, 'the player\'s own message has no usage');
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'I cross' }), 200, 'a second turn');
   assert.deepEqual(seenRequests.at(-1).messages.slice(1).map((entry) => entry.role), ['user', 'assistant', 'user'], 'the earlier exchange is sent as history');
 
@@ -165,7 +172,7 @@ try {
   assert.ok(deltas.length > 3, `several pieces arrive (got ${deltas.length})`);
   const done = JSON.parse(raw.match(/event: done\ndata: (.*)\n/)[1]);
   assert.match(done.text, /bridge/);
-  assert.equal(done.actions.length, 2);
+  assert.equal(done.actions.length, 3);
   assert.equal(done.usage.promptTokens, 321, 'usage comes from the final chunk');
   assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 6, 'a streamed turn is stored too');
   const failedStream = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.bob}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'hi' }) });
@@ -222,6 +229,28 @@ try {
   assert.ok(resume.story && resume.story.recentExchanges.length > 0, 'the resume state carries the story too');
   results.sharedStory = 'passed';
 
+  const polish = (token, body) => call('POST', '/ai/recap', { token, body });
+  // --- Story language: one setting for the campaign, read by the narrator and by assistants ---
+  const setLanguage = (token, language) => call('PUT', '/ai/solo-narrator/language', { token, body: { partyId: party.id, language } });
+  assert.equal((await ok(conversation(tokens.alice), 200, 'default language')).language, 'en');
+  await ok(setLanguage(tokens.alice, 'fr'), 400, 'an unsupported language');
+  await ok(setLanguage(tokens.bob, 'et'), 403, 'a stranger cannot change the language');
+  const revisionBeforeLanguage = await revisionNow();
+  await ok(setLanguage(tokens.alice, 'et'), 200, 'switch to Estonian');
+  assert.equal(await revisionNow(), revisionBeforeLanguage, 'the language is a setting, not game state');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'Estonian')).language, 'et');
+  assert.equal((await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state')).data.solo.narrationLanguage, 'et', 'assistants see it in the solo state');
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'Ma astun sillale' }), 200, 'an Estonian turn');
+  const estonianSystem = seenRequests.at(-1).messages[0].content;
+  assert.ok(estonianSystem.includes('LANGUAGE: Write everything the player reads in Estonian (eesti keel)'), 'the narrator is told to write Estonian');
+  assert.ok(estonianSystem.includes('exactly as specified in English'), 'and to keep the machine fields in English');
+  await ok(polish(tokens.alice, { partyId: party.id, draft: 'Goblin ambush: 4 rounds.' }), 200, 'an Estonian recap');
+  assert.ok(seenRequests.at(-1).messages[0].content.includes('Estonian (eesti keel)'), 'the recap follows the campaign language');
+  await ok(setLanguage(tokens.alice, 'en'), 200, 'back to English');
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'And now?' }), 200, 'an English turn again');
+  assert.ok(!seenRequests.at(-1).messages[0].content.includes('LANGUAGE:'), 'English needs no instruction');
+  results.storyLanguage = 'passed';
+
   // The player can correct the summary, and start over.
   await ok(call('PUT', '/ai/solo-narrator', { token: tokens.alice, body: { partyId: party.id, summary: 'Mara is at the gate. The wolf is dead.' } }), 200, 'edit the summary');
   assert.equal((await ok(conversation(tokens.alice), 200, 'edited')).summary, 'Mara is at the gate. The wolf is dead.');
@@ -233,9 +262,37 @@ try {
   await ok(narrate(tokens.alice, { partyId: 'not-a-uuid', message: 'hi' }), 400, 'a bad campaign id');
   await ok(narrate(tokens.alice, { partyId: party.id, message: '  ' }), 400, 'an empty message');
   const reset = await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.alice }), 200, 'start over');
-  assert.deepEqual(reset, { turns: [], summary: '', campaign: null });
+  assert.deepEqual(reset, { turns: [], summary: '', language: 'en', campaign: null });
   assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1', [party.id])).rows[0].n, 0);
   results.soloNarrator = 'passed';
+
+  // --- Polishing a session recap ---
+  const polished = await ok(polish(tokens.alice, { partyId: party.id, draft: 'Goblin ambush: 4 rounds. Defeated Goblin.' }), 200, 'a polished recap');
+  assert.match(polished.text, /fought bravely/);
+  assert.ok(seenRequests.at(-1).messages[0].content.includes('Do not invent'), 'the model is told not to invent');
+  assert.equal(seenRequests.at(-1).messages[1].content, 'Goblin ambush: 4 rounds. Defeated Goblin.');
+  await ok(polish(tokens.alice, { partyId: party.id, draft: '  ' }), 400, 'nothing to polish');
+  await ok(polish(tokens.bob, { partyId: party.id, draft: 'x' }), 403, 'a stranger cannot polish');
+  assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'recap'")).rows[0].n >= 1);
+  results.recapPolish = 'passed';
+
+  // --- Monthly limits ---
+  await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyTokenCap: 10 } }), 400, 'a token limit that is too small');
+  await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyCostCapUsd: -2 } }), 400, 'a negative money limit');
+  const capped = await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyTokenCap: 1000 } }), 200, 'a token limit');
+  assert.equal(capped.limits.monthlyTokenCap, 1000);
+  assert.equal(capped.limits.reached, true, 'the month already used more than that');
+  const blocked = await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the limit' } });
+  assert.equal(blocked.status, 402, 'a call over the limit is refused');
+  assert.equal(blocked.payload.error.code, 'AI_LIMIT_REACHED');
+  assert.match(blocked.payload.error.message, /1,000 tokens/);
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'hi' }), 402, 'the narrator stops at the limit too');
+  await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyTokenCap: null, monthlyCostCapUsd: 0.0005 } }), 200, 'switch to a money limit');
+  assert.equal((await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the money limit' } })).status, 402, 'the money limit counts reported costs');
+  const lifted = await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyCostCapUsd: null } }), 200, 'remove the limits');
+  assert.deepEqual([lifted.limits.monthlyCostCapUsd, lifted.limits.monthlyTokenCap, lifted.limits.reached], [null, null, false]);
+  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Free again' } }), 200, 'works again without limits');
+  results.monthlyLimits = 'passed';
 
   // --- Removing the key ---
   assert.equal((await ok(call('DELETE', '/account/ai', { token: tokens.alice }), 200, 'remove')).hasKey, false);

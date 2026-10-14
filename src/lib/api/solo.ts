@@ -8,7 +8,11 @@ export interface SoloCampaignStatus {
   soloHeroicAbilityId?: string | null;
   soloHeroicAbilityGranted?: boolean;
   oracleSettings?: { defaultTilt?: 'even' | 'ask' };
+  /** The language the story is narrated in, shared by the built-in narrator and AI assistants. */
+  narrationLanguage?: NarrationLanguage;
 }
+
+export type NarrationLanguage = 'en' | 'et';
 
 export interface SoloActorCondition {
   id: string;

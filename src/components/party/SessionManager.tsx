@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, FileText, Flame, Pause, Play, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, FileText, Flame, Pause, Play, Plus, Sparkles, Trash2, Undo2, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -18,6 +18,7 @@ import {
 } from '../../lib/api/campaignTime';
 import { fetchRandomTables } from '../../lib/api/randomTables';
 import { draftSessionRecap } from '../../lib/api/sessionRecap';
+import { fetchAiSettings, polishRecap } from '../../lib/api/ai';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 import { rollDiceExpression } from '../../lib/game/diceExpression';
@@ -52,6 +53,11 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   const [summary, setSummary] = useState('');
   const [unresolvedThreads, setUnresolvedThreads] = useState('');
   const [drafting, setDrafting] = useState(false);
+  const [polishing, setPolishing] = useState(false);
+  // The text before the last polish, so it can be put back.
+  const [beforePolish, setBeforePolish] = useState<string | null>(null);
+  const [polishError, setPolishError] = useState<string | null>(null);
+  const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000, enabled: isOpen });
   const [advanceAmount, setAdvanceAmount] = useState(1);
   const [reminderLabel, setReminderLabel] = useState('Encounter check');
   const [diceExpression, setDiceExpression] = useState('1d12');
@@ -328,6 +334,28 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                       }}>
                       Draft from this session
                     </Button>
+                    <Button size="sm" variant="secondary" icon={Sparkles} loading={polishing} disabled={!summary.trim() || mutation.isPending || !aiSettings.data?.hasKey}
+                      title={aiSettings.data?.hasKey ? 'Rewrite the summary as readable prose with your own AI key' : 'Add your OpenRouter key in Settings, AI Assistants, to use this'}
+                      onClick={async () => {
+                        setPolishing(true);
+                        setPolishError(null);
+                        try {
+                          const original = summary;
+                          const answer = await polishRecap(partyId, original);
+                          setBeforePolish(original);
+                          setSummary(answer.text);
+                        } catch (failure) {
+                          setPolishError(failure instanceof Error ? failure.message : 'Could not polish the summary.');
+                        } finally {
+                          setPolishing(false);
+                        }
+                      }}>
+                      Polish with AI
+                    </Button>
+                    {beforePolish !== null && (
+                      <Button size="sm" variant="ghost" icon={Undo2} onClick={() => { setSummary(beforePolish); setBeforePolish(null); }}>Undo polish</Button>
+                    )}
+                    {polishError && <p role="alert" className="text-sm text-red-700">{polishError}</p>}
                     <textarea value={unresolvedThreads} onChange={(event) => setUnresolvedThreads(event.target.value)} rows={2}
                       placeholder="Unresolved threads, one per line" className="w-full rounded-md border border-stone-300 p-3" />
                     <Button variant="danger" disabled={!summary.trim() || mutation.isPending}

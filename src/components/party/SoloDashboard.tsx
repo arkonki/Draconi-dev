@@ -957,11 +957,27 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
       setCheckName(proposal.name);
       setCheckModifier(proposal.modifier);
       setCheckContext(proposal.label);
+    } else if (proposal.type === 'search') {
+      openAction('search');
+      setSearchContext(proposal.context);
+    } else if (proposal.type === 'scavenge') {
+      openAction('scavenge');
+      setScavengeContext(proposal.context);
+    } else if (proposal.type === 'npc') {
+      openAction('npc-create');
+      setNpcName(proposal.name);
+      setNpcTemplate(proposal.template);
+      setNpcRoles(proposal.roles);
+      setNpcNotes(proposal.notes);
+    } else if (proposal.type === 'reveal') {
+      openAction('reveal-waypoint');
+      setRevealTitle(proposal.title);
+      setRevealDescription(proposal.description);
     } else if (proposal.type === 'fortune') {
       openAction('fortune');
       setFortuneQuestion(proposal.question);
       setFortuneCategory(fortuneCategories.some((category) => category.value === proposal.category) ? proposal.category as FortuneCategory : 'yes_no');
-    } else {
+    } else if (proposal.type === 'rest') {
       openAction('rest');
       setRestType(proposal.rest);
     }

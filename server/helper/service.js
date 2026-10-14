@@ -488,6 +488,7 @@ function soloStateForOutput(row) {
       soloHeroicAbilityId: null,
       soloHeroicAbilityGranted: false,
       oracleSettings: { defaultTilt: 'ask' },
+      narrationLanguage: 'en',
     };
   }
   return {
@@ -500,6 +501,7 @@ function soloStateForOutput(row) {
     soloHeroicAbilityId: row.solo_heroic_ability_id || null,
     soloHeroicAbilityGranted: Boolean(row.solo_heroic_ability_granted),
     oracleSettings: { defaultTilt: row.oracle_default_tilt },
+    narrationLanguage: row.narration_language || 'en',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

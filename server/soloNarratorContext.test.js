@@ -137,6 +137,24 @@ describe('the shared campaign story', () => {
   });
 });
 
+describe('narration language', () => {
+  it('leaves English prompts as they are and adds the instruction for Estonian', () => {
+    const english = buildNarratorMessages({ state, history: [], message: 'x' })[0].content;
+    expect(english).not.toContain('LANGUAGE:');
+    expect(buildNarratorMessages({ state, history: [], message: 'x', language: 'en' })[0].content).toBe(english);
+    const estonian = buildNarratorMessages({ state, history: [], message: 'x', language: 'et' })[0].content;
+    expect(estonian).toContain('LANGUAGE: Write everything the player reads in Estonian (eesti keel)');
+    expect(estonian).toContain('GAME SUMMARY');
+  });
+
+  it('asks for the story so far in the same language, without the action rules', () => {
+    const summary = buildSummaryMessages({ turns: [], language: 'et' })[0].content;
+    expect(summary).toContain('Estonian (eesti keel)');
+    expect(summary).not.toContain('ACTIONS');
+    expect(buildSummaryMessages({ turns: [] })[0].content).not.toContain('LANGUAGE:');
+  });
+});
+
 describe('narrator reply parsing', () => {
   it('splits the story from valid actions and fixes the names', () => {
     const reply = parseNarratorReply('The bridge sways.\n1. Cross\n2. Wait\nACTIONS: [{"type":"check","name":"sneaking","modifier":"bane","label":"Cross quietly"},{"type":"fortune","question":"Is the bridge safe?","category":"yes_no"},{"type":"rest","rest":"shift"}]', state);
@@ -158,6 +176,27 @@ describe('narrator reply parsing', () => {
   it('drops anything the game cannot honour', () => {
     const reply = parseNarratorReply('Text.\nACTIONS: [{"type":"check","name":"Flying"},{"type":"rest","rest":"stretch"},{"type":"fortune","question":"  "},{"type":"damage","amount":5},{"type":"check","name":"Bows"},"nonsense",null]', state);
     expect(reply.actions).toEqual([{ type: 'check', checkType: 'skill', name: 'Bows', modifier: 'normal', label: 'Roll Bows' }]);
+  });
+
+  it('offers search, scavenge, creatures and moving on only when the app offers them', () => {
+    const offered = { ...state, allowedNextActions: ['search_waypoint', 'scavenge_waypoint', 'generate_solo_npc', 'reveal_waypoint'] };
+    const line = 'Text.\nACTIONS: [{"type":"search","context":"the carved desk"},{"type":"scavenge","context":"the camp"},{"type":"npc","name":"Ashfang Captain","template":"boss","roles":["melee","ranged","wizard","melee"],"notes":"Scarred and tall"},{"type":"reveal","title":"The Flooded Gallery","description":"Water to the knees."}]';
+    const reply = parseNarratorReply(line, { ...offered });
+    // three actions at most
+    expect(reply.actions.map((action) => action.type)).toEqual(['search', 'scavenge', 'npc']);
+    expect(reply.actions[2]).toEqual({ type: 'npc', name: 'Ashfang Captain', template: 'boss', roles: ['melee', 'ranged'], notes: 'Scarred and tall', label: 'Face Ashfang Captain' });
+    expect(parseNarratorReply(line, state).actions).toEqual([]);
+    const reveal = parseNarratorReply('T.\nACTIONS: [{"type":"reveal","title":"The Flooded Gallery","description":"Water to the knees."}]', offered);
+    expect(reveal.actions).toEqual([{ type: 'reveal', title: 'The Flooded Gallery', description: 'Water to the knees.', label: 'Move on' }]);
+    const defaults = parseNarratorReply('T.\nACTIONS: [{"type":"npc","name":"Wolf"}]', offered);
+    expect(defaults.actions[0]).toMatchObject({ template: 'minion', roles: ['melee'] });
+  });
+
+  it('proposes a scene update with a tidy thread list, once', () => {
+    const line = 'Story.\nACTIONS: [{"type":"scene","location":"The shrine gate","description":"Moss-covered stone.","situation":"Rain.","threads":["Who lit the beacon?","  ","The wolf pack"]},{"type":"scene","location":"Elsewhere"},{"type":"scene"}]';
+    const reply = parseNarratorReply(line, state);
+    expect(reply.actions).toEqual([{ type: 'scene', location: 'The shrine gate', description: 'Moss-covered stone.', situation: 'Rain.', threads: ['Who lit the beacon?', 'The wolf pack'], label: 'Update the scene' }]);
+    expect(parseNarratorReply('S.\nACTIONS: [{"type":"scene"}]', state).actions).toEqual([]);
   });
 
   it('keeps at most three actions, and copes with missing or broken lines', () => {

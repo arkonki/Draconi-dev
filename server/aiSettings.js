@@ -40,11 +40,56 @@ export function parseSettingsUpdate(body) {
     if (!MODEL_PATTERN.test(model)) throw new HttpError(400, 'Enter a model id such as google/gemini-2.0-flash-001', 'INVALID_AI_MODEL');
     update.model = model;
   }
+  // A limit is a positive number; an empty value or null removes it.
+  if (body?.monthlyCostCapUsd !== undefined) {
+    const raw = body.monthlyCostCapUsd;
+    if (raw === null || raw === '') update.monthlyCostCapUsd = null;
+    else {
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value <= 0 || value > 100_000) throw new HttpError(400, 'The money limit must be a positive amount in US dollars', 'INVALID_AI_LIMIT');
+      update.monthlyCostCapUsd = Math.round(value * 100) / 100;
+    }
+  }
+  if (body?.monthlyTokenCap !== undefined) {
+    const raw = body.monthlyTokenCap;
+    if (raw === null || raw === '') update.monthlyTokenCap = null;
+    else {
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 1000 || value > 2_000_000_000) throw new HttpError(400, 'The token limit must be a whole number of at least 1000', 'INVALID_AI_LIMIT');
+      update.monthlyTokenCap = value;
+    }
+  }
   if (Object.keys(update).length === 0) throw new HttpError(400, 'Nothing to save', 'NOTHING_TO_SAVE');
   return update;
 }
 
 export const keyHint = (apiKey) => `…${apiKey.slice(-4)}`;
+
+/**
+ * Whether this month's use has reached a limit the person set. `used` holds the month's tokens and cost. A cost limit
+ * can only count what the provider reports a cost for; the token limit counts everything. Returns the message, or null.
+ */
+export function capReached({ costCapUsd, tokenCap }, used) {
+  if (tokenCap !== null && tokenCap !== undefined && used.tokens >= tokenCap) {
+    return `You have used your monthly limit of ${Number(tokenCap).toLocaleString('en-US')} tokens. Raise it in Settings → AI Assistants to continue.`;
+  }
+  if (costCapUsd !== null && costCapUsd !== undefined && used.costUsd >= Number(costCapUsd)) {
+    return `You have reached your monthly limit of $${Number(costCapUsd).toFixed(2)}. Raise it in Settings → AI Assistants to continue.`;
+  }
+  return null;
+}
+
+const monthlyUse = async (userId) => {
+  const { rows } = await pool.query(
+    `SELECT count(*)::int AS calls, COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens,
+            COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, COALESCE(sum(cost_usd), 0) AS cost_usd,
+            count(cost_usd)::int AS priced_calls
+     FROM ai_usage WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
+    [userId],
+  );
+  const row = rows[0];
+  return { calls: row.calls, promptTokens: Number(row.prompt_tokens), completionTokens: Number(row.completion_tokens), tokens: Number(row.prompt_tokens) + Number(row.completion_tokens), costUsd: Number(row.cost_usd), pricedCalls: row.priced_calls };
+};
 
 /** Turns the provider's answer into text and usage, or a clear error. Pure. */
 export function interpretModelResponse(status, payload) {
@@ -117,17 +162,13 @@ export function createSseParser({ onEvent, onDone }) {
 export const estimateTokens = (text) => Math.ceil(String(text ?? '').length / 4);
 
 export async function getAiSettings(user) {
-  const [{ rows: settings }, { rows: usage }] = await Promise.all([
-    pool.query('SELECT api_key_encrypted IS NOT NULL AS has_key, key_hint, model FROM user_ai_settings WHERE user_id = $1', [user.id]),
-    pool.query(
-      `SELECT count(*)::int AS calls, COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens,
-              COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, sum(cost_usd) AS cost_usd
-       FROM ai_usage WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
-      [user.id],
-    ),
+  const [{ rows: settings }, usage] = await Promise.all([
+    pool.query('SELECT api_key_encrypted IS NOT NULL AS has_key, key_hint, model, monthly_cost_cap_usd, monthly_token_cap FROM user_ai_settings WHERE user_id = $1', [user.id]),
+    monthlyUse(user.id),
   ]);
   const row = settings[0];
-  const month = usage[0];
+  const costCapUsd = row?.monthly_cost_cap_usd === null || row?.monthly_cost_cap_usd === undefined ? null : Number(row.monthly_cost_cap_usd);
+  const tokenCap = row?.monthly_token_cap ?? null;
   return {
     storageAvailable: aiKeyStorageAvailable(),
     hasKey: Boolean(row?.has_key),
@@ -136,11 +177,12 @@ export async function getAiSettings(user) {
     defaultModel: DEFAULT_AI_MODEL,
     suggestedModels: SUGGESTED_MODELS,
     usageThisMonth: {
-      calls: month.calls,
-      promptTokens: Number(month.prompt_tokens),
-      completionTokens: Number(month.completion_tokens),
-      costUsd: month.cost_usd === null ? null : Number(month.cost_usd),
+      calls: usage.calls,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      costUsd: usage.pricedCalls > 0 ? usage.costUsd : null,
     },
+    limits: { monthlyCostCapUsd: costCapUsd, monthlyTokenCap: tokenCap, reached: capReached({ costCapUsd, tokenCap }, usage) !== null },
   };
 }
 
@@ -167,15 +209,28 @@ export async function saveAiSettings(user, body, { fetchImpl = fetch } = {}) {
       throw new HttpError(400, 'OpenRouter did not accept this key. Copy it again from openrouter.ai/keys.', 'AI_KEY_REJECTED');
     }
   }
+  const has = (name) => Object.prototype.hasOwnProperty.call(update, name);
   await pool.query(
-    `INSERT INTO user_ai_settings (user_id, api_key_encrypted, key_hint, model)
-     VALUES ($1, $2, $3, COALESCE($4, $5))
+    `INSERT INTO user_ai_settings (user_id, api_key_encrypted, key_hint, model, monthly_cost_cap_usd, monthly_token_cap)
+     VALUES ($1, $2, $3, COALESCE($4, $5), $7::numeric, $9::integer)
      ON CONFLICT (user_id) DO UPDATE SET
        api_key_encrypted = COALESCE($2, user_ai_settings.api_key_encrypted),
        key_hint = COALESCE($3, user_ai_settings.key_hint),
        model = COALESCE($4, user_ai_settings.model),
+       monthly_cost_cap_usd = CASE WHEN $6::boolean THEN $7::numeric ELSE user_ai_settings.monthly_cost_cap_usd END,
+       monthly_token_cap = CASE WHEN $8::boolean THEN $9::integer ELSE user_ai_settings.monthly_token_cap END,
        updated_at = now()`,
-    [user.id, update.apiKey ? encryptSecret(update.apiKey, encryptionSecret()) : null, update.apiKey ? keyHint(update.apiKey) : null, update.model ?? null, DEFAULT_AI_MODEL],
+    [
+      user.id,
+      update.apiKey ? encryptSecret(update.apiKey, encryptionSecret()) : null,
+      update.apiKey ? keyHint(update.apiKey) : null,
+      update.model ?? null,
+      DEFAULT_AI_MODEL,
+      has('monthlyCostCapUsd'),
+      update.monthlyCostCapUsd ?? null,
+      has('monthlyTokenCap'),
+      update.monthlyTokenCap ?? null,
+    ],
   );
   return getAiSettings(user);
 }
@@ -187,7 +242,7 @@ export async function removeAiKey(user) {
 
 /** The person's stored key and model, with the checks every model call needs. */
 async function prepareCall(user) {
-  const { rows } = await pool.query('SELECT api_key_encrypted, model FROM user_ai_settings WHERE user_id = $1', [user.id]);
+  const { rows } = await pool.query('SELECT api_key_encrypted, model, monthly_cost_cap_usd, monthly_token_cap FROM user_ai_settings WHERE user_id = $1', [user.id]);
   const row = rows[0];
   if (!row?.api_key_encrypted) {
     throw new HttpError(409, 'Add your OpenRouter API key in Settings → AI Assistants first.', 'AI_KEY_MISSING');
@@ -195,6 +250,10 @@ async function prepareCall(user) {
   const apiKey = decryptSecret(row.api_key_encrypted, encryptionSecret());
   if (!apiKey) {
     throw new HttpError(409, 'Your stored API key can no longer be read. Enter it again in Settings → AI Assistants.', 'AI_KEY_UNREADABLE');
+  }
+  if (row.monthly_cost_cap_usd !== null || row.monthly_token_cap !== null) {
+    const message = capReached({ costCapUsd: row.monthly_cost_cap_usd, tokenCap: row.monthly_token_cap }, await monthlyUse(user.id));
+    if (message) throw new HttpError(402, message, 'AI_LIMIT_REACHED');
   }
   if (!allowCall(user.id)) throw new HttpError(429, 'Too many AI requests in a minute. Wait a moment.', 'AI_TOO_MANY_REQUESTS');
   return { apiKey, model: row.model };

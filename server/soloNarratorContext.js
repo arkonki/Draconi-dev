@@ -3,6 +3,8 @@
 // Anything the hero has not found yet (hidden places, dangers there, creatures there) is left out, so the narrator
 // cannot spoil it. The model is asked to describe, never to decide: dice and rules stay with the app.
 
+import { languageInstruction } from './soloNarrationLanguage.js';
+
 export const MAX_CONTEXT_CHARS = 9000;
 const ATTRIBUTES = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'];
 const MAX_HISTORY = 8;
@@ -121,6 +123,11 @@ export const NARRATOR_SYSTEM_PROMPT = [
   '  {"type":"check","name":"<a skill from the line Skills the hero has, or an attribute from the line Attributes the hero has>","modifier":"normal|boon|bane","label":"<what the hero attempts, under 60 characters>"}',
   '  {"type":"fortune","question":"<a yes/no question, under 120 characters>","label":"Ask Fortune"}',
   '  {"type":"rest","rest":"round|stretch|shift","label":"Rest"} (only a rest listed under Rests available now)',
+  '  {"type":"search","context":"<what is searched, under 120 characters>","label":"Search the room"} (only when ACTIONS THE APP OFFERS NOW lists search_waypoint)',
+  '  {"type":"scavenge","context":"<what is scavenged, under 120 characters>","label":"Scavenge the camp"} (only when it lists scavenge_waypoint)',
+  '  {"type":"npc","name":"<creature name>","template":"minion|boss","roles":["melee","ranged","sneaky","magic"],"notes":"<short description>","label":"Face the wolf"} (one or two roles; only when it lists generate_solo_npc)',
+  '  {"type":"reveal","title":"<name of the next place>","description":"<what the hero now sees, only facts the hero can know>","label":"Move on"} (only when it lists reveal_waypoint)',
+  '  {"type":"scene","location":"<where the hero is now>","description":"<the place in a sentence or two>","situation":"<what is going on>","threads":["<every thread still open>"],"label":"Update the scene"} (offer it only when the story has clearly moved to a new place or the open threads changed; threads is the complete list still open, keeping the existing unresolved ones; at most one scene action)',
   'Use a boon when the situation clearly favours the hero and a bane when it works against them, otherwise normal. Omit the ACTIONS line when nothing fits. Never mention the ACTIONS line in the story.',
   'If the player asks for something the game summary does not support, say so in a sentence and offer what is possible.',
 ].join('\n');
@@ -139,27 +146,29 @@ export function sanitizeHistory(history) {
     .map((entry) => ({ role: entry.role, content: entry.content.slice(0, MAX_MESSAGE_CHARS) }));
 }
 
-export function buildNarratorMessages({ state, checkpoint = null, summary = '', history, message }) {
+export function buildNarratorMessages({ state, checkpoint = null, summary = '', history, message, language = 'en' }) {
   const trimmed = String(message ?? '').trim().slice(0, MAX_MESSAGE_CHARS);
   const story = String(summary ?? '').trim();
+  const instruction = languageInstruction(language);
   return [
-    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}\n\nGAME SUMMARY\n${buildNarratorContext(state, { checkpoint })}${story ? `\n\nTHE STORY SO FAR (what happened earlier)\n${story}` : ''}` },
+    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}${instruction ? `\n${instruction}` : ''}\n\nGAME SUMMARY\n${buildNarratorContext(state, { checkpoint })}${story ? `\n\nTHE STORY SO FAR (what happened earlier)\n${story}` : ''}` },
     ...sanitizeHistory(history),
     { role: 'user', content: trimmed },
   ];
 }
 
 /** The messages that fold older exchanges into the running summary. */
-export function buildSummaryMessages({ summary = '', turns }) {
+export function buildSummaryMessages({ summary = '', turns, language = 'en' }) {
   const transcript = turns.map((turn) => `${turn.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${String(turn.content).slice(0, MAX_MESSAGE_CHARS)}`).join('\n\n');
   return [
-    { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+    { role: 'system', content: [SUMMARY_SYSTEM_PROMPT, languageInstruction(language).replace(/ Inside the ACTIONS line.*$/, '')].filter(Boolean).join('\n') },
     { role: 'user', content: `STORY SO FAR:\n${String(summary).trim() || '(nothing yet)'}\n\nNEWEST EXCHANGES:\n${transcript}` },
   ];
 }
 
 const FORTUNE_CATEGORIES = new Set(['yes_no', 'number', 'scale', 'power', 'quality', 'reaction']);
 const MAX_ACTIONS = 3;
+const NPC_ROLES = new Set(['melee', 'ranged', 'sneaky', 'magic']);
 
 /**
  * Separates the story from a trailing "ACTIONS: [...]" line and keeps only proposals the game can honour: a skill the
@@ -179,6 +188,7 @@ export function parseNarratorReply(rawText, state) {
   if (!Array.isArray(proposed)) return { text, actions: [] };
 
   const skills = new Map(Object.keys(state?.playerCharacter?.skills ?? {}).map((name) => [name.toLowerCase(), name]));
+  const offered = new Set(state?.allowedNextActions ?? []);
   const rests = new Set(Object.entries(state?.restState?.available ?? {}).filter(([, available]) => available).map(([kind]) => kind));
   const actions = [];
   for (const entry of proposed) {
@@ -203,6 +213,24 @@ export function parseNarratorReply(rawText, state) {
     } else if (entry.type === 'rest') {
       if (!rests.has(entry.rest)) continue;
       actions.push({ type: 'rest', rest: entry.rest, label: label || `Take a ${entry.rest} rest` });
+    } else if (entry.type === 'search' || entry.type === 'scavenge') {
+      if (!offered.has(`${entry.type}_waypoint`)) continue;
+      actions.push({ type: entry.type, context: clip(entry.context, 200), label: label || (entry.type === 'search' ? 'Search here' : 'Scavenge here') });
+    } else if (entry.type === 'npc') {
+      const name = clip(entry.name, 200);
+      if (!name || !offered.has('generate_solo_npc')) continue;
+      const roles = [...new Set((Array.isArray(entry.roles) ? entry.roles : []).filter((role) => NPC_ROLES.has(role)))].slice(0, 2);
+      actions.push({ type: 'npc', name, template: entry.template === 'boss' ? 'boss' : 'minion', roles: roles.length ? roles : ['melee'], notes: clip(entry.notes, 500), label: label || `Face ${name}` });
+    } else if (entry.type === 'reveal') {
+      if (!offered.has('reveal_waypoint')) continue;
+      actions.push({ type: 'reveal', title: clip(entry.title, 200), description: clip(entry.description, 1000), label: label || 'Move on' });
+    } else if (entry.type === 'scene') {
+      if (actions.some((action) => action.type === 'scene')) continue;
+      const location = clip(entry.location, 500);
+      const description = clip(entry.description, 2000);
+      if (!location && !description) continue;
+      const threads = (Array.isArray(entry.threads) ? entry.threads : []).map((thread) => clip(thread, 200)).filter(Boolean).slice(0, 10);
+      actions.push({ type: 'scene', location, description, situation: clip(entry.situation, 1000), threads, label: label || 'Update the scene' });
     }
   }
   return { text, actions };

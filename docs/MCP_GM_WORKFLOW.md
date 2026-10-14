@@ -87,6 +87,9 @@ between them at any time:
   `checkpoint_session` at scene changes, exactly as in standard play. The
   Narrator tab has a **Save checkpoint** button that does the same for a player
   who is not using MCP, starting a session first when none is running.
+- The campaign has a narration language, `solo.narrationLanguage` (`en` or `et` for Estonian), set from the
+  Narrator tab. The built-in narrator and an assistant should both tell the story in it. Tool arguments, skill
+  names and identifiers stay in English; only the story text for the player is translated.
 - The Solo journal and event log show events from every source.
 
 ## Recovery rules

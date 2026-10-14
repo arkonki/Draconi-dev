@@ -36,7 +36,7 @@ import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
 import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
-import { generateStory, getNarratorConversation, narrateSolo, resetNarrator, saveNarratorSummary } from './soloNarrator.js';
+import { generateStory, getNarratorConversation, narrateSolo, polishRecap, resetNarrator, saveNarratorSummary, setNarrationLanguage } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -163,6 +163,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/ai/story' && request.method === 'POST') {
       sendJson(response, 200, await generateStory(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/recap' && request.method === 'POST') {
+      sendJson(response, 200, await polishRecap(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/solo-narrator/language' && request.method === 'PUT') {
+      sendJson(response, 200, await setNarrationLanguage(await currentUser(request), await readJson(request)));
       return;
     }
     if (pathname === '/api/ai/solo-narrator') {

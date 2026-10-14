@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { allowCall, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate } from './aiSettings.js';
+import { allowCall, capReached, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate } from './aiSettings.js';
 
 describe('AI settings', () => {
   it('accepts a key and a model, and trims them', () => {
@@ -64,5 +64,23 @@ describe('AI settings', () => {
   it('estimates tokens when none are reported', () => {
     expect(estimateTokens('12345678')).toBe(2);
     expect(estimateTokens('')).toBe(0);
+  });
+
+  it('accepts monthly limits and lets them be removed', () => {
+    expect(parseSettingsUpdate({ monthlyCostCapUsd: '5.456' })).toEqual({ monthlyCostCapUsd: 5.46 });
+    expect(parseSettingsUpdate({ monthlyCostCapUsd: null, monthlyTokenCap: '' })).toEqual({ monthlyCostCapUsd: null, monthlyTokenCap: null });
+    expect(parseSettingsUpdate({ monthlyTokenCap: 250000 })).toEqual({ monthlyTokenCap: 250000 });
+    expect(() => parseSettingsUpdate({ monthlyCostCapUsd: -1 })).toThrow(/money limit/);
+    expect(() => parseSettingsUpdate({ monthlyCostCapUsd: 'abc' })).toThrow(/money limit/);
+    expect(() => parseSettingsUpdate({ monthlyTokenCap: 10 })).toThrow(/token limit/);
+    expect(() => parseSettingsUpdate({ monthlyTokenCap: 1500.5 })).toThrow(/token limit/);
+  });
+
+  it('stops at a limit, naming it', () => {
+    expect(capReached({ costCapUsd: null, tokenCap: null }, { tokens: 9e9, costUsd: 9e9 })).toBeNull();
+    expect(capReached({ costCapUsd: 5, tokenCap: null }, { tokens: 1, costUsd: 4.99 })).toBeNull();
+    expect(capReached({ costCapUsd: 5, tokenCap: null }, { tokens: 1, costUsd: 5 })).toMatch(/\$5\.00/);
+    expect(capReached({ costCapUsd: null, tokenCap: 100000 }, { tokens: 100000, costUsd: 0 })).toMatch(/100,000 tokens/);
+    expect(capReached({ costCapUsd: 5, tokenCap: 100000 }, { tokens: 10, costUsd: 0 })).toBeNull();
   });
 });

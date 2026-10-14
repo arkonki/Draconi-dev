@@ -110,13 +110,13 @@ export interface SessionStartResult {
 /** Saves a checkpoint of the story: a summary, the scene and the open threads, the same record an AI assistant saves. */
 export async function checkpointCampaignSession(
   partyId: string, sessionId: string, revision: number,
-  input: { summary: string; scene: { location: string; description: string }; unresolvedThreads?: string[] },
+  input: { summary: string; scene: { location: string; description: string; situation?: string }; unresolvedThreads?: string[] },
 ) {
   const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/sessions/${sessionId}/checkpoints`, {
     method: 'POST', headers: writeHeaders(revision),
     body: JSON.stringify({
       summary: input.summary,
-      scene: { schemaVersion: 'current-scene-v1', location: input.scene.location, description: input.scene.description },
+      scene: { schemaVersion: 'current-scene-v1', location: input.scene.location, description: input.scene.description, ...(input.scene.situation ? { situation: input.scene.situation } : {}) },
       unresolved_threads: input.unresolvedThreads,
       reason: 'The player saved a checkpoint of the story from the Narrator tab.',
     }),

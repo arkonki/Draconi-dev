@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookmarkPlus, BookOpenText, Check, Dices, Flag, HelpCircle, Moon, Send } from 'lucide-react';
+import { BookmarkPlus, BookOpenText, Check, ChevronRight, Dices, Flag, Ghost, HelpCircle, MapPin, Moon, PackageSearch, Search, Send } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../shared/Button';
 import { useConfirm } from '../../hooks/useConfirm';
 import {
   fetchAiSettings,
   fetchNarratorConversation,
+  NARRATION_LANGUAGE_OPTIONS,
+  setNarrationLanguage,
+  type NarrationLanguage,
   resetNarrator,
   saveNarratorSummary,
   streamSoloNarrator,
@@ -33,9 +36,21 @@ interface SoloNarratorProps {
   onAction: (action: NarratorAction) => void;
 }
 
-const STARTERS = ['Describe where I am.', 'What do I notice around me?', 'What could I try next?'];
+/** The few words of the narrator's own screen that follow the story's language; the rest of the app stays in English. */
+const TEXT: Record<NarrationLanguage, { starters: string[]; thinking: string; placeholder: string }> = {
+  en: { starters: ['Describe where I am.', 'What do I notice around me?', 'What could I try next?'], thinking: 'The narrator is thinking…', placeholder: 'I step onto the bridge…  (Ctrl or Cmd + Enter to send)' },
+  et: { starters: ['Kirjelda, kus ma olen.', 'Mida ma enda ümber märkan?', 'Mida ma võiksin edasi proovida?'], thinking: 'Jutustaja mõtleb…', placeholder: 'Astun sillale…  (Ctrl või Cmd + Enter saatmiseks)' },
+};
 
-const ACTION_ICONS = { check: Dices, fortune: HelpCircle, rest: Moon } as const;
+const ACTION_ICONS = { check: Dices, fortune: HelpCircle, rest: Moon, search: Search, scavenge: PackageSearch, npc: Ghost, reveal: ChevronRight, scene: MapPin } as const;
+
+/** A scene the narrator proposed, open for the player to edit before it is saved to the campaign. */
+interface SceneDraft { location: string; description: string; situation: string; threads: string }
+
+const usageLabel = (turn: NarratorMessage) => {
+  if (!turn.tokens) return null;
+  return `${turn.tokens.toLocaleString()} tokens${turn.costUsd ? ` · $${turn.costUsd < 0.01 ? turn.costUsd.toFixed(4) : turn.costUsd.toFixed(3)}` : ''}`;
+};
 
 /**
  * Talk to the narrator: say what the hero does and get the scene described, with a few options and, when they fit,
@@ -54,12 +69,15 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [summaryDraft, setSummaryDraft] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sceneDraft, setSceneDraft] = useState<SceneDraft | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const turns: NarratorMessage[] = conversation.data?.turns ?? [];
   const summary = conversation.data?.summary ?? '';
   const hasKey = Boolean(settings.data?.hasKey);
+  const language: NarrationLanguage = conversation.data?.language ?? 'en';
+  const words = TEXT[language];
   const busy = pending !== null;
 
   useEffect(() => { endRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [turns.length, pending?.raw]);
@@ -99,6 +117,11 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
     }
   };
 
+  const languageMutation = useMutation({
+    mutationFn: (next: NarrationLanguage) => setNarrationLanguage(partyId, next),
+    onSuccess: async () => { setError(null); await Promise.all([queryClient.invalidateQueries({ queryKey: conversationKey }), onStateChanged()]); },
+    onError: (failure: Error) => setError(failure.message),
+  });
   const summaryMutation = useMutation({
     mutationFn: (text: string) => saveNarratorSummary(partyId, text),
     onSuccess: async () => { setSummaryDraft(null); await queryClient.invalidateQueries({ queryKey: conversationKey }); },
@@ -111,7 +134,7 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
   });
 
   const checkpointMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (scene?: SceneDraft) => {
       const text = (summary || [...turns].reverse().find((turn) => turn.role === 'assistant')?.content || '').trim();
       if (!text) throw new Error('Play a little first: a checkpoint needs something to remember.');
       let { sessionId, revision } = checkpoint;
@@ -126,13 +149,21 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
         sessionId = started.state_excerpt.session.id;
         revision = started.campaign_revision;
       }
-      await checkpointCampaignSession(partyId, sessionId, revision, { summary: text.slice(0, 10_000), scene: { location: checkpoint.sceneLocation || 'The current scene', description: checkpoint.sceneDescription } });
+      const threads = scene ? scene.threads.split('\n').map((thread) => thread.trim()).filter(Boolean).slice(0, 50) : undefined;
+      await checkpointCampaignSession(partyId, sessionId, revision, {
+        summary: text.slice(0, 10_000),
+        scene: scene
+          ? { location: scene.location.trim() || checkpoint.sceneLocation || 'The current scene', description: scene.description.trim(), situation: scene.situation.trim() || undefined }
+          : { location: checkpoint.sceneLocation || 'The current scene', description: checkpoint.sceneDescription },
+        unresolvedThreads: threads,
+      });
       return true;
     },
     onSuccess: async (saved) => {
       if (!saved) return;
       setError(null);
-      setNotice('Checkpoint saved. Anyone continuing this story, including an AI assistant, starts from it.');
+      setSceneDraft(null);
+      setNotice('Saved. Anyone continuing this story, including an AI assistant, starts from it.');
       await Promise.all([queryClient.invalidateQueries({ queryKey: conversationKey }), onStateChanged()]);
     },
     onError: (failure: Error) => { setNotice(null); setError(failure.message); },
@@ -157,8 +188,14 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
           <h3 className="font-bold text-stone-900">Narrator</h3>
           <p className="text-xs text-stone-500">Say what your hero does or asks. The narrator describes what happens next and remembers the story. It never rolls dice or changes anything: its buttons open the rules on the Adventure tab, where you decide.</p>
         </div>
-        <div className="flex gap-1">
-          {(turns.length > 0 || summary) && <Button type="button" variant="outline" size="sm" icon={Flag} loading={checkpointMutation.isPending} onClick={() => { setNotice(null); checkpointMutation.mutate(); }} title="Save the story so far, the scene and the open threads for anyone who continues it">Save checkpoint</Button>}
+        <div className="flex flex-wrap items-center gap-1">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600" title="The language the story is told in, for the narrator and for any AI assistant connected to this campaign">
+            Story language
+            <select value={language} disabled={languageMutation.isPending || busy} onChange={(event) => languageMutation.mutate(event.target.value as NarrationLanguage)} className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-normal">
+              {NARRATION_LANGUAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {(turns.length > 0 || summary) && <Button type="button" variant="outline" size="sm" icon={Flag} loading={checkpointMutation.isPending} onClick={() => { setNotice(null); checkpointMutation.mutate(undefined); }} title="Save the story so far, the scene and the open threads for anyone who continues it">Save checkpoint</Button>}
           {(turns.length > 0 || summary) && <Button type="button" variant="ghost" size="sm" loading={resetMutation.isPending} onClick={() => void startOver()}>Start over</Button>}
         </div>
       </div>
@@ -202,7 +239,7 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
           <div className="space-y-2 text-sm text-stone-500">
             <p>Try one of these, or write your own.</p>
             <div className="flex flex-wrap gap-2">
-              {STARTERS.map((starter) => (
+              {words.starters.map((starter) => (
                 <button key={starter} type="button" disabled={busy} onClick={() => void send(starter)} className="rounded-full border border-stone-300 px-3 py-1 text-stone-700 hover:bg-stone-50 disabled:opacity-50">{starter}</button>
               ))}
             </div>
@@ -219,7 +256,17 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
                       {turn.actions.map((action, index) => {
                         const Icon = ACTION_ICONS[action.type];
                         return (
-                          <button key={`${action.type}-${index}`} type="button" onClick={() => onAction(action)} className="inline-flex items-center gap-1.5 rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50">
+                          <button
+                            key={`${action.type}-${index}`}
+                            type="button"
+                            onClick={() => {
+                              if (action.type === 'scene') {
+                                setSceneDraft({ location: action.location, description: action.description, situation: action.situation, threads: action.threads.join('\n') });
+                              } else {
+                                onAction(action);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50">
                             <Icon size={12} /> {action.label}
                             {action.type === 'check' && action.modifier !== 'normal' ? <span className="rounded bg-indigo-100 px-1 uppercase">{action.modifier}</span> : null}
                           </button>
@@ -228,12 +275,14 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
                     </div>
                   )}
                   {heroId && (
-                    <div className="mt-2 border-t border-stone-200 pt-1.5 text-xs text-stone-500">
+                    <div className="mt-2 flex items-center justify-between gap-3 border-t border-stone-200 pt-1.5 text-xs text-stone-500">
                       <button type="button" onClick={() => void saveToJournal(turn)} disabled={savedIds.has(turn.id)} className="inline-flex items-center gap-1 hover:text-indigo-700 disabled:text-emerald-700">
                         {savedIds.has(turn.id) ? <><Check size={12} /> Saved to the hero&apos;s journal</> : <><BookmarkPlus size={12} /> Save to the hero&apos;s journal</>}
                       </button>
+                      {usageLabel(turn) && <span title="What this reply used">{usageLabel(turn)}</span>}
                     </div>
                   )}
+                  {!heroId && usageLabel(turn) && <div className="mt-2 border-t border-stone-200 pt-1.5 text-right text-xs text-stone-500">{usageLabel(turn)}</div>}
                 </>
               )}
             </div>
@@ -244,13 +293,36 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
             <div className="flex justify-end"><div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm text-white">{pending.said}</div></div>
             <div className="flex justify-start">
               <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl border border-stone-200 bg-stone-50 px-4 py-2.5 text-sm text-stone-900">
-                {visibleNarration(pending.raw) || <span className="italic text-stone-500">The narrator is thinking…</span>}
+                {visibleNarration(pending.raw) || <span className="italic text-stone-500">{words.thinking}</span>}
               </div>
             </div>
           </>
         )}
         <div ref={endRef} />
       </div>
+
+      {sceneDraft && (
+        <div className="mx-4 mb-3 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 text-sm">
+          <h4 className="font-bold text-indigo-900">Update the scene in the campaign</h4>
+          <p className="text-xs text-indigo-800">The narrator suggests this. Change anything you like, then save it as the campaign's scene and open threads. The narrator and any AI assistant continue from it.</p>
+          <label className="block text-xs font-semibold text-stone-700">Where the hero is
+            <input value={sceneDraft.location} onChange={(event) => setSceneDraft({ ...sceneDraft, location: event.target.value })} maxLength={500} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="block text-xs font-semibold text-stone-700">The place
+            <textarea value={sceneDraft.description} onChange={(event) => setSceneDraft({ ...sceneDraft, description: event.target.value })} rows={2} maxLength={2000} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="block text-xs font-semibold text-stone-700">What is going on
+            <textarea value={sceneDraft.situation} onChange={(event) => setSceneDraft({ ...sceneDraft, situation: event.target.value })} rows={2} maxLength={1000} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="block text-xs font-semibold text-stone-700">Open threads (one per line)
+            <textarea value={sceneDraft.threads} onChange={(event) => setSceneDraft({ ...sceneDraft, threads: event.target.value })} rows={3} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" loading={checkpointMutation.isPending} disabled={!sceneDraft.location.trim() && !sceneDraft.description.trim()} onClick={() => checkpointMutation.mutate(sceneDraft)}>Save to the campaign</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setSceneDraft(null)}>Not now</Button>
+          </div>
+        </div>
+      )}
 
       {error && <p role="alert" className="mx-4 mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-800">{error}</p>}
 
@@ -263,7 +335,7 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
           maxLength={2000}
           disabled={!hasKey}
           aria-label="What does your hero do?"
-          placeholder={hasKey ? 'I step onto the bridge…  (Ctrl or Cmd + Enter to send)' : 'Add your key first'}
+          placeholder={hasKey ? words.placeholder : 'Add your key first'}
           className="min-w-0 flex-1 resize-none rounded-lg border border-stone-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 disabled:bg-stone-100"
         />
         <Button type="submit" icon={Send} loading={busy} disabled={!input.trim() || !hasKey}>Send</Button>
