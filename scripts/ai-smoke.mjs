@@ -37,6 +37,27 @@ const mock = http.createServer((request, response) => {
     if (request.url.endsWith('/auth/key')) { response.end(JSON.stringify({ data: { label: 'test' } })); return; }
     const parsed = JSON.parse(body || '{}');
     seenRequests.push(parsed);
+    if (parsed.tools) {
+      const lastUser = String([...parsed.messages].reverse().find((entry) => entry.role === 'user')?.content ?? '');
+      if (lastUser.includes('TOOLTEST nofn')) { response.statusCode = 404; response.end(JSON.stringify({ error: { message: 'No endpoints found that support tool use.' } })); return; }
+      let toolText = 'You listen to the wind.';
+      let toolCalls = [];
+      if (parsed.messages.at(-1).role === 'tool') toolText = 'You steady yourself. Done.';
+      else if (lastUser.includes('TOOLTEST roll')) { toolText = 'The gate is stuck.'; toolCalls = [['roll_check', { check_type: 'attribute', check_name: 'STR', modifier: 'normal', context: 'Force the gate' }]]; }
+      else if (lastUser.includes('TOOLTEST damage')) { toolText = 'A rock falls.'; toolCalls = [['narrative_damage', { severity: 'slight', context: 'a falling rock' }]]; }
+      else if (lastUser.includes('TOOLTEST two')) { toolText = 'Two things happen.'; toolCalls = [['narrative_damage', { severity: 'slight', context: 'a splinter' }], ['advance_time', { unit: 'stretch', amount: 1, why: 'Searching takes time' }]]; }
+      else if (lastUser.includes('TOOLTEST bad')) { toolText = 'You try something odd.'; toolCalls = [['fly', {}]]; }
+      response.setHeader('content-type', 'text/event-stream');
+      for (const piece of toolText.match(/[\s\S]{1,12}/g)) response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+      toolCalls.forEach(([name, args], index) => {
+        const argumentsText = JSON.stringify(args);
+        response.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, id: `call_${index}_${name}`, type: 'function', function: { name, arguments: argumentsText.slice(0, 10) } }] } }] })}\n\n`);
+        response.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, function: { arguments: argumentsText.slice(10) } }] } }] })}\n\n`);
+      });
+      response.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 400, completion_tokens: 30, cost: 0.0003 } })}\n\n`);
+      response.end('data: [DONE]\n\n');
+      return;
+    }
     const isSummary = String(parsed.messages?.[0]?.content ?? '').includes('You keep the running record');
     const isNarrator = String(parsed.messages?.[0]?.content ?? '').includes('narrator of a solo game');
     const isRecap = String(parsed.messages?.[0]?.content ?? '').includes('write the recap');
@@ -48,7 +69,7 @@ const mock = http.createServer((request, response) => {
       : isRecap
         ? 'The party fought bravely and won the day.'
         : isNarrator
-        ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"npc","name":"Bridge Troll","template":"boss","roles":["melee","ranged","wizard"],"notes":"Mossy and huge"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"damage","amount":9},{"type":"scene","location":"The old bridge","description":"A rope bridge over a gorge.","situation":"Wind is rising.","threads":["The troll"]},{"type":"fortune","question":"Is the bridge safe?"}]'
+        ? 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks\nACTIONS: [{"type":"check","name":"STR","modifier":"bane","label":"Cross the bridge"},{"type":"npc","name":"Bridge Troll","template":"boss","roles":["melee","ranged","wizard"],"notes":"Mossy and huge"},{"type":"check","name":"Flying","label":"Fly away"},{"type":"teleport","where":"home"},{"type":"scene","location":"The old bridge","description":"A rope bridge over a gorge.","situation":"Wind is rising.","threads":["The troll"]},{"type":"fortune","question":"Is the bridge safe?"}]'
         : 'You step onto the bridge. It groans.\n1. Cross quickly\n2. Test the planks';
     const usage = { prompt_tokens: 321, completion_tokens: 45, prompt_tokens_details: { cached_tokens: 128 }, cost: 0.0002 };
     if (parsed.stream) {
@@ -140,6 +161,8 @@ try {
     headers: { 'if-match': `"${options.campaignRevision}"`, 'idempotency-key': `ai-${randomUUID()}` },
     body: { player_character_id: hero.id, mode: 'custom', reason: 'AI smoke test' },
   }), 200, 'switch solo on');
+  // The older checks below are about the suggestion buttons; the tools get their own section further down.
+  await ok(call('PUT', '/ai/solo-narrator/mode', { token: tokens.alice, body: { partyId: party.id, mode: 'suggest' } }), 200, 'only suggest');
 
   const turn = await ok(narrate(tokens.alice, { partyId: party.id, message: 'I step onto the bridge' }), 200, 'a narrator turn');
   assert.match(turn.text, /bridge/);
@@ -183,6 +206,20 @@ try {
   await setGear({ weapons: [] });
   results.narratorGear = 'passed';
 
+  // The narrator is told what the dice said, the way an assistant is by the tool that rolled them.
+  const rolledCheck = (await ok(call('POST', `/v1/campaigns/${party.id}/solo/checks`, {
+    token: tokens.alice,
+    headers: { 'if-match': `"${(await soloSnapshotEarly()).campaignRevision}"`, 'idempotency-key': `chk-${randomUUID()}` },
+    body: { check_type: 'attribute', check_name: 'STR', modifier: 'normal', context: 'Force the gate', reason: 'smoke' },
+  }), 200, 'a solo check')).data;
+  const outcome = rolledCheck.state_excerpt.check.outcome;
+  await narrate(tokens.alice, { partyId: party.id, message: 'What happened?' });
+  const knowsRoll = lastContext();
+  assert.ok(knowsRoll.includes(`STR attribute check (Force the gate): rolled ${rolledCheck.state_excerpt.check.roll} against 13`), 'the narrator reads what was rolled');
+  assert.ok(knowsRoll.includes({ dragon: 'DRAGON', demon: 'DEMON', success: 'SUCCESS', failure: 'FAILURE' }[outcome]), 'and how it came out');
+  assert.equal(knowsRoll.includes('AWAITING THE PLAYER'), ['failure', 'demon'].includes(outcome), 'a failed check is flagged as not yet settled');
+  results.narratorKnowsRolls = 'passed';
+
   // Streaming: the answer arrives in pieces and ends with the finished turn.
   const streamResponse = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.alice}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'I look down' }) });
   assert.equal(streamResponse.status, 200);
@@ -194,7 +231,7 @@ try {
   assert.match(done.text, /bridge/);
   assert.equal(done.actions.length, 3);
   assert.equal(done.usage.promptTokens, 321, 'usage comes from the final chunk');
-  assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 10, 'a streamed turn is stored too');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'after streaming')).turns.length, 12, 'a streamed turn is stored too');
   const failedStream = await fetch(`${apiBase}/ai/solo-narrator/stream`, { method: 'POST', headers: { authorization: `Bearer ${tokens.bob}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, message: 'hi' }) });
   assert.equal(failedStream.status, 403, 'a problem before the first word is an ordinary error');
 
@@ -340,6 +377,103 @@ try {
   await ok(call('POST', '/ai/solo-stories/continue', { token: tokens.bob, body: { partyId: party.id, storyId: kept[0].id } }), 403, 'a stranger cannot continue it');
   results.storyLibrary = 'passed';
 
+  // --- The narrator with tools: the same game operations as an AI assistant over MCP ---
+  const mode = (token, value) => call('PUT', '/ai/solo-narrator/mode', { token, body: { partyId: party.id, mode: value } });
+  await ok(mode(tokens.alice, 'nonsense'), 400, 'a mode that does not exist');
+  await ok(mode(tokens.bob, 'ask'), 403, 'a stranger cannot change what the narrator may do');
+  assert.equal((await ok(mode(tokens.alice, 'ask'), 200, 'ask first')).mode, 'ask');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'conversation')).mode, 'ask', 'the page can read the mode');
+  const hp = async () => (await soloSnapshotEarly()).playerCharacter.hp.current;
+  const lastTools = () => seenRequests.at(-1);
+
+  // Tier 1: a roll runs at once, and the narrator is given the result in the same reply.
+  const rolledTurn = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST roll the gate' }), 200, 'a turn with a roll');
+  assert.equal(rolledTurn.awaiting, 0);
+  assert.deepEqual(rolledTurn.toolCalls.map((entry) => [entry.name, entry.status]), [['roll_check', 'done']]);
+  assert.match(rolledTurn.toolCalls[0].summary, /^STR attribute check \(Force the gate\): rolled \d+ against 13 → (SUCCESS|FAILURE|DRAGON|DEMON)/);
+  assert.match(rolledTurn.text, /The gate is stuck\.\n\nYou steady yourself\. Done\./, 'the narration continues after the roll, in one reply');
+  assert.ok(lastTools().messages.some((entry) => entry.role === 'tool' && entry.content.includes('STR attribute check (Force the gate)')), 'the model was told what was rolled');
+  assert.ok(lastTools().messages.some((entry) => entry.role === 'assistant' && entry.tool_calls?.[0]?.function?.name === 'roll_check'), 'together with its own call');
+  assert.ok((await database.query("SELECT count(*)::int AS n FROM solo_narrator_turns WHERE id = $1 AND tool_calls IS NOT NULL", [rolledTurn.id])).rows[0].n === 1, 'what the narrator did is kept with the reply');
+
+  // Tier 2: a change waits for the player, and nothing has happened until it is approved.
+  const hpBefore = await hp();
+  const waiting = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage the rock' }), 200, 'a turn with a change');
+  assert.equal(waiting.awaiting, 1);
+  assert.equal(waiting.toolCalls[0].status, 'pending');
+  assert.equal(waiting.toolCalls[0].tier, 'approve');
+  assert.equal(await hp(), hpBefore, 'nothing happens before the player approves');
+  assert.equal(waiting.text, 'A rock falls.', 'the turn pauses after the lead-in');
+  const shown = (await ok(conversation(tokens.alice), 200, 'conversation')).turns.at(-1);
+  assert.equal(shown.toolCalls[0].status, 'pending', 'a waiting action is still there after a reload');
+  const decide = (token, turnId, callId, decision) => call('POST', '/ai/solo-narrator/decide', { token, body: { partyId: party.id, turnId, callId, decision } });
+  await ok(decide(tokens.bob, waiting.id, waiting.toolCalls[0].id, 'approve'), 403, 'a stranger cannot approve');
+  await ok(decide(tokens.alice, waiting.id, waiting.toolCalls[0].id, 'maybe'), 400, 'only approve or decline');
+  await ok(decide(tokens.alice, waiting.id, 'nope', 'approve'), 404, 'an action that does not exist');
+  const resumeRequest = (token, turnId) => fetch(`${apiBase}/ai/solo-narrator/resume`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ partyId: party.id, turnId }) });
+  assert.equal((await resumeRequest(tokens.alice, waiting.id)).status, 409, 'the story cannot go on while the player has not decided');
+  const approved = await ok(decide(tokens.alice, waiting.id, waiting.toolCalls[0].id, 'approve'), 200, 'approve');
+  assert.equal(approved.awaiting, 0);
+  assert.equal(approved.turn.toolCalls[0].status, 'done');
+  assert.ok(await hp() < hpBefore, 'once approved, the server applies the damage');
+  await ok(decide(tokens.alice, waiting.id, waiting.toolCalls[0].id, 'approve'), 409, 'a call is decided only once');
+  const resumed = await resumeRequest(tokens.alice, waiting.id);
+  assert.equal(resumed.status, 200);
+  const resumedRaw = await resumed.text();
+  assert.match(resumedRaw, /event: delta/);
+  assert.match(resumedRaw, /event: done/);
+  const resumedDone = JSON.parse(resumedRaw.match(/event: done\ndata: (.*)\n/)[1]);
+  assert.equal(resumedDone.text, 'You steady yourself. Done.');
+  assert.ok(lastTools().messages.some((entry) => entry.role === 'tool' && entry.content.includes('Hero now: HP')), 'the narrator is told what happened and how the hero is');
+  const carriedOn = (await ok(conversation(tokens.alice), 200, 'conversation')).turns.at(-1);
+  assert.equal(carriedOn.content, 'A rock falls.\n\nYou steady yourself. Done.', 'the rest of the scene is added to the same reply');
+  assert.equal((await resumeRequest(tokens.alice, waiting.id)).status, 409, 'a finished reply cannot be resumed again');
+
+  // A declined change does not happen, and the narrator is told so.
+  const hpKept = await hp();
+  const refused = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage again' }), 200, 'another change');
+  assert.equal((await ok(decide(tokens.alice, refused.id, refused.toolCalls[0].id, 'decline'), 200, 'decline')).turn.toolCalls[0].status, 'declined');
+  assert.equal((await resumeRequest(tokens.alice, refused.id)).status, 200);
+  assert.ok(lastTools().messages.some((entry) => entry.role === 'tool' && entry.content.includes('declined')), 'the narrator is told it was declined');
+  assert.equal(await hp(), hpKept, 'and nothing changed');
+
+  // Several calls in one reply are each decided; the story goes on once all are.
+  const both = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST two things' }), 200, 'two changes');
+  assert.equal(both.awaiting, 2);
+  assert.equal((await ok(decide(tokens.alice, both.id, both.toolCalls[0].id, 'decline'), 200, 'first')).awaiting, 1);
+  assert.equal((await ok(decide(tokens.alice, both.id, both.toolCalls[1].id, 'approve'), 200, 'second')).awaiting, 0);
+  assert.equal((await resumeRequest(tokens.alice, both.id)).status, 200);
+
+  // Saying something else gives up what was waiting.
+  const stale = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage once more' }), 200, 'a change that is not answered');
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'Never mind, I wait.' }), 200, 'the player moves on');
+  assert.equal((await ok(conversation(tokens.alice), 200, 'conversation')).turns.find((entry) => entry.id === stale.id).toolCalls[0].status, 'expired');
+  await ok(decide(tokens.alice, stale.id, stale.toolCalls[0].id, 'approve'), 409, 'an expired action cannot be approved');
+
+  // Trust: the campaign lets the narrator act on its own.
+  await ok(mode(tokens.alice, 'trust'), 200, 'trust');
+  const hpTrust = await hp();
+  const trusted = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage trusted' }), 200, 'a change in trust mode');
+  assert.equal(trusted.awaiting, 0);
+  assert.equal(trusted.toolCalls[0].status, 'done');
+  assert.ok(await hp() < hpTrust, 'it is applied at once');
+  assert.equal(trusted.text, 'A rock falls.\n\nYou steady yourself. Done.');
+
+  // A call the game does not have is a problem the narrator hears about, not a failure of the turn.
+  await ok(mode(tokens.alice, 'ask'), 200, 'ask again');
+  const odd = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST bad idea' }), 200, 'an odd call');
+  assert.deepEqual([odd.toolCalls[0].status, odd.toolCalls[0].error], ['failed', 'There is no tool called fly.']);
+  assert.ok(lastTools().messages.some((entry) => entry.role === 'tool' && entry.content.startsWith('Problem: There is no tool called fly.')));
+
+  // A model that cannot use tools gets plain suggestions instead.
+  const fallback = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST nofn' }), 200, 'a model without tools');
+  assert.equal(fallback.toolsUnavailable, true);
+  assert.deepEqual(fallback.toolCalls, []);
+  assert.ok(fallback.actions.length > 0, 'and the old suggestion buttons');
+  assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'solo'")).rows[0].n > 0);
+  await ok(mode(tokens.alice, 'suggest'), 200, 'back to suggestions');
+  results.narratorTools = 'passed';
+
   const polish = (token, body) => call('POST', '/ai/recap', { token, body });
   // --- Story language: one setting for the campaign, read by the narrator and by assistants ---
   const setLanguage = (token, language) => call('PUT', '/ai/solo-narrator/language', { token, body: { partyId: party.id, language } });
@@ -410,7 +544,7 @@ try {
   await ok(narrate(tokens.alice, { partyId: 'not-a-uuid', message: 'hi' }), 400, 'a bad campaign id');
   await ok(narrate(tokens.alice, { partyId: party.id, message: '  ' }), 400, 'an empty message');
   const reset = await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.alice }), 200, 'start over');
-  assert.deepEqual(reset, { turns: [], summary: '', language: 'en', glossary: { custom: null, builtIn: '', terms: 0 }, campaign: null });
+  assert.deepEqual(reset, { turns: [], summary: '', language: 'en', mode: 'suggest', glossary: { custom: null, builtIn: '', terms: 0 }, campaign: null });
   assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1', [party.id])).rows[0].n, 0);
   results.soloNarrator = 'passed';
 

@@ -69,6 +69,19 @@ describe('solo narrator context', () => {
     expect(context).toContain('A rotten bridge.');
   });
 
+  it('gives the narrator the dice results, outcome first, and what is still unsettled', () => {
+    const rolled = buildNarratorContext({
+      ...state,
+      allowedNextActions: ['resolve_solo_check', 'push_solo_check', 'resolve_solo_check_consequence'],
+      latestRolls: [{ id: 'r1', purpose: 'Solo skill: Sneaking', result: { action: 'solo_check', checkType: 'skill', checkName: 'Sneaking', target: 12, modifier: 'normal', check: { dice: [15], roll: 15, target: 12, outcome: 'failure' }, outcome: 'failure', requiresFailForward: true } }],
+      journal: { recentEvents: [{ type: 'solo.check_resolved', sourceType: 'user', payload: { rollId: 'r1', checkName: 'Sneaking', outcome: 'failure' } }] },
+    });
+    expect(rolled).toContain('LATEST ROLLS (newest first');
+    expect(rolled).toContain('Sneaking skill check: rolled 15 against 12 → FAILURE.');
+    expect(rolled).toContain('AWAITING THE PLAYER');
+    expect(rolled).not.toContain('solo.check_resolved');
+  });
+
   it('copes with an empty state and stays within its size limit', () => {
     expect(buildNarratorContext({})).toContain('MISSION: none is under way.');
     const huge = { ...state, journal: { recentEvents: Array.from({ length: 40 }, () => ({ type: 'x', payload: { text: 'y'.repeat(500) } })) } };
@@ -249,6 +262,26 @@ describe('narrator reply parsing', () => {
     expect(reveal.actions).toEqual([{ type: 'reveal', title: 'The Flooded Gallery', description: 'Water to the knees.', label: 'Move on' }]);
     const defaults = parseNarratorReply('T.\nACTIONS: [{"type":"npc","name":"Wolf"}]', offered);
     expect(defaults.actions[0]).toMatchObject({ template: 'minion', roles: ['melee'] });
+  });
+
+  it('proposes the rule actions an AI assistant also has, only when the game offers them', () => {
+    const offered = { ...state, allowedNextActions: ['push_solo_check', 'resolve_solo_check_consequence', 'draw_inspiration', 'resolve_solo_narrative_damage', 'advance_threat', 'begin_solo_return', 'resolve_solo_dying_action'] };
+    const line = 'S.\nACTIONS: [{"type":"push"},{"type":"consequence","label":"Pay for it"},{"type":"inspiration","context":"a way out"}]';
+    expect(parseNarratorReply(line, offered).actions).toEqual([
+      { type: 'push', label: 'Push the roll' },
+      { type: 'consequence', label: 'Pay for it' },
+      { type: 'inspiration', context: 'a way out', label: 'Draw inspiration' },
+    ]);
+    const more = 'S.\nACTIONS: [{"type":"damage","context":"a fall","label":"Fall"},{"type":"threat","amount":2},{"type":"leave"}]';
+    expect(parseNarratorReply(more, offered).actions).toEqual([
+      { type: 'damage', context: 'a fall', label: 'Fall' },
+      { type: 'threat', amount: 2, label: 'Time runs out' },
+      { type: 'leave', label: 'Leave the site' },
+    ]);
+    expect(parseNarratorReply('S.\nACTIONS: [{"type":"dying"}]', offered).actions).toEqual([{ type: 'dying', label: 'Fight to live' }]);
+    // nothing the game does not offer
+    expect(parseNarratorReply(line, { ...state, allowedNextActions: ['draw_inspiration'] }).actions.map((action) => action.type)).toEqual(['inspiration']);
+    expect(parseNarratorReply('S.\nACTIONS: [{"type":"push"},{"type":"threat"},{"type":"leave"},{"type":"dying"}]', { ...state, allowedNextActions: [] }).actions).toEqual([]);
   });
 
   it('proposes a scene update with a tidy thread list, once', () => {

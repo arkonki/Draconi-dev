@@ -80,13 +80,15 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
 import { SoloNarrator } from './SoloNarrator';
+import { SoloNarratorDrawer, SoloNarratorLaunch } from './SoloNarratorPanel';
+import { awaitingApprovals } from './narratorToolText';
 import { SoloEndStory } from './SoloEndStory';
 import { SoloStartStory } from './SoloStartStory';
 import { SoloGear } from './SoloGear';
 import { useConfirm } from '../../hooks/useConfirm';
 import { SoloStoryLibrary } from './SoloStoryLibrary';
 import { continueFromStory, type SoloStory } from '../../lib/api/soloStories';
-import type { NarratorAction } from '../../lib/api/ai';
+import { fetchNarratorConversation, type NarratorAction } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { ScreenLanguageProvider, createTranslator, tr, useScreenLanguage, useT, type ScreenLanguagePreference, type Translator } from '../../i18n/translate';
@@ -399,6 +401,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
   const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('story');
   const [endStoryOpen, setEndStoryOpen] = useState(false);
+  const [narratorOpen, setNarratorOpen] = useState(false);
   const [startStory, setStartStory] = useState<{ idea: string } | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -504,6 +507,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     staleTime: 0,
   });
   const state = stateQuery.data;
+  // The narrator lives in its own panel above all the tabs, so its conversation is read here too (the same cached query).
+  const narratorConversation = useQuery({ queryKey: ['solo-narrator', partyId], queryFn: () => fetchNarratorConversation(partyId), enabled: canManage });
+  const narratorWaiting = awaitingApprovals(narratorConversation.data);
   // The screens follow the language the story is told in, unless this person chose another one for themselves.
   const { language: screenLanguage, preference: screenPreference, setPreference: setScreenPreference } = useScreenLanguage(state?.solo.narrationLanguage);
   const t = useMemo(() => createTranslator(screenLanguage), [screenLanguage]);
@@ -1022,6 +1028,25 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     } else if (proposal.type === 'rest') {
       openAction('rest');
       setRestType(proposal.rest);
+    } else if (proposal.type === 'push') {
+      const target = pushableRolls[0];
+      if (target) openPushAction(target.id);
+    } else if (proposal.type === 'consequence') {
+      const target = unresolvedRolls[0];
+      if (target) openConsequenceAction(target.id);
+    } else if (proposal.type === 'inspiration') {
+      openAction('inspiration');
+      setInspirationContext(proposal.context);
+    } else if (proposal.type === 'damage') {
+      openAction('damage');
+      setDamageContext(proposal.context);
+    } else if (proposal.type === 'threat') {
+      setThreatAmount(proposal.amount);
+      openAction('advance-threat');
+    } else if (proposal.type === 'leave') {
+      openAction('return');
+    } else if (proposal.type === 'dying') {
+      openAction('dying');
     }
   };
 
@@ -1282,6 +1307,11 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </select>
             </label>
             {canManage && (
+              <Button variant="outline" size="sm" icon={MessageSquareText} onClick={() => setNarratorOpen((open) => !open)} aria-expanded={narratorOpen} className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                {t('Narrator')}{narratorWaiting > 0 && <span className="ml-1 rounded-full bg-amber-300 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-950">{narratorWaiting}</span>}
+              </Button>
+            )}
+            {canManage && (
               <Button variant="outline" size="sm" icon={Settings2} onClick={onOpenSettings} className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
                 {t('Solo settings')}
               </Button>
@@ -1337,24 +1367,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             {activeDashboardTab === 'story' && startStoryBanner}
             {activeDashboardTab === 'story' && quickTools}
             {activeDashboardTab === 'stories' && <SoloStoryLibrary partyId={partyId} canManage={canManage} onContinue={(story) => void handleContinueStory(story)} />}
-            {activeDashboardTab === 'story' && (
-              <SoloNarrator
-                partyId={partyId}
-                partyName={partyName}
-                heroId={state.playerCharacter?.id ?? null}
-                currentUserId={currentUserId}
-                canUse={canManage}
-                checkpoint={{
-                  revision: state.campaignRevision,
-                  sessionId: state.activeSessionId ?? null,
-                  sceneLocation: journal.currentScene?.location ? String(journal.currentScene.location) : state.currentWaypoint?.title || '',
-                  sceneDescription: journal.currentScene?.description ? String(journal.currentScene.description) : '',
-                }}
-                onStateChanged={() => queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] })}
-                onAction={startNarratorAction}
-                onEndStory={() => setEndStoryOpen(true)}
-              />
-            )}
+            {activeDashboardTab === 'story' && <SoloNarratorLaunch conversation={narratorConversation.data} canUse={canManage} onOpen={() => setNarratorOpen(true)} />}
 
             {(activeDashboardTab === 'adventure' || activeDashboardTab === 'story') && unresolvedRolls.length > 0 && (
               <section className="order-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
@@ -1990,6 +2003,28 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         />
       )}
       {confirmDialog}
+
+      {canManage && (
+        <SoloNarratorDrawer open={narratorOpen} onClose={() => setNarratorOpen(false)}>
+          <SoloNarrator
+            fill
+            partyId={partyId}
+            partyName={partyName}
+            heroId={state.playerCharacter?.id ?? null}
+            currentUserId={currentUserId}
+            canUse={canManage}
+            checkpoint={{
+              revision: state.campaignRevision,
+              sessionId: state.activeSessionId ?? null,
+              sceneLocation: journal.currentScene?.location ? String(journal.currentScene.location) : state.currentWaypoint?.title || '',
+              sceneDescription: journal.currentScene?.description ? String(journal.currentScene.description) : '',
+            }}
+            onStateChanged={() => queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] })}
+            onAction={startNarratorAction}
+            onEndStory={() => setEndStoryOpen(true)}
+          />
+        </SoloNarratorDrawer>
+      )}
 
       {endStoryOpen && (
         <SoloEndStory

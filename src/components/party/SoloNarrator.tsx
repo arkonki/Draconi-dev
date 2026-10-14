@@ -1,22 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookCheck, BookmarkPlus, BookOpenText, Check, ChevronRight, Dices, Flag, Ghost, HelpCircle, MapPin, Moon, PackageSearch, Search, Send } from 'lucide-react';
+import { AlertTriangle, BookCheck, BookmarkPlus, BookOpenText, Check, ChevronRight, Dices, Flag, Ghost, HeartPulse, HelpCircle, Hourglass, MapPin, Moon, PackageSearch, Route, Search, Send, Skull, Wand2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../shared/Button';
 import { useConfirm } from '../../hooks/useConfirm';
 import {
+  decideNarratorCall,
   fetchAiSettings,
   fetchNarratorConversation,
   NARRATION_LANGUAGE_OPTIONS,
+  resumeSoloNarrator,
   setNarrationGlossary,
   setNarrationLanguage,
+  setNarratorMode,
   type NarrationLanguage,
   resetNarrator,
   saveNarratorSummary,
   streamSoloNarrator,
   type NarratorAction,
   type NarratorMessage,
+  type NarratorMode,
+  type NarratorToolCall,
 } from '../../lib/api/ai';
+import { toolTitle } from './narratorToolText';
 import { saveCharacterJournalEntry } from '../../lib/api/journal';
 import { checkpointCampaignSession, startCampaignSession } from '../../lib/api/campaignTime';
 import { visibleNarration } from '../../lib/narratorText';
@@ -38,9 +44,11 @@ interface SoloNarratorProps {
   onEndStory: () => void;
   /** Opens the matching rules dialog on the Adventure tab, filled in. Nothing is rolled until the player confirms there. */
   onAction: (action: NarratorAction) => void;
+  /** Fill the height of the panel it sits in (the narrator panel) instead of standing as a card on the page. */
+  fill?: boolean;
 }
 
-const ACTION_ICONS = { check: Dices, fortune: HelpCircle, rest: Moon, search: Search, scavenge: PackageSearch, npc: Ghost, reveal: ChevronRight, scene: MapPin } as const;
+const ACTION_ICONS = { check: Dices, fortune: HelpCircle, rest: Moon, search: Search, scavenge: PackageSearch, npc: Ghost, reveal: ChevronRight, scene: MapPin, push: Dices, consequence: AlertTriangle, inspiration: Wand2, damage: HeartPulse, threat: Hourglass, leave: Route, dying: Skull } as const;
 
 /** A scene the narrator proposed, open for the player to edit before it is saved to the campaign. */
 interface SceneDraft { location: string; description: string; situation: string; threads: string }
@@ -55,7 +63,7 @@ const usageLabel = (turn: NarratorMessage) => {
  * buttons that open the right rules dialog. It remembers the story. It writes prose and proposes; dice, hit points and
  * every rule stay with the Adventure tab.
  */
-export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse, checkpoint, onStateChanged, onAction, onEndStory }: SoloNarratorProps) {
+export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse, checkpoint, onStateChanged, onAction, onEndStory, fill = false }: SoloNarratorProps) {
   const t = useT();
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -63,7 +71,9 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
   const conversationKey = ['solo-narrator', partyId] as const;
   const conversation = useQuery({ queryKey: conversationKey, queryFn: () => fetchNarratorConversation(partyId), enabled: canUse });
   const [input, setInput] = useState('');
-  const [pending, setPending] = useState<{ said: string; raw: string } | null>(null);
+  const [pending, setPending] = useState<{ said: string | null; raw: string } | null>(null);
+  const [liveTools, setLiveTools] = useState<Array<Pick<NarratorToolCall, 'id' | 'name' | 'label' | 'status' | 'summary' | 'error'> & { args?: Record<string, unknown> }>>([]);
+  const [deciding, setDeciding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [summaryDraft, setSummaryDraft] = useState<string | null>(null);
@@ -77,35 +87,81 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
   const summary = conversation.data?.summary ?? '';
   const hasKey = Boolean(settings.data?.hasKey);
   const language: NarrationLanguage = conversation.data?.language ?? 'en';
+  const mode: NarratorMode = conversation.data?.mode ?? 'ask';
   const busy = pending !== null;
   const starters = [t('Describe where I am.'), t('What do I notice around me?'), t('What could I try next?')];
 
   useEffect(() => { endRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [turns.length, pending?.raw]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const send = async (text: string) => {
-    const message = text.trim();
-    if (!message || busy) return;
+  const streaming = async (run: (handlers: { signal: AbortSignal; onDelta: (piece: string) => void; onTool: (call: (typeof liveTools)[number]) => void }) => Promise<{ toolsUnavailable?: boolean }>, said: string | null, restore?: () => void) => {
     setError(null);
-    setInput('');
-    setPending({ said: message, raw: '' });
+    setNotice(null);
+    setLiveTools([]);
+    setPending({ said, raw: '' });
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      await streamSoloNarrator(partyId, message, { signal: controller.signal, onDelta: (piece) => setPending((current) => (current ? { ...current, raw: current.raw + piece } : current)) });
+      const answer = await run({
+        signal: controller.signal,
+        onDelta: (piece) => setPending((current) => (current ? { ...current, raw: current.raw + piece } : current)),
+        onTool: (call) => setLiveTools((current) => (current.some((entry) => entry.id === call.id) ? current.map((entry) => (entry.id === call.id ? call : entry)) : [...current, call])),
+      });
+      if (answer.toolsUnavailable) setNotice(t('The chosen model cannot use tools, so the narrator only made suggestions. Pick another model in Settings, AI Assistants, to let it act.'));
       await queryClient.invalidateQueries({ queryKey: conversationKey });
       // The exchange is now part of the campaign's event log, so the journal and logs tabs have something new.
       await onStateChanged();
     } catch (failure) {
       if (!controller.signal.aborted) {
         setError(failure instanceof Error ? failure.message : t('The narrator could not answer.'));
-        // Give the message back so it is not lost.
-        setInput(message);
+        restore?.();
+        await queryClient.invalidateQueries({ queryKey: conversationKey });
       }
     } finally {
       setPending(null);
+      setLiveTools([]);
     }
   };
+
+  const send = async (text: string) => {
+    const message = text.trim();
+    if (!message || busy) return;
+    setInput('');
+    // Give the message back if it did not go through, so it is not lost.
+    await streaming((handlers) => streamSoloNarrator(partyId, message, handlers), message, () => setInput(message));
+  };
+
+  /** Carries a reply on once what it waited for has been decided. */
+  const resume = async (turnId: string) => {
+    if (busy) return;
+    await streaming((handlers) => resumeSoloNarrator(partyId, turnId, handlers), null);
+  };
+
+  /** The player approves or declines one thing the narrator wants to do; when none is left waiting, the story goes on. */
+  const decide = async (turn: NarratorMessage, call: NarratorToolCall, decision: 'approve' | 'decline') => {
+    setDeciding(call.id);
+    setError(null);
+    try {
+      const result = await decideNarratorCall(partyId, turn.id, call.id, decision);
+      await queryClient.invalidateQueries({ queryKey: conversationKey });
+      if (decision === 'approve') await onStateChanged();
+      if (result.awaiting === 0) {
+        setDeciding(null);
+        await resume(turn.id);
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : t('Could not do that.'));
+      await queryClient.invalidateQueries({ queryKey: conversationKey });
+    } finally {
+      setDeciding(null);
+    }
+  };
+
+  const modeMutation = useMutation({
+    mutationFn: (next: NarratorMode) => setNarratorMode(partyId, next),
+    onSuccess: async () => { setError(null); await queryClient.invalidateQueries({ queryKey: conversationKey }); },
+    onError: (failure: Error) => setError(failure.message),
+  });
 
   const saveToJournal = async (turn: NarratorMessage) => {
     if (!heroId || !currentUserId) return;
@@ -187,11 +243,23 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
   const draft = summaryDraft ?? summary;
 
   return (
-    <section aria-label={t('Solo narrator')} className="flex min-h-[460px] flex-col rounded-2xl border border-stone-200 bg-white shadow-sm">
+    <section aria-label={t('Solo narrator')} className={fill ? 'flex h-full min-h-0 flex-col bg-white' : 'flex min-h-[460px] flex-col rounded-2xl border border-stone-200 bg-white shadow-sm'}>
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-stone-200 px-4 py-3">
         <div className="min-w-0">
-          <h3 className="font-bold text-stone-900">{t('Narrator')}</h3>
-          <p className="text-xs text-stone-500">{t('Say what your hero does or asks. The narrator describes what happens next and remembers the story. It never rolls dice or changes anything: its buttons open the rules on the Adventure tab, where you decide.')}</p>
+          {!fill && <h3 className="font-bold text-stone-900">{t('Narrator')}</h3>}
+          <p className="text-xs text-stone-500">{t(mode === 'suggest'
+            ? 'Say what your hero does or asks. The narrator describes what happens next and remembers the story. It never rolls dice or changes anything: its buttons open the rules on the Adventure tab, where you decide.'
+            : mode === 'trust'
+              ? 'Say what your hero does or asks. The narrator describes what happens next, rolls dice and uses the game\'s tools by itself. Everything it did is listed under its reply.'
+              : 'Say what your hero does or asks. The narrator describes what happens next and rolls dice for risky moments. Before it changes anything, such as damage, a rest or a threat, it asks you.')}</p>
+          <label className="mt-2 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-stone-600" title={t('How much the narrator may do on its own. Ending a mission, ending the session, starting a mission and combat always stay with you.')}>
+            {t('The narrator may')}
+            <select value={mode} disabled={modeMutation.isPending || busy} onChange={(event) => modeMutation.mutate(event.target.value as NarratorMode)} className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-normal">
+              <option value="suggest">{t('Only suggest')}</option>
+              <option value="ask">{t('Act after I approve')}</option>
+              <option value="trust">{t('Act on its own')}</option>
+            </select>
+          </label>
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600" title={t('The language the story is told in, for the narrator and for any AI assistant connected to this campaign')}>
@@ -270,6 +338,12 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
               {turn.content}
               {turn.role === 'assistant' && (
                 <>
+                  {(turn.toolCalls?.length ?? 0) > 0 && (
+                    <ToolCallList calls={turn.toolCalls ?? []} deciding={deciding} busy={busy} onDecide={(call, decision) => void decide(turn, call, decision)} />
+                  )}
+                  {turn.canResume && turn.id === lastTurn?.id && !busy && (
+                    <div className="mt-2"><Button type="button" size="sm" variant="outline" onClick={() => void resume(turn.id)}>{t('Continue the story')}</Button></div>
+                  )}
                   {turn.id === lastTurn?.id && turn.actions.length > 0 && !busy && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {turn.actions.map((action, index) => {
@@ -309,10 +383,11 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
         ))}
         {pending && (
           <>
-            <div className="flex justify-end"><div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm text-white">{pending.said}</div></div>
+            {pending.said && <div className="flex justify-end"><div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm text-white">{pending.said}</div></div>}
             <div className="flex justify-start">
               <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl border border-stone-200 bg-stone-50 px-4 py-2.5 text-sm text-stone-900">
                 {visibleNarration(pending.raw) || <span className="italic text-stone-500">{t('The narrator is thinking…')}</span>}
+                {liveTools.length > 0 && <ToolCallList calls={liveTools.map((call) => ({ ...call, args: call.args ?? {}, tier: 'auto' as const }))} deciding={null} busy onDecide={() => undefined} />}
               </div>
             </div>
           </>
@@ -361,5 +436,48 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
       </form>
       {confirmDialog}
     </section>
+  );
+}
+
+const STATUS_STYLE: Record<NarratorToolCall['status'], string> = {
+  pending: 'border-amber-300 bg-amber-50 text-amber-950',
+  done: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+  failed: 'border-red-200 bg-red-50 text-red-900',
+  declined: 'border-stone-200 bg-stone-100 text-stone-600',
+  expired: 'border-stone-200 bg-stone-100 text-stone-500',
+};
+
+/** What the narrator did with the game's tools in a reply, and the actions still waiting for the player. */
+function ToolCallList({ calls, deciding, busy, onDecide }: {
+  calls: Array<Pick<NarratorToolCall, 'id' | 'name' | 'label' | 'status' | 'summary' | 'error' | 'args'> & Partial<Pick<NarratorToolCall, 'tier'>>>;
+  deciding: string | null;
+  busy: boolean;
+  onDecide: (call: NarratorToolCall, decision: 'approve' | 'decline') => void;
+}) {
+  const t = useT();
+  return (
+    <ul className="mt-2 space-y-1.5" aria-label={t('What the narrator did')}>
+      {calls.map((call) => {
+        const title = toolTitle({ name: call.name, args: call.args ?? {}, label: call.label }, t);
+        return (
+          <li key={call.id} className={`rounded-lg border px-2.5 py-1.5 text-xs ${STATUS_STYLE[call.status]}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="font-semibold">{call.status === 'declined' ? t('Declined: {title}', { title }) : call.status === 'expired' ? t('No longer needed: {title}', { title }) : title}</span>
+                {call.status === 'done' && call.summary && <div className="mt-0.5 break-words opacity-80">{call.summary}</div>}
+                {call.status === 'failed' && <div className="mt-0.5 break-words">{call.error}</div>}
+                {call.status === 'pending' && <div className="mt-0.5 opacity-80">{t('The narrator is waiting for your answer.')}</div>}
+              </div>
+              {call.status === 'pending' && !busy && (
+                <div className="flex shrink-0 gap-1">
+                  <Button type="button" size="sm" loading={deciding === call.id} disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'approve')}>{t('Approve')}</Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={deciding !== null} onClick={() => onDecide(call as NarratorToolCall, 'decline')}>{t('Decline')}</Button>
+                </div>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

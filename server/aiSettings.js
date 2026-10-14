@@ -354,3 +354,64 @@ export async function callModelStream(user, { messages, purpose, partyId = null,
   await recordUsage(user, { partyId, purpose, model, usage });
   return { text: text.trim(), model, usage };
 }
+
+/**
+ * One step of a conversation in which the model may call tools. The answer is streamed through `onDelta`; any tool
+ * calls it makes are collected and returned for the caller to run. The caller sends the results back in a further call.
+ * Returns the text, the calls ({ id, name, arguments } with the arguments still as the model wrote them) and the usage.
+ * A model that cannot use tools is reported as AI_TOOLS_UNSUPPORTED, so the caller can fall back to plain narration.
+ */
+export async function callModelWithTools(user, { messages, tools, purpose, partyId = null, temperature = 0.7, maxTokens = 1200 }, { onDelta, signal, fetchImpl = fetch } = {}) {
+  const { apiKey, model } = await prepareCall(user);
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS * 2);
+  let response;
+  try {
+    response = await fetchImpl(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: requestHeaders(apiKey),
+      body: JSON.stringify({ model, messages: withCacheControl(model, messages), ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, usage: { include: true } }),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  } catch {
+    throw new HttpError(504, 'The AI service did not answer in time.', 'AI_TIMEOUT');
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if ((response.status === 404 || response.status === 400) && /tool/i.test(String(payload?.error?.message ?? ''))) {
+      throw new HttpError(502, 'This model cannot use tools. Choose another model in Settings → AI Assistants, or let the narrator only make suggestions.', 'AI_TOOLS_UNSUPPORTED');
+    }
+    interpretModelResponse(response.status, payload);
+  }
+
+  let text = '';
+  let reported = null;
+  const calls = [];
+  const parser = createSseParser({
+    onEvent: (event) => {
+      const delta = event?.choices?.[0]?.delta;
+      if (typeof delta?.content === 'string' && delta.content) { text += delta.content; onDelta?.(delta.content); }
+      for (const piece of Array.isArray(delta?.tool_calls) ? delta.tool_calls : []) {
+        const index = Number.isInteger(piece.index) ? piece.index : calls.length;
+        const call = calls[index] ?? (calls[index] = { id: '', name: '', arguments: '' });
+        if (piece.id) call.id = piece.id;
+        if (piece.function?.name) call.name += piece.function.name;
+        if (typeof piece.function?.arguments === 'string') call.arguments += piece.function.arguments;
+      }
+      if (event?.usage) reported = event.usage;
+    },
+  });
+  try {
+    const decoder = new TextDecoder();
+    for await (const chunk of response.body) parser.feed(decoder.decode(chunk, { stream: true }));
+    parser.end();
+  } catch {
+    throw new HttpError(504, 'The AI service stopped answering.', 'AI_STREAM_INTERRUPTED');
+  }
+  const toolCalls = calls.filter((call) => call?.name).map((call, index) => ({ id: call.id || `call_${index}`, name: call.name, arguments: call.arguments }));
+  if (!text.trim() && toolCalls.length === 0) throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
+  const usage = reported
+    ? readUsage(reported)
+    : { promptTokens: estimateTokens(JSON.stringify(messages)), completionTokens: estimateTokens(text + JSON.stringify(toolCalls)), cachedTokens: 0, costUsd: null };
+  await recordUsage(user, { partyId, purpose, model, usage });
+  return { text: text.trim(), toolCalls, model, usage };
+}

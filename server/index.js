@@ -38,7 +38,7 @@ import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { aiUsageOverview } from './adminAiUsage.js';
 import { archiveStory, continueFromStory, listStories } from './soloLibrary.js';
 import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
-import { generateStory, getNarratorConversation, narrateSolo, polishRecap, proposeMission, resetNarrator, saveNarratorSummary, setNarrationGlossary, setNarrationLanguage } from './soloNarrator.js';
+import { decideToolCall, generateStory, getNarratorConversation, narrateSolo, polishRecap, proposeMission, resetNarrator, resumeSolo, saveNarratorSummary, setNarrationGlossary, setNarrationLanguage, setNarratorMode } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -188,6 +188,14 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, await setNarrationGlossary(await currentUser(request), await readJson(request)));
       return;
     }
+    if (pathname === '/api/ai/solo-narrator/mode' && request.method === 'PUT') {
+      sendJson(response, 200, await setNarratorMode(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/solo-narrator/decide' && request.method === 'POST') {
+      sendJson(response, 200, await decideToolCall(await currentUser(request), await readJson(request)));
+      return;
+    }
     if (pathname === '/api/ai/solo-narrator/language' && request.method === 'PUT') {
       sendJson(response, 200, await setNarrationLanguage(await currentUser(request), await readJson(request)));
       return;
@@ -200,9 +208,11 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'PUT') { sendJson(response, 200, await saveNarratorSummary(actor, await readJson(request))); return; }
       if (request.method === 'POST') { sendJson(response, 200, await narrateSolo(actor, await readJson(request))); return; }
     }
-    // The same turn, with the answer sent as it is written (server-sent events). Problems found before the first
-    // word is written come back as an ordinary error response.
-    if (pathname === '/api/ai/solo-narrator/stream' && request.method === 'POST') {
+    // The same turn, with the answer sent as it is written (server-sent events): 'delta' for text, 'tool' each time a
+    // tool call changes status, and a final 'done'. Problems found before the first word is written come back as an
+    // ordinary error response. 'resume' carries on a reply once the player has decided what it was waiting for.
+    const narratorStream = pathname === '/api/ai/solo-narrator/stream' ? narrateSolo : pathname === '/api/ai/solo-narrator/resume' ? resumeSolo : null;
+    if (narratorStream && request.method === 'POST') {
       const actor = await currentUser(request);
       const body = await readJson(request);
       const controller = new AbortController();
@@ -215,7 +225,11 @@ const server = http.createServer(async (request, response) => {
       };
       const emit = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       try {
-        const result = await narrateSolo(actor, body, { signal: controller.signal, onDelta: (text) => { begin(); emit('delta', { text }); } });
+        const result = await narratorStream(actor, body, {
+          signal: controller.signal,
+          onDelta: (text) => { begin(); emit('delta', { text }); },
+          onTool: (call) => { begin(); emit('tool', { id: call.id, name: call.name, label: call.label, status: call.status, summary: call.summary ?? null, error: call.error ?? null }); },
+        });
         begin();
         emit('done', result);
         response.end();

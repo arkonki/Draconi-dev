@@ -29,13 +29,39 @@ export type NarratorAction =
   | { type: 'scavenge'; context: string; label: string }
   | { type: 'npc'; name: string; template: 'minion' | 'boss'; roles: Array<'melee' | 'ranged' | 'sneaky' | 'magic'>; notes: string; label: string }
   | { type: 'reveal'; title: string; description: string; label: string }
+  | { type: 'push'; label: string }
+  | { type: 'consequence'; label: string }
+  | { type: 'inspiration'; context: string; label: string }
+  | { type: 'damage'; context: string; label: string }
+  | { type: 'threat'; amount: 1 | 2; label: string }
+  | { type: 'leave'; label: string }
+  | { type: 'dying'; label: string }
   | { type: 'scene'; location: string; description: string; situation: string; threads: string[]; label: string };
+
+/** What the narrator is allowed to do on its own: only suggest, act after the player approves, or act at once. */
+export type NarratorMode = 'suggest' | 'ask' | 'trust';
+
+/** One thing the narrator did with the game's tools, or is waiting to do until the player approves it. */
+export interface NarratorToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  /** A short English description, used when a name has no translated wording. */
+  label: string;
+  tier: 'auto' | 'approve' | 'unknown';
+  status: 'pending' | 'done' | 'failed' | 'declined' | 'expired';
+  summary: string | null;
+  error: string | null;
+}
 
 export interface NarratorMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   actions: NarratorAction[];
+  toolCalls?: NarratorToolCall[];
+  /** The narrator's last step used tools and all of them are decided, but the reply has not been carried on. */
+  canResume?: boolean;
   createdAt?: string;
   /** What this reply used, when known. */
   tokens?: number | null;
@@ -70,6 +96,8 @@ export interface NarratorConversation {
   summary: string;
   /** The language the campaign is narrated in. */
   language: NarrationLanguage;
+  /** How much the narrator may do on its own. */
+  mode?: NarratorMode;
   glossary: NarratorGlossary;
   campaign: NarratorCampaignContext | null;
 }
@@ -77,6 +105,11 @@ export interface NarratorConversation {
 export interface NarratorAnswer extends AiAnswer {
   id: string;
   actions: NarratorAction[];
+  toolCalls?: NarratorToolCall[];
+  /** How many calls are waiting for the player. */
+  awaiting?: number;
+  /** The model could not use tools, so this reply only suggests. */
+  toolsUnavailable?: boolean;
 }
 
 export class AiApiError extends Error {
@@ -155,13 +188,15 @@ export async function readEventStream(body: ReadableStream<Uint8Array>, onEvent:
   if (buffer.trim()) flush(buffer);
 }
 
-/** One turn with the narrator. `onDelta` receives the reply as it is written; the promise resolves with the finished turn. */
-export async function streamSoloNarrator(
-  partyId: string,
-  message: string,
-  { onDelta, signal }: { onDelta: (text: string) => void; signal?: AbortSignal },
-): Promise<NarratorAnswer> {
-  const response = await authenticatedApiFetch('/ai/solo-narrator/stream', { ...json('POST', { partyId, message }), signal });
+interface NarratorStreamHandlers {
+  onDelta: (text: string) => void;
+  /** Called each time a tool call is made, finishes or fails. */
+  onTool?: (call: Pick<NarratorToolCall, 'id' | 'name' | 'label' | 'status' | 'summary' | 'error'>) => void;
+  signal?: AbortSignal;
+}
+
+async function streamNarrator(path: string, body: unknown, { onDelta, onTool, signal }: NarratorStreamHandlers): Promise<NarratorAnswer> {
+  const response = await authenticatedApiFetch(path, { ...json('POST', body), signal });
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => ({})) as { error?: { message?: string; code?: string } };
     throw new AiApiError(payload.error?.message || response.statusText || 'Request failed', payload.error?.code);
@@ -170,6 +205,7 @@ export async function streamSoloNarrator(
   let failure: AiApiError | null = null;
   await readEventStream(response.body, (event, data) => {
     if (event === 'delta') onDelta(String((data as { text?: string }).text ?? ''));
+    else if (event === 'tool') onTool?.(data as Parameters<NonNullable<NarratorStreamHandlers['onTool']>>[0]);
     else if (event === 'done') finished = data as NarratorAnswer;
     else if (event === 'error') failure = new AiApiError(String((data as { message?: string }).message || 'The narrator stopped.'), (data as { code?: string }).code);
   });
@@ -177,6 +213,18 @@ export async function streamSoloNarrator(
   if (!finished) throw new AiApiError('The narrator stopped before finishing. Try again.');
   return finished;
 }
+
+/** One turn with the narrator. `onDelta` receives the reply as it is written; the promise resolves with the finished turn. */
+export const streamSoloNarrator = (partyId: string, message: string, handlers: NarratorStreamHandlers) => streamNarrator('/ai/solo-narrator/stream', { partyId, message }, handlers);
+
+/** Carries a reply on after the player has decided what it was waiting for. The new text is added to the same reply. */
+export const resumeSoloNarrator = (partyId: string, turnId: string, handlers: NarratorStreamHandlers) => streamNarrator('/ai/solo-narrator/resume', { partyId, turnId }, handlers);
+
+/** Approves or declines one thing the narrator wants to do. An approved one is carried out now. */
+export const decideNarratorCall = (partyId: string, turnId: string, callId: string, decision: 'approve' | 'decline') => send<{ turn: NarratorMessage; awaiting: number }>('/ai/solo-narrator/decide', json('POST', { partyId, turnId, callId, decision }));
+
+/** Chooses how much the narrator may do on its own in this campaign. */
+export const setNarratorMode = (partyId: string, mode: NarratorMode) => send<{ mode: NarratorMode }>('/ai/solo-narrator/mode', json('PUT', { partyId, mode }));
 
 /** The older versions of the Story Helper kept the key in this browser; it can be moved to the server once. */
 export const LEGACY_KEY_STORAGE = 'openrouter_api_key';
