@@ -185,6 +185,43 @@ try {
   assert.ok(seenRequests.at(-1).messages[0].content.includes('THE STORY SO FAR') && seenRequests.at(-1).messages[0].content.includes('shrine gate'), 'the summary is given to the narrator');
   assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'solo-summary'")).rows[0].n >= 1, 'the summary call is counted as usage');
 
+  // --- One story, whoever plays: an assistant over MCP and the built-in narrator share the campaign record ---
+  const mcpHeaders = (revision) => ({ 'if-match': `"${revision}"`, 'idempotency-key': `mcp-${randomUUID()}`, 'x-helper-client': 'dragonbane-mcp' });
+  const revisionNow = async () => (await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state')).data.campaignRevision;
+  const startedSession = (await ok(call('POST', `/v1/campaigns/${party.id}/sessions/start`, { token: tokens.alice, headers: mcpHeaders(await revisionNow()), body: { title: 'MCP session', reason: 'smoke' } }), 200, 'an assistant starts a session')).data;
+  const sessionId = startedSession.state_excerpt.session.id;
+  await ok(call('POST', `/v1/campaigns/${party.id}/sessions/${sessionId}/checkpoints`, {
+    token: tokens.alice,
+    headers: mcpHeaders(await revisionNow()),
+    body: { summary: 'MCP checkpoint: the hero reached the shrine gate at dusk.', scene: { location: 'The shrine gate', description: 'Moss-covered stone.' }, unresolved_threads: ['Who lit the beacon?'], reason: 'smoke' },
+  }), 200, 'an assistant saves a checkpoint');
+  await ok(call('POST', `/v1/campaigns/${party.id}/events`, { token: tokens.alice, headers: mcpHeaders(await revisionNow()), body: { type: 'story.beat', visibility: 'players', payload: { summary: 'The gate swung open by itself.' }, reason: 'smoke' } }), 200, 'an assistant records a story beat');
+
+  const revisionBefore = await revisionNow();
+  await ok(narrate(tokens.alice, { partyId: party.id, message: 'I enter the gate' }), 200, 'the narrator continues the assistant story');
+  const system = seenRequests.at(-1).messages[0].content;
+  assert.ok(system.includes('LATEST CHECKPOINT') && system.includes('MCP checkpoint: the hero reached the shrine gate at dusk.'), 'the narrator reads the assistant\'s checkpoint');
+  assert.ok(system.includes('SCENE: The shrine gate'), 'and the scene it saved');
+  assert.ok(system.includes('OPEN THREADS: Who lit the beacon?'), 'and the open threads');
+  assert.ok(system.includes('story.beat (from an AI assistant)') && system.includes('The gate swung open by itself.'), 'and the events it recorded');
+  const seen = (await ok(conversation(tokens.alice), 200, 'campaign context')).campaign;
+  assert.match(seen.checkpoint.summary, /shrine gate at dusk/);
+  assert.deepEqual(seen.openThreads, ['Who lit the beacon?']);
+
+  // And back: what the narrator told is visible to the assistant, without touching the game state.
+  assert.equal(await revisionNow(), revisionBefore, 'narration does not change the campaign revision');
+  const soloNow = (await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state with story')).data;
+  assert.ok(soloNow.story && soloNow.story.recentExchanges.length > 0, 'the solo state carries the story');
+  assert.equal(soloNow.story.recentExchanges.at(-1).role, 'narrator');
+  const eventTypes = soloNow.journal.recentEvents.map((event) => `${event.type}:${event.sourceType}`);
+  assert.ok(eventTypes.includes('story.beat:chatgpt') && eventTypes.includes('narration.recorded:user'), `the journal lists every source (got ${eventTypes.join(', ')})`);
+  const narrationEvent = soloNow.journal.recentEvents.find((event) => event.type === 'narration.recorded');
+  assert.equal(narrationEvent.payload.source, 'narrator');
+  assert.equal(narrationEvent.previousRevision, narrationEvent.resultingRevision);
+  const resume = (await ok(call('GET', `/v1/campaigns/${party.id}/resume-state?detail=focused`, { token: tokens.alice }), 200, 'resume state')).data;
+  assert.ok(resume.story && resume.story.recentExchanges.length > 0, 'the resume state carries the story too');
+  results.sharedStory = 'passed';
+
   // The player can correct the summary, and start over.
   await ok(call('PUT', '/ai/solo-narrator', { token: tokens.alice, body: { partyId: party.id, summary: 'Mara is at the gate. The wolf is dead.' } }), 200, 'edit the summary');
   assert.equal((await ok(conversation(tokens.alice), 200, 'edited')).summary, 'Mara is at the gate. The wolf is dead.');
@@ -196,7 +233,7 @@ try {
   await ok(narrate(tokens.alice, { partyId: 'not-a-uuid', message: 'hi' }), 400, 'a bad campaign id');
   await ok(narrate(tokens.alice, { partyId: party.id, message: '  ' }), 400, 'an empty message');
   const reset = await ok(call('DELETE', `/ai/solo-narrator?partyId=${party.id}`, { token: tokens.alice }), 200, 'start over');
-  assert.deepEqual(reset, { turns: [], summary: '' });
+  assert.deepEqual(reset, { turns: [], summary: '', campaign: null });
   assert.equal((await database.query('SELECT count(*)::int AS n FROM solo_narrator_turns WHERE party_id = $1', [party.id])).rows[0].n, 0);
   results.soloNarrator = 'passed';
 

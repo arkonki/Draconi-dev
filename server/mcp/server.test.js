@@ -727,7 +727,7 @@ describe('Dragonbane MCP server', () => {
     const resource = await client.readResource({ uri: 'dragonbane://workflows/gm-session' });
     const workflow = JSON.parse(resource.contents[0].text);
     expect(workflow).toMatchObject({
-      version: 'draconi-gm-v2',
+      version: 'draconi-gm-v3',
       workflows: {
         sessionStart: expect.any(Array),
         scene: expect.any(Array),

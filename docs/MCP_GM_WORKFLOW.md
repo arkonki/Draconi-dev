@@ -67,6 +67,28 @@ flow instead.
    `advance_combat_turn` after a turn-consuming action.
 6. Call `end_combat` only when combat has ended and save a player-safe outcome.
 
+## One shared Solo story
+
+In Solo play the story does not belong to one client. The narrator built into the
+Draconi app (which uses the player's own OpenRouter key) and an AI assistant
+connected over MCP read and write the same record, so the player can switch
+between them at any time:
+
+- The narrator reads the latest checkpoint, the current scene, the open threads,
+  the summaries of finished sessions and the event log, whichever client saved
+  them.
+- `get_solo_state` and `get_resume_state` return `story` when the narrator has
+  been used: `storySoFar` (a running summary the narrator keeps) and
+  `recentExchanges` (the last few exchanges). Read it and continue it.
+- Each narrator exchange is recorded as a `narration.recorded` event with
+  `payload.source: "narrator"`. It changes no game state and does not change the
+  campaign revision.
+- An assistant should save important beats with `append_campaign_event` and call
+  `checkpoint_session` at scene changes, exactly as in standard play. The
+  Narrator tab has a **Save checkpoint** button that does the same for a player
+  who is not using MCP, starting a session first when none is running.
+- The Solo journal and event log show events from every source.
+
 ## Recovery rules
 
 - On `REVISION_CONFLICT`, call `get_resume_state` with `detail: "focused"` and reassess. Do not replay

@@ -13,6 +13,7 @@ import { HelperError } from './errors.js';
 import { elapsedSecondsFromLegacyTimeTracker } from './campaignTime.js';
 import { conditionId } from './identifiers.js';
 import { projectResumeState } from './resumeProfiles.js';
+import { loadPublishedStory } from '../soloStory.js';
 import { applyActorChangeSet, consumeRalliedAction, validateActorCanAct } from './rules.js';
 import { actorChangesForOutput } from './writeDeltas.js';
 import {
@@ -403,6 +404,7 @@ async function eventRows(client, access, campaignId, filters, userId) {
   if (filters.beforeSequence !== undefined) add('sequence < ?', filters.beforeSequence);
   if (filters.type) add('type = ?', filters.type);
   if (filters.sourceType) add('source_type = ?', filters.sourceType);
+  if (filters.sourceTypes) add('source_type = ANY(?::text[])', filters.sourceTypes);
   if (filters.actorId) {
     values.push(filters.actorId);
     clauses.push(`(actor_id = $${values.length} OR target_id = $${values.length})`);
@@ -1874,11 +1876,11 @@ export async function getSoloState(user, campaignId) {
        LIMIT 10`,
       [campaignId],
     ),
-    eventRows(pool, access, campaignId, {
-      sourceType: 'chatgpt',
-      limit: 20,
-    }, user.id),
+    // From the app and from assistants: what happened is the same story whichever way it was played.
+    // (Automatic system bookkeeping is left out; it says nothing about the story.)
+    eventRows(pool, access, campaignId, { sourceTypes: ['user', 'chatgpt'], limit: 30 }, user.id),
   ]);
+  const story = await loadPublishedStory(pool, campaignId);
   const restState = await loadSoloRestState(pool, campaignId);
   const [{ rows: soloNpcs }, { rows: treasureDraws }] = await Promise.all([
     pool.query(
@@ -1968,6 +1970,7 @@ export async function getSoloState(user, campaignId) {
       sessions: journalSessionRows.map((session) => sessionForOutput(session, { includeGm: access.isGm })),
       recentEvents: journalEvents,
     },
+    ...(story ? { story } : {}),
     activeMission: soloMissionForOutput(activeMission),
     waypoints: waypoints.map(soloWaypointForOutput),
     currentWaypoint: soloWaypointForOutput(currentWaypoint),
@@ -7805,6 +7808,7 @@ export async function getResumeState(user, campaignId, {
       },
       combat,
       solo,
+      ...(soloState?.enabled ? { story: await loadPublishedStory(client, campaignId) } : {}),
       rolls: {
         pending: recentRolls.filter((request) => request.status === 'pending'),
         recent: recentRolls,
@@ -7815,6 +7819,31 @@ export async function getResumeState(user, campaignId, {
     return projectResumeState(fullState, {
       detail,
       recentRollLimit: effectiveRollLimit,
+    });
+  });
+}
+
+/**
+ * Puts one exchange with the built-in narrator into the campaign's event log, so assistants and the Solo journal see
+ * the story the narrator told. It changes no game state, so the campaign revision stays as it is.
+ */
+export async function recordNarration(user, { campaignId, said, narration }) {
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM parties WHERE id = $1 FOR UPDATE', [campaignId]);
+    const access = await requireCampaignAccess(client, user, campaignId, { write: true });
+    const revision = Number(access.campaign.helper_revision || 0);
+    const sequence = await nextEventSequence(client, campaignId);
+    return insertEvent(client, {
+      campaign: access.campaign,
+      user,
+      sequence,
+      type: 'narration.recorded',
+      payload: { source: 'narrator', said: String(said).slice(0, 500), narration: String(narration).slice(0, 4000) },
+      visibility: 'players',
+      sourceClient: 'draconi-narrator',
+      idempotencyKey: `narration-${campaignId}-${sequence}`,
+      previousRevision: revision,
+      resultingRevision: revision,
     });
   });
 }

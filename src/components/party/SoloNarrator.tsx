@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookmarkPlus, BookOpenText, Check, Dices, HelpCircle, Moon, Send } from 'lucide-react';
+import { BookmarkPlus, BookOpenText, Check, Dices, Flag, HelpCircle, Moon, Send } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../shared/Button';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -14,6 +14,7 @@ import {
   type NarratorMessage,
 } from '../../lib/api/ai';
 import { saveCharacterJournalEntry } from '../../lib/api/journal';
+import { checkpointCampaignSession, startCampaignSession } from '../../lib/api/campaignTime';
 import { visibleNarration } from '../../lib/narratorText';
 
 interface SoloNarratorProps {
@@ -23,6 +24,11 @@ interface SoloNarratorProps {
   currentUserId?: string;
   /** Only the owner or a GM can use the narrator, as they are the ones who run the solo rules. */
   canUse: boolean;
+  partyName: string;
+  /** What a checkpoint needs from the campaign as it stands. */
+  checkpoint: { revision: number; sessionId: string | null; sceneLocation: string; sceneDescription: string };
+  /** Called after anything that changes the campaign record, so the rest of the page shows the new state. */
+  onStateChanged: () => Promise<void> | void;
   /** Opens the matching rules dialog on the Adventure tab, filled in. Nothing is rolled until the player confirms there. */
   onAction: (action: NarratorAction) => void;
 }
@@ -36,7 +42,7 @@ const ACTION_ICONS = { check: Dices, fortune: HelpCircle, rest: Moon } as const;
  * buttons that open the right rules dialog. It remembers the story. It writes prose and proposes; dice, hit points and
  * every rule stay with the Adventure tab.
  */
-export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction }: SoloNarratorProps) {
+export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse, checkpoint, onStateChanged, onAction }: SoloNarratorProps) {
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const settings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000 });
@@ -47,6 +53,7 @@ export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction 
   const [error, setError] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [summaryDraft, setSummaryDraft] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -69,6 +76,8 @@ export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction 
     try {
       await streamSoloNarrator(partyId, message, { signal: controller.signal, onDelta: (piece) => setPending((current) => (current ? { ...current, raw: current.raw + piece } : current)) });
       await queryClient.invalidateQueries({ queryKey: conversationKey });
+      // The exchange is now part of the campaign's event log, so the journal and logs tabs have something new.
+      await onStateChanged();
     } catch (failure) {
       if (!controller.signal.aborted) {
         setError(failure instanceof Error ? failure.message : 'The narrator could not answer.');
@@ -101,6 +110,34 @@ export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction 
     onError: (failure: Error) => setError(failure.message),
   });
 
+  const checkpointMutation = useMutation({
+    mutationFn: async () => {
+      const text = (summary || [...turns].reverse().find((turn) => turn.role === 'assistant')?.content || '').trim();
+      if (!text) throw new Error('Play a little first: a checkpoint needs something to remember.');
+      let { sessionId, revision } = checkpoint;
+      if (!sessionId) {
+        const confirmed = await confirm({
+          title: 'Start a session to save a checkpoint?',
+          description: 'Checkpoints belong to a game session, and none is running. This starts one for this campaign. You can end it later from the Session button.',
+          confirmText: 'Start a session and save',
+        });
+        if (!confirmed) return false;
+        const started = await startCampaignSession(partyId, revision, { title: `${partyName} solo adventure` });
+        sessionId = started.state_excerpt.session.id;
+        revision = started.campaign_revision;
+      }
+      await checkpointCampaignSession(partyId, sessionId, revision, { summary: text.slice(0, 10_000), scene: { location: checkpoint.sceneLocation || 'The current scene', description: checkpoint.sceneDescription } });
+      return true;
+    },
+    onSuccess: async (saved) => {
+      if (!saved) return;
+      setError(null);
+      setNotice('Checkpoint saved. Anyone continuing this story, including an AI assistant, starts from it.');
+      await Promise.all([queryClient.invalidateQueries({ queryKey: conversationKey }), onStateChanged()]);
+    },
+    onError: (failure: Error) => { setNotice(null); setError(failure.message); },
+  });
+
   const startOver = async () => {
     const confirmed = await confirm({ title: 'Start the story over?', description: 'The conversation and the story so far are forgotten. Your journal and the game itself are not touched.', confirmText: 'Start over' });
     if (confirmed) resetMutation.mutate();
@@ -120,7 +157,10 @@ export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction 
           <h3 className="font-bold text-stone-900">Narrator</h3>
           <p className="text-xs text-stone-500">Say what your hero does or asks. The narrator describes what happens next and remembers the story. It never rolls dice or changes anything: its buttons open the rules on the Adventure tab, where you decide.</p>
         </div>
-        {(turns.length > 0 || summary) && <Button type="button" variant="ghost" size="sm" loading={resetMutation.isPending} onClick={() => void startOver()}>Start over</Button>}
+        <div className="flex gap-1">
+          {(turns.length > 0 || summary) && <Button type="button" variant="outline" size="sm" icon={Flag} loading={checkpointMutation.isPending} onClick={() => { setNotice(null); checkpointMutation.mutate(); }} title="Save the story so far, the scene and the open threads for anyone who continues it">Save checkpoint</Button>}
+          {(turns.length > 0 || summary) && <Button type="button" variant="ghost" size="sm" loading={resetMutation.isPending} onClick={() => void startOver()}>Start over</Button>}
+        </div>
       </div>
 
       {!settings.isLoading && !hasKey && (
@@ -140,6 +180,21 @@ export function SoloNarrator({ partyId, heroId, currentUserId, canUse, onAction 
           </div>
         )}
       </details>
+
+      {notice && <p role="status" className="mx-4 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900">{notice}</p>}
+
+      {conversation.data?.campaign && (conversation.data.campaign.checkpoint || conversation.data.campaign.openThreads.length > 0 || conversation.data.campaign.sessions.length > 0) && (
+        <details className="border-b border-stone-200 px-4 py-2 text-sm">
+          <summary className="cursor-pointer font-semibold text-stone-700">Also read from the campaign (shared with AI assistants)</summary>
+          <div className="mt-2 space-y-2 text-xs text-stone-600">
+            {conversation.data.campaign.checkpoint && (
+              <p><strong>Latest checkpoint{conversation.data.campaign.checkpoint.location ? `, ${conversation.data.campaign.checkpoint.location}` : ''}:</strong> {conversation.data.campaign.checkpoint.summary}</p>
+            )}
+            {conversation.data.campaign.openThreads.length > 0 && <p><strong>Open threads:</strong> {conversation.data.campaign.openThreads.join(' · ')}</p>}
+            {conversation.data.campaign.sessions.map((session) => <p key={session.title + (session.endedAt ?? '')}><strong>{session.title}:</strong> {session.summary}</p>)}
+          </div>
+        </details>
+      )}
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
         {conversation.isLoading && <p className="text-sm text-stone-500">Loading the story…</p>}

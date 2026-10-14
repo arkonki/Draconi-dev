@@ -213,6 +213,7 @@ export function projectResumeState(fullState, {
     solo: compactSolo(fullState.solo, { focused: profile === 'focused' }),
     rolls: boundedRolls(fullState.rolls, limit, { includeRecent: profile === 'focused' }),
     gameTime: fullState.gameTime || null,
+    ...(fullState.story ? { story: fullState.story } : {}),
   };
   if (profile === 'focused' && fullState.gmContext !== undefined) {
     base.gmContext = fullState.gmContext;

@@ -2274,7 +2274,7 @@ try {
     });
     const workflowGuide = JSON.parse(workflowResource.contents[0].text);
     assert(
-      workflowGuide.version === 'draconi-gm-v2'
+      workflowGuide.version === 'draconi-gm-v3'
         && workflowGuide.recovery?.revisionConflict
         && workflowGuide.privacy?.gmPrivate,
       'MCP GM workflow resource is incomplete.',

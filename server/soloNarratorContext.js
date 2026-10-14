@@ -3,7 +3,7 @@
 // Anything the hero has not found yet (hidden places, dangers there, creatures there) is left out, so the narrator
 // cannot spoil it. The model is asked to describe, never to decide: dice and rules stay with the app.
 
-export const MAX_CONTEXT_CHARS = 6000;
+export const MAX_CONTEXT_CHARS = 9000;
 const ATTRIBUTES = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'];
 const MAX_HISTORY = 8;
 const MAX_MESSAGE_CHARS = 2000;
@@ -15,7 +15,14 @@ const compactJson = (value, length) => {
   try { return clip(JSON.stringify(value ?? {}), length); } catch { return ''; }
 };
 
-export function buildNarratorContext(state) {
+/** Scene entries the hero may know about: anything not marked as hidden from the player. */
+const knownEntries = (entries) => (Array.isArray(entries) ? entries : []).filter((entry) => entry && entry.visibility !== 'gm');
+
+/**
+ * `extras.checkpoint` is the latest saved checkpoint, whoever made it. The state itself carries the scene, the open
+ * threads, the session summaries and the event log, which are also shared with assistants connected over MCP.
+ */
+export function buildNarratorContext(state, extras = {}) {
   const lines = [];
   const hero = state?.playerCharacter;
   if (hero) {
@@ -64,15 +71,39 @@ export function buildNarratorContext(state) {
   }
   if (state?.activeCombat) lines.push(`A fight is under way: ${state.activeCombat.name}.`);
 
+  const scene = state?.journal?.currentScene ?? state?.currentScene;
+  if (scene && (scene.location || scene.description || scene.situation)) {
+    lines.push('', `SCENE: ${clip(scene.location || 'unnamed', 120)}${scene.description ? `. ${clip(scene.description, 400)}` : ''}${scene.situation ? ` Situation: ${clip(scene.situation, 300)}` : ''}`);
+    const exits = knownEntries(scene.exits).slice(0, 6).map((exit) => `${clip(exit.name, 60)}${exit.status && exit.status !== 'unknown' ? ` (${exit.status})` : ''}`);
+    if (exits.length) lines.push(`Exits: ${exits.join('; ')}.`);
+    for (const danger of knownEntries(scene.dangers).filter((entry) => entry.status !== 'resolved').slice(0, 4)) lines.push(`Scene danger: ${clip(danger.description, 160)}`);
+  }
+  const threads = (state?.journal?.openThreads ?? []).map((thread) => clip(typeof thread === 'string' ? thread : JSON.stringify(thread), 160)).filter(Boolean);
+  if (threads.length) lines.push(`OPEN THREADS: ${threads.slice(0, 8).join(' | ')}`);
+
+  const checkpoint = extras.checkpoint;
+  if (checkpoint?.summary) {
+    lines.push('', `LATEST CHECKPOINT${checkpoint.createdAt ? ` (${new Date(checkpoint.createdAt).toISOString().slice(0, 10)})` : ''}: ${clip(checkpoint.summary, 900)}`);
+  }
+  const earlier = (state?.journal?.sessions ?? []).filter((session) => session.status === 'completed' && session.summary).slice(0, 3).reverse();
+  if (earlier.length) {
+    lines.push('', 'EARLIER SESSIONS (oldest first):');
+    for (const session of earlier) lines.push(`- ${clip(session.title, 80)}: ${clip(session.summary, 500)}`);
+  }
+
   const rolls = (state?.latestRolls ?? []).slice(0, 3);
   if (rolls.length) {
     lines.push('', 'LATEST ROLLS (the only results that exist):');
     for (const roll of rolls) lines.push(`- ${clip(roll.purpose, 100)}: ${compactJson(roll.result, 160)}`);
   }
-  const events = (state?.journal?.recentEvents ?? []).slice(-8);
+  // The log lists the newest first, from every source. The narrator's own narration is already in the conversation.
+  const events = (state?.journal?.recentEvents ?? [])
+    .filter((event) => event.type !== 'narration.recorded' || event.payload?.source !== 'narrator')
+    .slice(0, 8)
+    .reverse();
   if (events.length) {
     lines.push('', 'RECENT EVENTS (oldest first):');
-    for (const event of events) lines.push(`- ${event.type}: ${compactJson(event.payload, 200)}`);
+    for (const event of events) lines.push(`- ${event.type}${event.sourceType === 'chatgpt' ? ' (from an AI assistant)' : ''}: ${compactJson(event.payload, 200)}`);
   }
   if (state?.allowedNextActions?.length) lines.push('', `ACTIONS THE APP OFFERS NOW: ${state.allowedNextActions.join(', ')}.`);
 
@@ -108,11 +139,11 @@ export function sanitizeHistory(history) {
     .map((entry) => ({ role: entry.role, content: entry.content.slice(0, MAX_MESSAGE_CHARS) }));
 }
 
-export function buildNarratorMessages({ state, summary = '', history, message }) {
+export function buildNarratorMessages({ state, checkpoint = null, summary = '', history, message }) {
   const trimmed = String(message ?? '').trim().slice(0, MAX_MESSAGE_CHARS);
   const story = String(summary ?? '').trim();
   return [
-    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}\n\nGAME SUMMARY\n${buildNarratorContext(state)}${story ? `\n\nTHE STORY SO FAR (what happened earlier)\n${story}` : ''}` },
+    { role: 'system', content: `${NARRATOR_SYSTEM_PROMPT}\n\nGAME SUMMARY\n${buildNarratorContext(state, { checkpoint })}${story ? `\n\nTHE STORY SO FAR (what happened earlier)\n${story}` : ''}` },
     ...sanitizeHistory(history),
     { role: 'user', content: trimmed },
   ];

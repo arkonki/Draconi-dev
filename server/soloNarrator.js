@@ -2,7 +2,7 @@ import { pool } from './db.js';
 import { HttpError } from './http.js';
 import { loadCampaignAccess } from './campaignRoles.js';
 import { callModel, callModelStream } from './aiSettings.js';
-import { getSoloState } from './helper/service.js';
+import { getSessionHistory, getSoloState, recordNarration } from './helper/service.js';
 import { buildNarratorMessages, buildSummaryMessages, parseNarratorReply } from './soloNarratorContext.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -18,18 +18,31 @@ async function requireNarratorAccess(user, partyId) {
   if (!UUID.test(String(partyId || ''))) throw new HttpError(400, 'partyId is required', 'INVALID_CAMPAIGN');
   const access = await loadCampaignAccess(pool, user, partyId);
   if (!access?.canWrite) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
+  return access;
 }
 
 const turnOut = (row) => ({ id: row.id, role: row.role, content: row.content, actions: row.actions ?? [], createdAt: row.created_at });
 
 /** What the narrator page shows when it opens: the conversation so far and the running summary. */
 export async function getNarratorConversation(user, partyId) {
-  await requireNarratorAccess(user, partyId);
-  const [{ rows: turns }, { rows: memory }] = await Promise.all([
+  const access = await requireNarratorAccess(user, partyId);
+  const [{ rows: turns }, { rows: memory }, history] = await Promise.all([
     pool.query('SELECT * FROM (SELECT * FROM solo_narrator_turns WHERE party_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2) recent ORDER BY created_at, id', [partyId, TURNS_SHOWN]),
     pool.query('SELECT summary FROM solo_narrator_memory WHERE party_id = $1', [partyId]),
+    getSessionHistory(user, partyId, { limit: 3 }),
   ]);
-  return { turns: turns.map(turnOut), summary: memory[0]?.summary ?? '' };
+  // What the narrator also reads from the campaign, shown so the player can see the story is shared: the latest
+  // checkpoint (whoever saved it), the open threads and the summaries of finished sessions.
+  const checkpoint = history.latestCheckpoint;
+  return {
+    turns: turns.map(turnOut),
+    summary: memory[0]?.summary ?? '',
+    campaign: {
+      checkpoint: checkpoint ? { summary: checkpoint.summary, location: checkpoint.scene?.location ?? '', createdAt: checkpoint.createdAt } : null,
+      openThreads: (access.campaign.open_threads ?? []).map((thread) => (typeof thread === 'string' ? thread : JSON.stringify(thread))).slice(0, 10),
+      sessions: history.sessions.filter((session) => session.status === 'completed' && session.summary).slice(0, 3).map((session) => ({ title: session.title, summary: session.summary, endedAt: session.endedAt })),
+    },
+  };
 }
 
 /** The player can correct the story so far by hand. */
@@ -50,7 +63,7 @@ export async function resetNarrator(user, partyId) {
   await requireNarratorAccess(user, partyId);
   await pool.query('DELETE FROM solo_narrator_turns WHERE party_id = $1', [partyId]);
   await pool.query('DELETE FROM solo_narrator_memory WHERE party_id = $1', [partyId]);
-  return { turns: [], summary: '' };
+  return { turns: [], summary: '', campaign: null };
 }
 
 /** Folds the oldest exchanges into the summary once too many have piled up. Failures leave things as they were. */
@@ -90,13 +103,14 @@ export async function narrateSolo(user, { partyId, message } = {}, { onDelta, si
   if (!said) throw new HttpError(400, 'Say what the hero does or asks', 'EMPTY_MESSAGE');
   const state = await getSoloState(user, partyId);
   if (!state?.solo?.enabled) throw new HttpError(409, 'Solo mode is not switched on for this campaign.', 'SOLO_NOT_ENABLED');
+  const { latestCheckpoint } = await getSessionHistory(user, partyId, { limit: 1 });
 
   const [{ rows: recent }, { rows: memory }] = await Promise.all([
     pool.query('SELECT role, content FROM solo_narrator_turns WHERE party_id = $1 AND NOT summarized ORDER BY created_at DESC, id DESC LIMIT $2', [partyId, RECENT_TURNS]),
     pool.query('SELECT summary FROM solo_narrator_memory WHERE party_id = $1', [partyId]),
   ]);
   const request = {
-    messages: buildNarratorMessages({ state, summary: memory[0]?.summary ?? '', history: recent.reverse(), message: said }),
+    messages: buildNarratorMessages({ state, checkpoint: latestCheckpoint, summary: memory[0]?.summary ?? '', history: recent.reverse(), message: said }),
     purpose: 'solo',
     partyId,
     temperature: 0.8,
@@ -113,6 +127,9 @@ export async function narrateSolo(user, { partyId, message } = {}, { onDelta, si
   );
   const assistantId = saved.find((row) => row.role === 'assistant')?.id;
 
+  // The exchange also goes into the campaign's event log, so an AI assistant connected over MCP and the Solo journal
+  // see the same story. It changes no game state, and a problem here never fails the turn.
+  await recordNarration(user, { campaignId: partyId, said, narration: reply.text }).catch(() => null);
   // Tidying the story so far can happen after the answer has been delivered; it is never allowed to fail the turn.
   void summariseIfNeeded(user, partyId).catch(() => false);
   return { id: assistantId, text: reply.text, actions: reply.actions, model: result.model, usage: result.usage };

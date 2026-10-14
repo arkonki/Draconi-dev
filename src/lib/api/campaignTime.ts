@@ -94,12 +94,34 @@ export async function advanceCampaignTime(
 
 export async function startCampaignSession(
   partyId: string, revision: number, input: { title: string; gmNotes?: string },
-) {
+): Promise<SessionStartResult> {
   const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/sessions/start`, {
     method: 'POST', headers: writeHeaders(revision),
     body: JSON.stringify({ title: input.title, gm_notes: input.gmNotes || undefined, reason: 'The GM started the game session.' }),
   });
   return parseResponse(response, 'Could not start the session.');
+}
+
+export interface SessionStartResult {
+  campaign_revision: number;
+  state_excerpt: { session: { id: string } };
+}
+
+/** Saves a checkpoint of the story: a summary, the scene and the open threads, the same record an AI assistant saves. */
+export async function checkpointCampaignSession(
+  partyId: string, sessionId: string, revision: number,
+  input: { summary: string; scene: { location: string; description: string }; unresolvedThreads?: string[] },
+) {
+  const response = await authenticatedApiFetch(`/v1/campaigns/${partyId}/sessions/${sessionId}/checkpoints`, {
+    method: 'POST', headers: writeHeaders(revision),
+    body: JSON.stringify({
+      summary: input.summary,
+      scene: { schemaVersion: 'current-scene-v1', location: input.scene.location, description: input.scene.description },
+      unresolved_threads: input.unresolvedThreads,
+      reason: 'The player saved a checkpoint of the story from the Narrator tab.',
+    }),
+  });
+  return parseResponse<{ campaign_revision: number }>(response, 'Could not save the checkpoint.');
 }
 
 export async function endCampaignSession(

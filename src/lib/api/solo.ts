@@ -273,6 +273,13 @@ export interface SoloOptions {
   };
 }
 
+/** The narrator's story, published so every client (the app, an AI assistant) reads the same one. */
+export interface SoloPublishedStory {
+  storySoFar: string;
+  storyUpdatedAt: string | null;
+  recentExchanges: Array<{ role: 'player' | 'narrator'; text: string; at: string }>;
+}
+
 export interface SoloState {
   campaignRevision: number;
   solo: SoloCampaignStatus;
@@ -281,6 +288,7 @@ export interface SoloState {
   activeSessionId?: string | null;
   currentScene?: Record<string, unknown>;
   journal: SoloAdventureJournal;
+  story?: SoloPublishedStory;
   activeMission?: SoloMission | null;
   waypoints: SoloWaypoint[];
   currentWaypoint?: SoloWaypoint | null;

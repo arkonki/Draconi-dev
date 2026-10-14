@@ -213,7 +213,7 @@ export function SoloGameTimeSummary({ gameTime }: { gameTime: Record<string, unk
 }
 
 function journalEventSummary(event: SoloJournalEvent): string | null {
-  const keys = ['summary', 'description', 'reason', 'title', 'question', 'outcome'];
+  const keys = ['summary', 'description', 'narration', 'reason', 'title', 'question', 'outcome'];
   for (const key of keys) {
     const value = event.payload[key];
     if (typeof value === 'string' && value.trim()) return value;
@@ -1145,7 +1145,21 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         )}
 
         {activeDashboardTab === 'narrator' && (
-          <SoloNarrator partyId={partyId} heroId={state.playerCharacter?.id ?? null} currentUserId={currentUserId} canUse={canManage} onAction={startNarratorAction} />
+          <SoloNarrator
+            partyId={partyId}
+            partyName={partyName}
+            heroId={state.playerCharacter?.id ?? null}
+            currentUserId={currentUserId}
+            canUse={canManage}
+            checkpoint={{
+              revision: state.campaignRevision,
+              sessionId: state.activeSessionId ?? null,
+              sceneLocation: journal.currentScene?.location ? String(journal.currentScene.location) : state.currentWaypoint?.title || '',
+              sceneDescription: journal.currentScene?.description ? String(journal.currentScene.description) : '',
+            }}
+            onStateChanged={() => queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] })}
+            onAction={startNarratorAction}
+          />
         )}
 
         <div className={activeDashboardTab === 'adventure' || activeDashboardTab === 'state'
@@ -1322,14 +1336,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900">
                   {activeDashboardTab === 'state' ? <HeartPulse className="h-5 w-5 text-red-600" /> : activeDashboardTab === 'journal' ? <BookOpen className="h-5 w-5 text-teal-700" /> : <ScrollText className="h-5 w-5 text-amber-700" />}
-                  {activeDashboardTab === 'state' ? 'Adventure State' : activeDashboardTab === 'journal' ? 'Journal' : 'ChatGPT Event Log'}
+                  {activeDashboardTab === 'state' ? 'Adventure State' : activeDashboardTab === 'journal' ? 'Journal' : 'Event Log'}
                 </h3>
                 <p className="mt-1 text-sm text-stone-500">
                   {activeDashboardTab === 'state'
                     ? 'Current scene and mechanical campaign state at a glance.'
                     : activeDashboardTab === 'journal'
                       ? 'Persistent session memory and unresolved story threads. Entries marked GM remain private.'
-                      : 'Recent visible events written through the Helper MCP, with their saved details.'}
+                      : 'What was saved to the campaign by the app and by AI assistants, with the saved details. The built-in narrator and any assistant read this same record.'}
                 </p>
               </div>
 
@@ -1381,6 +1395,24 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                   </div>
                 )}
 
+                {activeDashboardTab === 'journal' && state.story && (
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-indigo-800">The story so far</h4>
+                    <p className="mt-1 text-xs text-indigo-700">One story for everyone: the narrator in this app and any AI assistant connected over MCP read and continue the same record.</p>
+                    {state.story.storySoFar && <p className="mt-2 whitespace-pre-wrap text-sm text-stone-900">{state.story.storySoFar}</p>}
+                    {state.story.recentExchanges.length > 0 && (
+                      <details className="mt-2 text-sm">
+                        <summary className="cursor-pointer text-xs font-semibold text-indigo-800">Latest exchanges with the narrator</summary>
+                        <ul className="mt-2 space-y-1.5">
+                          {state.story.recentExchanges.map((exchange) => (
+                            <li key={exchange.at + exchange.role} className="whitespace-pre-wrap text-stone-800"><strong>{exchange.role === 'player' ? 'You' : 'Narrator'}:</strong> {exchange.text}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                )}
+
                 {activeDashboardTab === 'journal' && journal.openThreads.length > 0 && (
                   <div>
                     <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Unresolved threads · GM</h4>
@@ -1394,9 +1426,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
 
                 {activeDashboardTab === 'logs' && (
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Recent ChatGPT journal entries</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-stone-600">Recent journal entries</h4>
                   {journal.recentEvents.length === 0 ? (
-                    <p className="mt-2 text-sm text-stone-500">ChatGPT has not saved a visible campaign event yet.</p>
+                    <p className="mt-2 text-sm text-stone-500">Nothing has been saved to the campaign journal yet.</p>
                   ) : (
                     <ol className="mt-2 space-y-2">
                       {journal.recentEvents.map((event) => {
@@ -1409,6 +1441,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                                 {summary && <p className="mt-0.5 text-sm text-stone-700">{summary}</p>}
                               </div>
                               <div className="flex shrink-0 items-center gap-2 text-[11px] font-semibold text-stone-400">
+                                <span className="rounded bg-stone-100 px-1.5 py-0.5">{event.sourceType === 'chatgpt' ? 'AI assistant' : event.sourceType === 'system' ? 'System' : 'App'}</span>
                                 <span className="rounded bg-stone-100 px-1.5 py-0.5">{titleCase(event.visibility)}</span>
                                 <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
                               </div>

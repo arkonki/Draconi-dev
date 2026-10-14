@@ -89,6 +89,54 @@ describe('solo narrator context', () => {
   });
 });
 
+describe('the shared campaign story', () => {
+  const shared = {
+    ...state,
+    journal: {
+      currentScene: { location: 'The shrine gate', description: 'Moss-covered stone.', situation: 'Rain is falling.', exits: [{ name: 'Forest path', status: 'open', visibility: 'players' }, { name: 'Secret stair', visibility: 'gm' }], dangers: [{ description: 'Loose rubble', status: 'active', visibility: 'players' }, { description: 'Hidden cult guard', status: 'active', visibility: 'gm' }] },
+      openThreads: ['Who lit the beacon?', 'The wolf pack'],
+      sessions: [
+        { status: 'completed', title: 'Session 2', summary: 'Mara found the shrine.' },
+        { status: 'completed', title: 'Session 1', summary: 'Mara left the inn.' },
+        { status: 'active', title: 'Session 3', summary: null },
+      ],
+      // newest first, as the event log returns them
+      recentEvents: [
+        { type: 'narration.recorded', sourceType: 'user', payload: { source: 'narrator', narration: 'MY OWN WORDS' } },
+        { type: 'story.beat', sourceType: 'chatgpt', payload: { summary: 'The gate opened.' } },
+        { type: 'clue.found', sourceType: 'user', payload: { summary: 'A key in the moss.' } },
+      ],
+    },
+  };
+  const context = buildNarratorContext(shared, { checkpoint: { summary: 'The hero reached the gate at dusk.', createdAt: '2026-10-12T20:00:00Z' } });
+
+  it('reads the latest checkpoint, the scene, the threads and the earlier sessions', () => {
+    expect(context).toContain('LATEST CHECKPOINT (2026-10-12): The hero reached the gate at dusk.');
+    expect(context).toContain('SCENE: The shrine gate. Moss-covered stone. Situation: Rain is falling.');
+    expect(context).toContain('Exits: Forest path (open).');
+    expect(context).toContain('OPEN THREADS: Who lit the beacon? | The wolf pack');
+    expect(context.indexOf('Session 1')).toBeLessThan(context.indexOf('Session 2'));
+    expect(context).not.toContain('Session 3');
+  });
+
+  it('keeps what the hero does not know out of the scene', () => {
+    expect(context).toContain('Scene danger: Loose rubble');
+    expect(context).not.toContain('Secret stair');
+    expect(context).not.toContain('Hidden cult guard');
+  });
+
+  it('lists events from every source, oldest first, without echoing its own narration', () => {
+    const events = context.slice(context.indexOf('RECENT EVENTS'));
+    expect(events.indexOf('clue.found')).toBeLessThan(events.indexOf('story.beat'));
+    expect(events).toContain('story.beat (from an AI assistant)');
+    expect(events).not.toContain('MY OWN WORDS');
+  });
+
+  it('works without a checkpoint', () => {
+    expect(buildNarratorContext(shared)).not.toContain('LATEST CHECKPOINT');
+  });
+});
+
 describe('narrator reply parsing', () => {
   it('splits the story from valid actions and fixes the names', () => {
     const reply = parseNarratorReply('The bridge sways.\n1. Cross\n2. Wait\nACTIONS: [{"type":"check","name":"sneaking","modifier":"bane","label":"Cross quietly"},{"type":"fortune","question":"Is the bridge safe?","category":"yes_no"},{"type":"rest","rest":"shift"}]', state);

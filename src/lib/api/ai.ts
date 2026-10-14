@@ -32,10 +32,18 @@ export interface NarratorMessage {
   createdAt?: string;
 }
 
+/** What the narrator also reads from the campaign. It is the same record an AI assistant over MCP reads and writes. */
+export interface NarratorCampaignContext {
+  checkpoint: { summary: string; location: string; createdAt: string } | null;
+  openThreads: string[];
+  sessions: Array<{ title: string; summary: string; endedAt: string | null }>;
+}
+
 export interface NarratorConversation {
   turns: NarratorMessage[];
   /** The running summary of everything older than the recent turns. */
   summary: string;
+  campaign: NarratorCampaignContext | null;
 }
 
 export interface NarratorAnswer extends AiAnswer {
