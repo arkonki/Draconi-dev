@@ -137,7 +137,7 @@ export interface SoloNpc {
   name: string;
   template: 'minion' | 'boss';
   roles: Array<'melee' | 'ranged' | 'sneaky' | 'magic'>;
-  status: 'active' | 'fled' | 'surrendered' | 'defeated';
+  status: 'active' | 'fled' | 'surrendered' | 'defeated' | 'retired';
   notes?: string | null;
   profile: {
     attributes?: number;

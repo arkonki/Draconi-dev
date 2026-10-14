@@ -4,15 +4,15 @@ import { createTranslator, translate } from './translate';
 import { translationKeysIn } from './extractKeys';
 
 // The source of the Solo screens, read as text so the test can see every text they ask to translate.
-const SOLO_SOURCES = import.meta.glob(['../components/party/SoloDashboard.tsx', '../components/party/SoloModeSettings.tsx', '../components/party/SoloNarrator.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const SOLO_SOURCES = import.meta.glob(['../components/party/SoloDashboard.tsx', '../components/party/SoloModeSettings.tsx', '../components/party/SoloNarrator.tsx', '../components/party/SoloEndStory.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
 
 describe('Estonian translations of the Solo screens', () => {
   const used = new Map<string, string[]>();
   for (const [file, source] of Object.entries(SOLO_SOURCES)) for (const key of translationKeysIn(source, file)) used.set(key, [...(used.get(key) ?? []), file]);
 
-  it('reads the three Solo screens', () => {
-    expect(Object.keys(SOLO_SOURCES)).toHaveLength(3);
+  it('reads the four Solo screens', () => {
+    expect(Object.keys(SOLO_SOURCES)).toHaveLength(4);
     expect(used.size).toBeGreaterThan(400);
   });
 

@@ -49,7 +49,8 @@ export function SoloModeSettings({ partyId, partyName, isOpen, onClose }: SoloMo
   const [isDisableConfirmOpen, setIsDisableConfirmOpen] = useState(false);
 
   const settingsQuery = useQuery({
-    queryKey: ['solo-settings', partyId],
+    // A key of its own: the Solo page keeps different data under ['solo-settings', partyId]. Invalidating that prefix still reaches both.
+    queryKey: ['solo-settings', partyId, 'dialog'],
     queryFn: async () => {
       const [options, state] = await Promise.all([
         fetchSoloOptions(partyId),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookmarkPlus, BookOpenText, Check, ChevronRight, Dices, Flag, Ghost, HelpCircle, MapPin, Moon, PackageSearch, Search, Send } from 'lucide-react';
+import { BookCheck, BookmarkPlus, BookOpenText, Check, ChevronRight, Dices, Flag, Ghost, HelpCircle, MapPin, Moon, PackageSearch, Search, Send } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../shared/Button';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -34,6 +34,8 @@ interface SoloNarratorProps {
   checkpoint: { revision: number; sessionId: string | null; sceneLocation: string; sceneDescription: string };
   /** Called after anything that changes the campaign record, so the rest of the page shows the new state. */
   onStateChanged: () => Promise<void> | void;
+  /** Opens the end-of-story wizard: conclude, advance, clean up. */
+  onEndStory: () => void;
   /** Opens the matching rules dialog on the Adventure tab, filled in. Nothing is rolled until the player confirms there. */
   onAction: (action: NarratorAction) => void;
 }
@@ -53,7 +55,7 @@ const usageLabel = (turn: NarratorMessage) => {
  * buttons that open the right rules dialog. It remembers the story. It writes prose and proposes; dice, hit points and
  * every rule stay with the Adventure tab.
  */
-export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse, checkpoint, onStateChanged, onAction }: SoloNarratorProps) {
+export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse, checkpoint, onStateChanged, onAction, onEndStory }: SoloNarratorProps) {
   const t = useT();
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -199,6 +201,7 @@ export function SoloNarrator({ partyId, partyName, heroId, currentUserId, canUse
             </select>
           </label>
           {(turns.length > 0 || summary) && <Button type="button" variant="outline" size="sm" icon={Flag} loading={checkpointMutation.isPending} onClick={() => { setNotice(null); checkpointMutation.mutate(undefined); }} title={t('Save the story so far, the scene and the open threads for anyone who continues it')}>{t('Save checkpoint')}</Button>}
+          <Button type="button" variant="outline" size="sm" icon={BookCheck} onClick={onEndStory} title={t('Conclude the mission, run the advancement and clean up')}>{t('End the story')}</Button>
           {(turns.length > 0 || summary) && <Button type="button" variant="ghost" size="sm" loading={resetMutation.isPending} onClick={() => void startOver()}>{t('Start over')}</Button>}
         </div>
       </div>

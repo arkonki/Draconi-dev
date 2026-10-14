@@ -2712,7 +2712,7 @@ export async function generateSoloNpc(user, input, { sourceClient } = {}) {
     if (waypointId) {
       await client.query(
         `UPDATE solo_waypoints
-         SET npc_ids = CASE WHEN $1 = ANY(npc_ids) THEN npc_ids ELSE array_append(npc_ids, $1) END
+         SET npc_ids = CASE WHEN npc_ids @> jsonb_build_array($1::text) THEN npc_ids ELSE npc_ids || jsonb_build_array($1::text) END
          WHERE id = $2`,
         [npc.id, waypointId],
       );
@@ -6151,6 +6151,19 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
       `UPDATE solo_campaign_states SET current_mission_id = NULL WHERE campaign_id = $1`,
       [input.campaign_id],
     );
+    // The story of this mission is over: what it left behind goes with it. Dangers that were still active are settled
+    // (resolved after a success, avoided otherwise) and the creatures that belonged to it leave play.
+    const { rowCount: settledDangers } = await client.query(
+      `UPDATE solo_dangers
+       SET status = CASE WHEN $2 = 'success' THEN 'resolved' ELSE 'avoided' END
+       WHERE campaign_id = $1 AND mission_id = $3 AND status = 'active'`,
+      [input.campaign_id, input.outcome, mission.id],
+    );
+    const { rowCount: retiredNpcs } = await client.query(
+      `UPDATE solo_npcs SET status = 'retired'
+       WHERE campaign_id = $1 AND mission_id = $2 AND status = 'active'`,
+      [input.campaign_id, mission.id],
+    );
     let advancement = null;
     if (input.outcome === 'success') {
       const { rows } = await client.query(
@@ -6182,6 +6195,7 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
         summary: input.summary,
         rewards: input.rewards,
         reason: input.reason,
+        cleanup: { settledDangers, retiredNpcs },
       },
       visibility: 'players',
       sourceClient,
@@ -6198,6 +6212,7 @@ export async function completeSoloMission(user, input, { sourceClient } = {}) {
         mission: soloMissionForOutput(completedRows[0]),
         currentMissionId: null,
         rewards: input.rewards,
+        cleanup: { settledDangers, retiredNpcs },
         advancement: soloAdvancementForOutput(advancement),
         advancementNotice: input.outcome === 'success'
           ? 'Choose exactly five skills to mark, then resolve advancement before the next mission.'

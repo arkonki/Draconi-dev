@@ -80,6 +80,7 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
 import { SoloNarrator } from './SoloNarrator';
+import { SoloEndStory } from './SoloEndStory';
 import type { NarratorAction } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
@@ -93,8 +94,8 @@ interface SoloDashboardProps {
   onOpenSettings: () => void;
 }
 
-type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'treasure' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission';
-type SoloDashboardTab = 'adventure' | 'narrator' | 'state' | 'journal' | 'logs';
+type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'treasure' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission' | 'advancement';
+type SoloDashboardTab = 'story' | 'adventure' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
@@ -342,6 +343,7 @@ function ActionModal({
     'add-waypoints': t('Add route waypoints'),
     return: t('Begin the return journey'),
     'complete-mission': t('Conclude the mission'),
+    advancement: t('Mission advancement'),
   };
 
   return (
@@ -381,7 +383,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     setCharacter: setViewedSheetCharacter,
   } = useCharacterSheetStore();
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
-  const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('adventure');
+  const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('story');
+  const [endStoryOpen, setEndStoryOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [oracleActionResult, setOracleActionResult] = useState<SoloWriteResult | null>(null);
   const [isCharacterSheetOpen, setIsCharacterSheetOpen] = useState(false);
@@ -489,6 +492,17 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const t = useMemo(() => createTranslator(screenLanguage), [screenLanguage]);
   /** A word from the game's data (a status, a role, a condition) in the screen language. */
   const tc = (value: string) => t(titleCase(value));
+  // A finished mission leaves an advancement to do. When one appears while the page is open, bring it up straight away
+  // (the end-of-story wizard runs it itself, so it stays out of the way then).
+  const seenAdvancement = useRef<string | null | undefined>(undefined);
+  const endStoryOpenRef = useRef(false);
+  endStoryOpenRef.current = endStoryOpen;
+  useEffect(() => {
+    if (!state) return;
+    const current = state.pendingAdvancement && !state.activeMission ? state.pendingAdvancement.id : null;
+    if (seenAdvancement.current !== undefined && current && current !== seenAdvancement.current && canManage && !endStoryOpenRef.current) openAction('advancement');
+    seenAdvancement.current = current;
+  }, [state?.pendingAdvancement?.id, state?.activeMission?.id]);
   const optionsQuery = useQuery({
     queryKey: ['solo-settings', partyId],
     queryFn: () => fetchSoloOptions(partyId),
@@ -790,6 +804,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             routeType: returnRouteType,
             checkSkill: returnRouteType === 'dangerous' ? returnCheckSkill : undefined,
           });
+        case 'advancement':
+          throw new Error('The advancement runs through its own buttons.');
         case 'complete-mission':
           if (!state.activeMission) throw new Error(t('There is no active mission.'));
           return completeSoloMission(partyId, state.activeMission.id, revision, {
@@ -1103,12 +1119,86 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
     }))
     .filter(({ roll, cardCount }) => cardCount > 0 && !recordedTreasureSourceIds.has(roll.id));
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
+    { id: 'story', label: t('Story'), icon: MessageSquareText, badge: state.pendingAdvancement && !state.activeMission ? 1 : undefined },
     { id: 'adventure', label: t('Adventure'), icon: Route, badge: unresolvedRolls.length || undefined },
-    { id: 'narrator', label: t('Narrator'), icon: MessageSquareText },
     { id: 'state', label: t('State'), icon: HeartPulse, badge: state.activeInjuries.length || undefined },
     { id: 'journal', label: t('Journal'), icon: BookOpen, badge: journal.openThreads.length || undefined },
     { id: 'logs', label: t('Logs'), icon: ScrollText },
   ];
+
+  // When the mission is over and its advancement has not been done, say so wherever the player is.
+  const advancementBanner = canManage && state.pendingAdvancement && !state.activeMission ? (
+    <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 font-bold text-amber-950"><Sparkles className="h-5 w-5 text-amber-600" /> {t('Advancement is ready')}</h3>
+          <p className="mt-1 text-sm text-amber-800">{t('The mission is over. Mark five skills, roll for them and claim any heroic ability before the next story.')}</p>
+        </div>
+        <Button size="sm" icon={Sparkles} onClick={() => openAction('advancement')}>{t('Start the advancement')}</Button>
+      </div>
+    </section>
+  ) : null;
+
+  // The tools the player reaches for most, within reach of the story. Everything else is on the Adventure tab.
+  const quickTools = canManage ? (
+    <div className="flex flex-wrap items-center gap-2" aria-label={t('Quick tools')}>
+      <Button size="sm" icon={Dices} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('check')}>{t('Act')}</Button>
+      <Button size="sm" icon={Gauge} onClick={() => openAction('fortune')}>{t('Ask Fortune')}</Button>
+      <Button size="sm" variant="outline" icon={Wand2} onClick={() => openAction('inspiration')}>{t('Inspire')}</Button>
+      <Button size="sm" variant="outline" icon={Bed} disabled={Boolean(state.activeCombat) || !hero || hero.hp.current <= 0} onClick={() => openAction('rest')}>{t('Rest')}</Button>
+      {state.currentWaypoint?.status === 'active' && (
+        <>
+          <Button size="sm" variant="outline" icon={Search} onClick={() => openAction('search')}>{t('Search')}</Button>
+          <Button size="sm" variant="outline" icon={PackageSearch} onClick={() => openAction('scavenge')}>{t('Scavenge')}</Button>
+        </>
+      )}
+      {hero && hero.hp.current === 0 && hero.lifeStatus !== 'dead' && (
+        <Button size="sm" icon={Skull} onClick={() => openAction('dying')}>{t('Dying action')}</Button>
+      )}
+      <Button size="sm" variant="ghost" icon={Route} onClick={() => setActiveDashboardTab('adventure')}>{t('Mission and all tools')}</Button>
+    </div>
+  ) : null;
+
+  // The between-mission advancement, shown in the Mission card and, so it is hard to miss, in a dialog of its own.
+  const advancementPanel = state.pendingAdvancement ? (
+    <div className="mx-auto max-w-2xl text-left">
+      <Sparkles className="h-10 w-10 text-amber-500" />
+      <h4 className="mt-3 text-lg font-bold text-stone-900">{t('Mission advancement')}</h4>
+      <p className="mt-1 text-sm text-stone-600">{t('Complete the between-mission advancement before starting the next mission.')}</p>
+      {state.pendingAdvancement.status === 'selecting_marks' && (
+        <div className="mt-4">
+          <div className="text-sm font-bold text-stone-800">{t('Choose exactly five unmarked skills')}</div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {skillOptions.filter(([name]) => !hero?.markedSkills?.some((marked) => titleCase(marked) === titleCase(name))).map(([name, value]) => (
+              <label key={name} className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${selectedAdvancementSkills.includes(name) ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
+                <input type="checkbox" checked={selectedAdvancementSkills.includes(name)} disabled={!selectedAdvancementSkills.includes(name) && selectedAdvancementSkills.length >= 5} onChange={(event) => setSelectedAdvancementSkills((current) => event.target.checked ? [...current, name] : current.filter((skill) => skill !== name))} />
+                <span className="flex-1 font-semibold">{name}</span><span>{value}</span>
+              </label>
+            ))}
+          </div>
+          {canManage && <Button className="mt-4" loading={advancementMutation.isPending} disabled={selectedAdvancementSkills.length !== 5} onClick={() => advancementMutation.mutate('marks')}>{t('Apply five marks')}</Button>}
+        </div>
+      )}
+      {state.pendingAdvancement.status === 'ready_to_roll' && (
+        <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+          <div className="font-bold text-indigo-950">{t('Marks ready: {selectedSkills}', { selectedSkills: state.pendingAdvancement.selectedSkills.join(', ') })}</div>
+          <p className="mt-1 text-sm text-indigo-800">{t('Draconi will roll D20 for every marked skill. A roll above the current value improves it by one, to a maximum of 18.')}</p>
+          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} onClick={() => advancementMutation.mutate('resolve')}>{t('Roll advancement')}</Button>}
+        </div>
+      )}
+      {state.pendingAdvancement.status === 'claiming_abilities' && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="font-bold text-amber-950">{t('Choose {pendingHeroicAbilities} heroic ability reward(s)', { pendingHeroicAbilities: state.pendingAdvancement.pendingHeroicAbilities })}</div>
+          <select value={advancementAbilityId} onChange={(event) => setAdvancementAbilityId(event.target.value)} className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm">
+            <option value="">{t('Choose heroic ability…')}</option>
+            {(optionsQuery.data?.heroicAbilities || []).filter((ability) => !ability.knownByCharacterIds?.includes(hero?.id || '')).map((ability) => <option key={ability.id} value={ability.id}>{ability.name}</option>)}
+          </select>
+          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} disabled={!advancementAbilityId} onClick={() => advancementMutation.mutate('ability')}>{t('Claim ability')}</Button>}
+        </div>
+      )}
+      {advancementMutation.error && <p className="mt-3 text-sm text-red-700">{advancementMutation.error.message}</p>}
+    </div>
+  ) : null;
 
   return (
     <ScreenLanguageProvider value={screenLanguage}>
@@ -1184,29 +1274,33 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           </div>
         )}
 
-        {activeDashboardTab === 'narrator' && (
-          <SoloNarrator
-            partyId={partyId}
-            partyName={partyName}
-            heroId={state.playerCharacter?.id ?? null}
-            currentUserId={currentUserId}
-            canUse={canManage}
-            checkpoint={{
-              revision: state.campaignRevision,
-              sessionId: state.activeSessionId ?? null,
-              sceneLocation: journal.currentScene?.location ? String(journal.currentScene.location) : state.currentWaypoint?.title || '',
-              sceneDescription: journal.currentScene?.description ? String(journal.currentScene.description) : '',
-            }}
-            onStateChanged={() => queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] })}
-            onAction={startNarratorAction}
-          />
-        )}
-
-        <div className={activeDashboardTab === 'adventure' || activeDashboardTab === 'state'
+        <div className={activeDashboardTab === 'story' || activeDashboardTab === 'adventure' || activeDashboardTab === 'state'
           ? 'grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(290px,0.75fr)]'
           : 'block'}>
           <div className="flex min-w-0 flex-col gap-5">
-            {activeDashboardTab === 'adventure' && unresolvedRolls.length > 0 && (
+            {/* The story comes first, with what needs the player's attention right above it. */}
+            {activeDashboardTab === 'story' && advancementBanner}
+            {activeDashboardTab === 'story' && quickTools}
+            {activeDashboardTab === 'story' && (
+              <SoloNarrator
+                partyId={partyId}
+                partyName={partyName}
+                heroId={state.playerCharacter?.id ?? null}
+                currentUserId={currentUserId}
+                canUse={canManage}
+                checkpoint={{
+                  revision: state.campaignRevision,
+                  sessionId: state.activeSessionId ?? null,
+                  sceneLocation: journal.currentScene?.location ? String(journal.currentScene.location) : state.currentWaypoint?.title || '',
+                  sceneDescription: journal.currentScene?.description ? String(journal.currentScene.description) : '',
+                }}
+                onStateChanged={() => queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] })}
+                onAction={startNarratorAction}
+                onEndStory={() => setEndStoryOpen(true)}
+              />
+            )}
+
+            {(activeDashboardTab === 'adventure' || activeDashboardTab === 'story') && unresolvedRolls.length > 0 && (
               <section className="order-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -1225,7 +1319,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </section>
             )}
 
-            {activeDashboardTab === 'adventure' && pendingTreasureRolls.length > 0 && (
+            {(activeDashboardTab === 'adventure' || activeDashboardTab === 'story') && pendingTreasureRolls.length > 0 && (
               <section className="order-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -1253,43 +1347,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               {!state.activeMission ? (
                 <div className="px-5 py-10 text-center">
                   {state.pendingAdvancement ? (
-                    <div className="mx-auto max-w-2xl text-left">
-                      <Sparkles className="h-10 w-10 text-amber-500" />
-                      <h4 className="mt-3 text-lg font-bold text-stone-900">{t('Mission advancement')}</h4>
-                      <p className="mt-1 text-sm text-stone-600">{t('Complete the between-mission advancement before starting the next mission.')}</p>
-                      {state.pendingAdvancement.status === 'selecting_marks' && (
-                        <div className="mt-4">
-                          <div className="text-sm font-bold text-stone-800">{t('Choose exactly five unmarked skills')}</div>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            {skillOptions.filter(([name]) => !hero?.markedSkills?.some((marked) => titleCase(marked) === titleCase(name))).map(([name, value]) => (
-                              <label key={name} className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${selectedAdvancementSkills.includes(name) ? 'border-indigo-400 bg-indigo-50' : 'border-stone-200'}`}>
-                                <input type="checkbox" checked={selectedAdvancementSkills.includes(name)} disabled={!selectedAdvancementSkills.includes(name) && selectedAdvancementSkills.length >= 5} onChange={(event) => setSelectedAdvancementSkills((current) => event.target.checked ? [...current, name] : current.filter((skill) => skill !== name))} />
-                                <span className="flex-1 font-semibold">{name}</span><span>{value}</span>
-                              </label>
-                            ))}
-                          </div>
-                          {canManage && <Button className="mt-4" loading={advancementMutation.isPending} disabled={selectedAdvancementSkills.length !== 5} onClick={() => advancementMutation.mutate('marks')}>{t('Apply five marks')}</Button>}
-                        </div>
-                      )}
-                      {state.pendingAdvancement.status === 'ready_to_roll' && (
-                        <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                          <div className="font-bold text-indigo-950">{t('Marks ready: {selectedSkills}', { selectedSkills: state.pendingAdvancement.selectedSkills.join(', ') })}</div>
-                          <p className="mt-1 text-sm text-indigo-800">{t('Draconi will roll D20 for every marked skill. A roll above the current value improves it by one, to a maximum of 18.')}</p>
-                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} onClick={() => advancementMutation.mutate('resolve')}>{t('Roll advancement')}</Button>}
-                        </div>
-                      )}
-                      {state.pendingAdvancement.status === 'claiming_abilities' && (
-                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                          <div className="font-bold text-amber-950">{t('Choose {pendingHeroicAbilities} heroic ability reward(s)', { pendingHeroicAbilities: state.pendingAdvancement.pendingHeroicAbilities })}</div>
-                          <select value={advancementAbilityId} onChange={(event) => setAdvancementAbilityId(event.target.value)} className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm">
-                            <option value="">{t('Choose heroic ability…')}</option>
-                            {(optionsQuery.data?.heroicAbilities || []).filter((ability) => !ability.knownByCharacterIds?.includes(hero?.id || '')).map((ability) => <option key={ability.id} value={ability.id}>{ability.name}</option>)}
-                          </select>
-                          {canManage && <Button className="mt-3" loading={advancementMutation.isPending} disabled={!advancementAbilityId} onClick={() => advancementMutation.mutate('ability')}>{t('Claim ability')}</Button>}
-                        </div>
-                      )}
-                      {advancementMutation.error && <p className="mt-3 text-sm text-red-700">{advancementMutation.error.message}</p>}
-                    </div>
+                    advancementPanel
                   ) : (
                     <>
                       <Flag className="mx-auto h-10 w-10 text-stone-300" />
@@ -1371,7 +1429,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             </section>
             )}
 
-            {activeDashboardTab !== 'adventure' && activeDashboardTab !== 'narrator' && (
+            {activeDashboardTab !== 'adventure' && activeDashboardTab !== 'story' && (
             <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900">
@@ -1662,8 +1720,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             )}
           </div>
 
-          {(activeDashboardTab === 'adventure' || activeDashboardTab === 'state') && (
-          <aside className="order-first space-y-5 lg:order-none">
+          {(activeDashboardTab === 'story' || activeDashboardTab === 'adventure' || activeDashboardTab === 'state') && (
+          <aside className={`space-y-5 ${activeDashboardTab === 'story' ? '' : 'order-first lg:order-none'}`}>
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-indigo-100 font-bold text-indigo-700">
@@ -1727,7 +1785,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               </div>
 
-              {activeDashboardTab === 'state' && (
+              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Bed className="h-3.5 w-3.5" /> {t('Rest this shift')}</div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
@@ -1738,7 +1796,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               </div>
               )}
 
-              {activeDashboardTab === 'state' && state.activeInjuries.length > 0 && (
+              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && state.activeInjuries.length > 0 && (
                 <div className="mt-4 border-t border-stone-100 pt-4">
                   <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><HeartPulse className="h-3.5 w-3.5" /> {t('Severe injuries')}</div>
                   <div className="mt-2 space-y-2">
@@ -1776,14 +1834,14 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                 </div>
               )}
 
-              {activeDashboardTab === 'state' && (
+              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Sparkles className="h-3.5 w-3.5" /> {t('Solo ability')}</div>
                 <div className="mt-1.5 text-sm font-semibold text-stone-800">{state.soloHeroicAbility?.name || t('Not selected')}</div>
               </div>
               )}
 
-              {activeDashboardTab === 'state' && (
+              {(activeDashboardTab === 'state' || activeDashboardTab === 'story') && (
               <div className="mt-4 border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500"><Shield className="h-3.5 w-3.5" /> {t('Equipped')}</div>
                 <div className="mt-2 space-y-1 text-sm text-stone-700">
@@ -1850,7 +1908,40 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         layer="nested"
       />
 
-      {activeAction && (
+      {activeAction === 'advancement' && (
+        <ActionModal action="advancement" busy={advancementMutation.isPending} error={advancementMutation.error} onClose={closeAction}>
+          {advancementPanel ?? (
+            <div className="space-y-4 text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
+              <p className="font-semibold text-stone-800">{t('The advancement is complete.')}</p>
+              <Button type="button" fullWidth onClick={closeAction}>{t('Done')}</Button>
+            </div>
+          )}
+        </ActionModal>
+      )}
+
+      {endStoryOpen && (
+        <SoloEndStory
+          partyId={partyId}
+          partyName={partyName}
+          state={state}
+          hero={hero ?? null}
+          currentUserId={currentUserId}
+          canCompleteSuccessfully={canCompleteSuccessfully}
+          advancementPanel={advancementPanel}
+          onChanged={async () => {
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] }),
+              queryClient.invalidateQueries({ queryKey: ['solo-settings', partyId] }),
+              queryClient.invalidateQueries({ queryKey: ['solo-narrator', partyId] }),
+              queryClient.invalidateQueries({ queryKey: ['party', partyId] }),
+            ]);
+          }}
+          onClose={() => setEndStoryOpen(false)}
+        />
+      )}
+
+      {activeAction && activeAction !== 'advancement' && (
         <ActionModal action={activeAction} busy={actionMutation.isPending} error={actionMutation.error} onClose={closeAction}>
           <form onSubmit={submitAction} className="space-y-4">
             {(activeAction === 'fortune' || activeAction === 'inspiration') && oracleActionResult && (

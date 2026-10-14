@@ -230,6 +230,47 @@ try {
   assert.ok(resume.story && resume.story.recentExchanges.length > 0, 'the resume state carries the story too');
   results.sharedStory = 'passed';
 
+  // --- Ending a story: the mission's leftovers are cleaned up for every client, and a success leads to advancement ---
+  const writeHeaders = (revision) => ({ 'if-match': `"${revision}"`, 'idempotency-key': `end-${randomUUID()}` });
+  const soloSnapshot = async () => (await ok(call('GET', `/v1/campaigns/${party.id}/solo`, { token: tokens.alice }), 200, 'solo state')).data;
+  const startMission = async (title) => ok(call('POST', `/v1/campaigns/${party.id}/solo/missions`, {
+    token: tokens.alice,
+    headers: writeHeaders((await soloSnapshot()).campaignRevision),
+    body: { title, objective: 'Find the lantern', waypoint_count: 3, unknown_waypoint_count: 0, foreseen_waypoints: [], opening_waypoint: { title: 'The gate', description: 'A rusted gate.' }, threat: { description: 'The water rises', recurring: false, trigger_effect: {} }, reason: 'smoke' },
+  }), 200, `start ${title}`);
+  const leaveBehind = async () => {
+    const state = await soloSnapshot();
+    const npc = await ok(call('POST', `/v1/campaigns/${party.id}/solo/npcs`, { token: tokens.alice, headers: writeHeaders(state.campaignRevision), body: { name: 'Gate Warden', template: 'minion', roles: ['melee'], mission_id: state.activeMission.id, waypoint_id: state.currentWaypoint.id, reason: 'smoke' } }), 200, 'a creature in the mission');
+    assert.ok(npc.data.summary);
+    await database.query("INSERT INTO solo_dangers (campaign_id, mission_id, waypoint_id, description) VALUES ($1, $2, $3, 'Loose rubble')", [party.id, state.activeMission.id, state.currentWaypoint.id]);
+    return state.activeMission.id;
+  };
+  const statusOf = async (table, missionId) => (await database.query(`SELECT status FROM ${table} WHERE mission_id = $1`, [missionId])).rows.map((row) => row.status);
+
+  await startMission('The first story');
+  const failedMission = await leaveBehind();
+  const failed = (await ok(call('POST', `/v1/campaigns/${party.id}/solo/missions/${failedMission}/complete`, { token: tokens.alice, headers: writeHeaders((await soloSnapshot()).campaignRevision), body: { outcome: 'failure', summary: 'The hero fled.', rewards: {}, reason: 'smoke' } }), 200, 'fail the mission')).data;
+  assert.deepEqual(failed.state_excerpt.cleanup, { settledDangers: 1, retiredNpcs: 1 }, 'leftovers are counted');
+  assert.deepEqual(await statusOf('solo_dangers', failedMission), ['avoided'], 'a danger left behind is avoided after a failure');
+  assert.deepEqual(await statusOf('solo_npcs', failedMission), ['retired'], 'the mission\'s creature leaves play');
+  const afterFailure = await soloSnapshot();
+  assert.ok(!afterFailure.pendingAdvancement, 'a failed story earns no advancement');
+  assert.equal(afterFailure.activeDangers.length, 0);
+  assert.ok(afterFailure.npcs.some((npc) => npc.status === 'retired'), 'the retired creature is still on record');
+  const concluded = afterFailure.journal.recentEvents.find((event) => event.type === 'solo.mission_completed');
+  assert.deepEqual(concluded.payload.cleanup, { settledDangers: 1, retiredNpcs: 1 }, 'and the event log says what was cleaned');
+
+  await startMission('The second story');
+  const wonMission = await leaveBehind();
+  await database.query('UPDATE solo_missions SET current_waypoint_index = (SELECT position FROM solo_waypoints WHERE id = solo_missions.objective_waypoint_id) WHERE id = $1', [wonMission]);
+  const won = (await ok(call('POST', `/v1/campaigns/${party.id}/solo/missions/${wonMission}/complete`, { token: tokens.alice, headers: writeHeaders((await soloSnapshot()).campaignRevision), body: { outcome: 'success', summary: 'The lantern was found.', rewards: {}, reason: 'smoke' } }), 200, 'win the mission')).data;
+  assert.deepEqual(won.state_excerpt.cleanup, { settledDangers: 1, retiredNpcs: 1 });
+  assert.deepEqual(await statusOf('solo_dangers', wonMission), ['resolved'], 'a danger is resolved after a success');
+  const afterSuccess = await soloSnapshot();
+  assert.equal(afterSuccess.pendingAdvancement?.status, 'selecting_marks', 'a success starts the advancement');
+  assert.ok(afterSuccess.allowedNextActions.includes('select_solo_mission_marks'));
+  results.storyEnd = 'passed';
+
   const polish = (token, body) => call('POST', '/ai/recap', { token, body });
   // --- Story language: one setting for the campaign, read by the narrator and by assistants ---
   const setLanguage = (token, language) => call('PUT', '/ai/solo-narrator/language', { token, body: { partyId: party.id, language } });
