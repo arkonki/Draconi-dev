@@ -23,7 +23,7 @@ const KEEPABLE_CONTENT = [
   ['party_display_sessions', 'created_by'],
 ];
 
-function requireAdmin(user) {
+export function requireAdmin(user) {
   if (user?.role !== 'admin') throw new HttpError(403, 'Administrator access is required', 'ADMIN_REQUIRED');
 }
 
@@ -72,7 +72,7 @@ export function lastAdminProblem(target, changes, otherActiveAdmins) {
   return isActiveAdmin && !staysActiveAdmin && otherActiveAdmins === 0;
 }
 
-async function audit(client, actor, action, target, details = {}) {
+export async function audit(client, actor, action, target, details = {}) {
   await client.query(
     `INSERT INTO admin_audit_log (actor_id, actor_email, action, target_user_id, target_email, details)
      VALUES ($1, $2, $3, $4, $5, $6)`,

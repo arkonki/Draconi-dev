@@ -109,6 +109,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'user.reset_password': 'Reset password',
   'user.revoke_sessions': 'Signed out everywhere',
   'user.delete': 'Deleted account',
+  'connection.revoke': 'Disconnected an AI connection',
   'backups.prune': 'Removed old database dumps',
 };
 

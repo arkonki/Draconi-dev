@@ -34,6 +34,7 @@ import { attachRealtimeServer } from './realtime.js';
 import { handleHelperApiRequest } from './helper/api.js';
 import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
+import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -153,6 +154,14 @@ const server = http.createServer(async (request, response) => {
 
     if (pathname === '/api/admin/users' && request.method === 'GET') {
       sendJson(response, 200, await listUsers(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/connections' && request.method === 'GET') {
+      sendJson(response, 200, await listAllConnections(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/connections/revoke' && request.method === 'POST') {
+      sendJson(response, 200, await revokeConnections(await currentUser(request), await readJson(request)));
       return;
     }
     if (pathname === '/api/admin/audit' && request.method === 'GET') {

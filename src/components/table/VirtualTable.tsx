@@ -27,6 +27,7 @@ import {
   deleteTableItem,
   moveTableItem,
   pingTable,
+  setCharacterHp,
   saveMapScale,
   setItemsVisibility,
   setTableScene,
@@ -39,6 +40,10 @@ import {
 import { fetchAllMonsters } from '../../lib/api/monsters';
 import { clampTokenScale } from '../../lib/tableGeometry';
 import { buildTokenStatuses } from '../../lib/tableStatus';
+import { combatantForToken, damageForChange, siblingCombatants } from '../../lib/tableQuickStatus';
+import { toggleEncounterStatusEffect } from '../../lib/encounterStatusEffects';
+import { applyEncounterDamage, updateCharacterCombatState, updateCombatant } from '../../lib/api/encounters';
+import { TokenQuickPanel } from './TokenQuickPanel';
 import type { FogArea } from '../../lib/tableFog';
 import { nameCandidates, type TokenIconFile } from '../../lib/tokenIcons';
 import { queryKeys } from '../../lib/queryKeys';
@@ -305,6 +310,62 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
     onError: (error: Error) => { onError(error); void table.refreshAll(); },
   });
 
+  const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) ?? null, [items, selectedItemId]);
+  const selectedCombatant = useMemo(
+    () => (selectedItem ? combatantForToken(selectedItem, turn.combatants, items) : null),
+    [selectedItem, turn.combatants, items],
+  );
+
+  const afterVitalsChange = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['table-characters', partyId] }),
+      queryClient.invalidateQueries({ queryKey: ['encounterCombatants'] }),
+    ]);
+  };
+
+  const hpMutation = useMutation({
+    mutationFn: async ({ item, delta }: { item: TableItem; delta: number }) => {
+      const target = combatantForToken(item, turn.combatants, items);
+      if (target) {
+        // Through the combat rules, so the log, the dying state and the character sheet all follow.
+        const [outcome] = await applyEncounterDamage({
+          encounterId: target.encounter_id,
+          attackerName: 'GM',
+          attackName: 'Table adjustment',
+          entries: [{ combatant_id: target.id, damage: damageForChange(delta), armor: 0, ignore_armor: true }],
+        });
+        return outcome ?? null;
+      }
+      const character = item.character_id ? quickCharacters.find((entry) => entry.id === item.character_id) : null;
+      if (!character) throw new Error('This creature is not in the running fight.');
+      await setCharacterHp(character.id, Math.min(character.max_hp, Math.max(0, character.current_hp + delta)));
+      return null;
+    },
+    onSuccess: async (outcome) => {
+      await afterVitalsChange();
+      if (outcome?.instantDeath) showNotice(`${outcome.target} is dead.`);
+      else if (outcome?.dying) showNotice(`${outcome.target} is down and rolls death saves.`);
+      else if (outcome?.defeated) showNotice(`${outcome.target} is defeated.`);
+    },
+    onError,
+  });
+
+  const conditionMutation = useMutation({
+    mutationFn: async ({ item, name }: { item: TableItem; name: string }) => {
+      if (item.character_id) {
+        const character = quickCharacters.find((entry) => entry.id === item.character_id);
+        await updateCharacterCombatState(item.character_id, { conditions: { ...(character?.conditions ?? {}), [name]: !character?.conditions?.[name] } });
+        return;
+      }
+      const target = combatantForToken(item, turn.combatants, items);
+      if (!target) throw new Error('This creature is not in the running fight.');
+      const next = toggleEncounterStatusEffect(target.status_effects, name);
+      await Promise.all(siblingCombatants(target, turn.combatants).map((sibling) => updateCombatant(sibling.id, { status_effects: next })));
+    },
+    onSuccess: afterVitalsChange,
+    onError,
+  });
+
   const handlePing = useCallback((x: number, y: number) => {
     const mapId = viewMapId ?? liveMapId;
     if (!mapId) return;
@@ -435,6 +496,21 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
                 onSave={(draft, showGrid) => saveScaleMutation.mutate({ draft, showGrid })}
                 onReset={() => clearScaleMutation.mutate()}
                 onClose={() => { setTool('move'); setScaleError(null); }}
+              />
+            </div>
+          )}
+          {isGm && selectedItem && tool !== 'scale' && (selectedItem.character_id || selectedItem.kind === 'monster' || selectedItem.kind === 'npc') && (
+            <div className="absolute right-3 top-3 z-[75]">
+              <TokenQuickPanel
+                key={selectedItem.id}
+                item={selectedItem}
+                status={statuses.get(selectedItem.id) ?? null}
+                canChangeHp={Boolean(selectedCombatant) || Boolean(selectedItem.character_id)}
+                canChangeConditions={Boolean(selectedCombatant) || Boolean(selectedItem.character_id)}
+                busy={hpMutation.isPending || conditionMutation.isPending}
+                onChangeHp={(delta) => hpMutation.mutate({ item: selectedItem, delta })}
+                onToggleCondition={(name) => conditionMutation.mutate({ item: selectedItem, name })}
+                onClose={() => setSelectedItemId(null)}
               />
             </div>
           )}

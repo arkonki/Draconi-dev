@@ -26,6 +26,8 @@ function describe(entry: AuditEntry): string {
       if (details.transferredTo) parts.push(`content handed to ${String(details.transferredTo)}`);
       return parts.join('; ');
     }
+    case 'connection.revoke':
+      return details.kind === 'all' ? `All connections ended (${Number(details.ended ?? 0)})` : `${String(details.connection ?? 'Connection')} disconnected`;
     case 'backups.prune':
       return `${Number(details.removed ?? 0)} dump(s) removed, ${Number(details.kept ?? 0)} kept`;
     default:

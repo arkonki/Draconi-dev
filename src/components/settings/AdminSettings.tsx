@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Activity, BookOpen, History, LayoutDashboard, Wrench, Users } from 'lucide-react';
+import { Activity, BookOpen, Bot, History, LayoutDashboard, Wrench, Users } from 'lucide-react';
 import { UserManagement } from '../admin/UserManagement';
 import { CompendiumManager } from '../admin/CompendiumManager';
 import { AdminActivityLog } from '../admin/AdminActivityLog';
+import { AdminConnections } from '../admin/AdminConnections';
 import { AdminOverview } from '../admin/AdminOverview';
 import { SystemHealth } from '../admin/SystemHealth';
 import { MaintenanceSettings } from './MaintenanceSettings';
 
-type AdminSection = 'overview' | 'users' | 'activity' | 'compendium' | 'maintenance' | 'system';
+type AdminSection = 'overview' | 'users' | 'connections' | 'activity' | 'compendium' | 'maintenance' | 'system';
 
 interface AdminSettingsProps {
   /** Opens the separate Backup & Restore page of Settings. */
@@ -25,6 +26,8 @@ export function AdminSettings({ onOpenBackups = () => undefined }: AdminSettings
         return <SystemHealth />;
       case 'users':
         return <UserManagement />;
+      case 'connections':
+        return <AdminConnections />;
       case 'activity':
         return <AdminActivityLog />;
       case 'compendium':
@@ -39,6 +42,7 @@ export function AdminSettings({ onOpenBackups = () => undefined }: AdminSettings
   const tabs: { key: AdminSection; label: string; Icon: React.ElementType }[] = [
     { key: 'overview', label: 'Overview', Icon: LayoutDashboard },
     { key: 'users', label: 'Users', Icon: Users },
+    { key: 'connections', label: 'AI access', Icon: Bot },
     { key: 'activity', label: 'Activity', Icon: History },
     { key: 'compendium', label: 'Compendium', Icon: BookOpen },
     { key: 'maintenance', label: 'Maintenance', Icon: Wrench },

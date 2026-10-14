@@ -4,6 +4,7 @@ import { fetchActiveEncounterForParty, fetchEncounterCombatants } from '../lib/a
 import { queryKeys } from '../lib/queryKeys';
 import { buildTableTurn, type TableTurn } from '../lib/tableTurn';
 import { useEncounterRealtime } from './useEncounterRealtime';
+import { usePartyEncounterWatch } from './usePartyEncounterWatch';
 import type { EncounterCombatant } from '../types/encounter';
 import type { TableItem } from '../types/virtualTable';
 
@@ -12,9 +13,10 @@ export function useTableTurn(partyId: string, items: TableItem[], isGm: boolean)
   const { data: encounter } = useQuery({
     queryKey: queryKeys.activeEncounter(partyId),
     queryFn: () => fetchActiveEncounterForParty(partyId),
-    // An encounter starting or ending is not announced on its own channel, so look now and then.
-    refetchInterval: 10_000,
+    // The encounter watch below announces a fight starting or ending; this slow look is only a safety net.
+    refetchInterval: 90_000,
   });
+  usePartyEncounterWatch(partyId);
   const encounterId = encounter?.id ?? null;
   useEncounterRealtime(encounterId, partyId);
 

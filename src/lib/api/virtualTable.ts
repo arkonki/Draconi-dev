@@ -69,6 +69,12 @@ export async function updateMapFog(mapId: string, changes: { enabled?: boolean; 
   if (error) throw new Error(error.message || 'Could not change the fog');
 }
 
+/** Sets a character's current hit points directly, for a character who is not in a running fight. */
+export async function setCharacterHp(characterId: string, hp: number): Promise<void> {
+  const { error } = await supabase.from('characters').update({ current_hp: hp }).eq('id', characterId);
+  if (error) throw new Error(error.message || 'Could not change the hit points');
+}
+
 export async function deleteTableItem(id: string): Promise<void> {
   const { error } = await supabase.from('table_items').delete().eq('id', id);
   if (error) throw new Error(error.message || 'Could not remove the token');

@@ -330,6 +330,7 @@ export function ProjectorDisplayPage() {
   const dragStateRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const controlsHideTimeoutRef = useRef<number | null>(null);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
+  const lastChangeRef = useRef(Date.now());
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [imageTransform, setImageTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [now, setNow] = useState(() => Date.now());
@@ -345,9 +346,15 @@ export function ProjectorDisplayPage() {
     queryKey: ['player-display', sessionToken],
     queryFn: () => getPlayerDisplayState(sessionToken!),
     enabled: !!sessionToken,
-    refetchInterval: 1500,
+    // Quick while the GM is changing things; slower once the picture has been the same for a while.
+    refetchInterval: (query) => {
+      const stableFor = Date.now() - lastChangeRef.current;
+      return query.state.status === 'error' || stableFor < 60_000 ? 1500 : stableFor < 300_000 ? 3000 : 5000;
+    },
     retry: 1,
   });
+  const dataSignature = data ? JSON.stringify(data) : '';
+  useEffect(() => { lastChangeRef.current = Date.now(); }, [dataSignature]);
 
   const measureImage = () => {
     if (!imageRef.current) {
@@ -459,7 +466,7 @@ export function ProjectorDisplayPage() {
     };
   }, [isKiosk, revealControls]);
 
-  const connectionLost = !!data && now - dataUpdatedAt > 5000;
+  const connectionLost = !!data && now - dataUpdatedAt > 15000;
   const displayImageUrl = data?.displayImageUrl || data?.map?.imageUrl || null;
   const displayMap = data?.map ?? null;
   const showControlOverlay = controlsVisible || !isKiosk || wakeLockState === 'error' || !isFullscreen;

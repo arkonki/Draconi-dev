@@ -127,6 +127,22 @@ try {
   assert.deepEqual(seen.fog_areas, fog);
   results.observerManagementAndFog = 'passed';
 
+  // --- Administrators can see and cut off AI connections; nobody else can.
+  const made = (await ok(call('POST', '/account/connections/tokens', { token: tokens.bob, body: { name: `RL token ${suffix}`, access: 'write', days: 7 } }), 201, 'Bob makes a personal token'));
+  const everyone = (await ok(call('GET', '/admin/connections', { token: admin }), 200, 'administrator lists connections')).connections;
+  const bobId = (await database.query('SELECT id FROM users WHERE email = $1', [emails.bob])).rows[0].id;
+  const found = everyone.find((entry) => entry.kind === 'token' && entry.userId === bobId && entry.id === made.id);
+  assert.ok(found, 'the token is listed under its owner');
+  assert.equal(found.access, 'write');
+  assert.ok(!JSON.stringify(everyone).includes(made.token), 'the secret is never listed');
+  await ok(call('GET', '/admin/connections', { token: tokens.bob }), 403, 'an ordinary user cannot list them');
+  await ok(call('POST', '/admin/connections/revoke', { token: tokens.bob, body: { userId: bobId, kind: 'token', id: made.id } }), 403, 'an ordinary user cannot revoke through the admin route');
+  await ok(call('POST', '/admin/connections/revoke', { token: admin, body: { userId: bobId, kind: 'token', id: made.id } }), 200, 'the administrator disconnects it');
+  await ok(call('POST', '/admin/connections/revoke', { token: admin, body: { userId: bobId, kind: 'token', id: made.id } }), 404, 'a second attempt finds nothing');
+  assert.equal((await ok(call('GET', '/account/connections', { token: tokens.bob }), 200, 'Bob lists his own')).tokens.length, 0, 'it is gone for Bob too');
+  assert.equal((await database.query("SELECT count(*)::int AS n FROM admin_audit_log WHERE action = 'connection.revoke' AND target_user_id = $1", [bobId])).rows[0].n, 1, 'the revocation was logged');
+  results.adminConnections = 'passed';
+
   // --- Solo play is available to anyone who runs a campaign, and to nobody who merely watches.
   const soloHero = (await ok(query(tokens.alice, { table: 'characters', action: 'insert', payload: { name: `RL Solo Hero ${suffix}`, max_hp: 10, current_hp: 10, max_wp: 8, current_wp: 8 } }), 200, 'solo hero')).data[0];
   const soloParty = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `RL Solo ${suffix}`, p_character_ids: [soloHero.id] }), 200, 'Alice starts a solo campaign')).data;

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchAllEncountersForParty, fetchEncounterCombatants } from '../lib/api/encounters';
 import { queryKeys } from '../lib/queryKeys';
 import { useEncounterRealtime } from './useEncounterRealtime';
+import { usePartyEncounterWatch } from './usePartyEncounterWatch';
 import { tokensNeededForEncounter } from '../lib/tableEncounter';
 import type { NewTableItem, TableItem } from '../types/virtualTable';
 
@@ -13,12 +14,13 @@ export function useTableEncounter(partyId: string, items: TableItem[], enabled: 
     queryFn: () => fetchAllEncountersForParty(partyId),
     enabled,
     staleTime: 10_000,
-    refetchInterval: 15_000,
+    refetchInterval: 90_000,
   });
   const encounter = useMemo(
     () => encounters.data?.find((entry) => entry.status === 'active') ?? encounters.data?.find((entry) => entry.status === 'planning') ?? null,
     [encounters.data],
   );
+  usePartyEncounterWatch(partyId, enabled);
   const encounterId = encounter?.id ?? null;
   useEncounterRealtime(enabled ? encounterId : null, partyId);
 

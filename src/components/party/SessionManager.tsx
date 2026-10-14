@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, Flame, Pause, Play, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, FileText, Flame, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -17,6 +17,7 @@ import {
   type CampaignTimeUnit,
 } from '../../lib/api/campaignTime';
 import { fetchRandomTables } from '../../lib/api/randomTables';
+import { draftSessionRecap } from '../../lib/api/sessionRecap';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 import { rollDiceExpression } from '../../lib/game/diceExpression';
@@ -50,6 +51,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   const [gmNotes, setGmNotes] = useState('');
   const [summary, setSummary] = useState('');
   const [unresolvedThreads, setUnresolvedThreads] = useState('');
+  const [drafting, setDrafting] = useState(false);
   const [advanceAmount, setAdvanceAmount] = useState(1);
   const [reminderLabel, setReminderLabel] = useState('Encounter check');
   const [diceExpression, setDiceExpression] = useState('1d12');
@@ -312,8 +314,20 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                 </div>
                 {state.activeSession ? (
                   <div className="space-y-3">
-                    <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3}
+                    <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={summary.includes('\n') ? 10 : 3}
                       placeholder="Session summary (required)" className="w-full rounded-md border border-stone-300 p-3" />
+                    <Button size="sm" variant="secondary" icon={FileText} loading={drafting} disabled={mutation.isPending}
+                      onClick={async () => {
+                        if (summary.trim() && !(await confirm({ title: 'Replace what you wrote?', description: 'The draft takes the place of the current summary.', confirmText: 'Replace with draft' }))) return;
+                        setDrafting(true);
+                        try {
+                          setSummary(await draftSessionRecap(partyId, state.activeSession!, `Day ${clock.day}, ${clock.shift.toLowerCase()}`));
+                        } finally {
+                          setDrafting(false);
+                        }
+                      }}>
+                      Draft from this session
+                    </Button>
                     <textarea value={unresolvedThreads} onChange={(event) => setUnresolvedThreads(event.target.value)} rows={2}
                       placeholder="Unresolved threads, one per line" className="w-full rounded-md border border-stone-300 p-3" />
                     <Button variant="danger" disabled={!summary.trim() || mutation.isPending}
