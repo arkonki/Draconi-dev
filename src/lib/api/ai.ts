@@ -106,6 +106,17 @@ export const removeAiKey = () => send<AiSettings>('/account/ai', { method: 'DELE
 
 /** Rewrites the session recap draft as readable prose. The GM edits the result before using it. */
 export const polishRecap = (partyId: string, draft: string) => send<AiAnswer>('/ai/recap', json('POST', { partyId, draft }));
+/** A mission the narrator proposes from the player's idea. Only a draft: the player edits it before it is created. */
+export interface MissionProposal {
+  title: string;
+  objective: string;
+  opening: { title: string; description: string };
+  foreseen: Array<{ title: string; description: string }>;
+  unknownWaypoints: number;
+  threat: { description: string; recurring: boolean; triggerEffect: string };
+}
+
+export const proposeSoloMission = (partyId: string, idea: string) => send<{ mission: MissionProposal; usage: AiAnswer['usage'] }>('/ai/solo-mission', json('POST', { partyId, idea }));
 export const generateStory = (prompt: string, partyId?: string) => send<AiAnswer>('/ai/story', json('POST', { prompt, partyId }));
 export const fetchNarratorConversation = (partyId: string) => send<NarratorConversation>(`/ai/solo-narrator?partyId=${encodeURIComponent(partyId)}`);
 export const saveNarratorSummary = (partyId: string, summary: string) => send<{ summary: string }>('/ai/solo-narrator', json('PUT', { partyId, summary }));

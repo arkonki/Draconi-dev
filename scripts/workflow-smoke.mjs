@@ -197,9 +197,13 @@ try {
   });
   assert.equal(linkedOwnerCharacter.party_id, party.id, 'Direct party creation did not synchronize character.party_id');
 
+  // A campaign's GM may add any character to it; a player may not add someone else's.
   await dataQuery(owner.token, {
     table: 'party_members', action: 'insert', payload: { party_id: party.id, character_id: memberCharacter.id },
-  }, 403);
+  }, 200);
+  await dataQuery(owner.token, {
+    table: 'party_members', action: 'delete', filters: [{ operator: 'eq', column: 'character_id', value: memberCharacter.id }],
+  }, 200);
   await dataQuery(member.token, {
     table: 'party_members', action: 'insert', payload: { party_id: party.id, character_id: memberCharacter.id },
   }, 403);
@@ -391,10 +395,13 @@ try {
         body: JSON.stringify({ paths: [storagePath] }),
       }).catch(() => undefined);
     }
-    await database.query('DELETE FROM users WHERE email = ANY($1::text[])', [testEmails]);
+    // Campaigns first: a campaign's owner cannot be removed from it while it exists.
+    await database.query('DELETE FROM parties WHERE created_by IN (SELECT id FROM users WHERE email = ANY($1::text[]))', [testEmails]);
     for (const { table, id } of [...cleanupRecords].reverse()) {
       await database.query(`DELETE FROM "${table}" WHERE id = $1`, [id]);
     }
+    await database.query('DELETE FROM characters WHERE user_id IN (SELECT id FROM users WHERE email = ANY($1::text[]))', [testEmails]);
+    await database.query('DELETE FROM users WHERE email = ANY($1::text[])', [testEmails]);
   } finally {
     await database.end();
   }

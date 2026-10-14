@@ -18,7 +18,7 @@ export const SUGGESTED_MODELS = Object.freeze([
 // The address can be overridden to reach OpenRouter through a proxy, or to point a test at a stand-in server.
 export const OPENROUTER_BASE = (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
 const MODEL_PATTERN = /^[A-Za-z0-9._:/-]{3,100}$/;
-const MAX_CALLS_PER_MINUTE = 20;
+const MAX_CALLS_PER_MINUTE = Number(process.env.AI_CALLS_PER_MINUTE) > 0 ? Number(process.env.AI_CALLS_PER_MINUTE) : 20;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 const encryptionSecret = () => process.env.AI_KEY_ENCRYPTION_SECRET;

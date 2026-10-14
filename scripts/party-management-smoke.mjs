@@ -100,7 +100,10 @@ try {
   // --- Creating a campaign is all-or-nothing.
   const ownerHero = await character(tokens.owner, `PM Owner Hero ${suffix}`);
   const countParties = async (name) => (await database.query('SELECT count(*)::int AS n FROM parties WHERE name = $1', [name])).rows[0].n;
-  await ok(rpc(tokens.player, 'create_campaign', { p_name: `PM Player Party ${suffix}`, p_character_ids: [] }), 403, 'players cannot create');
+  // Every account may run a campaign (up to the owner limit); a plain player becomes the owner of their own.
+  const playerParty = (await ok(rpc(tokens.player, 'create_campaign', { p_name: `PM Player Party ${suffix}`, p_character_ids: [] }), 200, 'players can create')).data;
+  assert.equal((await database.query('SELECT role FROM campaign_memberships WHERE party_id = $1 AND user_id = $2', [playerParty.id, playerParty.created_by])).rows[0].role, 'owner');
+  await database.query('DELETE FROM parties WHERE id = $1', [playerParty.id]);
   await ok(rpc(tokens.owner, 'create_campaign', { p_name: '   ', p_character_ids: [] }), 400, 'blank name');
   await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Atomic ${suffix}`, p_character_ids: [ownerHero.id, randomUUID()] }), 404, 'unknown character');
   await ok(rpc(tokens.owner, 'create_campaign', { p_name: `PM Atomic ${suffix}`, p_character_ids: [playerHero.id] }), 403, 'someone else\'s character');

@@ -40,8 +40,11 @@ const mock = http.createServer((request, response) => {
     const isSummary = String(parsed.messages?.[0]?.content ?? '').includes('You keep the running record');
     const isNarrator = String(parsed.messages?.[0]?.content ?? '').includes('narrator of a solo game');
     const isRecap = String(parsed.messages?.[0]?.content ?? '').includes('write the recap');
+    const isMission = String(parsed.messages?.[0]?.content ?? '').includes('design missions for solo play');
     const text = isSummary
       ? 'Mara crossed the old bridge and now stands at the shrine gate.'
+      : isMission
+        ? '```json\n{"title":"The Drowned Lighthouse","objective":"Relight the lighthouse before the fleet returns.","opening":{"title":"The harbour wall","description":"Fog rolls in."},"foreseen":[{"title":"The salt marsh","description":"A causeway."}],"unknown_waypoints":1,"threat":{"description":"The tide rises","recurring":false,"trigger_effect":"The causeway floods."}}\n```'
       : isRecap
         ? 'The party fought bravely and won the day.'
         : isNarrator
@@ -270,6 +273,50 @@ try {
   assert.equal(afterSuccess.pendingAdvancement?.status, 'selecting_marks', 'a success starts the advancement');
   assert.ok(afterSuccess.allowedNextActions.includes('select_solo_mission_marks'));
   results.storyEnd = 'passed';
+
+  // --- Planning the next story ---
+  const proposal = (token, body) => call('POST', '/ai/solo-mission', { token, body });
+  const proposed = await ok(proposal(tokens.alice, { partyId: party.id, idea: 'A haunted lighthouse' }), 200, 'a mission proposal');
+  assert.equal(proposed.mission.title, 'The Drowned Lighthouse');
+  assert.equal(proposed.mission.opening.title, 'The harbour wall');
+  assert.deepEqual(proposed.mission.foreseen, [{ title: 'The salt marsh', description: 'A causeway.' }]);
+  assert.equal(proposed.mission.unknownWaypoints, 1);
+  assert.equal(proposed.mission.threat.recurring, false);
+  const planning = seenRequests.at(-1).messages;
+  assert.ok(planning[1].content.includes("THE PLAYER'S IDEA FOR THE NEXT STORY\nA haunted lighthouse"), 'the idea is sent');
+  assert.ok(planning[1].content.includes('EARLIER MISSIONS') && planning[1].content.includes('The first story (failure): The hero fled.') && planning[1].content.includes('The second story (success): The lantern was found.'), 'with the earlier missions and how they ended');
+  await ok(proposal(tokens.alice, { partyId: party.id, idea: '' }), 200, 'a follow-on proposal needs no idea');
+  assert.ok(seenRequests.at(-1).messages[1].content.includes('(none: propose something that follows'));
+  await ok(proposal(tokens.bob, { partyId: party.id, idea: 'x' }), 403, 'a stranger cannot plan');
+  assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'solo-mission'")).rows[0].n >= 2, 'planning is counted as usage');
+  results.planStory = 'passed';
+
+  // --- The story library ---
+  const stories = (await ok(call('GET', `/ai/solo-stories?partyId=${party.id}`, { token: tokens.alice }), 200, 'the library')).stories;
+  assert.deepEqual(stories.map((story) => [story.title, story.outcome]), [['The second story', 'success'], ['The first story', 'failure']], 'newest first, with how each ended');
+  assert.equal(stories[0].summary, 'The lantern was found.');
+  assert.equal(stories[1].summary, 'The hero fled.');
+  assert.equal(stories[0].narrative, '', 'nothing was kept of the telling yet');
+  await database.query("INSERT INTO solo_narrator_memory (party_id, summary) VALUES ($1, 'Mara found the lantern in the flooded vault.') ON CONFLICT (party_id) DO UPDATE SET summary = EXCLUDED.summary", [party.id]);
+  const archived = await ok(call('POST', '/ai/solo-stories', { token: tokens.alice, body: { partyId: party.id, title: 'The second story', outcome: 'unfinished', summary: 'The lantern was found.' } }), 200, 'put the story away');
+  assert.equal(archived.hasNarrative, true);
+  const kept = (await ok(call('GET', `/ai/solo-stories?partyId=${party.id}`, { token: tokens.alice }), 200, 'the library again')).stories;
+  assert.equal(kept.length, 2, 'it joins the mission it belongs to, not a second entry');
+  assert.match(kept[0].narrative, /flooded vault/);
+  assert.equal(kept[0].outcome, 'success', 'and takes that mission\'s outcome');
+  await ok(call('POST', '/ai/solo-stories', { token: tokens.alice, body: { partyId: party.id, title: '', outcome: 'success' } }), 400, 'a story needs a title');
+  await ok(call('POST', '/ai/solo-stories', { token: tokens.bob, body: { partyId: party.id, title: 'x' } }), 403, 'a stranger cannot add to it');
+  await ok(call('GET', `/ai/solo-stories?partyId=${party.id}`, { token: tokens.bob }), 403, 'or read it');
+
+  const continued = await ok(call('POST', '/ai/solo-stories/continue', { token: tokens.alice, body: { partyId: party.id, storyId: kept[0].id } }), 200, 'continue from a story');
+  assert.match(continued.summary, /^Earlier story, “The second story” \(success\): Mara found the lantern/);
+  const afterContinue = await ok(conversation(tokens.alice), 200, 'the narrator after continuing');
+  assert.equal(afterContinue.summary, continued.summary, 'the story becomes the narrator\'s story so far');
+  assert.deepEqual(afterContinue.turns, [], 'and the conversation starts clean');
+  await ok(call('POST', '/ai/solo-stories/continue', { token: tokens.alice, body: { partyId: party.id, storyId: `mission:${randomUUID()}` } }), 404, 'an unknown story');
+  await ok(call('POST', '/ai/solo-stories/continue', { token: tokens.alice, body: { partyId: party.id, storyId: 'nonsense' } }), 400, 'a bad id');
+  await ok(call('POST', '/ai/solo-stories/continue', { token: tokens.bob, body: { partyId: party.id, storyId: kept[0].id } }), 403, 'a stranger cannot continue it');
+  results.storyLibrary = 'passed';
 
   const polish = (token, body) => call('POST', '/ai/recap', { token, body });
   // --- Story language: one setting for the campaign, read by the narrator and by assistants ---

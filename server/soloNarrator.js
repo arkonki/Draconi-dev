@@ -5,6 +5,7 @@ import { callModel, callModelStream } from './aiSettings.js';
 import { getSessionHistory, getSoloState, recordNarration } from './helper/service.js';
 import { buildNarratorMessages, buildSummaryMessages, parseNarratorReply } from './soloNarratorContext.js';
 import { buildRecapMessages } from './recapPrompt.js';
+import { buildMissionMessages, missionContext, parseMissionProposal } from './soloMissionProposal.js';
 import { DEFAULT_GLOSSARIES, MAX_GLOSSARY_CHARS, effectiveGlossary, isNarrationLanguage, normalizeNarrationLanguage, sanitizeGlossaryInput } from './soloNarrationLanguage.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -206,4 +207,37 @@ export async function polishRecap(user, { partyId, draft } = {}) {
   if (!access?.isGm) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
   const result = await callModel(user, { messages: buildRecapMessages(text, ...Object.values(await campaignLanguage(partyId))), purpose: 'recap', partyId, temperature: 0.5, maxTokens: 500 });
   return { text: result.text, model: result.model, usage: result.usage };
+}
+
+/**
+ * "Plan a story": proposes the next mission from the player's one-line idea, the story so far and the earlier missions.
+ * Nothing is created: the player edits the proposal in the start form first.
+ */
+export async function proposeMission(user, { partyId, idea } = {}) {
+  await requireNarratorAccess(user, partyId);
+  const state = await getSoloState(user, partyId);
+  if (!state?.solo?.enabled) throw new HttpError(409, 'Solo mode is not switched on for this campaign.', 'SOLO_NOT_ENABLED');
+  const [{ rows: memory }, { rows: missions }, { rows: completions }, narration] = await Promise.all([
+    pool.query('SELECT summary FROM solo_narrator_memory WHERE party_id = $1', [partyId]),
+    pool.query("SELECT id, title, objective, status FROM solo_missions WHERE campaign_id = $1 AND status IN ('success', 'failure', 'abandoned') ORDER BY completed_at DESC NULLS LAST LIMIT 5", [partyId]),
+    pool.query("SELECT payload FROM campaign_events WHERE campaign_id = $1 AND type = 'solo.mission_completed' ORDER BY sequence DESC LIMIT 20", [partyId]),
+    campaignLanguage(partyId),
+  ]);
+  const summaryOf = new Map(completions.map((row) => [row.payload?.missionId, String(row.payload?.summary ?? '')]));
+  const context = missionContext({
+    hero: state.playerCharacter ? { name: state.playerCharacter.name, description: state.playerCharacter.description } : null,
+    storySoFar: memory[0]?.summary ?? '',
+    pastMissions: missions.map((mission) => ({ title: mission.title, outcome: mission.status, objective: mission.objective, summary: summaryOf.get(mission.id) ?? '' })),
+    openThreads: (state.journal?.openThreads ?? []).map((thread) => (typeof thread === 'string' ? thread : JSON.stringify(thread))),
+  });
+  const result = await callModel(user, {
+    messages: buildMissionMessages({ idea, context, language: narration.language, glossary: narration.glossary }),
+    purpose: 'solo-mission',
+    partyId,
+    temperature: 0.9,
+    maxTokens: 1000,
+  });
+  const mission = parseMissionProposal(result.text);
+  if (!mission) throw new HttpError(502, 'The narrator did not come back with a usable mission. Try again, or write it yourself.', 'MISSION_UNREADABLE');
+  return { mission, model: result.model, usage: result.usage };
 }

@@ -31,6 +31,7 @@
     "test:connections": "node scripts/connections-smoke.mjs",
     "test:roles": "node scripts/roles-smoke.mjs",
     "test:ai": "node scripts/ai-smoke.mjs",
+    "test:live": "bash scripts/test-live.sh",
     "test:workflow": "node scripts/workflow-smoke.mjs",
     "test:housekeeping": "node scripts/housekeeping-smoke.mjs",
     "test:helper-api": "node --env-file-if-exists=.env server/helper/smoke.mjs",

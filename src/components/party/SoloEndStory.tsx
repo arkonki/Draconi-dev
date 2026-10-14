@@ -8,6 +8,7 @@ import { endCampaignSession } from '../../lib/api/campaignTime';
 import { draftSessionRecap } from '../../lib/api/sessionRecap';
 import { fetchAiSettings, fetchNarratorConversation, polishRecap, resetNarrator } from '../../lib/api/ai';
 import { saveCharacterJournalEntry } from '../../lib/api/journal';
+import { archiveSoloStory } from '../../lib/api/soloStories';
 
 interface SoloEndStoryProps {
   partyId: string;
@@ -21,11 +22,13 @@ interface SoloEndStoryProps {
   advancementPanel: ReactNode;
   /** Called after anything that changes the campaign, so the page shows the new state. */
   onChanged: () => Promise<void> | void;
+  /** Opens the planner for the next story. */
+  onStartNext: () => void;
   onClose: () => void;
 }
 
 type Step = 'mission' | 'advancement' | 'wrapup' | 'done';
-type TaskKey = 'journal' | 'session' | 'rest' | 'fresh';
+type TaskKey = 'library' | 'journal' | 'session' | 'rest' | 'fresh';
 type TaskStatus = 'waiting' | 'running' | 'done' | 'failed';
 
 const clockLabel = (state: SoloState): string => {
@@ -38,10 +41,12 @@ const clockLabel = (state: SoloState): string => {
  * saving the story to the hero's journal, closing the game session, an optional rest, and a fresh start for the narrator.
  * The mission's leftover dangers and creatures are settled by the server when the mission ends.
  */
-export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, canCompleteSuccessfully, advancementPanel, onChanged, onClose }: SoloEndStoryProps) {
+export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, canCompleteSuccessfully, advancementPanel, onChanged, onStartNext, onClose }: SoloEndStoryProps) {
   const t = useT();
   // The mission is gone from the state once it is concluded, so remember what it was called.
   const missionTitle = useRef(state.activeMission?.title ?? '');
+  const missionId = useRef<string | null>(state.activeMission?.id ?? null);
+  const finalOutcome = useRef<'success' | 'failure' | 'abandoned' | 'unfinished'>('unfinished');
   const initialStep: Step = state.activeMission ? 'mission' : state.pendingAdvancement ? 'advancement' : 'wrapup';
   const [step, setStep] = useState<Step>(initialStep);
   const [outcome, setOutcome] = useState<'success' | 'failure' | 'abandoned'>(canCompleteSuccessfully ? 'success' : 'failure');
@@ -50,6 +55,7 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [keepInLibrary, setKeepInLibrary] = useState(true);
   const [saveJournal, setSaveJournal] = useState(true);
   const [endSession, setEndSession] = useState(Boolean(state.activeSessionId));
   const [sessionSummary, setSessionSummary] = useState('');
@@ -92,6 +98,7 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
       const result = await completeSoloMission(partyId, state.activeMission.id, state.campaignRevision, { outcome, summary: missionSummary.trim() });
       const settled = (result.state_excerpt as { cleanup?: { settledDangers: number; retiredNpcs: number } }).cleanup ?? null;
       setCleanup(settled);
+      finalOutcome.current = outcome;
       await onChanged();
       setStep(outcome === 'success' ? 'advancement' : 'wrapup');
     } catch (failure) {
@@ -118,6 +125,13 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
     setError(null);
     const mark = (key: TaskKey, status: TaskStatus) => setTasks((current) => ({ ...current, [key]: status }));
     const planned: Array<{ key: TaskKey; enabled: boolean; run: () => Promise<void> }> = [
+      {
+        key: 'library',
+        enabled: keepInLibrary && (hasStory || Boolean(missionSummary.trim())),
+        run: async () => {
+          await archiveSoloStory({ partyId, missionId: missionId.current, title: missionTitle.current || partyName, outcome: finalOutcome.current, summary: missionSummary.trim() });
+        },
+      },
       {
         key: 'journal',
         enabled: saveJournal && hasStory && Boolean(hero && currentUserId),
@@ -167,6 +181,7 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
 
   const needsSummary = endSession && !sessionSummary.trim();
   const taskLabel: Record<TaskKey, string> = {
+    library: t('Kept the story in the library'),
     journal: t("Saved the story to the hero's journal"),
     session: t('Ended the game session'),
     rest: t('Took a shift rest'),
@@ -230,6 +245,11 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
               {state.pendingAdvancement && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{t('The advancement is still pending. It stays available on the Story tab.')}</p>}
               <p className="text-sm text-stone-600">{t('Choose what to tidy up. Everything is optional, and nothing is deleted from the game.')}</p>
 
+              <div className="flex items-start gap-3 rounded-lg border border-stone-200 p-3 text-sm">
+                <input id="end-story-library" type="checkbox" className="mt-0.5 h-4 w-4" checked={keepInLibrary} onChange={(event) => setKeepInLibrary(event.target.checked)} />
+                <div><label htmlFor="end-story-library" className="font-bold">{t('Keep the story in the library')}</label><span className="block text-xs text-stone-500">{t('Keeps how it ended and how it was told, so you can read it again or continue from it later.')}</span></div>
+              </div>
+
               <div className={`flex items-start gap-3 rounded-lg border p-3 text-sm ${hasStory ? 'border-stone-200' : 'border-stone-100 text-stone-400'}`}>
                 <input id="end-story-journal" type="checkbox" className="mt-0.5 h-4 w-4" checked={saveJournal && hasStory} disabled={!hasStory || !hero} onChange={(event) => setSaveJournal(event.target.checked)} />
                 <div><label htmlFor="end-story-journal" className="font-bold">{t("Save the story to the hero's journal")}</label><span className="block text-xs text-stone-500">{hasStory ? t('The story so far and the mission summary become a journal entry.') : t('There is no story to save yet.')}</span></div>
@@ -287,8 +307,11 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
               <ul className="mx-auto max-w-sm space-y-1.5 text-left text-sm">
                 {(Object.keys(taskLabel) as TaskKey[]).filter((key) => tasks[key] === 'done').map((key) => <li key={key} className="flex items-center gap-2">{icon('done')} {taskLabel[key]}</li>)}
               </ul>
-              <p className="text-sm text-stone-600">{t('Start a new mission or simply begin the next story in the Story tab.')}</p>
-              <Button type="button" fullWidth onClick={onClose}>{t('Done')}</Button>
+              <p className="text-sm text-stone-600">{t('Ready for the next one? The narrator can propose a mission that follows from this story.')}</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button type="button" variant="outline" fullWidth onClick={onClose}>{t('Done')}</Button>
+                <Button type="button" fullWidth icon={Sparkles} onClick={onStartNext}>{t('Start the next story')}</Button>
+              </div>
             </div>
           )}
 

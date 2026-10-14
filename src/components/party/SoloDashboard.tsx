@@ -18,6 +18,7 @@ import {
   LockKeyhole,
   MapPin,
   PackageSearch,
+  BookMarked,
   MessageSquareText,
   RefreshCw,
   Route,
@@ -81,6 +82,10 @@ import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { Button } from '../shared/Button';
 import { SoloNarrator } from './SoloNarrator';
 import { SoloEndStory } from './SoloEndStory';
+import { SoloStartStory } from './SoloStartStory';
+import { useConfirm } from '../../hooks/useConfirm';
+import { SoloStoryLibrary } from './SoloStoryLibrary';
+import { continueFromStory, type SoloStory } from '../../lib/api/soloStories';
 import type { NarratorAction } from '../../lib/api/ai';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
@@ -95,7 +100,7 @@ interface SoloDashboardProps {
 }
 
 type SoloAction = 'check' | 'push' | 'consequence' | 'fortune' | 'inspiration' | 'treasure' | 'npc-create' | 'npc-behavior' | 'start-mission' | 'reveal-waypoint' | 'search' | 'scavenge' | 'rest' | 'dying' | 'damage' | 'injury' | 'advance-threat' | 'resolve-threat' | 'set-threat' | 'add-waypoints' | 'return' | 'complete-mission' | 'advancement';
-type SoloDashboardTab = 'story' | 'adventure' | 'state' | 'journal' | 'logs';
+type SoloDashboardTab = 'story' | 'adventure' | 'stories' | 'state' | 'journal' | 'logs';
 type SoloConsequenceEffectType = SoloConsequenceEffect['type'];
 
 const standardConditionKeys = new Set(['exhausted', 'sickly', 'dazed', 'angry', 'scared', 'disheartened']);
@@ -385,6 +390,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const [activeAction, setActiveAction] = useState<SoloAction | null>(null);
   const [activeDashboardTab, setActiveDashboardTab] = useState<SoloDashboardTab>('story');
   const [endStoryOpen, setEndStoryOpen] = useState(false);
+  const [startStory, setStartStory] = useState<{ idea: string } | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [oracleActionResult, setOracleActionResult] = useState<SoloWriteResult | null>(null);
   const [isCharacterSheetOpen, setIsCharacterSheetOpen] = useState(false);
@@ -1121,10 +1129,43 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
   const dashboardTabs: Array<{ id: SoloDashboardTab; label: string; icon: typeof Route; badge?: number }> = [
     { id: 'story', label: t('Story'), icon: MessageSquareText, badge: state.pendingAdvancement && !state.activeMission ? 1 : undefined },
     { id: 'adventure', label: t('Adventure'), icon: Route, badge: unresolvedRolls.length || undefined },
+    { id: 'stories', label: t('Stories'), icon: BookMarked },
     { id: 'state', label: t('State'), icon: HeartPulse, badge: state.activeInjuries.length || undefined },
     { id: 'journal', label: t('Journal'), icon: BookOpen, badge: journal.openThreads.length || undefined },
     { id: 'logs', label: t('Logs'), icon: ScrollText },
   ];
+
+  // Picks a finished story up again: it becomes the narrator's story so far, and the next mission is planned from it.
+  const handleContinueStory = async (story: SoloStory) => {
+    const confirmed = await confirm({
+      title: t('Continue from "{title}"?', { title: story.title }),
+      description: t("The narrator's conversation and story so far are replaced by this story. Your journal and the game itself are not touched."),
+      confirmText: t('Continue from this story'),
+    });
+    if (!confirmed) return;
+    setPageError(null);
+    try {
+      await continueFromStory(partyId, story.id);
+      await queryClient.invalidateQueries({ queryKey: ['solo-narrator', partyId] });
+      setActiveDashboardTab('story');
+      setStartStory({ idea: t('Continue after "{title}"', { title: story.title }) });
+    } catch (failure) {
+      setPageError(failure instanceof Error ? failure.message : t('Could not continue from that story.'));
+    }
+  };
+
+  // With no mission under way, the Story tab offers to begin the next story.
+  const startStoryBanner = canManage && !state.activeMission && !state.pendingAdvancement ? (
+    <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 font-bold text-indigo-950"><Flag className="h-5 w-5 text-indigo-600" /> {t('No story is under way')}</h3>
+          <p className="mt-1 text-sm text-indigo-900">{t('Start a mission and the narrator can tell it. Give an idea, or let the narrator propose one from what has happened so far.')}</p>
+        </div>
+        <Button size="sm" icon={Sparkles} className="shrink-0 whitespace-nowrap" onClick={() => setStartStory({ idea: '' })}>{t('Start a new story')}</Button>
+      </div>
+    </section>
+  ) : null;
 
   // When the mission is over and its advancement has not been done, say so wherever the player is.
   const advancementBanner = canManage && state.pendingAdvancement && !state.activeMission ? (
@@ -1134,7 +1175,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           <h3 className="flex items-center gap-2 font-bold text-amber-950"><Sparkles className="h-5 w-5 text-amber-600" /> {t('Advancement is ready')}</h3>
           <p className="mt-1 text-sm text-amber-800">{t('The mission is over. Mark five skills, roll for them and claim any heroic ability before the next story.')}</p>
         </div>
-        <Button size="sm" icon={Sparkles} onClick={() => openAction('advancement')}>{t('Start the advancement')}</Button>
+        <Button size="sm" icon={Sparkles} className="shrink-0 whitespace-nowrap" onClick={() => openAction('advancement')}>{t('Start the advancement')}</Button>
       </div>
     </section>
   ) : null;
@@ -1268,6 +1309,8 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           </div>
         )}
 
+        {pageError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{pageError}</div>}
+
         {!canManage && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             {t('You can follow the solo adventure here. Only the campaign owner or a GM can resolve authoritative Solo actions.')}
@@ -1280,7 +1323,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
           <div className="flex min-w-0 flex-col gap-5">
             {/* The story comes first, with what needs the player's attention right above it. */}
             {activeDashboardTab === 'story' && advancementBanner}
+            {activeDashboardTab === 'story' && startStoryBanner}
             {activeDashboardTab === 'story' && quickTools}
+            {activeDashboardTab === 'stories' && <SoloStoryLibrary partyId={partyId} canManage={canManage} onContinue={(story) => void handleContinueStory(story)} />}
             {activeDashboardTab === 'story' && (
               <SoloNarrator
                 partyId={partyId}
@@ -1353,7 +1398,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
                       <Flag className="mx-auto h-10 w-10 text-stone-300" />
                       <h4 className="mt-3 font-bold text-stone-800">{t('No active mission')}</h4>
                       <p className="mt-1 text-sm text-stone-500">{t('Create a custom objective, route, and threat to begin the playable solo loop.')}</p>
-                      {canManage && <Button className="mt-5" icon={Flag} onClick={() => openAction('start-mission')}>{t('Start a mission')}</Button>}
+                      {canManage && <Button className="mt-5" icon={Flag} onClick={() => setStartStory({ idea: '' })}>{t('Start a mission')}</Button>}
                     </>
                   )}
                 </div>
@@ -1429,7 +1474,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
             </section>
             )}
 
-            {activeDashboardTab !== 'adventure' && activeDashboardTab !== 'story' && (
+            {activeDashboardTab !== 'adventure' && activeDashboardTab !== 'story' && activeDashboardTab !== 'stories' && (
             <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-100 px-5 py-4">
                 <h3 className="flex items-center gap-2 font-bold text-stone-900">
@@ -1920,6 +1965,24 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
         </ActionModal>
       )}
 
+      {startStory && (
+        <SoloStartStory
+          partyId={partyId}
+          initialIdea={startStory.idea}
+          onWriteMyself={() => { setStartStory(null); openAction('start-mission'); }}
+          onCreated={async () => {
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['solo-state', partyId] }),
+              queryClient.invalidateQueries({ queryKey: ['solo-stories', partyId] }),
+            ]);
+            setActiveDashboardTab('story');
+          }}
+          onClose={() => setStartStory(null)}
+          blockedReason={state.pendingAdvancement ? t('The last mission\'s advancement is still waiting. Finish it on the Story tab, then begin this mission.') : undefined}
+        />
+      )}
+      {confirmDialog}
+
       {endStoryOpen && (
         <SoloEndStory
           partyId={partyId}
@@ -1937,6 +2000,7 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               queryClient.invalidateQueries({ queryKey: ['party', partyId] }),
             ]);
           }}
+          onStartNext={() => { setEndStoryOpen(false); setStartStory({ idea: '' }); }}
           onClose={() => setEndStoryOpen(false)}
         />
       )}

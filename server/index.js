@@ -36,8 +36,9 @@ import { handleOAuthRequest, authenticateOAuthAccessToken } from './oauth.js';
 import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } from './connections.js';
 import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { aiUsageOverview } from './adminAiUsage.js';
+import { archiveStory, continueFromStory, listStories } from './soloLibrary.js';
 import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
-import { generateStory, getNarratorConversation, narrateSolo, polishRecap, resetNarrator, saveNarratorSummary, setNarrationGlossary, setNarrationLanguage } from './soloNarrator.js';
+import { generateStory, getNarratorConversation, narrateSolo, polishRecap, proposeMission, resetNarrator, saveNarratorSummary, setNarrationGlossary, setNarrationLanguage } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
 import { adminOverview, pruneBackups } from './adminOverview.js';
 import {
@@ -164,6 +165,19 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/ai/story' && request.method === 'POST') {
       sendJson(response, 200, await generateStory(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/solo-mission' && request.method === 'POST') {
+      sendJson(response, 200, await proposeMission(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/solo-stories') {
+      const actor = await currentUser(request);
+      if (request.method === 'GET') { sendJson(response, 200, await listStories(actor, new URL(request.url, 'http://localhost').searchParams.get('partyId'))); return; }
+      if (request.method === 'POST') { sendJson(response, 200, await archiveStory(actor, await readJson(request))); return; }
+    }
+    if (pathname === '/api/ai/solo-stories/continue' && request.method === 'POST') {
+      sendJson(response, 200, await continueFromStory(await currentUser(request), await readJson(request)));
       return;
     }
     if (pathname === '/api/ai/recap' && request.method === 'POST') {
