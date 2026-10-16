@@ -203,18 +203,25 @@ export function resetDatabaseMetrics() {
   metrics.queryMilliseconds.length = 0;
 }
 
-export async function withTransaction(callback) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+const DEADLOCK_CODE = '40P01';
+
+// `retryDeadlocks` re-runs the whole callback after a Postgres deadlock rollback. Only use it
+// when the callback has no side effects outside this transaction.
+export async function withTransaction(callback, { retryDeadlocks = 0 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await callback(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (error?.code === DEADLOCK_CODE && attempt < retryDeadlocks) continue;
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 

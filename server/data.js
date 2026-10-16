@@ -754,6 +754,30 @@ async function synchronizeActiveEncounterVitals(table, rows, prepared, client) {
   }
 }
 
+// Vital changes touch both `characters` and `encounter_combatants`. Locking them in one fixed
+// order (characters, then combatants, each by id) stops concurrent HP/WP edits from deadlocking.
+async function lockVitalRows(table, ids, prepared, client) {
+  if (!ENCOUNTER_VITAL_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(prepared, field))) return;
+  if (table === 'encounter_combatants') {
+    await client.query(
+      `SELECT id FROM characters
+       WHERE id IN (SELECT character_id FROM encounter_combatants WHERE id = ANY($1::uuid[]))
+       ORDER BY id FOR UPDATE`,
+      [ids],
+    );
+    await client.query('SELECT id FROM encounter_combatants WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids]);
+  } else if (table === 'characters') {
+    await client.query('SELECT id FROM characters WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids]);
+    await client.query(
+      `SELECT combatant.id FROM encounter_combatants AS combatant
+       JOIN encounters AS encounter ON encounter.id = combatant.encounter_id
+       WHERE encounter.status = 'active' AND combatant.character_id = ANY($1::uuid[])
+       ORDER BY combatant.id FOR UPDATE OF combatant`,
+      [ids],
+    );
+  }
+}
+
 async function insertOne(table, input, ctx, client, onConflict) {
   // Journal updates must authorize the existing entry and preserve its author.
   if (table === 'notes' && onConflict) throw new HttpError(400, 'Use an explicit journal update instead of upsert');
@@ -826,6 +850,7 @@ export async function executeDataQuery(user, request) {
       const keys = Object.keys(prepared);
       if (keys.length === 0) return candidates;
       const assignments = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
+      await lockVitalRows(table, ids, prepared, client);
       const { rows } = await client.query(
         `UPDATE "${table}" SET ${assignments} WHERE id = ANY($${keys.length + 1}::uuid[]) RETURNING *`,
         [...keys.map((key) => prepared[key]), ids],
@@ -834,7 +859,7 @@ export async function executeDataQuery(user, request) {
       return rows.map((row) => outwardAliases(table, row));
     }
     throw new HttpError(400, `Unsupported action: ${action}`);
-  });
+  }, { retryDeadlocks: 2 });
   if (ACCESS_CONTEXT_TABLES.has(table)) invalidateAccessContextCache();
   return result;
 }
