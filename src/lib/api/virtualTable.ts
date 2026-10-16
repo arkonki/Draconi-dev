@@ -86,8 +86,8 @@ export async function pingTable(mapId: string, x: number, y: number, focus = fal
   if (error && !/one ping at a time/i.test(error.message)) throw new Error(error.message || 'Could not send the ping');
 }
 
-/** The same 20 MB-per-campaign map allowance and storage folder the Atlas uses, so maps are shared between the two. */
-export const MAP_STORAGE_LIMIT_BYTES = 20 * 1024 * 1024;
+/** The same 100 MB-per-campaign map allowance and storage folder the Atlas uses, so maps are shared between the two. */
+export const MAP_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 
 export async function uploadTableMap(partyId: string, file: File, name: string): Promise<PartyMap> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');

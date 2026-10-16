@@ -161,7 +161,7 @@ async function generateAllVariants(bucket, objectPath, originalPath, metadata) {
 
 export async function uploadObject(request, bucket, objectPath) {
   const target = safePath(bucket, objectPath);
-  const maxBytes = Number(process.env.MAX_UPLOAD_BYTES || 25_000_000);
+  const maxBytes = Number(process.env.MAX_UPLOAD_BYTES || 100_000_000);
   const allowOverwrite = request.headers['x-upsert'] === 'true';
   if (!allowOverwrite && await fileDetails(target)) throw new HttpError(409, 'Object already exists');
 

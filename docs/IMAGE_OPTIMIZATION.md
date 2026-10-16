@@ -30,7 +30,7 @@ uploads. Restoring originals is sufficient; variants regenerate on demand.
 
 ## Resource limits
 
-- `MAX_UPLOAD_BYTES` limits the streamed upload body (25 MB by default).
+- `MAX_UPLOAD_BYTES` limits the streamed upload body (100 MB by default).
 - `MAX_IMAGE_PIXELS` limits decoded image size (40 million pixels by default).
 - Image transforms run one at a time with a bounded Sharp cache for predictable
   memory use on small self-hosted servers.
