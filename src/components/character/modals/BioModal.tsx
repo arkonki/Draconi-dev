@@ -1,44 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCharacterSheetStore } from '../../../stores/characterSheetStore';
 import { 
-  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical
+  X, User, BookOpen, Save, Edit3, AlertTriangle, FileText, Star, HeartCrack, Camera, Upload, Loader, MoveVertical, MoveHorizontal
 } from 'lucide-react';
 import { Button } from '../../shared/Button';
 import { AccessibleDialog } from '../../shared/AccessibleDialog';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { supabase } from '../../../lib/supabase';
 import { optimizedImageUrl } from '../../../lib/images';
+import { buildPortraitValue, parsePortrait, type PortraitFocus } from '../../../lib/portrait';
+import { PortraitImage } from '../../shared/PortraitImage';
 
 interface BioModalProps {
   onClose: () => void;
 }
 
-// --- HELPER: Parse Position from URL ---
-// We store position as a query param (e.g., image.jpg?pos=20) to avoid DB schema changes
-const parsePortraitData = (fullUrl: string | null) => {
-  if (!fullUrl) return { url: '', pos: 50 };
-  const [url, query] = fullUrl.split('?pos=');
-  const pos = query ? parseInt(query) : 50; // Default center (50%)
-  return { url, pos: isNaN(pos) ? 50 : pos };
-};
-
 // --- SUB-COMPONENT: PORTRAIT EDITOR ---
 
 const PortraitEditor = ({ 
   currentUrl, 
-  currentPos, 
+  currentFocus, 
   onSave, 
   onCancel, 
   isSaving 
 }: { 
   currentUrl: string, 
-  currentPos: number, 
-  onSave: (url: string, pos: number) => void, 
+  currentFocus: PortraitFocus, 
+  onSave: (url: string, focus: PortraitFocus) => void, 
   onCancel: () => void, 
   isSaving: boolean 
 }) => {
   const [tempUrl, setTempUrl] = useState(currentUrl);
-  const [tempPos, setTempPos] = useState(currentPos);
+  const [tempFocus, setTempFocus] = useState(currentFocus);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,7 +53,7 @@ const PortraitEditor = ({
 
       const { data } = supabase.storage.from('images').getPublicUrl(filePath);
       setTempUrl(data.publicUrl);
-      setTempPos(50); // Reset position on new image
+      setTempFocus({ x: 50, y: 50 }); // Reset position on new image
     } catch (err) {
       console.error("Upload failed:", err);
       setError("Upload failed. Please try again.");
@@ -82,7 +75,7 @@ const PortraitEditor = ({
               alt="Preview" 
               decoding="async"
               className="w-full h-full object-cover transition-none"
-              style={{ objectPosition: `center ${tempPos}%` }}
+              style={{ objectPosition: `${tempFocus.x}% ${tempFocus.y}%` }}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-400"><User /></div>
@@ -90,7 +83,7 @@ const PortraitEditor = ({
         </div>
 
         <div className="flex-1 space-y-3">
-          {/* Position Slider */}
+          {/* Position Sliders */}
           <div>
             <label htmlFor="portrait-pos" className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
               <MoveVertical size={12} /> Position (Y-Axis)
@@ -100,8 +93,8 @@ const PortraitEditor = ({
               type="range" 
               min="0" 
               max="100" 
-              value={tempPos} 
-              onChange={(e) => setTempPos(parseInt(e.target.value))}
+              value={tempFocus.y} 
+              onChange={(e) => setTempFocus({ ...tempFocus, y: parseInt(e.target.value) })}
               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
               disabled={!tempUrl}
             />
@@ -109,6 +102,26 @@ const PortraitEditor = ({
               <span>Top</span>
               <span>Center</span>
               <span>Bottom</span>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="portrait-pos-x" className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
+              <MoveHorizontal size={12} /> Position (X-Axis)
+            </label>
+            <input 
+              id="portrait-pos-x"
+              type="range" 
+              min="0" 
+              max="100" 
+              value={tempFocus.x} 
+              onChange={(e) => setTempFocus({ ...tempFocus, x: parseInt(e.target.value) })}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              disabled={!tempUrl}
+            />
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+              <span>Left</span>
+              <span>Center</span>
+              <span>Right</span>
             </div>
           </div>
 
@@ -126,6 +139,25 @@ const PortraitEditor = ({
           </div>
         </div>
       </div>
+
+      {/* 2. The same framing as other players see it: round in the party roster, on the table and on the projector, wide on the character card */}
+      {tempUrl && (
+        <div>
+          <div className="text-xs font-bold text-gray-500 uppercase mb-1.5">How it looks elsewhere</div>
+          <div className="flex items-center gap-4">
+            <div className="text-center">
+              <PortraitImage value={buildPortraitValue(tempUrl, tempFocus, true)} variant="medium" className="h-16 w-16 rounded-full border-2 border-white object-cover shadow-md bg-gray-200" />
+              <div className="mt-1 text-[10px] text-gray-400">Roster, table, projector</div>
+            </div>
+            <div className="min-w-0 flex-1 text-center">
+              <div className="h-16 overflow-hidden rounded-lg border border-gray-200 bg-gray-200">
+                <PortraitImage value={buildPortraitValue(tempUrl, tempFocus, true)} variant="medium" className="h-full w-full object-cover" />
+              </div>
+              <div className="mt-1 text-[10px] text-gray-400">Character card</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
 
@@ -150,7 +182,7 @@ const PortraitEditor = ({
         </Button>
 
         <div className="flex gap-2">
-            <Button size="sm" fullWidth onClick={() => onSave(tempUrl, tempPos)} disabled={isSaving || isUploading}>Save Portrait</Button>
+            <Button size="sm" fullWidth onClick={() => onSave(tempUrl, tempFocus)} disabled={isSaving || isUploading}>Save Portrait</Button>
             <Button size="sm" variant="ghost" fullWidth onClick={onCancel} disabled={isUploading}>Cancel</Button>
         </div>
       </div>
@@ -183,7 +215,7 @@ export function BioModal({ onClose }: BioModalProps) {
 
   // Form Data
   const [portraitUrl, setPortraitUrl] = useState('');
-  const [portraitPos, setPortraitPos] = useState(50);
+  const [portraitFocus, setPortraitFocus] = useState<PortraitFocus>({ x: 50, y: 50 });
   const [appearance, setAppearance] = useState('');
   const [memento, setMemento] = useState('');
   const [flaw, setFlaw] = useState('');
@@ -193,9 +225,9 @@ export function BioModal({ onClose }: BioModalProps) {
   // Sync state
   const syncStateFromCharacter = () => {
     if (character) {
-      const { url, pos } = parsePortraitData(character.portrait_url ?? null);
+      const { url, focus } = parsePortrait(character.portrait_url ?? null);
       setPortraitUrl(url);
-      setPortraitPos(pos);
+      setPortraitFocus(focus);
       setAppearance(character.appearance || '');
       setMemento(character.memento || '');
       setFlaw(character.flaw || '');
@@ -216,16 +248,13 @@ export function BioModal({ onClose }: BioModalProps) {
     setIsEditingBio(false);
   };
 
-  const handleSavePortrait = async (newUrl: string, newPos: number) => {
+  const handleSavePortrait = async (newUrl: string, newFocus: PortraitFocus) => {
     if (!character) return;
-    // We combine the URL and the position into a single string to avoid DB schema changes
-    // If newPos is 50 (default), we don't need to append it to keep URL clean, 
-    // but appending it ensures consistency if the user explicitly set it.
-    const finalString = newPos === 50 ? newUrl : `${newUrl}?pos=${newPos}`;
-    
-    await updateCharacterData({ portrait_url: finalString });
+    // The address and where the picture is framed are kept in one string, so no database change is needed. Every view
+    // of the portrait (card, roster, table, projector) reads the framing from it.
+    await updateCharacterData({ portrait_url: newUrl ? buildPortraitValue(newUrl, newFocus, true) : '' });
     setPortraitUrl(newUrl);
-    setPortraitPos(newPos);
+    setPortraitFocus(newFocus);
     setIsEditingPortrait(false);
   };
 
@@ -271,7 +300,7 @@ export function BioModal({ onClose }: BioModalProps) {
                                 alt={character.name} 
                                 decoding="async"
                                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                style={{ objectPosition: `center ${portraitPos}%` }}
+                                style={{ objectPosition: `${portraitFocus.x}% ${portraitFocus.y}%` }}
                                 onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x400/f3f4f6/9ca3af?text=No+Image'; }} 
                             />
                         ) : (
@@ -293,7 +322,7 @@ export function BioModal({ onClose }: BioModalProps) {
             ) : (
                 <PortraitEditor 
                     currentUrl={portraitUrl}
-                    currentPos={portraitPos}
+                    currentFocus={portraitFocus}
                     onSave={handleSavePortrait}
                     onCancel={() => setIsEditingPortrait(false)}
                     isSaving={isSaving}

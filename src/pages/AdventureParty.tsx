@@ -9,7 +9,7 @@ import { Party, createParty, fetchParties, fetchAvailableCharacters } from '../l
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { EmptyState } from '../components/shared/EmptyState';
-import { optimizedImageUrl } from '../lib/images';
+import { PortraitImage } from '../components/shared/PortraitImage';
 
 export function AdventureParty() {
   const { user } = useAuth();
@@ -254,9 +254,9 @@ export function AdventureParty() {
                           className="inline-flex min-w-0 max-w-28 items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 py-1 pl-1 pr-2"
                         >
                           {member.portrait_url ? (
-                            <img
-                              src={optimizedImageUrl(member.portrait_url, 'thumbnail')}
-                              alt=""
+                            <PortraitImage
+                              value={member.portrait_url}
+                              variant="thumbnail"
                               loading="lazy"
                               decoding="async"
                               className="w-6 h-6 rounded-full object-cover shrink-0"

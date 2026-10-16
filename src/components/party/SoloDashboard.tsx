@@ -32,7 +32,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { optimizedImageUrl } from '../../lib/images';
+import { PortraitImage } from '../shared/PortraitImage';
 import {
   addSoloWaypoints,
   advanceSoloThreat,
@@ -1795,9 +1795,9 @@ export function SoloDashboard({ partyId, partyName, currentUserId, canManage, on
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-indigo-100 font-bold text-indigo-700">
                   {hero?.portraitUrl ? (
-                    <img
-                      src={optimizedImageUrl(hero.portraitUrl, 'thumbnail')}
-                      alt=""
+                    <PortraitImage
+                      value={hero.portraitUrl}
+                      variant="thumbnail"
                       loading="lazy"
                       decoding="async"
                       className="h-full w-full object-cover"

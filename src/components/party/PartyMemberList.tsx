@@ -10,6 +10,7 @@ import { useCharacterSheetStore } from '../../stores/characterSheetStore';
 import { CharacterSheetDialog } from '../character/CharacterSheetDialog';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { useConfirm } from '../../hooks/useConfirm';
+import { PortraitImage } from '../shared/PortraitImage';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -162,8 +163,9 @@ const MemberCard = React.memo(({
   const Avatar = () => {
     if (member.portrait_url) {
         return (
-            <img
-              src={member.portrait_url}
+            <PortraitImage
+              value={member.portrait_url}
+              variant="thumbnail"
               alt={member.name}
               className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md bg-gray-100"
             />

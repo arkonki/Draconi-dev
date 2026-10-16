@@ -6,6 +6,7 @@ import { getPlayerDisplayState } from '../lib/api/projectorDisplay';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import type { DisplayCorner, PlayerDisplayState } from '../types/projectorDisplay';
 import { optimizedImageUrl } from '../lib/images';
+import { PortraitImage } from '../components/shared/PortraitImage';
 
 const CONDITION_STYLES: Record<string, string> = {
   exhausted: 'bg-amber-100 text-amber-900 border-amber-200',
@@ -142,8 +143,9 @@ function SlotCard({
         <>
           <div className="flex items-center gap-3 p-3 border-b border-white/10">
             {character.portraitUrl ? (
-              <img
-                src={optimizedImageUrl(character.portraitUrl, 'thumbnail')}
+              <PortraitImage
+                value={character.portraitUrl}
+                variant="thumbnail"
                 alt={character.name}
                 decoding="async"
                 className="h-12 w-12 rounded-full object-cover border border-white/20 bg-black/40 shrink-0"

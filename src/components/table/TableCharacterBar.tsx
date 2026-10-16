@@ -1,7 +1,7 @@
 import { BookOpen, Heart, Skull, Swords, Zap } from 'lucide-react';
-import { optimizedImageUrl } from '../../lib/images';
 import { activeConditionLabels } from '../../lib/conditions';
 import type { QuickCharacter } from '../../hooks/useTableCharacters';
+import { PortraitImage } from '../shared/PortraitImage';
 
 interface TableCharacterBarProps {
   characters: QuickCharacter[];
@@ -47,7 +47,7 @@ function CharacterCard({ character, mine, onOpenSheet }: { character: QuickChara
     <div className={`flex w-[17rem] flex-none flex-col gap-1.5 rounded-xl border p-2 text-white ${dying ? 'border-red-400/70 bg-red-950/70' : mine ? 'border-amber-300/60 bg-stone-800' : 'border-white/15 bg-stone-800/90'}`}>
       <div className="flex items-center gap-2">
         {character.portrait_url ? (
-          <img src={optimizedImageUrl(character.portrait_url, 'thumbnail')} alt="" className="h-9 w-9 flex-none rounded-full border border-white/25 object-cover" />
+          <PortraitImage value={character.portrait_url} variant="thumbnail" className="h-9 w-9 flex-none rounded-full border border-white/25 object-cover" />
         ) : (
           <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-white/15 text-sm font-bold">{character.name.slice(0, 2).toUpperCase()}</span>
         )}

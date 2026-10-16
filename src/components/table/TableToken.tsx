@@ -1,9 +1,9 @@
 import { memo } from 'react';
 import { EyeOff, Lock, Skull } from 'lucide-react';
-import { optimizedImageUrl } from '../../lib/images';
 import { initials } from '../../lib/tableGeometry';
 import { conditionBadge, hpColor, hpFraction, type TokenStatus } from '../../lib/tableStatus';
 import type { TableItem } from '../../types/virtualTable';
+import { PortraitImage } from '../shared/PortraitImage';
 
 interface TableTokenProps {
   item: TableItem;
@@ -60,7 +60,7 @@ export const TableToken = memo(function TableToken({
         }}
       >
         {imageUrl ? (
-          <img src={optimizedImageUrl(imageUrl, 'thumbnail')} alt="" draggable={false} decoding="async" className="h-full w-full object-cover" />
+          <PortraitImage value={imageUrl} variant="thumbnail" draggable={false} decoding="async" className="h-full w-full object-cover" />
         ) : (
           <span className="font-bold" style={{ fontSize: diameter * 0.38 }}>{initials(item.label)}</span>
         )}

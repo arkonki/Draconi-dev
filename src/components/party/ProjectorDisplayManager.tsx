@@ -24,6 +24,7 @@ import type { PartyDisplaySlot } from '../../types/projectorDisplay';
 import type { Character } from '../../types/character';
 import { queryKeys } from '../../lib/queryKeys';
 import { optimizedImageUrl } from '../../lib/images';
+import { PortraitImage } from '../shared/PortraitImage';
 import { useConfirm } from '../../hooks/useConfirm';
 
 interface ProjectorDisplayManagerProps {
@@ -67,8 +68,9 @@ function ProjectorSeatPreviewCard({ member, rotation }: { member: Character; rot
     >
       <div className="flex items-center gap-2 p-2.5 border-b border-white/10">
         {member.portrait_url ? (
-          <img
-            src={optimizedImageUrl(member.portrait_url, 'thumbnail')}
+          <PortraitImage
+            value={member.portrait_url}
+            variant="thumbnail"
             alt={member.name}
             loading="lazy"
             decoding="async"
