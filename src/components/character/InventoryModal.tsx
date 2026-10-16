@@ -311,6 +311,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
 
     const [sortOrder, setSortOrder] = useState('name-asc');
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+    const [moveQuantity, setMoveQuantity] = useState<number | null>(null); // null = whole stack
     const [animalSelector, setAnimalSelector] = useState<{ item: InventoryItem, candidates: InventoryItem[] } | null>(null);
     const [activeInventoryTab, setActiveInventoryTab] = useState<string>('main'); // 'main' or containerID
     const [cart, setCart] = useState<ShopCartLine[]>([]);
@@ -626,33 +627,46 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
     const handleDropItem = (itemToDrop: InventoryItem) => { setItemToDelete(itemToDrop); };
     const confirmDropItem = () => { if (itemToDelete) { handleUseItem(itemToDelete); setItemToDelete(null); } };
 
-    // --- NEW CONTAINER MOVE LOGIC ---
-    const handleMoveItemToContainer = (itemToMove: InventoryItem, targetContainerId: string | null) => {
+    // --- CONTAINER MOVE LOGIC ---
+    // Moves `quantity` units (default: the whole stack); a partial move splits the stack.
+    const handleMoveItemToContainer = (itemToMove: InventoryItem, targetContainerId: string | null, quantity?: number) => {
         const newEquipment = structuredClone(character.equipment!);
         const inventory = newEquipment.inventory;
 
-        // 1. Find and remove source item
         const invItemIndex = inventory.findIndex((i: InventoryItem) => i.id === itemToMove.id);
         if (invItemIndex === -1) return;
 
-        // Check if just moving 1 or all? For now, let's say "Move All" or we handle quantity splits?
-        // Let's assume user wants to move specific stack. 
-        // If we want to move partial stack, we'd need a modal. For now, move ENTIRE stack.
-
-        const [movedItem] = inventory.splice(invItemIndex, 1);
+        const source = inventory[invItemIndex];
+        const amount = Math.min(source.quantity, Math.max(1, Math.floor(quantity ?? source.quantity)));
+        let movedItem: InventoryItem;
+        if (amount >= source.quantity) {
+            [movedItem] = inventory.splice(invItemIndex, 1);
+        } else {
+            source.quantity -= amount;
+            movedItem = { ...source, id: generateId(), quantity: amount };
+        }
         movedItem.temporarilyPlaced = false;
         movedItem.carriedByActorId = character.id;
         delete movedItem.locationId;
 
-        // 2. Update containerId
         if (targetContainerId) {
             movedItem.containerId = targetContainerId;
         } else {
             delete movedItem.containerId; // Move to main inventory
         }
 
-        // 3. Merge back
         newEquipment.inventory = mergeIntoInventory(inventory, movedItem);
+        handleUpdateEquipment(newEquipment);
+    };
+
+    // A container that is set down (e.g. a basket left at camp) is not carried, so its contents stop counting toward load.
+    const handleToggleContainerPlaced = (containerId: string) => {
+        const newEquipment = structuredClone(character.equipment!);
+        const container = (newEquipment.equipped.containers || []).find((c: InventoryItem) => c.id === containerId);
+        if (!container) return;
+        const placing = !(container.temporarilyPlaced && !container.carriedByActorId);
+        container.temporarilyPlaced = placing;
+        container.carriedByActorId = placing ? null : character.id;
         handleUpdateEquipment(newEquipment);
     };
 
@@ -677,7 +691,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             {(eq.containers || []).map((container: InventoryItem, index: number) => {
                                 const bonus = encumbrance.capacityBonuses.find(entry => entry.id === container.id && entry.name === container.name)?.slots;
                                 const storage = container.id ? encumbrance.containerStats[container.id] : undefined;
-                                return <LoadoutSlot key={container.id || `container-${index}`} icon={Backpack} label={storage?.storageKind === 'mount' ? 'Mount bag' : storage?.storageKind === 'external' ? 'Stored container' : 'Worn pack'} item={container} onUnequip={() => handleUnequipItem(container.name, 'container', container.id)} subItems={<span className="mt-1 text-[10px] text-gray-500">{bonus ? `+${bonus} carrying slots` : storage?.storageKind === 'mount' ? 'Contents carried by mount' : storage?.storageKind === 'external' ? 'Contents stored elsewhere' : 'Contents count toward carried load'}</span>} />;
+                                return <LoadoutSlot key={container.id || `container-${index}`} icon={Backpack} label={storage?.storageKind === 'mount' ? 'Mount bag' : storage?.storageKind === 'external' ? 'Stored container' : 'Worn pack'} item={container} onUnequip={() => handleUnequipItem(container.name, 'container', container.id)} subItems={<><span className="mt-1 text-[10px] text-gray-500">{bonus ? `+${bonus} carrying slots` : storage?.storageKind === 'mount' ? 'Contents carried by mount' : storage?.storageKind === 'external' ? 'Contents stored elsewhere' : 'Contents count toward carried load'}</span>{container.id && storage?.storageKind !== 'mount' && <button type="button" onClick={() => handleToggleContainerPlaced(container.id!)} className="mt-1 self-start text-[10px] font-bold text-indigo-600 hover:underline">{storage?.storageKind === 'external' ? 'Pick up' : 'Set down (not carried)'}</button>}</>} />;
                             })}
                             {(eq.animals || []).map((animal: InventoryItem, index: number) => <LoadoutSlot key={animal.id || `animal-${index}`} icon={Anchor} label="Mount / pack animal" item={animal} onUnequip={() => handleUnequipItem(animal.name, 'animal', animal.id)} subItems={<span className="mt-1 text-[10px] text-gray-500">Cargo does not count toward your load</span>} />)}
                         </div>
@@ -698,7 +712,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         const isUsable = isItemConsumable(item, itemDetails);
         const isMenuOpen = menuOpenId === item.id;
         const isDetailsExpanded = expandedItemId === item.id;
-        const toggleMenu = (e: React.MouseEvent) => { e.stopPropagation(); setMenuOpenId(isMenuOpen ? null : (item.id ?? null)); };
+        const toggleMenu = (e: React.MouseEvent) => { e.stopPropagation(); setMoveQuantity(null); setMenuOpenId(isMenuOpen ? null : (item.id ?? null)); };
         const description = itemDetails?.effect || itemDetails?.description;
 
         // Get valid move targets (equipped containers OR animals THAT ARE STORAGE)
@@ -785,13 +799,20 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                             <div className="w-full px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                                 Move To...
                                             </div>
+                                            {item.quantity > 1 && (
+                                                <label className="flex w-full items-center gap-2 px-2 text-xs text-gray-600" onClick={(e) => e.stopPropagation()}>
+                                                    Amount
+                                                    <input type="number" min={1} max={item.quantity} value={Math.min(moveQuantity ?? item.quantity, item.quantity)} onChange={(e) => setMoveQuantity(Math.min(item.quantity, Math.max(1, Math.floor(Number(e.target.value)) || 1)))} className="w-16 rounded border border-gray-300 px-2 py-1 text-xs" />
+                                                    <span className="text-gray-400">of {item.quantity}</span>
+                                                </label>
+                                            )}
                                             {canMoveToMain && (
-                                                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, null); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50">
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, null, moveQuantity ?? undefined); setMoveQuantity(null); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50">
                                                     <Package size={14} /> Main Inventory
                                                 </button>
                                             )}
                                             {moveTargets.map((c: InventoryItem) => (
-                                                <button type="button" key={c.id} onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, c.id!); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-indigo-50">
+                                                <button type="button" key={c.id} onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleMoveItemToContainer(item, c.id!, moveQuantity ?? undefined); setMoveQuantity(null); }} className="flex min-h-9 items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-indigo-50">
                                                     <Backpack size={14} /> {c.name}
                                                 </button>
                                             ))}

@@ -120,6 +120,20 @@ describe('shared character encumbrance', () => {
     expect(result.containerStats.bag).toMatchObject({ load: 9, storageKind: 'mount', countsTowardCarriedLoad: false });
   });
 
+  it('does not count contents of a set-down basket toward carried load, and counts them again once picked up', () => {
+    const stuff: InventoryItem[] = [
+      { id: 'a', name: 'Rope', quantity: 2 },
+      { id: 'b', name: 'Rope', quantity: 5, containerId: 'basket' },
+    ];
+    const basket = (placement: Partial<InventoryItem>): Partial<EquippedItems> => ({ containers: [{ id: 'basket', name: 'Basket', quantity: 1, ...placement }] });
+    const defs = [item('Rope', 1), item('Basket', 1, { is_container: true, container_capacity: 10 })];
+    const setDown = calculateEncumbrance(character(12, stuff, basket({ temporarilyPlaced: true, carriedByActorId: null })), defs);
+    expect(setDown).toMatchObject({ load: 2, externalLoad: 5 });
+    expect(setDown.containerStats.basket).toMatchObject({ load: 5, storageKind: 'external', countsTowardCarriedLoad: false });
+    const carried = calculateEncumbrance(character(12, stuff, basket({ temporarilyPlaced: false, carriedByActorId: 'hero' })), defs);
+    expect(carried).toMatchObject({ load: 7, externalLoad: 0 });
+  });
+
   it('accepts legacy JSON fields and handles missing or malformed equipment without crashing the sheet', () => {
     const hero = character(10, [{ name: 'Cargo', quantity: 6 }]);
     const legacy = { ...hero, attributes: JSON.stringify(hero.attributes), equipment: JSON.stringify(hero.equipment) } as unknown as Character;

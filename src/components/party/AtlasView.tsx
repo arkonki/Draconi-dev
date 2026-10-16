@@ -1238,7 +1238,7 @@ export function AtlasView({ partyId, isDM }: AtlasViewProps) {
                                         <Button variant="primary" icon={Upload} onClick={() => fileInputRef.current?.click()}>
                                             Choose Image File
                                         </Button>
-                                        <p className="text-[10px] text-slate-500">Max size 20MB per party. Supports PNG, JPG, WEBP.</p>
+                                        <p className="text-[10px] text-slate-500">Max size 100MB per party. Supports PNG, JPG, WEBP.</p>
                                     </div>
                                 )}
                             </div>
