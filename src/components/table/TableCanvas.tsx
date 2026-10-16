@@ -274,7 +274,9 @@ export function TableCanvas({
       const zoomed = zoomAround(pinchRef.current.view, distance / pinchRef.current.distance, pinchRef.current.midpoint);
       setView({ ...zoomed, x: zoomed.x + (midpoint.x - pinchRef.current.midpoint.x), y: zoomed.y + (midpoint.y - pinchRef.current.midpoint.y) });
     } else if (panRef.current && !longPressRef.current) {
-      setView((current) => ({ ...current, x: panRef.current!.viewX + point.x - panRef.current!.x, y: panRef.current!.viewY + point.y - panRef.current!.y }));
+      // Capture now: the updater runs later, after pointer-up or the long-press timer may have cleared panRef.
+      const pan = panRef.current;
+      setView((current) => ({ ...current, x: pan.viewX + point.x - pan.x, y: pan.viewY + point.y - pan.y }));
     }
   };
 
