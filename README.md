@@ -1,6 +1,6 @@
 # Dragonbane Character Manager
 
-Dragonbane Character Manager is a self-hosted React application for characters, parties, encounters, maps, notes, shared inventory, and game reference data.
+**Dragonbane Character Manager** is a self-hosted React application for characters, parties, encounters, maps, notes, shared inventory, and game reference data.
 
 The application now runs without Supabase, Netlify, or another hosted backend. Its runtime is four local containers:
 
