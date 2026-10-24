@@ -337,7 +337,10 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
     }, [selectedShopGroup]);
 
     useEffect(() => {
-        const handleClickOutside = () => setMenuOpenId(null);
+        const handleClickOutside = (event: MouseEvent) => {
+            if (event.target instanceof Element && event.target.closest('[data-keep-menu]')) return;
+            setMenuOpenId(null);
+        };
         window.addEventListener('click', handleClickOutside);
         return () => window.removeEventListener('click', handleClickOutside);
     }, []);
@@ -800,7 +803,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                 Move To...
                                             </div>
                                             {item.quantity > 1 && (
-                                                <label className="flex w-full items-center gap-2 px-2 text-xs text-gray-600" onClick={(e) => e.stopPropagation()}>
+                                                <label data-keep-menu className="flex w-full items-center gap-2 px-2 text-xs text-gray-600">
                                                     Amount
                                                     <input type="number" min={1} max={item.quantity} value={Math.min(moveQuantity ?? item.quantity, item.quantity)} onChange={(e) => setMoveQuantity(Math.min(item.quantity, Math.max(1, Math.floor(Number(e.target.value)) || 1)))} className="w-16 rounded border border-gray-300 px-2 py-1 text-xs" />
                                                     <span className="text-gray-400">of {item.quantity}</span>
