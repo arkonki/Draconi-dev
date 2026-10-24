@@ -124,6 +124,11 @@ export async function listUsers(actor) {
 
 export async function userImpact(actor, id, client = pool) {
   requireAdmin(actor);
+  return computeUserImpact(id, client);
+}
+
+// What would be removed or need handing over if this account were deleted. No permission check: callers decide who may ask.
+export async function computeUserImpact(id, client = pool) {
   const target = await loadTarget(client, id);
   const count = async (text, values = [id]) => (await client.query(text, values)).rows[0].count;
 

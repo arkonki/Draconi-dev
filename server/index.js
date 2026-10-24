@@ -1,6 +1,9 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { requestPasswordReset, resendVerification, resetPassword as resetPasswordWithToken, verifyEmail } from './accountEmails.js';
+import { deleteMyAccount, exportMyData } from './accountData.js';
+import { checkSignup } from './signupGuard.js';
+import { legalContact } from './legal.js';
 import { bootstrapAdmin, currentUser, hashPassword, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
 import { mailEnabled } from './mailer.js';
 import { clearSmtp, getSmtpAdminView, loadStoredSmtp, saveSmtp, sendSmtpTest, startSmtpRefresh } from './smtpSettings.js';
@@ -400,11 +403,17 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/auth/sign-up' && request.method === 'POST') {
       const actor = await currentUser(request, false);
-      sendJson(response, 201, await signUp(actor, await readJson(request)));
+      const body = await readJson(request);
+      if (!actor && checkSignup(request, body) === 'bot') {
+        // A bot filled in the hidden field: answer as if it worked, and create nothing.
+        sendJson(response, 201, { user: null, session: null, verificationRequired: true });
+        return;
+      }
+      sendJson(response, 201, await signUp(actor, body));
       return;
     }
     if (pathname === '/api/auth/config' && request.method === 'GET') {
-      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true', emailEnabled: mailEnabled() });
+      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true', emailEnabled: mailEnabled(), legal: legalContact() });
       return;
     }
     if (pathname === '/api/auth/password-reset/request' && request.method === 'POST') {
@@ -423,6 +432,22 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, await resendVerification(request, await readJson(request, 10_000)));
       return;
     }
+    if (pathname === '/api/auth/export' && request.method === 'GET') {
+      const exported = await exportMyData(await currentUser(request));
+      const body = JSON.stringify(exported, null, 2);
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': 'attachment; filename="draconi-my-data.json"',
+        'content-length': Buffer.byteLength(body),
+        'cache-control': 'no-store',
+      });
+      response.end(body);
+      return;
+    }
+    if (pathname === '/api/auth/account' && request.method === 'DELETE') {
+      sendJson(response, 200, await deleteMyAccount(request, await currentUser(request), await readJson(request, 10_000)));
+      return;
+    }
     if (pathname === '/api/auth/sign-out' && request.method === 'POST') {
       await signOut(request);
       sendJson(response, 200, {});
@@ -434,7 +459,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/auth/user' && request.method === 'PUT') {
       const body = await readJson(request);
-      sendJson(response, 200, { user: await updateAuthUser(request, body) });
+      sendJson(response, 200, await updateAuthUser(request, body));
       return;
     }
 

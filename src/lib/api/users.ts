@@ -146,7 +146,7 @@ export async function updateUserProfile(userId: string, updates: UserProfileUpda
  * This triggers Supabase's email change verification flow.
  * @param newEmail The new email address.
  */
-export async function updateUserAuthEmail(newEmail: string): Promise<void> {
+export async function updateUserAuthEmail(newEmail: string, currentPassword: string): Promise<{ pending: boolean }> {
     if (!newEmail) {
         throw new Error("updateUserAuthEmail: No new email provided.");
     }
@@ -159,7 +159,7 @@ export async function updateUserAuthEmail(newEmail: string): Promise<void> {
     try {
         // Note: Supabase handles checking if the email is already in use by another user.
         const { data, error } = await supabase.auth.updateUser(
-            { email: newEmail },
+            { email: newEmail, currentPassword },
             // Optionally add emailRedirectTo if you want to control where the verification link sends the user
             // { emailRedirectTo: 'https://your-app.com/profile-settings' }
         );
@@ -175,13 +175,11 @@ export async function updateUserAuthEmail(newEmail: string): Promise<void> {
                  throw new Error("The new email address is the same as the current one.");
             }
             // Default error
-            throw new Error(`Failed to initiate email update: ${error.message}`);
+            throw new Error(error.message);
         }
 
-        // Important: Inform the user they need to check both old and new email inboxes
-        // for verification links. The actual email change completes upon verification.
-        console.log("User auth email update initiated. Verification required.", data);
-        // Consider showing a persistent message to the user in the UI.
+        // With email set up the address changes only when the link sent to the new address is opened.
+        return { pending: Boolean(data?.emailChangePending) };
 
     } catch (err) {
         console.error("Unexpected error in updateUserAuthEmail:", err);

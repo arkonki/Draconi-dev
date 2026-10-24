@@ -21,14 +21,19 @@ function fakeDatabase() {
       return { rows: [] };
     }
     if (/INSERT INTO auth_tokens/.test(sql)) {
-      state.tokens.push({ token_hash: params[0], user_id: params[1], purpose: params[2], hours: params[3], used_at: null, expired: false });
+      state.tokens.push({ token_hash: params[0], user_id: params[1], purpose: params[2], hours: params[3], payload: params[4], used_at: null, expired: false });
       return { rows: [] };
     }
     if (/UPDATE auth_tokens SET used_at/.test(sql)) {
-      const token = state.tokens.find((t) => t.token_hash === params[0] && t.purpose === params[1] && !t.used_at && !t.expired);
+      const token = state.tokens.find((t) => t.token_hash === params[0] && params[1].includes(t.purpose) && !t.used_at && !t.expired);
       if (!token) return { rows: [] };
       token.used_at = Date.now();
-      return { rows: [{ user_id: token.user_id }] };
+      return { rows: [{ user_id: token.user_id, purpose: token.purpose, payload: token.payload }] };
+    }
+    if (/UPDATE users SET email = \$1, is_email_verified = true/.test(sql)) {
+      if (state.users.some((u) => u.email === params[0])) throw Object.assign(new Error('duplicate'), { code: '23505' });
+      Object.assign(state.users.find((u) => u.id === params[1]), { email: params[0], is_email_verified: true });
+      return { rows: [] };
     }
     if (/UPDATE users SET is_email_verified/.test(sql)) { state.users.find((u) => u.id === params[0]).is_email_verified = true; return { rows: [] }; }
     if (/UPDATE app_credentials/.test(sql)) { state.credentials[params[1]] = params[0]; return { rows: [] }; }
@@ -113,6 +118,24 @@ describe('account emails', () => {
     await accountEmails.verifyEmail({ token });
     expect(database.state.users[0].is_email_verified).toBe(true);
     await expect(accountEmails.verifyEmail({ token })).rejects.toMatchObject({ code: 'TOKEN_INVALID' });
+  });
+
+  it('changes the email only after the new address confirms it, and tells the old address', async () => {
+    database.state.users[0].is_email_verified = true;
+    await accountEmails.requestEmailChange(database.state.users[0], 'new@example.com');
+    expect(sent.map((message) => message.to)).toEqual(['new@example.com', 'hero@example.com']);
+    expect(sent[0].text).toContain('/verify-email?token=');
+    expect(sent[1].text).toContain('Nothing changes until');
+    expect(database.state.users[0].email).toBe('hero@example.com');
+    await expect(accountEmails.verifyEmail({ token: tokenFrom(sent[0]) })).resolves.toEqual({ ok: true, emailChanged: true });
+    expect(database.state.users[0].email).toBe('new@example.com');
+  });
+
+  it('refuses to confirm an address that another account took in the meantime', async () => {
+    database.state.users.push({ id: 'u2', email: 'taken@example.com', username: 'other', is_active: true, is_email_verified: true });
+    await accountEmails.requestEmailChange(database.state.users[0], 'taken@example.com');
+    await expect(accountEmails.verifyEmail({ token: tokenFrom(sent[0]) })).rejects.toMatchObject({ status: 409, code: 'EMAIL_TAKEN' });
+    expect(database.state.users[0].email).toBe('hero@example.com');
   });
 
   it('only resends verification to accounts that are still unverified', async () => {

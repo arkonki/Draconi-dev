@@ -3,7 +3,9 @@ import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
 import { assertSafeBootstrapPassword } from './configCheck.js';
 import { getBearerToken, HttpError } from './http.js';
-import { sendVerificationEmail } from './accountEmails.js';
+import { requestEmailChange, sendVerificationEmail } from './accountEmails.js';
+import { TERMS_VERSION } from './legal.js';
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
 import { mailEnabled } from './mailer.js';
 
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 14);
@@ -191,6 +193,10 @@ export async function signUp(actor, { email, password, options = {} }) {
     throw new HttpError(400, 'Email address is invalid', 'INVALID_EMAIL');
   }
 
+  // Someone signing up on their own must agree to the terms and privacy policy; accounts an administrator creates are exempt.
+  if (!actor && options?.data?.acceptTerms !== true) {
+    throw new HttpError(400, 'Agree to the terms and privacy policy to create an account.', 'TERMS_REQUIRED');
+  }
   const username = String(options?.data?.username || normalizedEmail.split('@')[0]).trim();
   if (username.length < 3 || username.length > 50) {
     throw new HttpError(400, 'Username must contain between 3 and 50 characters', 'INVALID_USERNAME');
@@ -201,9 +207,9 @@ export async function signUp(actor, { email, password, options = {} }) {
   const needsVerification = !actor && mailEnabled();
   const user = await withTransaction(async (client) => {
     const result = await client.query(
-      `INSERT INTO users (email, username, role, is_email_verified)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [normalizedEmail, username, role, !needsVerification],
+      `INSERT INTO users (email, username, role, is_email_verified, terms_accepted_at, terms_version)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [normalizedEmail, username, role, !needsVerification, actor ? null : new Date(), actor ? null : TERMS_VERSION],
     );
     await client.query(
       'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',
@@ -226,22 +232,47 @@ export async function signOut(request) {
   if (token) await pool.query('DELETE FROM app_sessions WHERE token_hash = $1', [hashToken(token)]);
 }
 
+// Changing the password or the email address needs the current password as well as a session, so a stolen or
+// forgotten-open session cannot take the account over. Wrong guesses count against the same limit as sign-in.
+async function requireCurrentPassword(request, user, currentPassword) {
+  assertLoginAllowed(request, user.email);
+  if (!(await verifyUserPassword(user.id, currentPassword))) {
+    recordLoginFailure(request, user.email);
+    throw new HttpError(403, 'Your current password is not correct.', 'CURRENT_PASSWORD_INVALID');
+  }
+  clearLoginFailures(request, user.email);
+}
+
 export async function updateAuthUser(request, changes) {
   const user = await currentUser(request);
-  if (changes.password) {
-    await pool.query(
-      'UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2',
-      [hashPassword(changes.password), user.id],
-    );
+  const wantsPassword = Boolean(changes.password);
+  const newEmail = changes.email === undefined ? null : normalizeEmail(changes.email);
+  if (!wantsPassword && newEmail === null) throw new HttpError(400, 'No supported account changes were supplied');
+  if (newEmail !== null && !/^\S+@\S+\.\S+$/.test(newEmail)) throw new HttpError(400, 'Email address is invalid');
+  await requireCurrentPassword(request, user, changes.currentPassword);
+
+  let emailChangePending = null;
+  if (wantsPassword) {
+    const passwordHash = hashPassword(changes.password);
+    await withTransaction(async (client) => {
+      await client.query('UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2', [passwordHash, user.id]);
+      // Every other device is signed out; this one stays.
+      await client.query('DELETE FROM app_sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, hashToken(getBearerToken(request))]);
+    });
   }
-  if (changes.email) {
-    const email = normalizeEmail(changes.email);
-    if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(400, 'Email address is invalid');
-    await pool.query('UPDATE users SET email = $1 WHERE id = $2', [email, user.id]);
+  if (newEmail !== null && newEmail !== normalizeEmail(user.email)) {
+    const taken = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1 AND id <> $2', [newEmail, user.id]);
+    if (taken.rows[0]) throw new HttpError(409, 'That email address is already used by another account.', 'EMAIL_TAKEN');
+    if (mailEnabled()) {
+      // The address changes only once the new mailbox has confirmed it.
+      await requestEmailChange(user, newEmail);
+      emailChangePending = newEmail;
+    } else {
+      await pool.query('UPDATE users SET email = $1 WHERE id = $2', [newEmail, user.id]);
+    }
   }
-  if (!changes.password && !changes.email) throw new HttpError(400, 'No supported account changes were supplied');
   const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [user.id]);
-  return publicUser(rows[0]);
+  return { user: publicUser(rows[0]), emailChangePending };
 }
 
 export async function sessionForRequest(request) {

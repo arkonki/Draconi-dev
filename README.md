@@ -314,6 +314,23 @@ Without `SMTP_HOST` the server behaves as before: no confirmation step, and pass
 In production, `ALLOW_REGISTRATION=true` without working email settings (saved in the app or in `.env`) stops the server at start, so sign-ups cannot
 become accounts nobody can recover.
 
+## Opening the site to the public
+
+Before setting `ALLOW_REGISTRATION=true`:
+
+- Set up email (above) and `PUBLIC_BASE_URL`, and fill in `LEGAL_OPERATOR_NAME` and `LEGAL_CONTACT_EMAIL`: they appear on the
+  public **Terms of use** (`/terms`) and **Privacy policy** (`/privacy`) pages. The texts are a starting point written for
+  what this app stores; have them reviewed against your own situation and change them in `src/pages/Terms.tsx` and
+  `src/pages/Privacy.tsx`. When the wording changes in a way that matters, update `TERMS_VERSION` in `server/legal.js`.
+- New accounts must tick the agreement box; the version and time are stored on the account.
+- Sign-up is limited per address per hour (`SIGNUP_MAX_PER_IP_HOUR`), has a hidden field that catches simple bots, and
+  pauses for the day after `SIGNUP_MAX_PER_DAY` new accounts. Watch the admin user list after launch.
+- People can download their data and delete their own account under **Settings > Profile**. Someone who owns campaigns
+  must have an administrator hand them over first (Admin Panel > Users > Delete shows how). Administrators are
+  deleted by another administrator.
+- Changing the password or the email address asks for the current password. A password change signs out the other
+  devices; a new email address takes effect only after the link sent to it is opened.
+
 ## Development and verification
 
 Install frontend dependencies with `npm install`. With the Docker database and API running, `npm run dev` starts Vite with `/api` proxied to port 3000.

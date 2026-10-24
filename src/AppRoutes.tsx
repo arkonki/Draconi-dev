@@ -23,6 +23,8 @@ const Settings = lazy(() =>
   import('./pages/Settings').then((module) => ({ default: module.Settings }))
 );
 const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
+const Terms = lazy(() => import('./pages/Terms').then((module) => ({ default: module.Terms })));
+const Privacy = lazy(() => import('./pages/Privacy').then((module) => ({ default: module.Privacy })));
 const Register = lazy(() => import('./pages/Register').then((module) => ({ default: module.Register })));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then((module) => ({ default: module.ForgotPassword })));
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then((module) => ({ default: module.ResetPassword })));
@@ -66,6 +68,8 @@ export function AppRoutes() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verify-email" element={<VerifyEmail />} />

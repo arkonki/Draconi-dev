@@ -785,8 +785,8 @@ const localAuth = {
     if (result.data.session) notifyAuth('TOKEN_REFRESHED', result.data.session);
     return result;
   },
-  async updateUser(attributes: { password?: string; email?: string }) {
-    const result = await apiRequest<{ user: LocalUser }>('/auth/user', {
+  async updateUser(attributes: { password?: string; email?: string; currentPassword?: string }) {
+    const result = await apiRequest<{ user: LocalUser; emailChangePending?: string | null }>('/auth/user', {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(attributes),
     });
     if (result.data?.user) {
@@ -797,7 +797,7 @@ const localAuth = {
         notifyAuth('USER_UPDATED', updatedSession);
       }
     }
-    return { data: { user: result.data?.user ?? null }, error: result.error };
+    return { data: { user: result.data?.user ?? null, emailChangePending: result.data?.emailChangePending ?? null }, error: result.error };
   },
   onAuthStateChange(listener: AuthListener) {
     authListeners.add(listener);
@@ -811,7 +811,7 @@ const localAuth = {
 /** Public account endpoints: registration settings, email confirmation and password reset by email. */
 export const accountApi = {
   async config() {
-    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean }>('/auth/config');
+    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean; legal?: { operator: string; contactEmail: string; termsVersion: string } }>('/auth/config');
     return { data: result.data, error: result.error };
   },
   async requestPasswordReset(email: string) {
@@ -829,10 +829,10 @@ export const accountApi = {
 };
 
 async function post(path: string, body: Record<string, unknown>) {
-  const result = await apiRequest<{ ok: boolean }>(path, {
+  const result = await apiRequest<{ ok: boolean; emailChanged?: boolean }>(path, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   });
-  return { error: result.error };
+  return { data: result.data, error: result.error };
 }
 
 class LocalStorageBucket {

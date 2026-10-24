@@ -222,6 +222,9 @@ export function Login() {
           </Button>
         </form>
         
+        <p className="text-center text-xs text-gray-500">
+          <Link to="/terms" className="hover:underline">Terms of use</Link> · <Link to="/privacy" className="hover:underline">Privacy policy</Link>
+        </p>
         <div className="text-center text-sm text-gray-600">
           {emailEnabled && (
             <p className="mb-2"><Link to="/forgot-password" className="font-medium text-blue-600 hover:underline">Forgot your password?</Link></p>

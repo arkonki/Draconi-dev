@@ -25,6 +25,7 @@ export function ProfileSettings() {
   
   const [emailForm, setEmailForm] = useState('');
   const [initialEmail, setInitialEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
 
   // UI State
   const [isLoading, setIsLoading] = useState(true);
@@ -134,8 +135,15 @@ export function ProfileSettings() {
         if (!trimmedEmail) throw new Error("Email cannot be empty.");
         
         changesMade = true;
-        await updateUserAuthEmail(trimmedEmail);
-        emailUpdateMessage = " Check your new email for a verification link.";
+        if (!emailPassword) throw new Error('Enter your current password to change your email address.');
+        const { pending } = await updateUserAuthEmail(trimmedEmail, emailPassword);
+        setEmailPassword('');
+        if (pending) {
+          emailUpdateMessage = ' Open the link we sent to your new address to finish the change; until then your sign-in email stays the same.';
+          setEmailForm(initialEmail);
+        } else {
+          setInitialEmail(trimmedEmail);
+        }
       }
 
       if (changesMade) {
@@ -269,8 +277,20 @@ export function ProfileSettings() {
               />
               {emailForm !== initialEmail && (
                  <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                    <AlertCircle size={12} /> Changing email requires verification.
+                    <AlertCircle size={12} /> We will email the new address a link to confirm it. Enter your password to continue.
                  </p>
+              )}
+              {emailForm !== initialEmail && (
+                <input
+                  id="email-current-password"
+                  type="password"
+                  autoComplete="current-password"
+                  aria-label="Current password"
+                  placeholder="Current password"
+                  value={emailPassword}
+                  onChange={(event) => setEmailPassword(event.target.value)}
+                  className="mt-2 w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
               )}
             </div>
 

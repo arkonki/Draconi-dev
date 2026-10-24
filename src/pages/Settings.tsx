@@ -22,6 +22,7 @@ import { NotificationSettings } from '../components/settings/NotificationSetting
 import { LocalizationSettings } from '../components/settings/LocalizationSettings';
 import { AdminSettings } from '../components/settings/AdminSettings';
 import { SmtpSettings } from '../components/settings/SmtpSettings';
+import { AccountDataSettings } from '../components/settings/AccountDataSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
 import { ConnectionSettings } from '../components/settings/ConnectionSettings';
@@ -154,7 +155,7 @@ export function Settings() {
     }
 
     switch (activeSection) {
-      case 'profile': return <ProfileSettings />;
+      case 'profile': return <><ProfileSettings /><AccountDataSettings /></>;
       case 'appearance': return <AppearanceSettings />;
       case 'notifications': return <NotificationSettings />;
       case 'localization': return <LocalizationSettings />;

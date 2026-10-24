@@ -132,17 +132,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsAuthenticating(true);
       setGlobalError(null);
 
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
-      });
-
-      if (verifyError) {
-        throw new Error('Current password is incorrect.');
-      }
-
+      // The server checks the current password itself, so it cannot be skipped by calling the API directly.
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
+        currentPassword,
       });
 
       if (updateError) {
