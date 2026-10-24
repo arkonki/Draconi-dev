@@ -1,5 +1,7 @@
 // Checks the SMTP settings in .env: connects, logs in, and sends one test message.
 // Usage: npm run mail:test -- you@example.com
+import console from 'node:console';
+import process from 'node:process';
 import { mailEnabled, mailSettings, sendMail, verifyMailConnection } from '../server/mailer.js';
 
 const recipient = process.argv[2];
