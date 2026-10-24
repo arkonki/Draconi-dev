@@ -145,7 +145,8 @@ export function SystemHealth() {
           <Metric label="Query errors" value={database.queries.errors} tone={database.queries.errors > 0 ? 'bad' : undefined} />
           <Metric label="95% of queries finish within" value={formatMs(database.queries.p95Ms)} />
           <Metric label="Reads served from memory" value={`${database.postgres.cacheHitPercent}%`} tone={database.postgres.cacheHitPercent < 90 ? 'bad' : 'good'} />
-          <Metric label="Deadlocks" value={database.postgres.deadlocks} tone={database.postgres.deadlocks > 0 ? 'bad' : 'good'} />
+          <Metric label="Deadlocks since the server started" value={database.queries.deadlocks ?? 0} tone={(database.queries.deadlocks ?? 0) > 0 ? 'bad' : 'good'} />
+          <Metric label="Deadlocks ever recorded by PostgreSQL" value={database.postgres.deadlocks} />
           {overview && <Metric label="Database size" value={formatBytes(overview.database.sizeBytes)} />}
         </Card>
 

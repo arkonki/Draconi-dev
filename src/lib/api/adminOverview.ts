@@ -91,7 +91,7 @@ export interface PerformanceStatus {
   };
   database: {
     pool: { configuredMaximum: number; totalConnections: number; idleConnections: number; waitingRequests: number };
-    queries: { count: number; errors: number; slow: number; slowThresholdMs: number; p50Ms: number; p95Ms: number; p99Ms: number };
+    queries: { count: number; errors: number; deadlocks?: number; slow: number; slowThresholdMs: number; p50Ms: number; p95Ms: number; p99Ms: number };
     postgres: {
       serverVersion: string; connections: number; activeConnections: number; cacheHitPercent: number;
       transactionsCommitted: number; transactionsRolledBack: number; deadlocks: number; temporaryFiles: number;

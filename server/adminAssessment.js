@@ -50,8 +50,12 @@ export function assessPerformance(snapshot) {
   if (database.pool.waitingRequests > 0) {
     findings.push({ severity: 'warning', code: 'pool-waiting', title: 'Requests are waiting for a database connection', detail: `${database.pool.waitingRequests} waiting; the pool allows ${database.pool.configuredMaximum} connections.` });
   }
-  if (database.postgres.deadlocks > 0) {
-    findings.push({ severity: 'warning', code: 'deadlocks', title: 'Database deadlocks detected', detail: `${database.postgres.deadlocks} deadlock${database.postgres.deadlocks === 1 ? '' : 's'} recorded.` });
+  // PostgreSQL's own counter never resets, so an old deadlock would warn forever. The server counts the ones it ran into itself.
+  const seenDeadlocks = database.queries.deadlocks ?? 0;
+  if (seenDeadlocks > 0) {
+    findings.push({ severity: 'warning', code: 'deadlocks', title: 'Database deadlocks detected', detail: `${seenDeadlocks} deadlock${seenDeadlocks === 1 ? '' : 's'} since the server started or its counters were reset (see the server log for the details).` });
+  } else if (database.postgres.deadlocks > 0) {
+    findings.push({ severity: 'info', code: 'deadlocks-history', title: 'Earlier database deadlocks', detail: `PostgreSQL has recorded ${database.postgres.deadlocks} in total since its statistics began; this server has seen none since it started.` });
   }
   if (database.postgres.cacheHitPercent < 90 && database.postgres.transactionsCommitted > 1000) {
     findings.push({ severity: 'info', code: 'cache-hit', title: 'Database cache is missing often', detail: `Only ${database.postgres.cacheHitPercent}% of reads came from memory.` });

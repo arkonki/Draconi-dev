@@ -859,7 +859,7 @@ export async function executeDataQuery(user, request) {
       return rows.map((row) => outwardAliases(table, row));
     }
     throw new HttpError(400, `Unsupported action: ${action}`);
-  }, { retryDeadlocks: 2 });
+  }, { retryDeadlocks: 2, label: `data:${table}:${action}` });
   if (ACCESS_CONTEXT_TABLES.has(table)) invalidateAccessContextCache();
   return result;
 }

@@ -70,11 +70,20 @@ describe('performance findings', () => {
     bad.requests.failed = 120;
     bad.requests.p95Ms = 900;
     bad.database.pool.waitingRequests = 3;
-    bad.database.postgres.deadlocks = 1;
+    bad.database.queries.deadlocks = 1;
     bad.process.eventLoopDelay.p99Ms = 400;
     bad.realtime.deliveryErrors = 2;
     const codes = assessPerformance(bad).map((finding) => finding.code);
     expect(codes).toEqual(expect.arrayContaining(['failed-requests', 'slow-api', 'pool-waiting', 'deadlocks', 'event-loop', 'realtime-errors']));
+  });
+
+  it('does not warn forever about an old deadlock that PostgreSQL still counts', () => {
+    const old = healthy();
+    old.database.postgres.deadlocks = 1;
+    old.database.queries.deadlocks = 0;
+    expect(assessPerformance(old)).toMatchObject([{ code: 'deadlocks-history', severity: 'info' }]);
+    old.database.queries.deadlocks = 2;
+    expect(assessPerformance(old)).toMatchObject([{ code: 'deadlocks', severity: 'warning' }]);
   });
 
   it('treats a few slow requests as information, not a warning', () => {

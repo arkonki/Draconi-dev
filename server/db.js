@@ -3,6 +3,8 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+const DEADLOCK_CODE = '40P01';
+
 function integerSetting(name, fallback, minimum, maximum) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -28,6 +30,7 @@ const metrics = {
   acquisitionWaitMilliseconds: [],
   queryCount: 0,
   queryErrors: 0,
+  deadlockCount: 0,
   slowQueryCount: 0,
   queryMilliseconds: [],
 };
@@ -54,6 +57,11 @@ function recordQuery(startedAt, command, error = null) {
   const duration = performance.now() - startedAt;
   metrics.queryCount += 1;
   if (error) metrics.queryErrors += 1;
+  if (error?.code === DEADLOCK_CODE) {
+    metrics.deadlockCount += 1;
+    // PostgreSQL's own message names the two blocked transactions; the queries are in its server log at the same time.
+    console.warn(JSON.stringify({ level: 'warn', event: 'database_deadlock', command, detail: String(error.detail || '').slice(0, 400) }));
+  }
   addSample(metrics.queryMilliseconds, duration);
   if (duration >= config.slowQueryMillis) {
     metrics.slowQueryCount += 1;
@@ -182,6 +190,7 @@ export function databaseMetricsSnapshot() {
     queries: {
       count: metrics.queryCount,
       errors: metrics.queryErrors,
+      deadlocks: metrics.deadlockCount,
       slow: metrics.slowQueryCount,
       slowThresholdMs: config.slowQueryMillis,
       sampleCount: querySamples.length,
@@ -199,15 +208,14 @@ export function resetDatabaseMetrics() {
   metrics.acquisitionWaitMilliseconds.length = 0;
   metrics.queryCount = 0;
   metrics.queryErrors = 0;
+  metrics.deadlockCount = 0;
   metrics.slowQueryCount = 0;
   metrics.queryMilliseconds.length = 0;
 }
 
-const DEADLOCK_CODE = '40P01';
-
 // `retryDeadlocks` re-runs the whole callback after a Postgres deadlock rollback. Only use it
 // when the callback has no side effects outside this transaction.
-export async function withTransaction(callback, { retryDeadlocks = 0 } = {}) {
+export async function withTransaction(callback, { retryDeadlocks = 0, label = 'transaction' } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     const client = await pool.connect();
     try {
@@ -217,7 +225,10 @@ export async function withTransaction(callback, { retryDeadlocks = 0 } = {}) {
       return result;
     } catch (error) {
       await client.query('ROLLBACK');
-      if (error?.code === DEADLOCK_CODE && attempt < retryDeadlocks) continue;
+      if (error?.code === DEADLOCK_CODE && attempt < retryDeadlocks) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'database_deadlock_retry', label, attempt: attempt + 1 }));
+        continue;
+      }
       throw error;
     } finally {
       client.release();
