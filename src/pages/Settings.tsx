@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Sword,
   Bell, // Ensure Bell is imported
+  Mail,
   ArrowLeft,
   Database,
   Plug,
@@ -20,6 +21,7 @@ import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
 import { LocalizationSettings } from '../components/settings/LocalizationSettings';
 import { AdminSettings } from '../components/settings/AdminSettings';
+import { SmtpSettings } from '../components/settings/SmtpSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
 import { ConnectionSettings } from '../components/settings/ConnectionSettings';
@@ -34,6 +36,7 @@ type SettingsSection =
   | 'admin'
   | 'game-data'
   | 'recovery'
+  | 'email'
   | 'connections';
 
 interface SettingsMenuItem {
@@ -82,6 +85,14 @@ const menuItems: SettingsMenuItem[] = [
     label: 'Backup & Restore',
     icon: Database,
     description: 'Create and restore recovery sets',
+    adminOnly: true,
+    category: 'admin'
+  },
+  {
+    id: 'email',
+    label: 'Email (SMTP)',
+    icon: Mail,
+    description: 'Outgoing email for sign-up and password reset',
     adminOnly: true,
     category: 'admin'
   },
@@ -138,7 +149,7 @@ export function Settings() {
 
   // Render Content Switcher
   const renderSettingsContent = () => {
-    if (['admin', 'game-data', 'recovery'].includes(activeSection) && !isAdmin()) {
+    if (['admin', 'game-data', 'recovery', 'email'].includes(activeSection) && !isAdmin()) {
       return <Navigate to="/settings" replace />;
     }
 
@@ -149,6 +160,7 @@ export function Settings() {
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
       case 'recovery': return <RecoverySettings />;
+      case 'email': return <SmtpSettings />;
       case 'connections': return <><BuiltInAiSettings /><ConnectionSettings /></>;
       case 'admin': return <AdminSettings onOpenBackups={() => handleSectionChange('recovery')} />;
       default: return <ProfileSettings />;

@@ -286,9 +286,15 @@ For long-running installations, the API removes expired sessions after a 24-hour
 
 ## Email: account confirmation and password reset
 
-Set `SMTP_HOST` and `SMTP_FROM` in `.env` (see `.env.example` for the port, TLS and login options) and set
-`PUBLIC_BASE_URL` to the address people use in the browser, because the links in the emails point there.
-Check the settings with:
+Administrators set this up in the app under **Settings > Email (SMTP)**: server, port, security, login, password and
+sender, with a *Send test email* button that mails the administrator using the form values before anything is saved.
+Saved settings apply immediately and override the environment; *Remove saved setup* returns to the environment. The
+password is stored encrypted with `AI_KEY_ENCRYPTION_SECRET` (32+ characters), so the server must have that set to
+store one in the app.
+
+Alternatively set `SMTP_HOST` and `SMTP_FROM` in `.env` (see `.env.example` for the port, TLS and login options). Either
+way set `PUBLIC_BASE_URL` to the address people use in the browser, because the links in the emails point there.
+Check the environment settings from a shell with:
 
 ```bash
 npm run mail:test -- you@example.com
@@ -305,7 +311,7 @@ With email configured:
   (`EMAIL_MAX_REQUESTS_PER_ADDRESS_HOUR`, `EMAIL_MAX_REQUESTS_PER_IP_HOUR`).
 
 Without `SMTP_HOST` the server behaves as before: no confirmation step, and passwords are reset by an administrator.
-In production, `ALLOW_REGISTRATION=true` without email settings stops the server at start, so sign-ups cannot
+In production, `ALLOW_REGISTRATION=true` without working email settings (saved in the app or in `.env`) stops the server at start, so sign-ups cannot
 become accounts nobody can recover.
 
 ## Development and verification

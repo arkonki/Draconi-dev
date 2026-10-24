@@ -27,3 +27,13 @@ describe('production configuration guard', () => {
     expect(() => assertSafeBootstrapPassword('change-me-now', { NODE_ENV: 'development' })).not.toThrow();
   });
 });
+
+describe('assertRegistrationHasEmail', () => {
+  it('stops production from opening registration without working email', async () => {
+    const { assertRegistrationHasEmail } = await import('./configCheck.js');
+    expect(() => assertRegistrationHasEmail({ NODE_ENV: 'production', ALLOW_REGISTRATION: 'true' }, false)).toThrow(/email is not configured/);
+    expect(() => assertRegistrationHasEmail({ NODE_ENV: 'production', ALLOW_REGISTRATION: 'true' }, true)).not.toThrow();
+    expect(() => assertRegistrationHasEmail({ NODE_ENV: 'production', ALLOW_REGISTRATION: 'false' }, false)).not.toThrow();
+    expect(() => assertRegistrationHasEmail({ NODE_ENV: 'development', ALLOW_REGISTRATION: 'true' }, false)).not.toThrow();
+  });
+});

@@ -3,9 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { requestPasswordReset, resendVerification, resetPassword as resetPasswordWithToken, verifyEmail } from './accountEmails.js';
 import { bootstrapAdmin, currentUser, hashPassword, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
 import { mailEnabled } from './mailer.js';
+import { clearSmtp, getSmtpAdminView, loadStoredSmtp, saveSmtp, sendSmtpTest, startSmtpRefresh } from './smtpSettings.js';
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
-import { assertSafeConfig } from './configCheck.js';
+import { assertRegistrationHasEmail, assertSafeConfig } from './configCheck.js';
 import { preflightHeaders } from './cors.js';
 import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
 import { handleError, HttpError, readJson, routePath, sendJson } from './http.js';
@@ -245,6 +246,22 @@ const server = http.createServer(async (request, response) => {
 
     if (pathname === '/api/admin/users' && request.method === 'GET') {
       sendJson(response, 200, await listUsers(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/smtp' && request.method === 'GET') {
+      sendJson(response, 200, await getSmtpAdminView(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/smtp' && request.method === 'PUT') {
+      sendJson(response, 200, await saveSmtp(await currentUser(request), await readJson(request, 20_000)));
+      return;
+    }
+    if (pathname === '/api/admin/smtp' && request.method === 'DELETE') {
+      sendJson(response, 200, await clearSmtp(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/smtp/test' && request.method === 'POST') {
+      sendJson(response, 200, await sendSmtpTest(await currentUser(request), await readJson(request, 20_000)));
       return;
     }
     if (pathname === '/api/admin/ai-usage' && request.method === 'GET') {
@@ -493,6 +510,9 @@ assertSafeConfig();
 await waitForDatabase();
 await runMigrations();
 await bootstrapAdmin();
+await loadStoredSmtp();
+startSmtpRefresh();
+assertRegistrationHasEmail();
 const realtimeServer = await attachRealtimeServer(server);
 server.listen(PORT, host, () => {
   console.log(`Dragonbane local API listening on ${host}:${PORT}`);
