@@ -445,7 +445,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       if (request.method === 'DELETE') {
-        sendJson(response, 200, { data: await removeObjects(bucket, (await readJson(request)).paths) });
+        sendJson(response, 200, { data: await removeObjects(bucket, (await readJson(request)).paths, user) });
         return;
       }
     }

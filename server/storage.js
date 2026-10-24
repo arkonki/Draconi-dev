@@ -163,11 +163,24 @@ async function generateAllVariants(bucket, objectPath, originalPath, metadata) {
   return Object.fromEntries(entries);
 }
 
+// An object with a recorded owner can only be replaced or deleted by that person or an administrator.
+// Objects without an owner row (uploaded before tracking, or whose uploader was deleted) stay open to everyone.
+async function assertMayModify(client, user, bucket, objectPaths) {
+  if (!user || user.role === 'admin' || objectPaths.length === 0) return;
+  const { rows } = await client.query(
+    `SELECT path FROM storage_objects
+     WHERE bucket = $1 AND path = ANY($2::text[]) AND owner_id IS NOT NULL AND owner_id <> $3`,
+    [bucket, objectPaths, user.id],
+  );
+  if (rows.length > 0) throw new HttpError(403, 'Only the person who uploaded this image or an administrator can change or delete it', 'STORAGE_FORBIDDEN');
+}
+
 // Records the upload against its owner, refusing it when the owner would exceed the quota.
 // Runs under a per-owner advisory lock so parallel uploads cannot slip past the limit together.
 async function recordUpload(owner, bucket, objectPath, size, place) {
   await withTransaction(async (client) => {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`storage:${owner.id}`]);
+    await assertMayModify(client, owner, bucket, [objectPath]);
     if (owner.role !== 'admin' && STORAGE_QUOTA_BYTES > 0) {
       const { rows } = await client.query(
         `SELECT COALESCE(SUM(size) FILTER (WHERE NOT (bucket = $2 AND path = $3)), 0)::bigint AS used
@@ -184,7 +197,8 @@ async function recordUpload(owner, bucket, objectPath, size, place) {
     await place();
     await client.query(
       `INSERT INTO storage_objects (bucket, path, owner_id, size) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (bucket, path) DO UPDATE SET owner_id = EXCLUDED.owner_id, size = EXCLUDED.size, created_at = now()`,
+       ON CONFLICT (bucket, path) DO UPDATE
+         SET owner_id = COALESCE(storage_objects.owner_id, EXCLUDED.owner_id), size = EXCLUDED.size, created_at = now()`,
       [bucket, objectPath, owner.id, size],
     );
   });
@@ -278,8 +292,12 @@ async function forgetUpload(bucket, objectPath) {
   await withTransaction((client) => client.query('DELETE FROM storage_objects WHERE bucket = $1 AND path = $2', [bucket, objectPath])).catch(() => {});
 }
 
-export async function removeObjects(bucket, paths) {
-  for (const objectPath of paths || []) {
+export async function removeObjects(bucket, paths, user = null) {
+  const objectPaths = paths || [];
+  for (const objectPath of objectPaths) safePath(bucket, objectPath);
+  // Check every path before deleting any, so a refused delete leaves the whole batch untouched.
+  if (user) await withTransaction((client) => assertMayModify(client, user, bucket, objectPaths));
+  for (const objectPath of objectPaths) {
     const target = safePath(bucket, objectPath);
     await rm(target, { force: true, recursive: false });
     await forgetUpload(bucket, objectPath);
@@ -287,7 +305,7 @@ export async function removeObjects(bucket, paths) {
       rm(variantPath(bucket, objectPath, variant), { force: true }).catch(() => {})
     )));
   }
-  return (paths || []).map((name) => ({ name }));
+  return objectPaths.map((name) => ({ name }));
 }
 
 function entityTag(details) {

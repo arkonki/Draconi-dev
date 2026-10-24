@@ -18,9 +18,16 @@ function fakeDatabase() {
           .reduce((sum, [, row]) => sum + row.size, 0);
         return { rows: [{ used }] };
       }
+      if (/SELECT path FROM storage_objects/.test(sql)) {
+        const [bucket, objectPaths, user] = params;
+        return { rows: objectPaths
+          .filter((objectPath) => { const row = rows.get(`${bucket}/${objectPath}`); return row?.owner && row.owner !== user; })
+          .map((objectPath) => ({ path: objectPath })) };
+      }
       if (/INSERT INTO storage_objects/.test(sql)) {
         const [bucket, objectPath, owner, size] = params;
-        rows.set(`${bucket}/${objectPath}`, { owner, size });
+        const existing = rows.get(`${bucket}/${objectPath}`);
+        rows.set(`${bucket}/${objectPath}`, { owner: existing?.owner ?? owner, size });
         return { rows: [] };
       }
       if (/DELETE FROM storage_objects/.test(sql)) {
@@ -85,5 +92,30 @@ describe('per-user storage quota', () => {
     const admin = { id: 'admin-1', role: 'admin' };
     for (const name of ['a', 'b', 'c', 'd']) await storage.uploadObject(upload(png), 'images', `admin/${name}.png`, admin);
     expect(database.rows.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('lets only the uploader or an administrator delete or overwrite an owned image', async () => {
+    const alice = { id: 'alice-1', role: 'player' };
+    const other = { id: 'player-2', role: 'player' };
+    const admin = { id: 'admin-1', role: 'admin' };
+    await storage.uploadObject(upload(png), 'images', 'own/mine.png', alice);
+    await expect(storage.removeObjects('images', ['own/mine.png'], other)).rejects.toMatchObject({ status: 403, code: 'STORAGE_FORBIDDEN' });
+    await expect(storage.uploadObject(upload(png, true), 'images', 'own/mine.png', other)).rejects.toMatchObject({ status: 403 });
+    expect(database.rows.get('images/own/mine.png').owner).toBe('alice-1');
+    await storage.uploadObject(upload(png, true), 'images', 'own/mine.png', admin);
+    expect(database.rows.get('images/own/mine.png').owner).toBe('alice-1');
+    await storage.removeObjects('images', ['own/mine.png'], alice);
+    expect(database.rows.has('images/own/mine.png')).toBe(false);
+  });
+
+  it('refuses a mixed batch as a whole and still lets anyone remove objects with no owner row', async () => {
+    const alice = { id: 'alice-1', role: 'player' };
+    const other = { id: 'player-2', role: 'player' };
+    await storage.uploadObject(upload(png), 'images', 'batch/a.png', alice);
+    await storage.uploadObject(upload(png), 'images', 'batch/legacy.png', null);
+    await expect(storage.removeObjects('images', ['batch/legacy.png', 'batch/a.png'], other)).rejects.toMatchObject({ status: 403 });
+    expect((await storage.listObjects('images', 'batch')).map((entry) => entry.name).sort()).toEqual(['a.png', 'legacy.png']);
+    await storage.removeObjects('images', ['batch/legacy.png'], other);
+    expect((await storage.listObjects('images', 'batch')).map((entry) => entry.name)).toEqual(['a.png']);
   });
 });
