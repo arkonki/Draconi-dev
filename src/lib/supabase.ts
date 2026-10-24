@@ -808,6 +808,33 @@ const localAuth = {
   stopAutoRefresh() {},
 };
 
+/** Public account endpoints: registration settings, email confirmation and password reset by email. */
+export const accountApi = {
+  async config() {
+    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean }>('/auth/config');
+    return { data: result.data, error: result.error };
+  },
+  async requestPasswordReset(email: string) {
+    return post('/auth/password-reset/request', { email });
+  },
+  async resetPassword(token: string, password: string) {
+    return post('/auth/password-reset/confirm', { token, password });
+  },
+  async verifyEmail(token: string) {
+    return post('/auth/verify-email', { token });
+  },
+  async resendVerification(email: string) {
+    return post('/auth/verify-email/resend', { email });
+  },
+};
+
+async function post(path: string, body: Record<string, unknown>) {
+  const result = await apiRequest<{ ok: boolean }>(path, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  return { error: result.error };
+}
+
 class LocalStorageBucket {
   constructor(private readonly bucket: string) {}
 

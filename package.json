@@ -12,6 +12,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:reset": "docker compose down -v",
+    "mail:test": "node --env-file-if-exists=.env scripts/send-test-mail.mjs",
     "backup": "sh scripts/backup.sh",
     "backup:verify": "sh scripts/verify-backup.sh",
     "restore": "sh scripts/restore.sh",

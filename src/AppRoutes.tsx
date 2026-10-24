@@ -23,6 +23,10 @@ const Settings = lazy(() =>
   import('./pages/Settings').then((module) => ({ default: module.Settings }))
 );
 const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
+const Register = lazy(() => import('./pages/Register').then((module) => ({ default: module.Register })));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then((module) => ({ default: module.ForgotPassword })));
+const ResetPassword = lazy(() => import('./pages/ResetPassword').then((module) => ({ default: module.ResetPassword })));
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail').then((module) => ({ default: module.VerifyEmail })));
 const DiceRollerModal = lazy(() =>
   import('./components/dice/DiceRollerModal').then((module) => ({ default: module.DiceRollerModal }))
 );
@@ -61,6 +65,10 @@ export function AppRoutes() {
       <Suspense fallback={loadingFallback}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/d/:sessionToken" element={<ProjectorDisplayPage />} />
           <Route path="/display/:sessionToken" element={<ProjectorDisplayPage />} />
 

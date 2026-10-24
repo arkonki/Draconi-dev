@@ -113,8 +113,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         else if (error.message.includes('network error') || error.message.includes('Failed to fetch')) errorMessage = 'Network error. Please check your connection and try again.';
         else errorMessage = error.message.length > 100 ? 'An unexpected authentication error occurred.' : error.message;
       }
+      // The sign-in form offers to resend the confirmation email when the account is not confirmed yet.
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'EMAIL_NOT_VERIFIED') errorMessage = 'Confirm your email address first. Check your inbox for the confirmation link.';
       setGlobalError(errorMessage);
-      throw new Error(errorMessage);
+      throw Object.assign(new Error(errorMessage), { code });
     } finally {
       setIsAuthenticating(false);
     }

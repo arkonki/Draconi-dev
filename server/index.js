@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { bootstrapAdmin, currentUser, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
+import { requestPasswordReset, resendVerification, resetPassword as resetPasswordWithToken, verifyEmail } from './accountEmails.js';
+import { bootstrapAdmin, currentUser, hashPassword, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
+import { mailEnabled } from './mailer.js';
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
 import { waitForDatabase, pool } from './db.js';
 import { assertSafeConfig } from './configCheck.js';
@@ -382,6 +384,26 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/auth/sign-up' && request.method === 'POST') {
       const actor = await currentUser(request, false);
       sendJson(response, 201, await signUp(actor, await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/auth/config' && request.method === 'GET') {
+      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true', emailEnabled: mailEnabled() });
+      return;
+    }
+    if (pathname === '/api/auth/password-reset/request' && request.method === 'POST') {
+      sendJson(response, 200, await requestPasswordReset(request, await readJson(request, 10_000)));
+      return;
+    }
+    if (pathname === '/api/auth/password-reset/confirm' && request.method === 'POST') {
+      sendJson(response, 200, await resetPasswordWithToken(await readJson(request, 10_000), hashPassword));
+      return;
+    }
+    if (pathname === '/api/auth/verify-email' && request.method === 'POST') {
+      sendJson(response, 200, await verifyEmail(await readJson(request, 10_000)));
+      return;
+    }
+    if (pathname === '/api/auth/verify-email/resend' && request.method === 'POST') {
+      sendJson(response, 200, await resendVerification(request, await readJson(request, 10_000)));
       return;
     }
     if (pathname === '/api/auth/sign-out' && request.method === 'POST') {

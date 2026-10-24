@@ -284,6 +284,30 @@ The **Settings → Game Data** item and spell tabs support add-only bulk imports
 
 For long-running installations, the API removes expired sessions after a 24-hour grace period and collaboration change events after 14 days. Cleanup runs every six hours in bounded batches. Administrators can inspect pending rows and trigger an immediate pass under **Settings → Admin Panel → Maintenance**. These defaults are configurable through the `HOUSEKEEPING_*`, `EXPIRED_SESSION_RETENTION_HOURS`, and `CHANGE_EVENT_RETENTION_DAYS` values in `.env`; set `HOUSEKEEPING_INTERVAL_MINUTES=0` to disable only the automatic schedule.
 
+## Email: account confirmation and password reset
+
+Set `SMTP_HOST` and `SMTP_FROM` in `.env` (see `.env.example` for the port, TLS and login options) and set
+`PUBLIC_BASE_URL` to the address people use in the browser, because the links in the emails point there.
+Check the settings with:
+
+```bash
+npm run mail:test -- you@example.com
+```
+
+With email configured:
+
+- **Registration** (`ALLOW_REGISTRATION=true`) shows a *Create account* page. A new account must confirm its email
+  address through a 24-hour link before it can sign in; the sign-in page offers to resend the link.
+  Accounts an administrator creates are usable immediately.
+- **Forgot password** on the sign-in page emails a single-use link that works for one hour. Using it signs the person
+  out everywhere else. The page answers the same way whether or not the address has an account.
+- Confirmation and reset requests are limited per hour, per address and per caller
+  (`EMAIL_MAX_REQUESTS_PER_ADDRESS_HOUR`, `EMAIL_MAX_REQUESTS_PER_IP_HOUR`).
+
+Without `SMTP_HOST` the server behaves as before: no confirmation step, and passwords are reset by an administrator.
+In production, `ALLOW_REGISTRATION=true` without email settings stops the server at start, so sign-ups cannot
+become accounts nobody can recover.
+
 ## Development and verification
 
 Install frontend dependencies with `npm install`. With the Docker database and API running, `npm run dev` starts Vite with `/api` proxied to port 3000.

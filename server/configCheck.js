@@ -9,6 +9,9 @@ export function configProblems(env = process.env) {
       problems.push('DEVELOPMENT_TOKEN is enabled but shorter than 32 characters or still a placeholder. Use a long random value or leave it empty.');
     }
   }
+  if (env.ALLOW_REGISTRATION === 'true' && !(String(env.SMTP_HOST || '').trim() && String(env.SMTP_FROM || '').trim())) {
+    problems.push('ALLOW_REGISTRATION is true but email is not configured. Set SMTP_HOST and SMTP_FROM so new accounts can confirm their address and reset passwords.');
+  }
   try {
     const dbPassword = decodeURIComponent(new URL(env.DATABASE_URL || '').password);
     if (WEAK_PASSWORDS.has(dbPassword) || dbPassword.startsWith('replace-with')) {

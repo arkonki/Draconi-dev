@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { accountApi } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
 import { AlertCircle, Mail, Lock, LogIn } from 'lucide-react';
 import { loginSchema } from '../lib/auth/validation';
@@ -14,6 +15,9 @@ export function Login() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   // Removed signUp from destructuring
   const { signIn } = useAuth();
@@ -28,6 +32,13 @@ export function Login() {
       navigate(location.pathname, { replace: true, state: { from: location.state.from } });
     }
   }, [location, navigate]);
+
+  useEffect(() => {
+    accountApi.config().then(({ data }) => {
+      setRegistrationOpen(Boolean(data?.registrationOpen));
+      setEmailEnabled(Boolean(data?.emailEnabled));
+    });
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -58,6 +69,7 @@ export function Login() {
       await signIn(validatedEmail, validatedPassword);
       return true;
     } catch (err) {
+      setNeedsConfirmation((err as { code?: string } | null)?.code === 'EMAIL_NOT_VERIFIED');
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
       return false;
     } finally {
@@ -68,6 +80,7 @@ export function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNeedsConfirmation(false);
     setSuccessMessage(null); 
     setValidationErrors({});
 
@@ -124,6 +137,20 @@ export function Login() {
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-red-800">Login Error</h3>
                 <p className="mt-2 text-sm text-red-700">{error}</p>
+                {needsConfirmation && (
+                  <button
+                    type="button"
+                    className="mt-2 text-sm font-medium text-red-800 underline"
+                    onClick={async () => {
+                      const { error: resendError } = await accountApi.resendVerification(email.trim());
+                      setNeedsConfirmation(false);
+                      if (resendError) setError(resendError.message);
+                      else { setError(null); setSuccessMessage('A new confirmation email is on its way.'); }
+                    }}
+                  >
+                    Send the confirmation email again
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -196,8 +223,12 @@ export function Login() {
         </form>
         
         <div className="text-center text-sm text-gray-600">
-          {/* Account self-registration is temporarily disabled. */}
-          <span>New account creation is currently unavailable.</span>
+          {emailEnabled && (
+            <p className="mb-2"><Link to="/forgot-password" className="font-medium text-blue-600 hover:underline">Forgot your password?</Link></p>
+          )}
+          {registrationOpen
+            ? <span>New here? <Link to="/register" className="font-medium text-blue-600 hover:underline">Create an account</Link></span>
+            : <span>New account creation is currently unavailable.</span>}
         </div>
       </div>
     </div>

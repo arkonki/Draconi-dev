@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
 import { assertSafeBootstrapPassword } from './configCheck.js';
 import { getBearerToken, HttpError } from './http.js';
+import { sendVerificationEmail } from './accountEmails.js';
+import { mailEnabled } from './mailer.js';
 
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 14);
 const SESSION_TOUCH_INTERVAL_SECONDS = Number(process.env.SESSION_TOUCH_INTERVAL_SECONDS || 300);
@@ -153,6 +155,9 @@ export async function signIn({ email, password }) {
   if (!user) {
     throw new HttpError(400, 'Invalid login credentials', 'INVALID_CREDENTIALS');
   }
+  if (user.is_email_verified === false) {
+    throw new HttpError(403, 'Confirm your email address first. Check your inbox for the confirmation link.', 'EMAIL_NOT_VERIFIED');
+  }
   const session = await withTransaction((client) => createSession(client, user));
   return { user: publicUser(user), session };
 }
@@ -191,11 +196,14 @@ export async function signUp(actor, { email, password, options = {} }) {
     throw new HttpError(400, 'Username must contain between 3 and 50 characters', 'INVALID_USERNAME');
   }
 
+  // Anyone signing up on their own must prove they own the address first, whenever email is set up.
+  // Accounts an administrator creates, and servers without email, are usable immediately.
+  const needsVerification = !actor && mailEnabled();
   const user = await withTransaction(async (client) => {
     const result = await client.query(
-      `INSERT INTO users (email, username, role)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [normalizedEmail, username, role],
+      `INSERT INTO users (email, username, role, is_email_verified)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [normalizedEmail, username, role, !needsVerification],
     );
     await client.query(
       'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',
@@ -204,6 +212,10 @@ export async function signUp(actor, { email, password, options = {} }) {
     return result.rows[0];
   });
 
+  if (needsVerification) {
+    await sendVerificationEmail(user);
+    return { user: publicUser(user), session: null, verificationRequired: true };
+  }
   // An admin creating another user must keep the existing admin session.
   const session = actor ? null : await withTransaction((client) => createSession(client, user));
   return { user: publicUser(user), session };
