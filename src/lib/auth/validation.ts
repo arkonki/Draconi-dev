@@ -18,7 +18,7 @@ export const signupSchema = z
     email: z.string().email({ message: 'Invalid email address' }),
     password: passwordSchema,
     confirmPassword: z.string(),
-    role: z.enum(['player', 'dm'], { required_error: 'Please select a role' }),
+    role: z.enum(['player', 'dm'], { error: 'Please select a role' }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords don't match",

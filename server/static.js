@@ -25,6 +25,38 @@ const CONTENT_TYPES = new Map([
   ['.woff2', 'font/woff2'],
 ]);
 
+// The app loads scripts and data only from its own origin. Styles may be inline (React style props and
+// Tailwind arbitrary values) and Google Fonts are used for headings; images may come from any HTTPS host
+// because campaign art and token icons can be linked by URL.
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self' ws: wss:",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
+export function securityHeaders(request, env = process.env) {
+  const secure = String(request.headers?.['x-forwarded-proto'] || '').split(',')[0].trim() === 'https'
+    || String(env.PUBLIC_BASE_URL || '').startsWith('https://');
+  return {
+    'content-security-policy': CONTENT_SECURITY_POLICY,
+    'referrer-policy': 'strict-origin-when-cross-origin',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'SAMEORIGIN',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    ...(secure ? { 'strict-transport-security': 'max-age=31536000' } : {}),
+  };
+}
+
 function safePublicPath(publicRoot, pathname) {
   let decodedPath;
   try {
@@ -94,7 +126,7 @@ export async function serveFrontend(request, response, publicRoot = DEFAULT_PUBL
     'content-length': details.size,
     'last-modified': details.mtime.toUTCString(),
     'cache-control': filePath.endsWith(`${sep}index.html`) ? 'no-cache' : cacheControl(pathname),
-    'x-content-type-options': 'nosniff',
+    ...securityHeaders(request),
   });
 
   if (request.method === 'HEAD') {

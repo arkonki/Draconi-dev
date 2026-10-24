@@ -68,3 +68,16 @@ describe('static frontend serving', () => {
     expect(await serveFrontend({ method: 'HEAD', url: '/%2e%2e%2fpackage.json' }, responseRecorder(), directory)).toBe(false);
   });
 });
+
+describe('security headers', () => {
+  it('sends a restrictive CSP and referrer policy, and HSTS only behind HTTPS', async () => {
+    const { securityHeaders } = await import('./static.js');
+    const plain = securityHeaders({ headers: {} }, {});
+    expect(plain['content-security-policy']).toContain("script-src 'self'");
+    expect(plain['content-security-policy']).toContain("object-src 'none'");
+    expect(plain['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    expect(plain['strict-transport-security']).toBeUndefined();
+    expect(securityHeaders({ headers: { 'x-forwarded-proto': 'https' } }, {})['strict-transport-security']).toContain('max-age=');
+    expect(securityHeaders({ headers: {} }, { PUBLIC_BASE_URL: 'https://draconi.ee' })['strict-transport-security']).toContain('max-age=');
+  });
+});

@@ -31,7 +31,7 @@ export function PasswordChangeForm() {
 
     if (!validationResult.success) {
       const fieldErrors: Record<string, string> = {};
-      validationResult.error.errors.forEach((err) => {
+      validationResult.error.issues.forEach((err) => {
         const pathKey = err.path[0] as string | undefined;
         if (pathKey) {
           fieldErrors[pathKey] = err.message;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import sharp from 'sharp';
+import { withTransaction } from './db.js';
 import { HttpError, sendJson } from './http.js';
 
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || '/data/storage');
@@ -14,6 +15,9 @@ const configuredPixelLimit = Number(process.env.MAX_IMAGE_PIXELS || 40_000_000);
 const MAX_IMAGE_PIXELS = Number.isSafeInteger(configuredPixelLimit) && configuredPixelLimit > 0
   ? configuredPixelLimit
   : 40_000_000;
+const configuredQuota = Number(process.env.STORAGE_QUOTA_BYTES ?? 500_000_000);
+// Per-person limit on uploaded originals. Administrators are exempt; 0 disables the limit.
+const STORAGE_QUOTA_BYTES = Number.isSafeInteger(configuredQuota) && configuredQuota >= 0 ? configuredQuota : 500_000_000;
 const VARIANTS = Object.freeze({
   thumbnail: { width: 256, height: 256, quality: 78 },
   medium: { width: 1280, height: 1280, quality: 82 },
@@ -159,7 +163,34 @@ async function generateAllVariants(bucket, objectPath, originalPath, metadata) {
   return Object.fromEntries(entries);
 }
 
-export async function uploadObject(request, bucket, objectPath) {
+// Records the upload against its owner, refusing it when the owner would exceed the quota.
+// Runs under a per-owner advisory lock so parallel uploads cannot slip past the limit together.
+async function recordUpload(owner, bucket, objectPath, size, place) {
+  await withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`storage:${owner.id}`]);
+    if (owner.role !== 'admin' && STORAGE_QUOTA_BYTES > 0) {
+      const { rows } = await client.query(
+        `SELECT COALESCE(SUM(size) FILTER (WHERE NOT (bucket = $2 AND path = $3)), 0)::bigint AS used
+         FROM storage_objects WHERE owner_id = $1`,
+        [owner.id, bucket, objectPath],
+      );
+      const used = Number(rows[0].used);
+      if (used + size > STORAGE_QUOTA_BYTES) {
+        const mb = (bytes) => Math.round(bytes / 1_000_000);
+        throw new HttpError(413, `Storage quota exceeded: you are using ${mb(used)} MB of ${mb(STORAGE_QUOTA_BYTES)} MB. Delete some images first.`, 'STORAGE_QUOTA_EXCEEDED');
+      }
+    }
+    // Placing the file inside the transaction keeps the quota row and the file in step: if placing fails, nothing is recorded.
+    await place();
+    await client.query(
+      `INSERT INTO storage_objects (bucket, path, owner_id, size) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (bucket, path) DO UPDATE SET owner_id = EXCLUDED.owner_id, size = EXCLUDED.size, created_at = now()`,
+      [bucket, objectPath, owner.id, size],
+    );
+  });
+}
+
+export async function uploadObject(request, bucket, objectPath, owner = null) {
   const target = safePath(bucket, objectPath);
   const maxBytes = Number(process.env.MAX_UPLOAD_BYTES || 100_000_000);
   const allowOverwrite = request.headers['x-upsert'] === 'true';
@@ -175,15 +206,19 @@ export async function uploadObject(request, bucket, objectPath) {
     await pipeline(request, byteLimitTransform(maxBytes), createWriteStream(temporaryPath, { flags: 'wx' }));
     metadata = await inspectUploadedImage(temporaryPath, objectPath, request.headers['content-type']);
 
-    if (allowOverwrite) {
-      await rename(temporaryPath, target);
-    } else {
-      await link(temporaryPath, target).catch((error) => {
-        if (error.code === 'EEXIST') throw new HttpError(409, 'Object already exists');
-        throw error;
-      });
-      await rm(temporaryPath, { force: true });
-    }
+    const place = async () => {
+      if (allowOverwrite) {
+        await rename(temporaryPath, target);
+      } else {
+        await link(temporaryPath, target).catch((error) => {
+          if (error.code === 'EEXIST') throw new HttpError(409, 'Object already exists');
+          throw error;
+        });
+        await rm(temporaryPath, { force: true });
+      }
+    };
+    if (owner) await recordUpload(owner, bucket, objectPath, (await stat(temporaryPath)).size, place);
+    else await place();
   } finally {
     await rm(temporaryPath, { force: true }).catch(() => {});
   }
@@ -238,10 +273,16 @@ export async function listObjects(bucket, folder = '', limit = 100, offset = 0) 
   return all.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.name.localeCompare(b.name)).slice(start, start + pageSize);
 }
 
+async function forgetUpload(bucket, objectPath) {
+  // Tracking is best effort here: a missing row (or a database hiccup) must not stop a delete from working.
+  await withTransaction((client) => client.query('DELETE FROM storage_objects WHERE bucket = $1 AND path = $2', [bucket, objectPath])).catch(() => {});
+}
+
 export async function removeObjects(bucket, paths) {
   for (const objectPath of paths || []) {
     const target = safePath(bucket, objectPath);
     await rm(target, { force: true, recursive: false });
+    await forgetUpload(bucket, objectPath);
     await Promise.all(Object.keys(VARIANTS).map((variant) => (
       rm(variantPath(bucket, objectPath, variant), { force: true }).catch(() => {})
     )));

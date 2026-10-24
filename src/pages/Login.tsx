@@ -44,7 +44,7 @@ export function Login() {
     const validationResult = loginSchema.safeParse({ email: email.trim(), password });
     if (!validationResult.success) {
       const fieldErrors: Record<string, string> = {};
-      validationResult.error.errors.forEach((err) => {
+      validationResult.error.issues.forEach((err) => {
         if (err.path[0]) fieldErrors[String(err.path[0])] = err.message;
       });
       setValidationErrors(fieldErrors);

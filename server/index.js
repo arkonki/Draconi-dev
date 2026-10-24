@@ -433,10 +433,10 @@ const server = http.createServer(async (request, response) => {
     }
     const storageMatch = matchPath(pathname, /^\/api\/storage\/([^/]+)(?:\/(.*))?$/);
     if (storageMatch) {
-      await currentUser(request);
+      const user = await currentUser(request);
       const [bucket, objectPath = ''] = storageMatch;
       if (request.method === 'PUT') {
-        sendJson(response, 201, { data: await uploadObject(request, bucket, objectPath) });
+        sendJson(response, 201, { data: await uploadObject(request, bucket, objectPath, user) });
         return;
       }
       if (request.method === 'GET') {
