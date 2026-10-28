@@ -38,6 +38,21 @@ export function nextInitiativeActions(combatants: EncounterCombatant[]): Initiat
     });
 }
 
+/**
+ * Turn order for a list of cards: whoever acts next first, by their next open initiative card; those who have
+ * acted this round after them, by their first card; anyone without initiative last.
+ */
+export function sortByTurnOrder(combatants: EncounterCombatant[]): EncounterCombatant[] {
+  const key = (combatant: EncounterCombatant) => {
+    const pending = pendingInitiativeSlotsFor(combatant)[0];
+    if (pending !== undefined && pending !== null) return pending;
+    const first = initiativeSlotsFor(combatant)[0];
+    if (first === null || first === undefined) return 1000;
+    return 100 + first;
+  };
+  return [...combatants].sort((left, right) => key(left) - key(right) || left.display_name.localeCompare(right.display_name));
+}
+
 export function usesArmyOfOne(combatant: EncounterCombatant, combatants: EncounterCombatant[]) {
   const playerCharacters = combatants.filter((entry) => entry.is_player_character && entry.current_hp > 0);
   return playerCharacters.length === 1

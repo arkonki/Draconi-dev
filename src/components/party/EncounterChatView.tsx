@@ -18,7 +18,7 @@ import {
   POISONED_STATUS_EFFECT,
   toggleEncounterStatusEffect,
 } from '../../lib/encounterStatusEffects';
-import { completeCurrentInitiativeSlot, initiativeSlotsFor } from '../../lib/initiativeSlots';
+import { completeCurrentInitiativeSlot, initiativeSlotsFor, sortByTurnOrder } from '../../lib/initiativeSlots';
 
 // --- HELPER: Editable Stat Box ---
 interface StatInputProps {
@@ -59,8 +59,10 @@ const StatInput = ({ value, max, icon: Icon, colorClass, onChange, disabled }: S
 };
 
 // --- HELPER: Combatant Card ---
-const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
-  const { setInitiativeForCombatant, updateCombatant, isSaving, character } = useCharacterSheetStore();
+// `isMine`: one of the viewer's own characters. `isGm`: the viewer runs this campaign. Players change only their own
+// characters here; the GM's full controls are in the encounter view.
+const CombatantCard = ({ combatant, isMine, isGm }: { combatant: EncounterCombatant; isMine: boolean; isGm: boolean }) => {
+  const { setInitiativeForCombatant, updateCombatant, isSaving } = useCharacterSheetStore();
   const [initiativeValue, setInitiativeValue] = useState<string>(combatant.initiative_roll?.toString() ?? '');
   const initiativeDisplay = initiativeSlotsFor(combatant).filter((value) => value !== null).join('/') || '-';
 
@@ -73,7 +75,8 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
     }
   };
 
-  const isMyCharacter = combatant.character_id === character?.id;
+  const isMyCharacter = isMine;
+  const canControl = isMine || isGm;
   const isPlayer = !!combatant.character_id;
   const hasActed = combatant.has_acted || false;
   const isMonster = !isPlayer;
@@ -87,7 +90,10 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
   if (isDefeated) borderClass = 'border-stone-400 bg-stone-200 opacity-70';
   else if (hasActed) borderClass = 'border-stone-300 bg-stone-100 opacity-70 grayscale';
 
-  const maxWp = combatant.max_wp || combatant.character?.max_wp || 0;
+  // 0 is a real value here, so only a missing one falls back to the character sheet.
+  const maxWp = combatant.max_wp ?? combatant.character?.max_wp ?? 0;
+  const currentWp = combatant.current_wp ?? combatant.character?.current_wp ?? 0;
+  const maxHp = combatant.max_hp ?? combatant.character?.max_hp ?? 0;
   const showWp = !isMonster || maxWp > 0;
 
   return (
@@ -119,10 +125,10 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
           {isDying && <span className="text-xs font-bold text-red-600 flex items-center gap-1"><Skull size={12} /> DYING</span>}
         </div>
         <div className="flex items-center gap-2 ml-2">
-          {(!combatant.initiative_roll || isMyCharacter) && !isDefeated ? (
+          {!combatant.initiative_roll && canControl && !isDefeated ? (
             <div className="flex items-center gap-1">
-              <input type="number" value={initiativeValue} onChange={(e) => setInitiativeValue(e.target.value)} placeholder="#" className="w-8 px-1 py-0.5 text-center border rounded text-sm font-bold" min="1" max="10" disabled={isSaving} />
-              {!combatant.initiative_roll && <Button onClick={handleSetInitiative} size="sm" variant="secondary" disabled={isSaving}>Set</Button>}
+              <input type="number" value={initiativeValue} onChange={(e) => setInitiativeValue(e.target.value)} placeholder="#" aria-label={`Initiative for ${combatant.display_name}`} className="w-8 px-1 py-0.5 text-center border rounded text-sm font-bold" min="1" max="10" disabled={isSaving} />
+              <Button onClick={handleSetInitiative} size="sm" variant="secondary" disabled={isSaving}>Set</Button>
             </div>
           ) : (
             <div className="min-w-8 h-8 px-1 bg-white border-2 border-stone-800 rounded flex items-center justify-center font-serif font-bold text-sm shadow-sm">{initiativeDisplay}</div>
@@ -131,10 +137,10 @@ const CombatantCard = ({ combatant }: { combatant: EncounterCombatant }) => {
       </div>
       <div className="relative z-10 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <StatInput value={combatant.current_hp || 0} max={combatant.max_hp || 10} icon={Heart} colorClass="text-red-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_hp: val })} />
-          {showWp && <StatInput value={combatant.current_wp || combatant.character?.current_wp || 0} max={maxWp} icon={Zap} colorClass="text-blue-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_wp: val })} />}
+          <StatInput value={combatant.current_hp ?? 0} max={maxHp} icon={Heart} colorClass="text-red-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_hp: val })} />
+          {showWp && <StatInput value={currentWp} max={maxWp} icon={Zap} colorClass="text-blue-600" disabled={!canEditStats || isSaving} onChange={(val: number) => updateCombatant(combatant.id, { current_wp: val })} />}
         </div>
-        {(isMyCharacter || !isPlayer) && !isDefeated && (
+        {canControl && !isDefeated && (
           <Button onClick={() => updateCombatant(combatant.id, hasActed ? { has_acted: false, completed_initiative_slots: [] } : completeCurrentInitiativeSlot(combatant))} size="sm" variant={hasActed ? "ghost" : "outline"} className={hasActed ? "text-stone-500" : "text-stone-800 border-stone-400 bg-white"} title="End Turn">
             {hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}
           </Button>
@@ -221,7 +227,8 @@ export function EncounterChatView() {
     }
   }, [isOpen, activeTab]);
 
-  const targetPartyId = forcedPartyId || character?.party_id || null;
+  // Combat follows the same campaign as the chat.
+  const targetPartyId = selectedPartyId;
   const targetCharId = character?.id || 'dm-observer';
   const unreadBindings = useMemo(() => (selectedPartyId ? [
     {
@@ -277,12 +284,12 @@ export function EncounterChatView() {
     fallbackRefetchMs: 15000,
     onEvent: async () => {
       if (targetPartyId) {
-        await fetchActiveEncounter(targetPartyId, targetCharId);
+        await fetchActiveEncounter(targetPartyId, targetCharId, { fresh: true });
       }
     },
     onReconnect: async () => {
       if (targetPartyId) {
-        await fetchActiveEncounter(targetPartyId, targetCharId);
+        await fetchActiveEncounter(targetPartyId, targetCharId, { fresh: true });
       }
     },
   });
@@ -309,12 +316,12 @@ export function EncounterChatView() {
     fallbackRefetchMs: 15000,
     onEvent: async () => {
       if (targetPartyId) {
-        await fetchActiveEncounter(targetPartyId, targetCharId);
+        await fetchActiveEncounter(targetPartyId, targetCharId, { fresh: true });
       }
     },
     onReconnect: async () => {
       if (targetPartyId) {
-        await fetchActiveEncounter(targetPartyId, targetCharId);
+        await fetchActiveEncounter(targetPartyId, targetCharId, { fresh: true });
       }
     },
   });
@@ -332,7 +339,12 @@ export function EncounterChatView() {
   // The same rule as the Chat tab: observers read, admins may always write.
   const isChatReadOnly = (partyFromList?.campaignRole ?? pageParty?.campaign_role) === 'observer' && !isAdmin();
 
-  const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => (a.initiative_roll ?? 1000) - (b.initiative_roll ?? 1000));
+  const sortedCombatants = sortByTurnOrder(encounterCombatants || []);
+  const isCampaignGm = isAdmin() || ['owner', 'gm'].includes(partyFromList?.campaignRole ?? pageParty?.campaign_role ?? '');
+  // Mine: a character the viewer owns, whichever character the sheet happens to have loaded.
+  const isMine = (combatant: EncounterCombatant) => Boolean(combatant.character_id) && (
+    combatant.character?.user_id === user?.id || combatant.character_id === character?.id
+  );
 
   return (
     <>
@@ -428,7 +440,7 @@ export function EncounterChatView() {
 
                       <div className="space-y-2 pb-20">
                         {sortedCombatants.length > 0 ? (
-                          sortedCombatants.map(c => <CombatantCard key={c.id} combatant={c} />)
+                          sortedCombatants.map(c => <CombatantCard key={c.id} combatant={c} isMine={isMine(c)} isGm={isCampaignGm} />)
                         ) : <p className="text-sm text-stone-500 italic text-center py-4">No combatants.</p>}
                       </div>
                     </div>

@@ -157,7 +157,8 @@ interface CharacterSheetState {
   setActiveStatusMessage: (message: string, duration?: number) => void;
   clearActiveStatusMessage: () => void;
   
-  fetchActiveEncounter: (partyId: string, characterId: string) => Promise<void>;
+  /** `fresh` skips the cache, for when a live update says the fight just changed. */
+  fetchActiveEncounter: (partyId: string, characterId: string, options?: { fresh?: boolean }) => Promise<void>;
   clearActiveEncounter: () => void;
   updateCombatant: (combatantId: string, updates: Partial<EncounterCombatant>) => Promise<void>;
 }
@@ -235,14 +236,16 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
     }
   },
 
-  fetchActiveEncounter: async (partyId, characterId) => {
+  fetchActiveEncounter: async (partyId, characterId, options = {}) => {
     set({ isLoadingEncounter: true });
+    // After a live update the cached copy is known to be out of date, however young it is.
+    const staleTime = options.fresh ? 0 : QUERY_STALE_TIME.live;
     try {
       // 1. Fetch ONLY the active encounter (using the new API function)
       const activeEncounter = await queryClient.fetchQuery({
         queryKey: queryKeys.activeEncounter(partyId),
         queryFn: () => fetchActiveEncounterForParty(partyId),
-        staleTime: QUERY_STALE_TIME.live,
+        staleTime,
       });
 
       // 2. Check if an active encounter exists
@@ -250,7 +253,7 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
         const allCombatants = await queryClient.fetchQuery({
           queryKey: queryKeys.encounterCombatants(activeEncounter.id),
           queryFn: () => fetchEncounterCombatants(activeEncounter.id),
-          staleTime: QUERY_STALE_TIME.live,
+          staleTime,
         });
         const characterCombatant = allCombatants.find(c => c.character_id === characterId);
         

@@ -3,6 +3,7 @@ import type { EncounterCombatant } from '../types/encounter';
 import {
   completeCurrentInitiativeSlot,
   nextInitiativeActions,
+  sortByTurnOrder,
   pendingInitiativeSlotsFor,
   usesArmyOfOne,
 } from './initiativeSlots';
@@ -43,5 +44,27 @@ describe('solo initiative slots', () => {
     const hero = combatant({});
     expect(usesArmyOfOne(hero, [hero])).toBe(true);
     expect(usesArmyOfOne(hero, [hero, combatant({ id: 'actor-2', character_id: 'character-2' })])).toBe(false);
+  });
+});
+
+describe('turn order', () => {
+  const card = (display_name: string, extra: Partial<EncounterCombatant>) => ({ id: display_name, display_name, ...extra }) as EncounterCombatant;
+
+  it('puts whoever acts next first, then those who have acted, then those without initiative', () => {
+    const order = sortByTurnOrder([
+      card('Unready', { initiative_roll: null }),
+      card('Done', { initiative_roll: 1, has_acted: true }),
+      card('Second', { initiative_roll: 4 }),
+      card('First', { initiative_roll: 2 }),
+    ]).map((combatant) => combatant.display_name);
+    expect(order).toEqual(['First', 'Second', 'Done', 'Unready']);
+  });
+
+  it('sorts someone with two cards by the card they have not played yet', () => {
+    const order = sortByTurnOrder([
+      card('Hero', { initiative_slots: [1, 6], completed_initiative_slots: [1] }),
+      card('Goblin', { initiative_roll: 3 }),
+    ]).map((combatant) => combatant.display_name);
+    expect(order).toEqual(['Goblin', 'Hero']);
   });
 });
