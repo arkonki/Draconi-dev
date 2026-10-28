@@ -220,46 +220,54 @@
 
 
 /* === FONT DEFINITIONS === */
+/* Self-hosted from /public/fonts (CC-BY-SA-4.0, see public/fonts/CREDITS.md).  */
 
 @font-face {
     font-family: BookSanity;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity.otf') format('opentype');
+    src: url('/fonts/Bookinsanity.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: normal
 }
 @font-face {
     font-family: BookSanity;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity%20Bold.otf') format('opentype');
+    src: url('/fonts/Bookinsanity-Bold.otf') format('opentype');
+    font-display: swap;
     font-weight: bold;
     font-style: normal
 }
 @font-face {
     font-family: BookSanity;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Bookinsanity/Bookinsanity%20Italic.otf') format('opentype');
+    src: url('/fonts/Bookinsanity-Italic.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: italic
 }
 @font-face {
     font-family: ScalySans;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Scaly%20Sans/Scaly%20Sans.otf') format('opentype');
+    src: url('/fonts/Scaly-Sans.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: normal
 }
 @font-face {
     font-family: ScalySansSmallCaps;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Scaly%20Sans%20Caps/Scaly%20Sans%20Caps.otf') format('opentype');
+    src: url('/fonts/Scaly-Sans-Caps.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: normal
 }
 @font-face {
     font-family: Solberry;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Solbera%20Imitation/Solbera%20Imitation.otf') format('opentype');
+    src: url('/fonts/Solbera-Imitation.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: normal
 }
 @font-face {
     font-family: MrJeeves;
-    src: url('https://raw.githubusercontent.com/jonathonf/solbera-dnd-fonts/master/Mr%20Eaves/Mr%20Eaves%20Small%20Caps.otf') format('opentype');
+    src: url('/fonts/Mr-Eaves-Small-Caps.otf') format('opentype');
+    font-display: swap;
     font-weight: normal;
     font-style: normal
 }

@@ -21,6 +21,8 @@ const CONTENT_TYPES = new Map([
   ['.txt', 'text/plain; charset=utf-8'],
   ['.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['.webp', 'image/webp'],
+  ['.otf', 'font/otf'],
+  ['.ttf', 'font/ttf'],
   ['.woff', 'font/woff'],
   ['.woff2', 'font/woff2'],
 ]);
@@ -32,7 +34,7 @@ export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com https://raw.githubusercontent.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob:",
   "connect-src 'self' ws: wss:",
