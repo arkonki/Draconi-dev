@@ -164,13 +164,12 @@ export function Compendium() {
   };
 
   const handleShareEntry = async (targetPartyId: string) => {
-    if (!selectedEntry || !user) return;
+    if (!selectedEntry?.id || !user) return;
+    const entryId = selectedEntry.id;
     const btn = document.getElementById('share-btn-icon');
     if (btn) btn.classList.add('text-green-500');
     try {
-      const tag = `<<<COMPENDIUM:${selectedEntry.id}:${selectedEntry.title}>>>`;
-      const message = `${tag} 📖 **Shared Entry:** ${selectedEntry.title}`;
-      await sendMessage(targetPartyId, user.id, message);
+      await sendMessage(targetPartyId, user.id, '', { kind: 'compendium', payload: { entryId } });
     } catch (err) { console.error("Failed to share entry", err); }
     finally { setTimeout(() => { if (btn) btn.classList.remove('text-green-500'); }, 1500); }
   };

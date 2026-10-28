@@ -307,9 +307,7 @@ export function PartyNotes({ partyId, openNoteId, isDM, readOnly = false }: Part
     setNotificationSent(false);
 
     try {
-      const secretTag = `<<<NOTE:${selectedNote.id}:${selectedNote.title}>>>`;
-      const message = `${secretTag} Shared a note: ${selectedNote.title}`;
-      await sendMessage(partyId, user.id, message);
+      await sendMessage(partyId, user.id, '', { kind: 'note', payload: { noteId: selectedNote.id } });
       setNotificationSent(true);
     } catch (err) {
       console.error("Failed to notify party", err);

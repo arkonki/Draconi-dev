@@ -2,6 +2,7 @@ import { pool, withTransaction } from './db.js';
 import { assertCanCreateCampaign, canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
 import { canEditNote } from '../shared/noteAccess.js';
+import { prepareChatMessage } from './chatMessages.js';
 import { assertUserActionAllowed, assertUserQueryAllowed, assertUserUpdateAllowed, projectUserRow } from './userAccess.js';
 
 const TABLES = new Set([
@@ -536,6 +537,7 @@ function scalarFilterSql(table, column, operator, value, columns, state) {
     return value === null ? `${expression} IS NULL` : `${expression} = ${state.bind(value)}`;
   }
   if (operator === 'gt') return `${expression} > ${state.bind(value)}`;
+  if (operator === 'lt') return `${expression} < ${state.bind(value)}`;
   if (operator === 'is') {
     if (value === null || value === 'null') return `${expression} IS NULL`;
     return `${expression} IS NOT DISTINCT FROM ${state.bind(value)}`;
@@ -801,7 +803,9 @@ export function assertMessageContent(prepared) {
 async function insertOne(table, input, ctx, client, onConflict) {
   // Journal updates must authorize the existing entry and preserve its author.
   if (table === 'notes' && onConflict) throw new HttpError(400, 'Use an explicit journal update instead of upsert');
-  const owned = applyOwnership(table, input, ctx.user);
+  let owned = applyOwnership(table, input, ctx.user);
+  // Pokes and shares are checked and given their text by the server; plain text may not carry the old tags.
+  if (table === 'messages') owned = { ...owned, ...await prepareChatMessage(client, owned) };
   let prepared = await preparePayload(table, owned, client);
   if (!canWrite(table, { ...owned, ...prepared }, ctx, true)) throw new HttpError(403, 'Permission denied');
   if (table === 'parties') await assertCanCreateCampaign(client, ctx.user);
@@ -864,7 +868,16 @@ export async function executeDataQuery(user, request) {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
-      if (table === 'messages') assertMessageContent(prepared);
+      if (table === 'messages') {
+        // Only the words of a plain message can be edited; a poke or share stays what the server made it.
+        delete prepared.kind;
+        delete prepared.payload;
+        if ('content' in prepared && candidates.some((row) => row.kind && row.kind !== 'text')) {
+          throw new HttpError(400, 'Only plain messages can be edited', 'INVALID_MESSAGE');
+        }
+        if ('content' in prepared) await prepareChatMessage(client, { party_id: candidates[0]?.party_id, content: prepared.content });
+        assertMessageContent(prepared);
+      }
       // A campaign's entry stays in that campaign: a GM cannot move it to another campaign or into the shared list.
       if (CAMPAIGN_OWNABLE_REFERENCE.has(table) && !transactionCtx.admin) delete prepared.party_id;
       if (table === 'notes') {

@@ -91,31 +91,28 @@ function truncateBody(body: string): string {
 }
 
 function buildNotificationCopy(message: MessagePayload, senderName: string, partyName: string) {
-  const pokeMatch = message.content.match(/<<<POKE:([^>]+)>>>/);
-  if (pokeMatch) {
+  if (message.kind === 'poke') {
     return {
       title: `${senderName} poked you in ${partyName}`,
       body: 'Open party chat to respond.',
     };
   }
 
-  const noteMatch = message.content.match(/<<<NOTE:([^:]+):([^>]+)>>>/);
-  if (noteMatch) {
+  if (message.kind === 'note') {
     return {
       title: `${senderName} shared a note in ${partyName}`,
-      body: noteMatch[2],
+      body: String(message.payload?.title ?? ''),
     };
   }
 
-  const compendiumMatch = message.content.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/);
-  if (compendiumMatch) {
+  if (message.kind === 'compendium') {
     return {
       title: `${senderName} shared a compendium entry in ${partyName}`,
-      body: compendiumMatch[2],
+      body: String(message.payload?.title ?? ''),
     };
   }
 
-  if (message.content.startsWith('🎲')) {
+  if (message.kind === 'roll') {
     return {
       title: `${senderName} rolled dice in ${partyName}`,
       body: truncateBody(cleanMessagePreview(message.content)),
@@ -243,8 +240,9 @@ export function NotificationController() {
           (oldData: Message[] = []) => appendMessageIfMissing(oldData, newMessage),
         );
 
-        const pokeMatch = newMessage.content.match(/<<<POKE:([^>]+)>>>/);
-        if (pokeMatch?.[1] === user.id) {
+        // A poke is checked by the server; its payload says who it is for.
+        const pokeTarget = newMessage.kind === 'poke' ? String(newMessage.payload?.targetUserId ?? '') : null;
+        if (pokeTarget === user.id) {
           window.dispatchEvent(new CustomEvent('party-chat-poke', {
             detail: { partyId: newMessage.party_id, messageId: newMessage.id },
           }));
@@ -262,9 +260,8 @@ export function NotificationController() {
           resolveSenderName(newMessage.user_id),
         ]);
 
-        if (pokeMatch) {
-          const targetId = pokeMatch[1];
-          if (targetId === user.id) {
+        if (pokeTarget !== null) {
+          if (pokeTarget === user.id) {
             await sendDesktopNotification({
               title: `${senderName} poked you in ${partyName}`,
               body: 'Open party chat to respond.',

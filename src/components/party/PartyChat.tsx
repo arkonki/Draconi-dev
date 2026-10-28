@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink } from 'lucide-react';
+import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink, Dices } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
 // 1. Import deleteMessage
 import {
   appendMessageIfMissing,
+  getOlderPartyMessages,
   getPartyMessages,
+  MESSAGE_PAGE_SIZE,
+  prependOlderMessages,
   sendMessage,
   deleteMessage,
   MAX_MESSAGE_CHARS,
@@ -21,6 +24,7 @@ import { getNotePath } from '../../lib/noteLinks';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 import { useConfirm } from '../../hooks/useConfirm';
 import { findPokeTarget } from '../../lib/pokeTarget';
+import { setChatViewing } from '../../lib/activeChat';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -37,9 +41,16 @@ interface PartyChatProps {
   members: Character[];
   campaignMembers?: CampaignMembership[];
   readOnly?: boolean;
+  /** Fill the panel it sits in (the drawer) instead of taking most of the page's height (the Chat tab). */
+  fill?: boolean;
 }
 
-export function PartyChat({ partyId, members, campaignMembers = [], readOnly = false }: PartyChatProps) {
+const payloadText = (message: Message, key: string) => {
+  const value = message.payload?.[key];
+  return typeof value === 'string' ? value : '';
+};
+
+export function PartyChat({ partyId, members, campaignMembers = [], readOnly = false, fill = false }: PartyChatProps) {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -56,35 +67,6 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   const [searchParams, setSearchParams] = useSearchParams();
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const messageIdFromUrl = searchParams.get('messageId');
-
-  const syncActiveChatContext = (isActive: boolean) => {
-    const payload = { partyId, active: isActive };
-
-    if (isActive) {
-      sessionStorage.setItem('active_chat_context', JSON.stringify(payload));
-    } else {
-      const current = sessionStorage.getItem('active_chat_context');
-      if (current) {
-        try {
-          const parsed = JSON.parse(current) as { partyId?: string; active?: boolean };
-          if (parsed.partyId === partyId) {
-            sessionStorage.removeItem('active_chat_context');
-          }
-        } catch {
-          sessionStorage.removeItem('active_chat_context');
-        }
-      }
-    }
-
-    if ('serviceWorker' in navigator) {
-      void navigator.serviceWorker.ready.then((registration) => {
-        registration.active?.postMessage({
-          type: 'ACTIVE_CHAT_CONTEXT',
-          ...payload,
-        });
-      });
-    }
-  };
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: queryKeys.messages(partyId),
@@ -103,7 +85,34 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     return () => window.removeEventListener('party-chat-poke', handlePoke);
   }, [partyId]);
   const scrollToBottom = (smooth = true) => { messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' }); setShowScrollButton(false); };
-  useEffect(() => { scrollToBottom(); }, [messages.length]);
+  // Follow new messages at the bottom, but stay put when older ones are loaded above.
+  const lastMessageId = messages[messages.length - 1]?.id;
+  useEffect(() => { scrollToBottom(); }, [lastMessageId]);
+
+  // "Load older": a page of earlier messages goes in front, keeping what is on screen where it was.
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(true);
+  const restoreScrollFrom = useRef<number | null>(null);
+  useEffect(() => {
+    if (restoreScrollFrom.current === null || !containerRef.current) return;
+    containerRef.current.scrollTop = containerRef.current.scrollHeight - restoreScrollFrom.current;
+    restoreScrollFrom.current = null;
+  }, [messages]);
+  const loadOlder = async () => {
+    const oldest = messages[0];
+    if (!oldest || isLoadingOlder) return;
+    setIsLoadingOlder(true);
+    try {
+      const older = await getOlderPartyMessages(partyId, oldest.created_at);
+      if (older.length < MESSAGE_PAGE_SIZE) setHasOlder(false);
+      if (containerRef.current) restoreScrollFrom.current = containerRef.current.scrollHeight - containerRef.current.scrollTop;
+      queryClient.setQueryData(queryKeys.messages(partyId), (current: Message[] = []) => prependOlderMessages(current, older));
+    } catch (error) {
+      console.error('Failed to load older messages', error);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
   const handleScroll = () => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
@@ -148,17 +157,20 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     };
   }, [messageIdFromUrl, messages, searchParams, setSearchParams]);
 
+  // Tell the notifications this chat is on screen while the page is visible.
   useEffect(() => {
-    const updateContext = () => {
-      syncActiveChatContext(document.visibilityState === 'visible');
+    let viewing = false;
+    const update = () => {
+      const visible = document.visibilityState === 'visible';
+      if (visible === viewing) return;
+      viewing = visible;
+      setChatViewing(partyId, visible);
     };
-
-    updateContext();
-    document.addEventListener('visibilitychange', updateContext);
-
+    update();
+    document.addEventListener('visibilitychange', update);
     return () => {
-      document.removeEventListener('visibilitychange', updateContext);
-      syncActiveChatContext(false);
+      document.removeEventListener('visibilitychange', update);
+      if (viewing) setChatViewing(partyId, false);
     };
   }, [partyId]);
 
@@ -181,14 +193,15 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     if (!newMessage.trim() || !user) return;
     
     const content = newMessage;
-    let finalContent = content;
+    const finalContent = content;
 
-    // Poke Logic
+    // Poke Logic: the server checks the target and writes the message.
+    let poke: { kind: 'poke'; payload: { targetUserId: string } } | undefined;
     if (content.startsWith('/poke ')) {
       const typed = content.substring(6).trim();
       const target = findPokeTarget(typed, members, campaignMembers);
       if (target) {
-        finalContent = `<<<POKE:${target.userId}>>> 👉 Poked ${target.name}!`;
+        poke = { kind: 'poke', payload: { targetUserId: target.userId } };
       } else {
         alert(`Could not find member "${typed}"`);
         return;
@@ -200,7 +213,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     setIsSending(true);
 
     try {
-      const sentMessage = await sendMessage(partyId, user.id, finalContent);
+      const sentMessage = await sendMessage(partyId, user.id, finalContent, poke);
       queryClient.setQueryData(
         queryKeys.messages(partyId),
         (oldData: Message[] = []) => appendMessageIfMissing(oldData, sentMessage),
@@ -250,10 +263,15 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   if (isLoading) return <div className="h-64 flex items-center justify-center"><LoadingSpinner /></div>;
 
   return (
-    <div className={`flex flex-col h-[calc(100vh-14rem)] min-h-[500px] bg-gray-50 rounded-xl overflow-hidden border border-gray-200 shadow-inner relative ${isShaking ? 'animate-shake' : ''}`}>
+    <div className={`flex flex-col ${fill ? 'h-full min-h-0' : 'h-[calc(100vh-14rem)] min-h-[500px] rounded-xl border border-gray-200'} bg-gray-50 overflow-hidden shadow-inner relative ${isShaking ? 'animate-shake' : ''}`}>
       {confirmDialog}
       
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar z-0">
+        {messages.length >= MESSAGE_PAGE_SIZE && hasOlder && (
+          <div className="flex justify-center pb-2">
+            <Button size="sm" variant="ghost" loading={isLoadingOlder} disabled={isLoadingOlder} onClick={() => void loadOlder()}>Load older messages</Button>
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
             <div className="bg-white p-4 rounded-full shadow-sm mb-3"><MessageSquare className="w-8 h-8 text-indigo-200" /></div>
@@ -269,19 +287,18 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
             const { name, initials } = getSenderInfo(msg.user_id);
             const avatarColor = getAvatarColor(msg.user_id);
 
-            // --- CONTENT PARSING ---
-            const noteMatch = msg.content.match(/<<<NOTE:([^:]+):([^>]+)>>>/);
-            // 4. PARSE COMPENDIUM TAG
-            const compendiumMatch = msg.content.match(/<<<COMPENDIUM:([^:]+):([^>]+)>>>/);
-            const pokeMatch = msg.content.match(/<<<POKE:([^>]+)>>>/);
-            
-            const isEmote = msg.content.startsWith('/me ');
-            const isRoll = msg.content.startsWith('🎲');
-            
+            // --- WHAT KIND OF MESSAGE ---
+            // Pokes and shares were checked by the server, which also wrote their text.
+            const kind = msg.kind ?? 'text';
+            const noteMatch = kind === 'note' ? [null, payloadText(msg, 'noteId'), payloadText(msg, 'title')] as const : null;
+            const compendiumMatch = kind === 'compendium' ? [null, payloadText(msg, 'entryId'), payloadText(msg, 'title')] as const : null;
+            const pokeMatch = kind === 'poke';
+            const isRoll = kind === 'roll';
+            const isEmote = kind === 'text' && msg.content.startsWith('/me ');
+
             let displayContent = msg.content;
-            if (noteMatch) displayContent = msg.content.replace(/<<<NOTE:[^>]+>>>/, '').trim();
-            if (compendiumMatch) displayContent = msg.content.replace(/<<<COMPENDIUM:[^>]+>>>/, '').trim();
-            if (pokeMatch) displayContent = msg.content.replace(/<<<POKE:[^>]+>>>/, '').trim();
+            if (noteMatch) displayContent = '';
+            if (compendiumMatch) displayContent = '';
             if (isEmote) displayContent = msg.content.substring(4);
 
             return (
@@ -342,10 +359,17 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
                        </div>
                     )}
 
-                    <div className={pokeMatch ? 'text-gray-500 text-sm' : ''}>
-                        {isEmote && <span className="opacity-50 not-italic mr-1 select-none">*</span>}
-                        <MessageContent content={displayContent} />
-                    </div>
+                    {displayContent && (
+                      <div className={pokeMatch ? 'text-gray-500 text-sm' : ''}>
+                          {isEmote && <span className="opacity-50 not-italic mr-1 select-none">*</span>}
+                          <MessageContent content={displayContent} />
+                      </div>
+                    )}
+                    {isRoll && (
+                      <div className="mt-1 flex items-center gap-1 text-[10px] text-gray-400" title="Rolled on the sender's own dice roller. Rolls the GM asked for are kept in the Rolls tab.">
+                        <Dices size={10} /> Shared from their dice roller
+                      </div>
+                    )}
                   </div>
                   
                   {/* Footer Line: Time & Delete */}

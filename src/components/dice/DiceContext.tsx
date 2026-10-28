@@ -157,22 +157,22 @@ export function DiceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const shareRollToParty = useCallback(async (partyId: string, userId: string, entry: RollHistoryEntry) => {
-    let message = `🎲 **${entry.description || 'Dice Roll'}**: `;
-    
-    if (entry.finalOutcome !== undefined) {
-        message += `Result: ${entry.finalOutcome}`;
-    } else {
-        const total = entry.results.reduce((sum, r) => sum + r.value, 0);
-        message += `Rolled ${total} (${entry.dicePool.join('+')})`;
-    }
-
-    if (entry.isCritical) message += " 🔥 CRITICAL!";
-    if (entry.isSuccess !== undefined) {
-      message += entry.isSuccess ? " ✅ Success" : " ❌ Failure";
-    }
-    if (entry.isManual) message += " 🎲 Manual roll";
-
-    await sendMessage(partyId, userId, message);
+    // The server writes the message text from these fields. The chat marks it as rolled on the sender's own dice.
+    const total = entry.finalOutcome === undefined
+      ? entry.results.reduce((sum, r) => sum + r.value, 0)
+      : typeof entry.finalOutcome === 'number' ? entry.finalOutcome : null;
+    await sendMessage(partyId, userId, '', {
+      kind: 'roll',
+      payload: {
+        label: entry.description || 'Dice Roll',
+        total,
+        outcome: typeof entry.finalOutcome === 'string' ? entry.finalOutcome : '',
+        dice: entry.finalOutcome === undefined ? entry.dicePool.join('+') : '',
+        critical: Boolean(entry.isCritical),
+        success: entry.isSuccess === undefined ? null : entry.isSuccess,
+        manual: Boolean(entry.isManual),
+      },
+    });
   }, []);
 
   return (

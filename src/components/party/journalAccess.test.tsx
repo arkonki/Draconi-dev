@@ -86,7 +86,7 @@ describe('party journal controls', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Notify' }));
     await screen.findByRole('button', { name: 'Shared!' });
-    expect(mocks.sendMessage).toHaveBeenCalledWith('p', 'viewer', '<<<NOTE:n:Entry n>>> Shared a note: Entry n');
+    expect(mocks.sendMessage).toHaveBeenCalledWith('p', 'viewer', '', { kind: 'note', payload: { noteId: 'n' } });
   });
   it('allows a player to edit their own entry', async () => {
     mountParty(false, false, 'own');

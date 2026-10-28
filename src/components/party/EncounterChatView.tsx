@@ -445,6 +445,7 @@ export function EncounterChatView() {
               {activeTab === 'chat' && selectedPartyId && (
                 <div className="h-full flex flex-col">
                   <PartyChat
+                    fill
                     partyId={selectedPartyId}
                     members={currentPartyMembers}
                     campaignMembers={currentCampaignMembers}

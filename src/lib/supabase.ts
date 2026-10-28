@@ -134,6 +134,11 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
     return this;
   }
 
+  lt(column: string, value: unknown) {
+    this.filters.push({ operator: 'lt', column, value });
+    return this;
+  }
+
   is(column: string, value: unknown) {
     this.filters.push({ operator: 'is', column, value });
     return this;
