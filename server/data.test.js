@@ -206,6 +206,21 @@ describe('shared table access', () => {
     expect(canRead('party_maps', { party_id: 'party' }, player)).toBe(true);
   });
 
+  it('keeps a campaign\'s custom items inside that campaign', () => {
+    const campaignItem = { id: 'item', name: 'Old Key', party_id: 'party' };
+    const sharedItem = { id: 'shared', name: 'Torch', party_id: null };
+    expect(canRead('game_items', campaignItem, player)).toBe(true);
+    expect(canRead('game_items', campaignItem, outsider)).toBe(false);
+    expect(canRead('game_items', sharedItem, outsider)).toBe(true);
+    expect(canWrite('game_items', campaignItem, gm, true)).toBe(true);
+    expect(canWrite('game_items', campaignItem, player, true)).toBe(false);
+    expect(canWrite('game_items', sharedItem, gm, true)).toBe(false);
+
+    const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }]]);
+    const outsiderQuery = buildAuthorizedSelectQuery('game_items', outsider, columns);
+    expect(outsiderQuery.text).toContain('t."party_id" IS NULL');
+  });
+
   it('filters hidden tokens out of the SQL a player runs', () => {
     const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }], ['visible', { data_type: 'boolean', udt_name: 'bool' }]]);
     const playerQuery = buildAuthorizedSelectQuery('table_items', player, columns);

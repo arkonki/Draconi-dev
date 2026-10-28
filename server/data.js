@@ -286,7 +286,10 @@ function partyWriteAccess(ctx, partyId) {
 }
 
 export function canRead(table, row, ctx) {
-  if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return true;
+  if (ctx.admin) return true;
+  // A campaign's own custom items are only visible to that campaign; the shared item list is visible to everyone.
+  if (table === 'game_items') return !row.party_id || partyAccess(ctx, row.party_id);
+  if (REFERENCE_TABLES.has(table) || table === 'users') return true;
   if (table === 'campaign_events') {
     return partyAccess(ctx, row.campaign_id)
       && (
@@ -316,6 +319,8 @@ export function canRead(table, row, ctx) {
 
 export function canWrite(table, row, ctx, inserting = false) {
   if (ctx.admin) return true;
+  // GMs may manage their own campaign's custom items, never the shared item list.
+  if (table === 'game_items') return Boolean(row.party_id) && partyGmAccess(ctx, row.party_id);
   if (REFERENCE_TABLES.has(table) || table === 'users') return table === 'users' && row.id === ctx.user.id;
   if (table === 'characters') {
     if (inserting) return row.user_id === ctx.user.id;
@@ -461,8 +466,10 @@ function uuidArrayPredicate(expression, values, state) {
 }
 
 function authorizationSql(table, ctx, state) {
-  if (ctx.admin || REFERENCE_TABLES.has(table) || table === 'users') return 'TRUE';
+  if (ctx.admin) return 'TRUE';
   const partyIds = [...ctx.partyIds];
+  if (table === 'game_items') return `(t."party_id" IS NULL OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  if (REFERENCE_TABLES.has(table) || table === 'users') return 'TRUE';
 
   if (table === 'campaign_events') {
     const gmPartyIds = partyIds.filter((partyId) => partyGmAccess(ctx, partyId));
@@ -843,6 +850,8 @@ export async function executeDataQuery(user, request) {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
+      // A campaign's item stays in that campaign: a GM cannot move it to another campaign or into the shared list.
+      if (table === 'game_items' && !transactionCtx.admin) delete prepared.party_id;
       if (table === 'notes') {
         for (const row of candidates) validateNoteUpdate(row, prepared, transactionCtx);
         delete prepared.user_id;

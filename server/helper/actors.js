@@ -572,11 +572,12 @@ export async function loadActor(client, campaignId, actorId, { forUpdate = false
     if (equipmentNames.length > 0) {
       const { rows } = await client.query(
         `SELECT * FROM game_items
-         WHERE lower(name) = ANY($1::text[])
+         WHERE (party_id IS NULL OR party_id = $3)
+           AND (lower(name) = ANY($1::text[])
             OR lower(regexp_replace(name, '\\s*\\([0-9]+\\s*[a-zA-Z]*\\)$', '')) = ANY($1::text[])
-            OR id::text = ANY($2::text[])
+            OR id::text = ANY($2::text[]))
          ORDER BY lower(name), COALESCE(is_custom, false), created_at`,
-        [[...new Set(equipmentNames)], [...new Set(equipmentDefinitionIds)]],
+        [[...new Set(equipmentNames)], [...new Set(equipmentDefinitionIds)], campaignId],
       );
       definitions = rows;
     }

@@ -45,6 +45,7 @@ import { createPersonalToken, listConnections, revokeApp, revokePersonalToken } 
 import { listAllConnections, revokeConnections } from './adminConnections.js';
 import { aiUsageOverview } from './adminAiUsage.js';
 import { archiveStory, continueFromStory, listStories } from './soloLibrary.js';
+import { enhanceItem } from './lootEnhancer.js';
 import { getAiSettings, removeAiKey, saveAiSettings } from './aiSettings.js';
 import { decideToolCall, generateStory, getNarratorConversation, narrateSolo, polishRecap, proposeMission, resetNarrator, resumeSolo, saveNarratorSummary, setNarrationGlossary, setNarrationLanguage, setNarratorMode } from './soloNarrator.js';
 import { createMcpHttpHandler } from './mcp/http.js';
@@ -186,6 +187,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/ai/solo-stories/continue' && request.method === 'POST') {
       sendJson(response, 200, await continueFromStory(await currentUser(request), await readJson(request)));
+      return;
+    }
+    if (pathname === '/api/ai/loot-item' && request.method === 'POST') {
+      sendJson(response, 200, await enhanceItem(await currentUser(request), await readJson(request)));
       return;
     }
     if (pathname === '/api/ai/recap' && request.method === 'POST') {

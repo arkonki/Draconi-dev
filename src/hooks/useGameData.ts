@@ -71,6 +71,11 @@
               queryBuilder = queryBuilder.select('*');
             }
 
+            // Campaigns' own custom items are not part of the shared game data.
+            if (category === 'items') {
+              queryBuilder = queryBuilder.is('party_id', null);
+            }
+
             queryBuilder = queryBuilder.order('name');
 
             console.log(`[useGameData] Executing query for table: ${tableName}`);

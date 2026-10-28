@@ -139,6 +139,23 @@ export const removeAiKey = () => send<AiSettings>('/account/ai', { method: 'DELE
 
 /** Rewrites the session recap draft as readable prose. The GM edits the result before using it. */
 export const polishRecap = (partyId: string, draft: string) => send<AiAnswer>('/ai/recap', json('POST', { partyId, draft }));
+/** Item fields the AI filled in for a custom loot item. Only a draft: the GM reviews it in the loot form. */
+export interface EnhancedLootItem {
+  name: string;
+  category: string;
+  cost: string;
+  weight: number;
+  effect: string;
+  damage: string;
+  grip: string;
+  range: string;
+  durability: string;
+  armor_rating: string;
+  features: string[];
+}
+
+export const enhanceLootItem = (partyId: string, item: Record<string, unknown>, instructions: string) =>
+  send<{ item: EnhancedLootItem; usage: AiAnswer['usage'] }>('/ai/loot-item', json('POST', { partyId, item, instructions }));
 /** A mission the narrator proposes from the player's idea. Only a draft: the player edits it before it is created. */
 export interface MissionProposal {
   title: string;

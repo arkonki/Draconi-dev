@@ -1,8 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
-  Package, Search, ArrowRight, ArrowLeft, Plus, Trash2, X, Users, History, Pencil, Save, AlertCircle, Shield, Sword, Coins
+  Package, Search, ArrowRight, ArrowLeft, Plus, Trash2, X, Users, History, Pencil, Save, AlertCircle, Shield, Sword, Coins,
+  Sparkles, Undo2
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { enhanceLootItem, fetchAiSettings } from '../../lib/api/ai';
 import { Button } from '../shared/Button';
 import { Character, InventoryItem as CharacterInventoryItem } from '../../types/character';
 import { GameItem, fetchItems, createGameItem } from '../../lib/api/items';
@@ -31,6 +34,25 @@ const getItemStackKey = (name: string, description?: string) => `${normalizeName
 const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) { return crypto.randomUUID(); }
   return `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
+// One-off loot only exists in this party's stash; it is never written to game_items.
+const ONE_OFF_ID_PREFIX = 'one-off-';
+const isOneOffItem = (item: GameItem) => item.id.startsWith(ONE_OFF_ID_PREFIX);
+
+// The stash only keeps name, category and description, so fold a one-off item's stats into its description.
+const buildOneOffDescription = (item: Partial<GameItem>) => {
+  const stats = [
+    item.damage && `Damage ${item.damage}`,
+    item.grip && `Grip ${item.grip}`,
+    item.range && `Range ${item.range}`,
+    item.durability && `Durability ${item.durability}`,
+    item.armor_rating && `Armor ${item.armor_rating}`,
+    item.features && (Array.isArray(item.features) ? item.features.join(', ') : item.features),
+    item.weight ? `Weight ${item.weight}` : '',
+    item.cost && item.cost !== '0' && `Value ${item.cost}`,
+  ].filter(Boolean).join(' · ');
+  return [item.effect?.trim(), stats].filter(Boolean).join('\n');
 };
 
 const isCurrencyItem = (name: string) => {
@@ -77,12 +99,13 @@ interface TransactionLog {
 // --- MODAL: LOOT ASSIGNMENT ---
 
 interface LootAssignmentModalProps {
+  partyId: string;
   onClose: () => void;
   allItems: GameItem[];
   onAssignLoot: (loot: { item: GameItem; quantity: number }[]) => Promise<void>;
 }
 
-const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignmentModalProps) => {
+const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootAssignmentModalProps) => {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [stagedLoot, setStagedLoot] = useState<Map<string, { item: GameItem; quantity: number }>>(new Map());
@@ -95,6 +118,13 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
     damage: '', armor_rating: '', grip: '', range: '', durability: '', features: ''
   });
   const [customQty, setCustomQty] = useState(1);
+  const [saveCustomToDb, setSaveCustomToDb] = useState(false);
+  const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000 });
+  const hasAiKey = Boolean(aiSettings.data?.hasKey);
+  const [aiWish, setAiWish] = useState('');
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [beforeEnhance, setBeforeEnhance] = useState<Partial<GameItem> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const customNameInputRef = useRef<HTMLInputElement>(null);
 
@@ -125,6 +155,7 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
     if (baseItem) {
       const rest: Partial<GameItem> = { ...baseItem };
       delete rest.id;
+      delete rest.party_id;
       setCustomForm({ ...rest });
     } else {
       setCustomForm({
@@ -133,22 +164,60 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
       });
     }
     setCustomQty(1);
+    setSaveCustomToDb(false);
+    setAiWish('');
+    setAiError(null);
+    setBeforeEnhance(null);
     setIsCustomizing(true);
   };
 
-  const handleSaveCustomItem = async () => {
-    if (!customForm.name) return;
-    setIsSavingCustom(true);
-
+  const handleEnhanceWithAi = async () => {
+    setIsEnhancing(true);
+    setAiError(null);
     try {
-      const newItem = await createGameItem(customForm);
+      const original = customForm;
+      const { item } = await enhanceLootItem(partyId, original, aiWish);
+      setBeforeEnhance(original);
+      setCustomForm({ ...original, ...item });
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Could not enhance the item.');
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
+  const handleSaveCustomItem = async () => {
+    if (!customForm.name?.trim()) return;
+    const quantity = Number.isFinite(customQty) && customQty > 0 ? customQty : 1;
+
+    if (!saveCustomToDb) {
+      const oneOff: GameItem = {
+        ...customForm,
+        id: `${ONE_OFF_ID_PREFIX}${generateId()}`,
+        name: customForm.name.trim(),
+        category: (customForm.category || 'LOOT').toUpperCase(),
+        effect: buildOneOffDescription(customForm),
+        is_custom: true,
+      } as GameItem;
+      handleStageItem(oneOff, quantity);
+      setIsCustomizing(false);
+      setCustomForm({});
+      return;
+    }
+
+    setIsSavingCustom(true);
+    try {
+      // Saved items belong to this campaign only, so other campaigns never see them.
+      const newItem = await createGameItem({ ...customForm, name: customForm.name.trim(), party_id: partyId });
       await queryClient.invalidateQueries({ queryKey: ['gameItems'] });
-      handleStageItem(newItem, customQty);
+      handleStageItem(newItem, quantity);
       setIsCustomizing(false);
       setCustomForm({});
     } catch (err) {
       console.error("Failed to create custom item", err);
-      alert("Failed to save custom item.");
+      alert(err instanceof Error && /duplicate|unique/i.test(err.message)
+        ? "This campaign already has an item with that name."
+        : "Failed to save custom item.");
     } finally {
       setIsSavingCustom(false);
     }
@@ -169,7 +238,7 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[60] backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-200">
         <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-          <div><h3 className="text-lg font-bold text-gray-800">Assign Loot</h3><p className="text-xs text-gray-500">Items added here are saved to the game database.</p></div>
+          <div><h3 className="text-lg font-bold text-gray-800">Assign Loot</h3><p className="text-xs text-gray-500">Pick items from the item list or create custom loot for this campaign.</p></div>
           <button onClick={onClose} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600"><X size={20} /></button>
         </div>
 
@@ -178,8 +247,27 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
           <div className="w-full md:w-1/2 flex flex-col border-r border-gray-200 bg-white relative">
             {isCustomizing ? (
               <div className="absolute inset-0 z-10 bg-white flex flex-col animate-in slide-in-from-left-4 duration-200">
-                <div className="p-3 border-b flex items-center gap-2 bg-indigo-50 text-indigo-900"><button onClick={() => setIsCustomizing(false)}><ArrowLeft size={18} /></button><span className="font-bold text-sm">Create New Item</span></div>
+                <div className="p-3 border-b flex items-center gap-2 bg-indigo-50 text-indigo-900"><button onClick={() => setIsCustomizing(false)}><ArrowLeft size={18} /></button><span className="font-bold text-sm">Create Custom Loot</span></div>
                 <div className="p-4 flex-grow overflow-y-auto space-y-4">
+                  {hasAiKey ? (
+                    <div className="bg-violet-50 p-3 rounded border border-violet-100 space-y-2">
+                      <label htmlFor="loot-ai-wish" className="flex items-center gap-1.5 text-xs font-bold uppercase text-violet-800"><Sparkles size={12} /> AI helper</label>
+                      <textarea id="loot-ai-wish" className="w-full p-2 border border-violet-200 rounded text-sm h-14" value={aiWish} onChange={e => setAiWish(e.target.value)}
+                        placeholder="Optional: what should it be? E.g. a cursed dagger the bandit chief carried" />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="secondary" icon={Sparkles} loading={isEnhancing} disabled={isEnhancing || (!aiWish.trim() && !customForm.name?.trim())}
+                          title="Fill in the name, description and stats with your own AI key. Nothing is saved until you add it." onClick={handleEnhanceWithAi}>
+                          Enhance with AI
+                        </Button>
+                        {beforeEnhance && (
+                          <Button size="sm" variant="ghost" icon={Undo2} onClick={() => { setCustomForm(beforeEnhance); setBeforeEnhance(null); }}>Undo</Button>
+                        )}
+                      </div>
+                      {aiError && <p role="alert" className="text-xs text-red-700">{aiError}</p>}
+                    </div>
+                  ) : aiSettings.isSuccess && (
+                    <p className="text-xs text-gray-500"><Sparkles size={12} className="inline mr-1" />Add your OpenRouter key in <Link to="/settings?section=connections" className="text-indigo-600 underline">Settings, AI Assistants</Link> to let AI fill in custom items.</p>
+                  )}
                   <div><label htmlFor="loot-custom-name" className="block text-xs font-bold text-gray-500 uppercase mb-1">Name</label><input id="loot-custom-name" ref={customNameInputRef} type="text" className="w-full p-2 border rounded font-medium" value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} /></div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label htmlFor="loot-custom-category" className="block text-xs font-bold text-gray-500 uppercase mb-1">Category</label><input id="loot-custom-category" type="text" className="w-full p-2 border rounded text-sm uppercase" value={customForm.category} onChange={e => setCustomForm({ ...customForm, category: e.target.value })} placeholder="LOOT, WEAPON..." /></div>
@@ -204,17 +292,24 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
                     <div><label htmlFor="loot-custom-quantity" className="block text-xs font-bold text-gray-500 uppercase mb-1">Quantity</label><input id="loot-custom-quantity" type="number" min="1" className="w-full p-2 border rounded text-sm" value={customQty} onChange={e => setCustomQty(parseInt(e.target.value))} /></div>
                   </div>
                   <div><label htmlFor="loot-custom-effect" className="block text-xs font-bold text-gray-500 uppercase mb-1">Effect / Description</label><textarea id="loot-custom-effect" className="w-full p-2 border rounded text-sm h-20" value={customForm.effect} onChange={e => setCustomForm({ ...customForm, effect: e.target.value })} /></div>
+                  <div className="flex items-start gap-2 p-3 rounded border border-gray-200 bg-gray-50">
+                    <input id="loot-custom-save-db" type="checkbox" className="mt-1" checked={saveCustomToDb} onChange={e => setSaveCustomToDb(e.target.checked)} />
+                    <div className="text-sm">
+                      <label htmlFor="loot-custom-save-db" className="font-semibold text-gray-800 cursor-pointer">Save to this campaign's item list</label>
+                      <p className="text-xs text-gray-500">{saveCustomToDb ? 'You can add it again later. Only this campaign can see it.' : 'One-off loot: only this stash gets it. Stats are kept in its description.'}</p>
+                    </div>
+                  </div>
                 </div>
                 <div className="p-4 border-t bg-gray-50 flex justify-end gap-2">
                   <Button variant="ghost" onClick={() => setIsCustomizing(false)}>Cancel</Button>
-                  <Button variant="primary" icon={Save} onClick={handleSaveCustomItem} disabled={isSavingCustom} loading={isSavingCustom}>Save to DB & Add</Button>
+                  <Button variant="primary" icon={saveCustomToDb ? Save : Plus} onClick={handleSaveCustomItem} disabled={isSavingCustom || !customForm.name?.trim()} loading={isSavingCustom}>{saveCustomToDb ? 'Save & Add' : 'Add to Loot'}</Button>
                 </div>
               </div>
             ) : (
               <>
                 <div className="p-4 border-b space-y-3">
                   <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input ref={searchInputRef} type="text" placeholder="Search database..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm outline-none" /></div>
-                  <Button variant="secondary" size="sm" icon={Plus} className="w-full justify-center" onClick={() => handleStartCustomizing()}>Create New Custom Item</Button>
+                  <Button variant="secondary" size="sm" icon={Plus} className="w-full justify-center" onClick={() => handleStartCustomizing()}>Create Custom Loot</Button>
                 </div>
                 <div className="flex-grow overflow-y-auto p-2 space-y-1 bg-gray-50/50">
                   {filteredItems.map(item => (
@@ -223,7 +318,9 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
                         <p className="font-medium text-sm text-gray-900 truncate">{item.name}</p>
                         <div className="flex gap-2 text-xs text-gray-500">
                           <span>{item.category}</span>
-                          {item.is_custom && <span className="text-amber-600 bg-amber-50 px-1 rounded font-bold text-[9px] flex items-center gap-0.5"><AlertCircle size={8} /> Custom</span>}
+                          {item.party_id
+                            ? <span className="text-indigo-600 bg-indigo-50 px-1 rounded font-bold text-[9px] flex items-center gap-0.5"><AlertCircle size={8} /> Campaign</span>
+                            : item.is_custom && <span className="text-amber-600 bg-amber-50 px-1 rounded font-bold text-[9px] flex items-center gap-0.5"><AlertCircle size={8} /> Custom</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -245,7 +342,10 @@ const LootAssignmentModal = ({ onClose, allItems, onAssignLoot }: LootAssignment
                 <div key={item.id} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-sm animate-in slide-in-from-left-2">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded flex items-center justify-center font-bold text-xs">{quantity}x</div>
-                    <div className="min-w-0"><p className="font-medium text-sm text-gray-900 truncate">{item.name}</p></div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm text-gray-900 truncate">{item.name}</p>
+                      {isOneOffItem(item) && <p className="text-[10px] font-bold uppercase text-amber-600">One-off · {item.category}</p>}
+                    </div>
                   </div>
                   <button onClick={() => { const n = new Map(stagedLoot); n.delete(item.id); setStagedLoot(n); }} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
                 </div>
@@ -277,9 +377,16 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   const [isLootModalOpen, setIsLootModalOpen] = useState(false);
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
 
-  const { data: allItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
+  const { data: readableItems = [] } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
+  // A GM of several campaigns can read each one's items; only this campaign's and the shared ones apply here.
+  const allItems = useMemo(
+    () => readableItems.filter(item => !item.party_id || item.party_id === partyId),
+    [readableItems, partyId]
+  );
   const allItemsByName = useMemo(() => {
-    return new Map(allItems.map(item => [normalizeName(item.name), item]));
+    // This campaign's own item wins over a shared item with the same name.
+    const ordered = [...allItems.filter(item => !item.party_id), ...allItems.filter(item => item.party_id)];
+    return new Map(ordered.map(item => [normalizeName(item.name), item]));
   }, [allItems]);
   const membersById = useMemo(() => {
     return new Map(members.map(member => [member.id, member]));
@@ -815,7 +922,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   return (
     <>
       {confirmDialog}
-      {isLootModalOpen && <LootAssignmentModal onClose={() => setIsLootModalOpen(false)} allItems={allItems} onAssignLoot={handleAssignLoot} />}
+      {isLootModalOpen && <LootAssignmentModal partyId={partyId} onClose={() => setIsLootModalOpen(false)} allItems={allItems} onAssignLoot={handleAssignLoot} />}
 
       {/* SELL MODAL */}
       {isSellModalOpen && (

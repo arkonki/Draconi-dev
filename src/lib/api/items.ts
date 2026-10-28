@@ -25,6 +25,8 @@ export interface GameItem {
 
   // Meta
   is_custom?: boolean;
+  /** Set for a campaign's own custom item, which only that campaign can see. Null for the shared item list. */
+  party_id?: string | null;
   idx?: number;
   created_at?: string;
   updated_at?: string;

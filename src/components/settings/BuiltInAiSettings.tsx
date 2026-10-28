@@ -28,7 +28,7 @@ function UsageBar({ label, used, cap, format }: { label: string; used: number; c
   );
 }
 
-/** Your own OpenRouter key and model for the built-in AI: the Story Helper and the Solo narrator. */
+/** Your own OpenRouter key and model for every built-in AI feature: the Story Helper, the loot helper, recaps and the Solo narrator. */
 export function BuiltInAiSettings() {
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -77,7 +77,7 @@ export function BuiltInAiSettings() {
   const usage = data.usageThisMonth;
 
   const handleRemove = async () => {
-    const confirmed = await confirm({ title: 'Remove your API key?', description: 'The Story Helper and the Solo narrator stop working until you add a key again.', confirmText: 'Remove key' });
+    const confirmed = await confirm({ title: 'Remove your API key?', description: 'The Story Helper, the loot helper, recap polishing and the Solo narrator stop working until you add a key again.', confirmText: 'Remove key' });
     if (confirmed) removeKey.mutate();
   };
 
@@ -86,7 +86,7 @@ export function BuiltInAiSettings() {
       <div>
         <h3 id="builtin-ai-heading" className="flex items-center gap-2 text-lg font-semibold text-gray-900"><Bot className="h-5 w-5 text-indigo-600" /> Built-in AI</h3>
         <p className="mt-1 text-sm text-gray-600">
-          Powers the Story Helper and the Solo narrator with your own OpenRouter account, so you pay OpenRouter directly for what you use.
+          One key for every AI feature: the Story Helper, the loot helper, recap polishing and the Solo narrator. You pay OpenRouter directly for what you use.
           Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="underline hover:text-indigo-600">openrouter.ai/keys</a>.
           The key is stored encrypted on the server and only used for your own requests.
         </p>
@@ -159,7 +159,7 @@ export function BuiltInAiSettings() {
           <div className="mt-3 space-y-2">
             {data.limits.monthlyTokenCap !== null && <UsageBar label="Tokens" used={usage.promptTokens + usage.completionTokens} cap={data.limits.monthlyTokenCap} format={number} />}
             {data.limits.monthlyCostCapUsd !== null && <UsageBar label="Money" used={usage.costUsd ?? 0} cap={data.limits.monthlyCostCapUsd} format={(value) => `$${value.toFixed(2)}`} />}
-            {data.limits.reached && <p role="alert" className="text-sm font-semibold text-red-700">A limit has been reached. The narrator and the Story Helper stay off until next month or until you raise it.</p>}
+            {data.limits.reached && <p role="alert" className="text-sm font-semibold text-red-700">A limit has been reached. The AI features stay off until next month or until you raise it.</p>}
           </div>
         )}
         <p className="mt-2 text-xs text-gray-500">The money limit counts only requests where OpenRouter reports a cost; the token limit counts everything. Your own OpenRouter account can also cap spending on the key itself, which is the stricter safeguard.</p>

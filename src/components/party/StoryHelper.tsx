@@ -414,8 +414,12 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
             {!apiKey ? (
               <div className="flex-grow flex flex-col items-center justify-center p-6 text-center text-gray-500">
                 <KeyRound size={40} className="mb-4 text-orange-300" />
-                <p className="text-sm font-medium">API Key Required</p>
-                <p className="text-xs mt-1 max-w-[200px]">Add your OpenRouter key in Settings, under AI Assistants, to start generating.</p>
+                <p className="text-sm font-medium">{aiSettings.isError ? 'Could not check your AI key' : 'Set up AI to start generating'}</p>
+                <p className="text-xs mt-1 max-w-[220px]">
+                  {aiSettings.isError
+                    ? 'Reload the page to try again.'
+                    : <>The Story Helper uses the same OpenRouter key as the rest of the app. Add it once in <Link to="/settings?section=connections" className="text-indigo-600 underline">Settings, AI Assistants</Link>.</>}
+                </p>
               </div>
             ) : (
               <>
@@ -531,7 +535,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
 
                 <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
                   <Button onClick={handleGenerate} disabled={loading} className="w-full justify-center shadow-sm" icon={loading ? RefreshCw : Sparkles} variant="primary" loading={loading}>
-                    {loading ? 'Conjuring...' : 'Generate (Gemini 2.0)'}
+                    {loading ? 'Conjuring...' : 'Generate'}
                   </Button>
                 </div>
               </>

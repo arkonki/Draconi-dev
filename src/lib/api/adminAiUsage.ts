@@ -32,5 +32,5 @@ export async function fetchAiUsage(month?: string): Promise<AiUsageOverview> {
   return payload;
 }
 
-const PURPOSE_NAMES: Record<string, string> = { story: 'Story Helper', solo: 'Narrator', 'solo-summary': 'Story summary', recap: 'Recap' };
+const PURPOSE_NAMES: Record<string, string> = { story: 'Story Helper', solo: 'Narrator', 'solo-summary': 'Story summary', recap: 'Recap', 'loot-item': 'Loot item' };
 export const purposeName = (purpose: string) => PURPOSE_NAMES[purpose] ?? purpose;
