@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, MessageSquare, Loader2, ArrowDown, FileText, Smile, Bold, Italic, Code, Hand, Book, Trash2, ExternalLink, Dices } from 'lucide-react';
+import { MessageSquare, ArrowDown, FileText, Hand, Book, Trash2, ExternalLink, Dices } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
 // 1. Import deleteMessage
 import {
@@ -23,11 +23,9 @@ import type { CampaignMembership } from '../../lib/api/parties';
 import { getNotePath } from '../../lib/noteLinks';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 import { useConfirm } from '../../hooks/useConfirm';
-import { findPokeTarget } from '../../lib/pokeTarget';
+import { findPokeTarget, pokeOptions } from '../../lib/pokeTarget';
+import { ChatComposer } from './ChatComposer';
 import { setChatViewing } from '../../lib/activeChat';
-
-// ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
-const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
 
 const getAvatarColor = (userId: string) => {
   const colors = [ 'bg-red-100 text-red-700', 'bg-green-100 text-green-700', 'bg-blue-100 text-blue-700', 'bg-yellow-100 text-yellow-700', 'bg-purple-100 text-purple-700', 'bg-pink-100 text-pink-700', 'bg-indigo-100 text-indigo-700', 'bg-orange-100 text-orange-700', ];
@@ -58,12 +56,10 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const messageIdFromUrl = searchParams.get('messageId');
@@ -188,56 +184,51 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
     }
   };
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !user) return;
-    
-    const content = newMessage;
-    const finalContent = content;
+  const [sendError, setSendError] = useState<string | null>(null);
 
-    // Poke Logic: the server checks the target and writes the message.
-    let poke: { kind: 'poke'; payload: { targetUserId: string } } | undefined;
-    if (content.startsWith('/poke ')) {
-      const typed = content.substring(6).trim();
-      const target = findPokeTarget(typed, members, campaignMembers);
-      if (target) {
-        poke = { kind: 'poke', payload: { targetUserId: target.userId } };
-      } else {
-        alert(`Could not find member "${typed}"`);
-        return;
-      }
-    }
-
-    setNewMessage(''); 
-    setShowEmojiPicker(false);
+  // Sends a plain message, or a poke when one is given; the server checks pokes and writes their text.
+  const send = async (content: string, poke?: { kind: 'poke'; payload: { targetUserId: string } }) => {
+    if (!user) return;
     setIsSending(true);
-
+    setSendError(null);
     try {
-      const sentMessage = await sendMessage(partyId, user.id, finalContent, poke);
+      const sentMessage = await sendMessage(partyId, user.id, content, poke);
       queryClient.setQueryData(
         queryKeys.messages(partyId),
         (oldData: Message[] = []) => appendMessageIfMissing(oldData, sentMessage),
       );
       scrollToBottom();
+      return true;
     } catch (error) {
       console.error('Failed to send message', error);
-      setNewMessage(content); 
+      setSendError(error instanceof Error ? error.message : 'Could not send the message.');
+      return false;
     } finally {
       setIsSending(false);
     }
   };
 
-  const insertText = (text: string, wrap: boolean = false) => {
-    if (!inputRef.current) return;
-    const start = inputRef.current.selectionStart || 0;
-    const end = inputRef.current.selectionEnd || 0;
-    const currentVal = newMessage;
-    const newVal = wrap 
-      ? currentVal.substring(0, start) + text + currentVal.substring(start, end) + text + currentVal.substring(end)
-      : currentVal.substring(0, start) + text + currentVal.substring(end);
-    setNewMessage(newVal);
-    inputRef.current.focus();
+  const handleSend = async () => {
+    const content = newMessage;
+    if (!content.trim()) return;
+
+    // "/poke name" still works for those who type it.
+    let poke: { kind: 'poke'; payload: { targetUserId: string } } | undefined;
+    if (content.startsWith('/poke ')) {
+      const typed = content.substring(6).trim();
+      const target = findPokeTarget(typed, members, campaignMembers);
+      if (!target) {
+        setSendError(`Nobody called "${typed}" is in this party.`);
+        return;
+      }
+      poke = { kind: 'poke', payload: { targetUserId: target.userId } };
+    }
+
+    setNewMessage('');
+    if (!(await send(content, poke))) setNewMessage(content);
   };
+
+  const pokePeople = useMemo(() => pokeOptions(members, campaignMembers, user?.id), [members, campaignMembers, user?.id]);
 
   // --- NAVIGATION HELPERS ---
   const openSharedNote = (noteId: string) => { navigate(getNotePath(noteId, partyId)); };
@@ -407,41 +398,16 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
           </div>
         ) : (
           <>
-        <div className="flex items-center gap-2 mb-2 px-1">
-           <button type="button" onClick={() => insertText('**', true)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded" title="Bold"><Bold size={16}/></button>
-           <button type="button" onClick={() => insertText('*', true)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded" title="Italic"><Italic size={16}/></button>
-           <button type="button" onClick={() => insertText('`', true)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded" title="Code"><Code size={16}/></button>
-           <div className="w-px h-4 bg-gray-200 mx-1"></div>
-           <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`p-1.5 hover:bg-gray-100 rounded ${showEmojiPicker ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-600'}`} title="Emoji"><Smile size={16}/></button>
-           <div className="flex-1"></div>
-           <div className="text-[10px] text-gray-400 hidden sm:block">/poke @name to poke · {newMessage.length > MAX_MESSAGE_CHARS - 200 ? `${newMessage.length}/${MAX_MESSAGE_CHARS}` : ''}</div>
-        </div>
-
-        {showEmojiPicker && (
-          <div className="absolute bottom-20 left-4 bg-white border border-gray-200 shadow-xl rounded-lg p-3 grid grid-cols-6 gap-2 w-64 animate-in slide-in-from-bottom-2 z-50">
-             {RPG_EMOJIS.map(e => (
-               <button key={e} type="button" onClick={() => insertText(e)} className="text-xl hover:bg-gray-100 rounded p-1 transition-colors">{e}</button>
-             ))}
-          </div>
-        )}
-
-        <form onSubmit={handleSend} className="flex items-end gap-2 relative">
-          <div className="flex-1 relative">
-            <input
-              ref={inputRef}
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Message..."
-              maxLength={MAX_MESSAGE_CHARS}
-              disabled={isSending}
-              className="w-full text-base border border-gray-300 rounded-2xl pl-4 pr-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:bg-gray-100 transition-all shadow-sm"
-            />
-          </div>
-          <Button type="submit" disabled={!newMessage.trim() || isSending} variant="primary" className="rounded-full w-12 h-12 flex items-center justify-center p-0 flex-shrink-0 shadow-md">
-            {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-0.5" />}
-          </Button>
-        </form>
+        <ChatComposer
+          value={newMessage}
+          onChange={(value) => { setNewMessage(value); setSendError(null); }}
+          onSend={() => void handleSend()}
+          isSending={isSending}
+          maxLength={MAX_MESSAGE_CHARS}
+          pokeOptions={pokePeople}
+          onPoke={(option) => void send('', { kind: 'poke', payload: { targetUserId: option.userId } })}
+        />
+        {sendError && <p role="alert" className="mt-2 px-1 text-xs text-red-700">{sendError}</p>}
           </>
         )}
       </div>

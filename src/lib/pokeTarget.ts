@@ -21,3 +21,35 @@ export function findPokeTarget(typed: string, members: Character[], campaignMemb
     || candidates.find((c) => c.name.toLowerCase().includes(wanted));
   return match ?? null;
 }
+
+export interface PokeOption {
+  userId: string;
+  /** The character name when they have one in the party, otherwise their own name. */
+  label: string;
+  /** Their own name and role, shown under the label. */
+  detail: string;
+}
+
+const ROLE_LABELS: Record<string, string> = { owner: 'GM', gm: 'GM', player: 'Player', observer: 'Observer' };
+
+/** Everyone in the campaign the viewer can poke, one entry per person, by character name where they have one. */
+export function pokeOptions(members: Character[], campaignMembers: CampaignMembership[], selfId: string | undefined): PokeOption[] {
+  const people = new Map<string, PokeOption>();
+  for (const member of campaignMembers) {
+    if (!member.user_id || member.user_id === selfId) continue;
+    const fullName = [member.users?.first_name, member.users?.last_name].filter(Boolean).join(' ').trim();
+    const ownName = fullName || member.users?.username || 'Member';
+    const characters = members.filter((character) => character.user_id === member.user_id).map((character) => character.name);
+    people.set(member.user_id, {
+      userId: member.user_id,
+      label: characters.length ? characters.join(', ') : ownName,
+      detail: [characters.length ? ownName : '', ROLE_LABELS[member.role] ?? ''].filter(Boolean).join(' · '),
+    });
+  }
+  // Players whose membership row has not loaded yet still show up by their character.
+  for (const character of members) {
+    if (!character.user_id || character.user_id === selfId || people.has(character.user_id)) continue;
+    people.set(character.user_id, { userId: character.user_id, label: character.name, detail: 'Player' });
+  }
+  return [...people.values()].sort((left, right) => left.label.localeCompare(right.label));
+}

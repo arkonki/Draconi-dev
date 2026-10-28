@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findPokeTarget } from './pokeTarget';
+import { findPokeTarget, pokeOptions } from './pokeTarget';
 import type { Character } from '../types/character';
 import type { CampaignMembership } from './api/parties';
 
@@ -26,5 +26,20 @@ describe('poke target', () => {
   it('finds nobody for an empty or unknown name', () => {
     expect(findPokeTarget('@', members, campaign)).toBeNull();
     expect(findPokeTarget('Zed', members, campaign)).toBeNull();
+  });
+});
+
+describe('poke options', () => {
+  it('lists everyone but yourself once, by character name, with their own name and role', () => {
+    const options = pokeOptions(members, [
+      ...campaign,
+      { id: 'm2', party_id: 'p', user_id: 'u1', role: 'player', users: { id: 'u1', username: 'bry', first_name: null, last_name: null } },
+      { id: 'm3', party_id: 'p', user_id: 'me', role: 'player', users: { id: 'me', username: 'me' } },
+    ] as CampaignMembership[], 'me');
+    expect(options).toEqual([
+      { userId: 'u2', label: 'Bryn the Bold', detail: 'Player' },
+      { userId: 'u1', label: 'Brynja', detail: 'bry · Player' },
+      { userId: 'gm', label: 'Ann Lee', detail: 'GM' },
+    ].sort((a, b) => a.label.localeCompare(b.label)));
   });
 });

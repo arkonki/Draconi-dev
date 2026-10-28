@@ -58,7 +58,7 @@ const FormattedText = ({ text }: { text: string }) => {
       {splitCode.map((chunk, i) => {
         // Even indices are normal text (or bold/italic), Odd are code
         if (i % 2 === 1) {
-          return <code key={i} className="bg-black/20 px-1 rounded font-mono text-xs">{chunk}</code>;
+          return <code key={i} className="rounded bg-black/10 px-1.5 py-0.5 font-mono text-[0.85em]">{chunk}</code>;
         }
 
         const splitBold = chunk.split(BOLD_REGEX);
