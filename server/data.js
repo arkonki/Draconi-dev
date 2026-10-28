@@ -20,6 +20,10 @@ const REFERENCE_TABLES = new Set([
   'game_skills', 'game_spells', 'game_items', 'bio_data', 'monsters',
 ]);
 
+// Reference data a campaign can also have its own entries in: custom items and monsters. Rows without a party_id are
+// the shared lists everyone reads; rows with one belong to that campaign alone.
+const CAMPAIGN_OWNABLE_REFERENCE = new Set(['game_items', 'monsters']);
+
 const PARTY_SCOPED = new Set([
   'messages', 'party_inventory', 'party_inventory_log', 'party_tasks', 'time_trackers',
   'random_tables', 'story_ideas', 'encounters', 'party_maps',
@@ -287,8 +291,7 @@ function partyWriteAccess(ctx, partyId) {
 
 export function canRead(table, row, ctx) {
   if (ctx.admin) return true;
-  // A campaign's own custom items are only visible to that campaign; the shared item list is visible to everyone.
-  if (table === 'game_items') return !row.party_id || partyAccess(ctx, row.party_id);
+  if (CAMPAIGN_OWNABLE_REFERENCE.has(table)) return !row.party_id || partyAccess(ctx, row.party_id);
   if (REFERENCE_TABLES.has(table) || table === 'users') return true;
   if (table === 'campaign_events') {
     return partyAccess(ctx, row.campaign_id)
@@ -319,8 +322,8 @@ export function canRead(table, row, ctx) {
 
 export function canWrite(table, row, ctx, inserting = false) {
   if (ctx.admin) return true;
-  // GMs may manage their own campaign's custom items, never the shared item list.
-  if (table === 'game_items') return Boolean(row.party_id) && partyGmAccess(ctx, row.party_id);
+  // GMs may manage their own campaign's entries, never the shared lists.
+  if (CAMPAIGN_OWNABLE_REFERENCE.has(table)) return Boolean(row.party_id) && partyGmAccess(ctx, row.party_id);
   if (REFERENCE_TABLES.has(table) || table === 'users') return table === 'users' && row.id === ctx.user.id;
   if (table === 'characters') {
     if (inserting) return row.user_id === ctx.user.id;
@@ -468,7 +471,7 @@ function uuidArrayPredicate(expression, values, state) {
 function authorizationSql(table, ctx, state) {
   if (ctx.admin) return 'TRUE';
   const partyIds = [...ctx.partyIds];
-  if (table === 'game_items') return `(t."party_id" IS NULL OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
+  if (CAMPAIGN_OWNABLE_REFERENCE.has(table)) return `(t."party_id" IS NULL OR ${uuidArrayPredicate('t."party_id"', partyIds, state)})`;
   if (REFERENCE_TABLES.has(table) || table === 'users') return 'TRUE';
 
   if (table === 'campaign_events') {
@@ -718,7 +721,7 @@ function applyOwnership(table, payload, user) {
   if (table === 'campaign_memberships') row.invited_by = user.id;
   if (table === 'notes' || table === 'messages' || table === 'story_ideas') row.user_id = user.id;
   if (table === 'party_tasks') row.created_by_user_id = user.id;
-  if (table === 'compendium' || table === 'compendium_templates') row.created_by = user.id;
+  if (table === 'compendium' || table === 'compendium_templates' || table === 'monsters') row.created_by = user.id;
   if (table === 'party_map_pins' || table === 'party_map_drawings' || table === 'table_items') row.created_by = user.id;
   if (table === 'push_subscriptions' || table === 'user_notification_settings') row.user_id = user.id;
   return row;
@@ -850,8 +853,8 @@ export async function executeDataQuery(user, request) {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
-      // A campaign's item stays in that campaign: a GM cannot move it to another campaign or into the shared list.
-      if (table === 'game_items' && !transactionCtx.admin) delete prepared.party_id;
+      // A campaign's entry stays in that campaign: a GM cannot move it to another campaign or into the shared list.
+      if (CAMPAIGN_OWNABLE_REFERENCE.has(table) && !transactionCtx.admin) delete prepared.party_id;
       if (table === 'notes') {
         for (const row of candidates) validateNoteUpdate(row, prepared, transactionCtx);
         delete prepared.user_id;

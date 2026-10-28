@@ -71,8 +71,8 @@
               queryBuilder = queryBuilder.select('*');
             }
 
-            // Campaigns' own custom items are not part of the shared game data.
-            if (category === 'items') {
+            // Campaigns' own custom items and monsters are not part of the shared game data.
+            if (category === 'items' || category === 'monsters') {
               queryBuilder = queryBuilder.is('party_id', null);
             }
 

@@ -6,6 +6,7 @@ import { getSessionHistory, getSoloState, recordNarration } from './helper/servi
 import { buildNarratorMessages, buildSummaryMessages, parseNarratorReply } from './soloNarratorContext.js';
 import { needsApproval, parseToolArguments, runTool, toolByName, toolSpecs } from './soloNarratorTools.js';
 import { buildRecapMessages } from './recapPrompt.js';
+import { MAX_TASK_CHARS, buildStoryHelperMessages, campaignContext } from './storyHelperPrompt.js';
 import { stripRecapNotes } from '../shared/recapNotes.js';
 import { buildMissionMessages, missionContext, parseMissionProposal } from './soloMissionProposal.js';
 import { DEFAULT_GLOSSARIES, MAX_GLOSSARY_CHARS, effectiveGlossary, isNarrationLanguage, normalizeNarrationLanguage, sanitizeGlossaryInput } from './soloNarrationLanguage.js';
@@ -459,18 +460,59 @@ async function carryOn(user, { partyId, turnId }, { onDelta, onTool, signal }) {
 }
 
 /** A one-off generation for the Story Helper. The prompt is built by the page; the key and the call stay on the server. */
-export async function generateStory(user, { prompt, partyId } = {}) {
-  const text = String(prompt ?? '').trim();
-  if (!text) throw new HttpError(400, 'prompt is required', 'EMPTY_PROMPT');
-  if (text.length > 30_000) throw new HttpError(400, 'The prompt is too long', 'PROMPT_TOO_LONG');
-  let campaign = null;
-  if (partyId) {
-    if (!UUID.test(String(partyId))) throw new HttpError(400, 'Invalid campaign', 'INVALID_CAMPAIGN');
-    const access = await loadCampaignAccess(pool, user, partyId);
-    if (!access?.isGm) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
-    campaign = partyId;
-  }
-  const result = await callModel(user, { messages: [{ role: 'user', content: text }], purpose: 'story', partyId: campaign, temperature: 0.7, maxTokens: 2500 });
+/**
+ * The Story Helper. The GM sends only their request and choices; the instructions, the characters and what the
+ * campaign already knows are added here, so every GM gets the same rules and players' text is kept as data.
+ */
+export async function generateStory(user, { prompt, partyId, characterIds = [], includeDescriptions = true, includeStats = false, location = '', npcs = '' } = {}) {
+  const task = String(prompt ?? '').trim();
+  if (!task) throw new HttpError(400, 'prompt is required', 'EMPTY_PROMPT');
+  if (task.length > MAX_TASK_CHARS) throw new HttpError(400, `Keep the request under ${MAX_TASK_CHARS} characters`, 'PROMPT_TOO_LONG');
+  if (!UUID.test(String(partyId || ''))) throw new HttpError(400, 'partyId is required', 'INVALID_CAMPAIGN');
+  const access = await loadCampaignAccess(pool, user, partyId);
+  if (!access?.isGm) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
+
+  const ids = (Array.isArray(characterIds) ? characterIds : []).map(String).filter((id) => UUID.test(id)).slice(0, 20);
+  const [{ rows: characters }, { rows: categoryRows }, history, narration] = await Promise.all([
+    // Only characters in this campaign, whatever ids were sent.
+    ids.length
+      ? pool.query(
+        `SELECT c.name, c.kin, c.profession, c.appearance, c.weak_spot, c.current_hp, c.max_hp, c.current_wp, c.max_wp
+         FROM party_members pm JOIN characters c ON c.id = pm.character_id
+         WHERE pm.party_id = $1 AND c.id = ANY($2::uuid[])
+         ORDER BY c.name`,
+        [partyId, ids],
+      )
+      : { rows: [] },
+    pool.query('SELECT DISTINCT category FROM game_items WHERE party_id IS NULL AND category IS NOT NULL ORDER BY category'),
+    getSessionHistory(user, partyId, { limit: 3 }).catch(() => ({ sessions: [], latestCheckpoint: null })),
+    campaignLanguage(partyId),
+  ]);
+  const checkpoint = history.latestCheckpoint;
+  const campaign = campaignContext({
+    checkpoint: checkpoint ? { summary: checkpoint.summary, location: checkpoint.scene?.location ?? '' } : null,
+    sessions: history.sessions.filter((session) => session.status === 'completed' && session.summary),
+    openThreads: (access.campaign.open_threads ?? []).map((thread) => (typeof thread === 'string' ? thread : JSON.stringify(thread))),
+  });
+
+  const result = await callModel(user, {
+    messages: buildStoryHelperMessages({
+      task,
+      characters,
+      includeDescriptions: includeDescriptions !== false,
+      includeStats: includeStats === true,
+      location,
+      npcs,
+      campaign,
+      categories: categoryRows.map((row) => row.category),
+      language: narration.language,
+      glossary: narration.glossary,
+    }),
+    purpose: 'story',
+    partyId,
+    temperature: 0.7,
+    maxTokens: 2500,
+  });
   return { text: result.text, model: result.model, usage: result.usage };
 }
 

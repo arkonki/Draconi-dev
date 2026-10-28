@@ -26,6 +26,8 @@ export const queryKeys = {
   projectorImages: (partyId: string | undefined | null) => ['party-projector-images', partyId] as const,
   gameItems: ['gameItems'] as const,
   monsters: ['allMonsters'] as const,
+  /** The shared bestiary plus one campaign's own monsters; invalidating `monsters` refreshes these too. */
+  campaignMonsters: (partyId: string) => ['allMonsters', partyId] as const,
   heroicAbilities: ['heroicAbilities'] as const,
   magicSchools: ['magicSchools'] as const,
   professions: ['professions'] as const,

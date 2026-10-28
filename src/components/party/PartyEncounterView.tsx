@@ -22,6 +22,7 @@ import {
   nextRound,
 } from '../../lib/api/encounters';
 import { fetchAllMonsters } from '../../lib/api/monsters';
+import { CustomMonsterModal } from './CustomMonsterModal';
 import { useEncounterRealtime } from '../../hooks/useEncounterRealtime';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { Button } from '../shared/Button';
@@ -96,7 +97,7 @@ export interface MonsterStats {
   [key: string]: unknown;
 }
 export interface MonsterAttack { name: string; effects: unknown[]; description: string; roll_values?: string; }
-export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; }
+export interface MonsterData { id: string; name: string; category?: string; stats?: MonsterStats; attacks?: MonsterAttack[]; effectsSummary?: string; party_id?: string | null; }
 export interface MonsterGearItem {
   item_id: string;
   name: string;
@@ -1267,9 +1268,11 @@ interface AddCombatantsModalProps {
   allMonsters: MonsterData[];
   onAddParty: (characterId: string) => void;
   onAddMonster: (monsterId: string, count: number, customName: string) => void;
+  /** Opens the form for a new monster or NPC that belongs to this campaign. */
+  onCreateCustom: (asNpc: boolean) => void;
 }
 
-function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonsters, onAddParty, onAddMonster }: AddCombatantsModalProps) {
+function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonsters, onAddParty, onAddMonster, onCreateCustom }: AddCombatantsModalProps) {
   const [tab, setTab] = useState<'party' | 'monsters'>('party');
   const [monsterSearch, setMonsterSearch] = useState('');
   const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
@@ -1329,8 +1332,14 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
                   onChange={(e) => setMonsterSearch(e.target.value)}
                 />
               </div>
-              <div className="text-[11px] text-stone-500">
-                NPC entries are highlighted in amber and show their type before you add them to the fight.
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] text-stone-500">
+                  NPC entries are highlighted in amber. Entries marked Campaign were made for this campaign.
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" icon={PlusCircle} onClick={() => onCreateCustom(false)}>Custom monster</Button>
+                  <Button size="sm" variant="outline" icon={PlusCircle} onClick={() => onCreateCustom(true)}>Custom NPC</Button>
+                </div>
               </div>
               <div className="flex-grow min-h-0 overflow-hidden flex flex-col md:flex-row gap-4">
                 <div className="flex-1 min-h-0 overflow-y-auto border rounded bg-white divide-y">
@@ -1358,6 +1367,7 @@ function AddCombatantsModal({ isOpen, onClose, availablePartyMembers, allMonster
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-stone-500">
                               <span>{monster.category || 'Uncategorized'}</span>
                               {monster.stats?.TYPE ? <span>• {monster.stats.TYPE}</span> : null}
+                              {monster.party_id ? <span className="rounded bg-teal-50 px-1 font-bold uppercase text-teal-700">Campaign</span> : null}
                             </div>
                           </div>
                           <span
@@ -1876,9 +1886,9 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
     enabled: !!partyId,
   });
   const { data: allMonsters } = useQuery<MonsterData[]>({
-    queryKey: queryKeys.monsters,
+    queryKey: queryKeys.campaignMonsters(partyId),
     queryFn: async () => {
-      const monsters = await fetchAllMonsters();
+      const monsters = await fetchAllMonsters(partyId);
       return monsters as MonsterData[];
     },
     staleTime: QUERY_STALE_TIME.reference,
@@ -2088,6 +2098,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   const updateEncounterMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<Encounter> }) => updateEncounter(id, updates), onSuccess: () => { void Promise.all([invalidateEncounter(), invalidateEncounterList()]); setIsEditingEncounter(false); } });
   const addCharacterMu = useMutation({ mutationFn: addCharacterToEncounter, onSuccess: invalidateCombatants });
   const addMonsterMu = useMutation({ mutationFn: addMonsterToEncounter, onSuccess: invalidateCombatants });
+  const [customMonsterKind, setCustomMonsterKind] = useState<'monster' | 'npc' | null>(null);
   const removeCombatantMu = useMutation({ mutationFn: removeCombatant, onSuccess: invalidateCombatants });
   const updateCombatantMu = useMutation({ mutationFn: ({ id, updates }: { id: string; updates: Partial<EncounterCombatant> }) => updateCombatant(id, updates), onSuccess: invalidateCombatants });
 
@@ -2116,8 +2127,9 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   });
   const nextRoundMu = useMutation({ mutationFn: () => nextRound(currentEncounterId!), onSuccess: () => { setSelectedActorId(null); setIsInitModalOpen(true); void Promise.all([invalidateEncounter(), invalidateCombatants()]); }, onError: (error: Error) => { setFeedbackToast({ id: Date.now(), text: error.message, type: 'error' }); setTimeout(() => setFeedbackToast(null), 3500); } });
 
-  const handleAddMonster = (id: string, count: number, customName: string) => {
-    const m = id ? monstersById.get(id) : null;
+  // `monster` is passed for one that was just made, before the monster list has caught up with it.
+  const handleAddMonster = (id: string, count: number, customName: string, monster?: MonsterData) => {
+    const m = monster ?? (id ? monstersById.get(id) : null);
     const encounterPlayerCount = combatantsData?.filter((combatant) => combatant.is_player_character).length || 0;
     const ferocity = resolveMonsterFerocity(
       m?.stats?.FEROCITY,
@@ -2558,7 +2570,18 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
         allMonsters={allMonsters || []}
         onAddParty={(id: string) => addCharacterMu.mutate({ encounterId: currentEncounterId!, characterId: id, initiativeRoll: null })}
         onAddMonster={handleAddMonster}
+        onCreateCustom={(asNpc: boolean) => setCustomMonsterKind(asNpc ? 'npc' : 'monster')}
       />
+      {customMonsterKind && (
+        <CustomMonsterModal
+          partyId={partyId}
+          asNpc={customMonsterKind === 'npc'}
+          onClose={() => setCustomMonsterKind(null)}
+          onCreated={(monster, count, customName) => {
+            if (count > 0 && monster.id && currentEncounterId) handleAddMonster(monster.id, count, customName, monster as unknown as MonsterData);
+          }}
+        />
+      )}
       <InitiativeDrawModal isOpen={isInitModalOpen} onClose={() => setIsInitModalOpen(false)} combatants={combatants} onApply={handleInitApply} />
       {isAttackModalOpen && activeCombatant && (
         <AttackResolutionModal

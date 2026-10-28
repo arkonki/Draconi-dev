@@ -204,7 +204,7 @@ export async function executeRpc(user, name, args = {}) {
           imageUrl = imageUrl || characters[0].portrait_url || null;
         } else if (kind === 'monster' && entry.monster_id) {
           monsterId = requireUuid(entry.monster_id, 'monster_id');
-          const { rows: monsters } = await client.query('SELECT name FROM monsters WHERE id = $1', [monsterId]);
+          const { rows: monsters } = await client.query('SELECT name FROM monsters WHERE id = $1 AND (party_id IS NULL OR party_id = $2)', [monsterId, partyId]);
           if (!monsters[0]) throw new HttpError(404, 'Monster not found');
           label = label || monsters[0].name;
         }
@@ -432,8 +432,9 @@ export async function executeRpc(user, name, args = {}) {
     }
 
     if (name === 'add_monster_to_encounter') {
-      await requireEncounterAccess(client, user, args.p_encounter_id, true);
-      const { rows } = await client.query('SELECT * FROM monsters WHERE id = $1', [args.p_monster_id]);
+      const encounter = await requireEncounterAccess(client, user, args.p_encounter_id, true);
+      // Shared monsters, or this campaign's own; another campaign's monsters stay out of sight.
+      const { rows } = await client.query('SELECT * FROM monsters WHERE id = $1 AND (party_id IS NULL OR party_id = $2)', [args.p_monster_id, encounter.party_id]);
       if (!rows[0]) throw new HttpError(404, 'Monster not found');
       const stats = rows[0].stats || {};
       const maxHp = Number(stats.HP ?? stats.hp ?? 1);

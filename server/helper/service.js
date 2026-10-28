@@ -2699,8 +2699,8 @@ export async function generateSoloNpc(user, input, { sourceClient } = {}) {
       SOLO_NPC_ROLES: roles,
     };
     const { rows: monsters } = await client.query(
-      `INSERT INTO monsters (created_by, name, description, category, stats, attacks, effects_summary)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+      `INSERT INTO monsters (created_by, name, description, category, stats, attacks, effects_summary, party_id)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
        RETURNING *`,
       [
         user.id,
@@ -2710,6 +2710,7 @@ export async function generateSoloNpc(user, input, { sourceClient } = {}) {
         JSON.stringify(stats),
         JSON.stringify(roles.map((role) => ({ role, tableKey: `solo_npc_attack_${role}` }))),
         `Attributes ${profile.attributes}; HP ${profile.hp}; Movement ${profile.movement}; Armor ${profile.armor || 'none'}; Damage ${profile.damage.toUpperCase()}; relevant skills ${profile.relevantSkill}, other skills ${profile.otherSkill}.`,
+        input.campaign_id,
       ],
     );
     const { rows: npcs } = await client.query(
@@ -7241,6 +7242,7 @@ export async function getEncounterSetupOptions(user, campaignId, {
   const search = String(monsterSearch || '').trim();
   const monsterValues = [campaignId];
   const monsterClauses = [
+    '(monsters.party_id IS NULL OR monsters.party_id = $1)',
     `(NOT EXISTS (SELECT 1 FROM solo_npcs private_npc WHERE private_npc.monster_id = monsters.id)
       OR EXISTS (
         SELECT 1 FROM solo_npcs campaign_npc
@@ -7438,8 +7440,8 @@ export async function addEncounterParticipants(user, input, { sourceClient } = {
     const selectedMonsterIds = [...new Set(input.monsters.map((entry) => entry.monster_id))];
     const { rows: monsters } = selectedMonsterIds.length
       ? await client.query(
-        `SELECT id, name, stats FROM monsters WHERE id = ANY($1::uuid[])`,
-        [selectedMonsterIds],
+        `SELECT id, name, stats FROM monsters WHERE id = ANY($1::uuid[]) AND (party_id IS NULL OR party_id = $2)`,
+        [selectedMonsterIds, input.campaign_id],
       )
       : { rows: [] };
     if (monsters.length !== selectedMonsterIds.length) {

@@ -15,6 +15,7 @@ import { BarteringCalculator } from './BarteringCalculator';
 import { parseCost } from '../../lib/equipment';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { useConfirm } from '../../hooks/useConfirm';
+import { addItemsToPartyStash } from '../../lib/api/partyStash';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -394,9 +395,6 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   const inventoryById = useMemo(() => {
     return new Map(inventory.map(item => [item.id, item]));
   }, [inventory]);
-  const inventoryByStackKey = useMemo(() => {
-    return new Map(inventory.map(item => [getItemStackKey(item.name, item.description), item]));
-  }, [inventory]);
   const selectedItemIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
   const selectedCharacter = useMemo(() => membersById.get(selectedCharacterId), [membersById, selectedCharacterId]);
   const categories = useMemo(() => ['all', ...new Set(inventory.map(i => i.category).filter(Boolean) as string[])], [inventory]);
@@ -529,65 +527,12 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   // --- HANDLER: Assign Loot to Party ---
   const handleAssignLoot = async (loot: { item: GameItem; quantity: number }[]) => {
     try {
-      const aggregatedByStack = new Map<string, { item: GameItem; quantity: number; description: string }>();
-      for (const { item, quantity } of loot) {
-        if (quantity <= 0) continue;
-        const description = item.effect || item.description || '';
-        const stackKey = getItemStackKey(item.name, description);
-        const existing = aggregatedByStack.get(stackKey);
-        if (existing) {
-          existing.quantity += quantity;
-        } else {
-          aggregatedByStack.set(stackKey, { item, quantity, description });
-        }
-      }
-
-      const logs: Array<{
-        party_id: string;
-        item_name: string;
-        quantity: number;
-        from_type: 'party';
-        from_id: string;
-        to_type: 'party';
-        to_id: string;
-      }> = [];
-      const rowsToInsert: Array<{ party_id: string; name: string; quantity: number; category: string; description: string }> = [];
-      const rowsToUpdate: Array<{ id: string; quantity: number }> = [];
-
-      for (const { item, quantity, description } of aggregatedByStack.values()) {
-        const existing = inventoryByStackKey.get(getItemStackKey(item.name, description));
-        if (existing) {
-          rowsToUpdate.push({ id: existing.id, quantity: existing.quantity + quantity });
-        } else {
-          rowsToInsert.push({
-            party_id: partyId,
-            name: item.name,
-            quantity,
-            category: item.category,
-            description
-          });
-        }
-
-        logs.push({
-          party_id: partyId,
-          item_name: coerceItemName(item.name),
-          quantity,
-          from_type: 'party',
-          from_id: 'DM',
-          to_type: 'party',
-          to_id: partyId
-        });
-      }
-
-      if (rowsToUpdate.length > 0) {
-        await supabase.from('party_inventory').upsert(rowsToUpdate, { onConflict: 'id' });
-      }
-      if (rowsToInsert.length > 0) {
-        await supabase.from('party_inventory').insert(rowsToInsert);
-      }
-      if (logs.length > 0) {
-        await supabase.from('party_inventory_log').insert(logs);
-      }
+      await addItemsToPartyStash(partyId, loot.map(({ item, quantity }) => ({
+        name: coerceItemName(item.name),
+        category: item.category,
+        description: item.effect || item.description || '',
+        quantity,
+      })));
       await loadData();
     } catch (err) { console.error('Failed to assign loot.', err); }
   };

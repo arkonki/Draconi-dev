@@ -167,7 +167,18 @@ export interface MissionProposal {
 }
 
 export const proposeSoloMission = (partyId: string, idea: string) => send<{ mission: MissionProposal; usage: AiAnswer['usage'] }>('/ai/solo-mission', json('POST', { partyId, idea }));
-export const generateStory = (prompt: string, partyId?: string) => send<AiAnswer>('/ai/story', json('POST', { prompt, partyId }));
+/** What the GM chose in the Story Helper. The server adds the rules, the characters' details and the campaign so far. */
+export interface StoryRequest {
+  prompt: string;
+  partyId: string;
+  characterIds: string[];
+  includeDescriptions: boolean;
+  includeStats: boolean;
+  location?: string;
+  npcs?: string;
+}
+
+export const generateStory = (request: StoryRequest) => send<AiAnswer>('/ai/story', json('POST', request));
 export const fetchNarratorConversation = (partyId: string) => send<NarratorConversation>(`/ai/solo-narrator?partyId=${encodeURIComponent(partyId)}`);
 export const saveNarratorSummary = (partyId: string, summary: string) => send<{ summary: string }>('/ai/solo-narrator', json('PUT', { partyId, summary }));
 /** Changes the language the campaign is narrated in, for the built-in narrator and for assistants over MCP. */

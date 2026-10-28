@@ -17,6 +17,7 @@ import {
 
 import MDEditor, { commands, ICommand } from '@uiw/react-md-editor';
 import { HomebrewRenderer } from '../compendium/HomebrewRenderer';
+import { StoryContentActions } from './StoryContentActions';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 
 // --- CONSTANTS ---
@@ -49,11 +50,11 @@ interface PartyCharacterRow {
 
 const monsterTemplate = `\`\`\`monster
 ### Monster Name
-*Size type (tag)*
+*Category*
 ___
-| Ferocity | Movement | Armor | HP |
-|:---:|:---:|:---:|:---:|
-| 1 | 12 | 2 | 24 |
+| Ferocity | Size | Movement | Armor | HP |
+|:---:|:---:|:---:|:---:|:---:|
+| 1 | Normal | 12 | 2 | 24 |
 
 **Skills:** Awareness 14, Healing 10
 ___
@@ -96,32 +97,20 @@ ___
 |:---:|:---:|:---:|:---:|:---:|:---:|
 | 13 | 11 | 14 | 12 | 10 | 15 |
 ___
-**Movement:** 12 **HP:** 11 **WP:** 10
-**Armor:** Leather (1)
+**Movement:** 12 · **HP:** 11 · **WP:** 10 · **Armor:** 1
 **Skills:** Awareness 14, Persuasion 12
 **Weapons:** Dagger (skill 12, damage D8)
 \`\`\``;
 
 const itemTemplate = `\`\`\`item
 ### Item Name
-*Rarity Type*
+*LOOT*
 ___
-**Cost:** 50 Gold
-**Weight:** 1
+**Cost:** 5 gold · **Weight:** 1
 ___
-**Effect:** Description of the magical effect.
+**Effect:** What it looks like and what it does in play.
 \`\`\``;
 
-const DRAGONBANE_RULES_SUMMARY = `
-SYSTEM RULES (DRAGONBANE):
-- Core Mechanic: Roll D20 under Skill. 1 = Dragon (Crit), 20 = Demon (Fumble).
-- Attributes: STR, CON, AGL, INT, WIL, CHA.
-- Kin: Human, Halfling, Dwarf, Elf, Mallard, Wolfkin.
-- Combat: Rounds (10s). Initiative cards 1-10. Actions: Attack, Parry, Dodge, Dash, etc.
-- Monsters: Do NOT roll to hit. Attacks hit automatically; players must Dodge/Parry. Monsters use a d6 Attack Table. Stats: Ferocity (actions/round), Size, Movement, Armor, HP.
-- Magic: Costs Willpower Points (WP). Schools: Animism, Elementalism, Mentalism. Spells have Ranks.
-- Conditions: Exhausted (STR), Sickly (CON), Dazed (AGL), Angry (INT), Scared (WIL), Disheartened (CHA).
-`;
 
 // --- CUSTOM COMMANDS ---
 const createCommand = (name: string, icon: React.ReactNode, template: string): ICommand => ({
@@ -178,6 +167,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
   const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000 });
   const apiKey = Boolean(aiSettings.data?.hasKey);
   const [loading, setLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   // Library State
   const [selectedIdea, setSelectedIdea] = useState<StoryIdea | null>(null);
@@ -313,61 +303,29 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
     setSelectedCharIds(next);
   };
 
-  const buildCharacterContextString = () => {
-    const selectedChars = partyCharacters.filter((c) => selectedCharIds.has(c.id));
-    if (selectedChars.length === 0) return "No specific party members.";
-
-    return selectedChars.map((c) => {
-      let details = `- ${c.name} (${c.kin} ${c.profession})`;
-      if (includeCharDesc) {
-        if (c.appearance) details += `. Appearance: ${c.appearance}`;
-        if (c.weak_spot) details += `. Weakness: ${c.weak_spot}`;
-      }
-      if (includeCharStats) {
-        details += ` [HP: ${c.current_hp}/${c.max_hp}, WP: ${c.current_wp}/${c.max_wp}]`;
-      }
-      return details;
-    }).join('\n');
-  };
-
   const handleGenerate = async () => {
     if (!prompt.trim() || !apiKey) return;
     setLoading(true);
+    setGenerateError(null);
 
     if (window.innerWidth < 768) setIsMaximized(true);
 
     try {
-      const partyContextString = buildCharacterContextString();
-
-      const fullPrompt = `
-        You are a helpful Dragonbane RPG Gamemaster assistant. Generate content using Markdown.
-        ${DRAGONBANE_RULES_SUMMARY}
-        
-        CRITICAL FORMATTING:
-        - Use **bold** for mechanics (e.g., **Skill 14**).
-        - Use code blocks for specific content types:
-          - \`\`\`npc (Must follow: ### Name \\n *Kin Profession* \\n ___ \\n Attrib Table)
-          - \`\`\`monster (Must follow: ### Name \\n *Type* \\n ___ \\n Stat Table)
-          - \`\`\`spell (Must follow: ### Name \\n *Rank School* \\n ___)
-          - \`\`\`item (Must follow: ### Name \\n *Rarity Type* \\n ___)
-          - \`\`\`note (For invisible GM notes)
-        
-        TASK: ${prompt}
-        
-        CONTEXT:
-        Party Members:
-        ${partyContextString}
-        
-        ${contextLocation ? `Location/Scene: ${contextLocation}` : ''}
-        ${contextNpc ? `Involved NPCs: ${contextNpc}` : ''}
-      `;
-
-      const answer = await generateStory(fullPrompt, partyId);
-      setResponse(answer.text || 'No response.');
+      // The server adds the rules, the characters' details and what the campaign already knows.
+      const answer = await generateStory({
+        prompt,
+        partyId,
+        characterIds: partyCharacters.filter((c) => selectedCharIds.has(c.id)).map((c) => c.id),
+        includeDescriptions: includeCharDesc,
+        includeStats: includeCharStats,
+        location: contextLocation,
+        npcs: contextNpc,
+      });
+      if (answer.text?.trim()) setResponse(answer.text);
+      else setGenerateError('The AI came back empty. Try again.');
     } catch (err: unknown) {
       console.error(err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setResponse(`Error: ${errorMessage}`);
+      setGenerateError(err instanceof Error ? err.message : 'Could not generate.');
     } finally {
       setLoading(false);
     }
@@ -537,6 +495,7 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                   <Button onClick={handleGenerate} disabled={loading} className="w-full justify-center shadow-sm" icon={loading ? RefreshCw : Sparkles} variant="primary" loading={loading}>
                     {loading ? 'Conjuring...' : 'Generate'}
                   </Button>
+                  {generateError && <p role="alert" className="mt-2 text-xs text-red-700">{generateError}</p>}
                 </div>
               </>
             )}
@@ -613,12 +572,14 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
                     ) : (
                       <>
                         <button onClick={() => setIsEditingLibrary(false)} className="p-1.5 hover:bg-gray-100 rounded text-gray-500" title="Cancel"><X size={16} /></button>
-                        <Button size="sm" variant="primary" onClick={() => updateMutation.mutate({ ideaId: selectedIdea.id, updates: { response: editorContent } })} loading={updateMutation.isPending}>Save Changes</Button>
+                        <Button size="sm" variant="primary" onClick={() => updateMutation.mutate({ ideaId: selectedIdea.id, updates: { response: selectedIdea.response } })} loading={updateMutation.isPending}>Save Changes</Button>
                       </>
                     )
                   )}
                 </div>
               </div>
+
+              <StoryContentActions key={activeTab === 'generate' ? 'generate' : selectedIdea?.id} partyId={partyId} markdown={activeTab === 'generate' ? editorContent : (selectedIdea?.response ?? '')} />
 
               {/* Editor / Viewer */}
               <div className="flex-grow overflow-hidden relative group" data-color-mode="light">

@@ -153,7 +153,7 @@ export function VirtualTable({ partyId, partyMembers, isGm, currentUserId }: Vir
   );
   const portraits = useMemo(() => new Map(partyMembers.filter((member) => member.id).map((member) => [member.id as string, member.portrait_url ?? null])), [partyMembers]);
 
-  const { data: monsters = [] } = useQuery({ queryKey: queryKeys.monsters, queryFn: fetchAllMonsters, enabled: isGm, staleTime: 5 * 60_000 });
+  const { data: monsters = [] } = useQuery({ queryKey: queryKeys.campaignMonsters(partyId), queryFn: () => fetchAllMonsters(partyId), enabled: isGm, staleTime: 5 * 60_000 });
 
   const handleTokenScale = (value: number) => {
     const next = clampTokenScale(value);

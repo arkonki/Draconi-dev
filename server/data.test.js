@@ -221,6 +221,16 @@ describe('shared table access', () => {
     expect(outsiderQuery.text).toContain('t."party_id" IS NULL');
   });
 
+  it('keeps a campaign\'s own monsters and NPCs inside that campaign', () => {
+    const campaignMonster = { id: 'wight', name: 'Bog Wight', party_id: 'party' };
+    expect(canRead('monsters', campaignMonster, player)).toBe(true);
+    expect(canRead('monsters', campaignMonster, outsider)).toBe(false);
+    expect(canRead('monsters', { id: 'orc', party_id: null }, outsider)).toBe(true);
+    expect(canWrite('monsters', campaignMonster, gm, true)).toBe(true);
+    expect(canWrite('monsters', campaignMonster, player, true)).toBe(false);
+    expect(canWrite('monsters', { id: 'orc', party_id: null }, gm)).toBe(false);
+  });
+
   it('filters hidden tokens out of the SQL a player runs', () => {
     const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }], ['visible', { data_type: 'boolean', udt_name: 'bool' }]]);
     const playerQuery = buildAuthorizedSelectQuery('table_items', player, columns);

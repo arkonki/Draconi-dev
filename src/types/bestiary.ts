@@ -80,6 +80,8 @@ export interface MonsterAttackEntry {
 export interface MonsterData {
   id?: string; // UUID
   created_by?: string; // UUID of user
+  /** Set for a campaign's own monster or NPC, which only that campaign sees. Null for the shared bestiary. */
+  party_id?: string | null;
   name: string;
   description?: string;
   category?: string; // e.g., "Undead", "Beast", "Humanoid"
