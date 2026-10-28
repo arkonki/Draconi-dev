@@ -425,7 +425,10 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (pathname === '/api/auth/sign-up' && request.method === 'POST') {
-      const actor = await currentUser(request, false);
+      // Only an administrator creates accounts for other people. Anyone else, including someone who is still signed in
+      // on this browser, signs up the ordinary way, with the same terms, region and place checks.
+      const signedIn = await currentUser(request, false);
+      const actor = signedIn?.role === 'admin' ? signedIn : null;
       const body = await readJson(request);
       // Only an administrator can create an account for someone outside the allowed countries.
       if (!actor) assertSignUpRegion(request);
