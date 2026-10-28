@@ -65,10 +65,16 @@ describe('loot item enhancer', () => {
     expect(context).toContain('make it haunt its owner');
   });
 
-  it('keeps JSON keys in English when the campaign is narrated in another language', () => {
+  it('drops a price the stash cannot read', () => {
+    expect(parseEnhancedItem(JSON.stringify({ name: 'Ring', cost: '3 kuldmünti' })).cost).toBe('');
+    expect(parseEnhancedItem(JSON.stringify({ name: 'Ring', cost: '2 gold, 5 silver' })).cost).toBe('2 gold, 5 silver');
+  });
+
+  it('translates only the name and description when the campaign is narrated in another language', () => {
     const [system, user] = buildItemMessages({ context: 'THE ITEM SO FAR', language: 'et' });
     expect(system.content.startsWith(ITEM_SYSTEM_PROMPT)).toBe(true);
-    expect(system.content).toContain('keep the JSON keys exactly as shown in English');
+    expect(system.content).toContain('Write only "name" and "effect" in that language');
+    expect(system.content).toContain('keep the JSON keys in English');
     expect(user.content).toBe('THE ITEM SO FAR');
   });
 });

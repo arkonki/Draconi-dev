@@ -1,4 +1,5 @@
 import type { CombatSummary } from './combatSummary';
+import { RECAP_DRAFT_NOTE, RECAP_NOTHING_RECORDED } from '../../shared/recapNotes.js';
 
 // A first draft of the session summary, assembled from what the app already recorded while the session ran:
 // fights, notable rolls, quests and chat. It is plain text for the GM to rewrite, not a finished story.
@@ -22,7 +23,11 @@ export interface RecapInput {
   questsCompleted: string[];
   questsAdded: string[];
   messageCount: number;
+  /** What happened in the story this session, such as the solo narrator's replies. Empty when not known. */
+  story?: string;
 }
+
+const STORY_LIMIT = 3000;
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const list = (names: string[]) => names.join(', ');
@@ -70,7 +75,10 @@ export function buildSessionRecap(input: RecapInput): string {
 
   if (input.messageCount > 0) lines.push('', `${plural(input.messageCount, 'chat message')} at the table.`);
 
-  if (lines.length <= 2) lines.push('', 'Nothing was recorded by the app this session. Write what happened here.');
-  lines.push('', '(Draft from what the app recorded. Add what really happened before you end the session.)');
+  const story = (input.story ?? '').trim();
+  if (story) lines.push('', 'Story', story.length > STORY_LIMIT ? `…${story.slice(-(STORY_LIMIT - 1))}` : story);
+
+  if (lines.length <= 2) lines.push('', RECAP_NOTHING_RECORDED);
+  lines.push('', RECAP_DRAFT_NOTE);
   return lines.join('\n');
 }

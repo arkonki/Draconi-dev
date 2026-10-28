@@ -80,15 +80,22 @@ export function SoloEndStory({ partyId, partyName, state, hero, currentUserId, c
   // A first draft of the session summary when the wrap-up opens, from what the app recorded.
   const drafted = useRef(false);
   useEffect(() => {
-    if (step !== 'wrapup' || drafted.current || !state.activeSessionId) return;
+    // Wait for the narrator's replies: they are the story this session's recap is built around.
+    if (step !== 'wrapup' || drafted.current || !state.activeSessionId || conversation.isLoading) return;
     drafted.current = true;
     setDrafting(true);
-    const session = { title: `${partyName} solo adventure`, startedAt: null };
-    void draftSessionRecap(partyId, session, clockLabel(state))
+    // Without the session's start the draft would cover the whole campaign, so look it up in the journal.
+    const startedAt = state.journal.sessions.find((entry) => entry.id === state.activeSessionId)?.startedAt ?? null;
+    const since = startedAt ? new Date(startedAt).getTime() : null;
+    const turns = conversation.data?.turns ?? [];
+    const storyTurns = turns.filter((turn) => turn.role === 'assistant' && (since === null || (turn.createdAt && new Date(turn.createdAt).getTime() > since)));
+    const story = [missionSummary.trim(), ...(since === null ? storyTurns.slice(-3) : storyTurns).map((turn) => turn.content.trim())].filter(Boolean).join('\n\n');
+    const session = { title: `${partyName} solo adventure`, startedAt };
+    void draftSessionRecap(partyId, session, clockLabel(state), { story })
       .then((draft) => setSessionSummary((current) => current || draft))
       .catch(() => undefined)
       .finally(() => setDrafting(false));
-  }, [step, partyId, partyName, state]);
+  }, [step, partyId, partyName, state, conversation.isLoading, conversation.data, missionSummary]);
 
   const concludeMission = async () => {
     if (!state.activeMission) return;

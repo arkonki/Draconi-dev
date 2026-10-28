@@ -14,9 +14,12 @@ export async function draftSessionRecap(
   partyId: string,
   session: { title: string; startedAt?: string | null },
   clock: string | null,
+  extra: { story?: string } = {},
 ): Promise<string> {
-  const since = session.startedAt ? new Date(session.startedAt).getTime() : 0;
-  const after = (value: string | null | undefined) => Boolean(value) && new Date(value as string).getTime() > since;
+  // Without a start time nothing can be placed in this session, so leave the recorded facts out rather than
+  // reporting the whole campaign's history as this session's.
+  const since = session.startedAt ? new Date(session.startedAt).getTime() : null;
+  const after = (value: string | null | undefined) => since !== null && Boolean(value) && new Date(value as string).getTime() > since;
 
   const [encounters, rolls, tasks, messages] = await Promise.allSettled([
     (async () => {
@@ -31,9 +34,8 @@ export async function draftSessionRecap(
     fetchTrustedRollHistory(partyId, { limit: 200 }),
     fetchTasks(partyId),
     (async () => {
-      let query = supabase.from('messages').select('id').eq('party_id', partyId);
-      if (session.startedAt) query = query.gt('created_at', session.startedAt);
-      const { data, error } = await query;
+      if (!session.startedAt) return 0;
+      const { data, error } = await supabase.from('messages').select('id').eq('party_id', partyId).gt('created_at', session.startedAt);
       if (error) throw error;
       return data?.length ?? 0;
     })(),
@@ -62,5 +64,6 @@ export async function draftSessionRecap(
     questsCompleted: taskList.filter((task) => task.status === 'completed' && after(task.completed_at)).map((task) => task.title),
     questsAdded: taskList.filter((task) => after(task.created_at)).map((task) => task.title),
     messageCount: messages.status === 'fulfilled' ? messages.value : 0,
+    story: extra.story,
   });
 }

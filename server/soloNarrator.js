@@ -6,6 +6,7 @@ import { getSessionHistory, getSoloState, recordNarration } from './helper/servi
 import { buildNarratorMessages, buildSummaryMessages, parseNarratorReply } from './soloNarratorContext.js';
 import { needsApproval, parseToolArguments, runTool, toolByName, toolSpecs } from './soloNarratorTools.js';
 import { buildRecapMessages } from './recapPrompt.js';
+import { stripRecapNotes } from '../shared/recapNotes.js';
 import { buildMissionMessages, missionContext, parseMissionProposal } from './soloMissionProposal.js';
 import { DEFAULT_GLOSSARIES, MAX_GLOSSARY_CHARS, effectiveGlossary, isNarrationLanguage, normalizeNarrationLanguage, sanitizeGlossaryInput } from './soloNarrationLanguage.js';
 
@@ -475,7 +476,7 @@ export async function generateStory(user, { prompt, partyId } = {}) {
 
 /** Turns the session recap draft into readable prose with the GM's own model. The GM edits the result before using it. */
 export async function polishRecap(user, { partyId, draft } = {}) {
-  const text = String(draft ?? '').trim();
+  const text = stripRecapNotes(draft);
   if (!text) throw new HttpError(400, 'There is nothing to polish yet', 'EMPTY_DRAFT');
   if (!UUID.test(String(partyId || ''))) throw new HttpError(400, 'partyId is required', 'INVALID_CAMPAIGN');
   const access = await loadCampaignAccess(pool, user, partyId);

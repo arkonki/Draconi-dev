@@ -23,6 +23,8 @@ export const ENHANCED_FIELDS = Object.freeze({
   features: 200,
 });
 
+const COST_PATTERN = /^\d+\s*(gold|silver|copper)(\s*,?\s*\d+\s*(gold|silver|copper))*$/i;
+
 const clip = (value, length) => {
   const text = String(value ?? '').replace(/[ \t]+/g, ' ').trim();
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
@@ -68,7 +70,7 @@ export function buildItemMessages({ context, language = 'en', glossary = null })
   const instruction = plainLanguageInstruction(language, glossary);
   const system = [
     ITEM_SYSTEM_PROMPT,
-    instruction ? `${instruction} Write every text value of the JSON in that language, but keep the JSON keys exactly as shown in English.` : '',
+    instruction ? `${instruction} Write only "name" and "effect" in that language. The app reads the other values, so keep them in English game notation exactly as shown (such as "3 gold", "1H", "STR", "2D6", "Piercing"), and keep the JSON keys in English.` : '',
   ].filter(Boolean).join('\n');
   return [{ role: 'system', content: system }, { role: 'user', content: context }];
 }
@@ -92,6 +94,8 @@ export function parseEnhancedItem(text) {
   }
   if (!item.name) return null;
   item.category = item.category.toUpperCase() || 'LOOT';
+  // The stash prices items by reading "<number> gold/silver/copper", so anything else is no price at all.
+  if (!COST_PATTERN.test(item.cost)) item.cost = '';
   // Stored items keep features as a list, the way the rules' own items do.
   item.features = item.features.split(',').map((feature) => feature.trim()).filter(Boolean).slice(0, 8);
   const weight = Number(raw.weight);
@@ -131,5 +135,10 @@ export async function enhanceItem(user, { partyId, item, instructions } = {}) {
   });
   const enhanced = parseEnhancedItem(result.text);
   if (!enhanced) throw new HttpError(502, 'The AI did not come back with a usable item. Try again, or fill it in yourself.', 'ITEM_UNREADABLE');
+  // An invented or translated category would hide the item's weapon or armor stats in the form.
+  const knownCategories = new Set(categoryRows.map((row) => String(row.category).toUpperCase()));
+  if (knownCategories.size > 0 && !knownCategories.has(enhanced.category)) {
+    enhanced.category = String(draft.category || 'LOOT').toUpperCase();
+  }
   return { item: enhanced, model: result.model, usage: result.usage };
 }

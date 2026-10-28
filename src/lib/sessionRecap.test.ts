@@ -45,4 +45,13 @@ describe('session recap', () => {
     const text = buildSessionRecap({ ...base, clock: null });
     expect(text).toContain('Nothing was recorded by the app this session.');
   });
+
+  it('adds the story, keeping its newest part when it is long', () => {
+    const text = buildSessionRecap({ ...base, story: 'The hero crossed the marsh.' });
+    expect(text).toContain('Story\nThe hero crossed the marsh.');
+    expect(text).not.toContain('Nothing was recorded');
+    const long = buildSessionRecap({ ...base, story: `${'a'.repeat(4000)}THE END` });
+    expect(long).toContain('THE END');
+    expect(long).toContain('…');
+  });
 });
