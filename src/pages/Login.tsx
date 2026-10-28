@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { accountApi } from '../lib/supabase';
+import { accountApi, listCountries, type RegionStatus } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
 import { AlertCircle, Mail, Lock, LogIn } from 'lucide-react';
 import { loginSchema } from '../lib/auth/validation';
@@ -16,6 +16,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [region, setRegion] = useState<RegionStatus | null>(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
@@ -37,6 +38,7 @@ export function Login() {
     accountApi.config().then(({ data }) => {
       setRegistrationOpen(Boolean(data?.registrationOpen));
       setEmailEnabled(Boolean(data?.emailEnabled));
+      setRegion(data?.region ?? null);
     });
   }, []);
 
@@ -231,7 +233,9 @@ export function Login() {
           )}
           {registrationOpen
             ? <span>New here? <Link to="/register" className="font-medium text-blue-600 hover:underline">Create an account</Link></span>
-            : <span>New account creation is currently unavailable.</span>}
+            : region && !region.allowed
+              ? <span>This site is offered in {listCountries(region)}. New accounts can only be created there, but you can sign in to an existing account from anywhere.</span>
+              : <span>New account creation is currently unavailable.</span>}
         </div>
       </div>
     </div>

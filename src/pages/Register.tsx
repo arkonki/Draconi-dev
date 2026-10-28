@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { accountApi, supabase } from '../lib/supabase';
+import { accountApi, listCountries, supabase, type RegionStatus } from '../lib/supabase';
 import { passwordSchema } from '../lib/auth/validation';
 import { Button } from '../components/shared/Button';
 import { AuthNotice, AuthShell, authInputClass } from '../components/auth/AuthShell';
@@ -8,6 +8,7 @@ import { AuthNotice, AuthShell, authInputClass } from '../components/auth/AuthSh
 export function Register() {
   const navigate = useNavigate();
   const [open, setOpen] = useState<boolean | null>(null);
+  const [region, setRegion] = useState<RegionStatus | null>(null);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +20,10 @@ export function Register() {
   const [website, setWebsite] = useState(''); // hidden field: people leave it empty, form-filling bots do not
 
   useEffect(() => {
-    accountApi.config().then(({ data }) => setOpen(Boolean(data?.registrationOpen)));
+    accountApi.config().then(({ data }) => {
+      setOpen(Boolean(data?.registrationOpen));
+      setRegion(data?.region ?? null);
+    });
   }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -48,7 +52,11 @@ export function Register() {
   if (open === false) {
     return (
       <AuthShell title="Create account">
-        <AuthNotice tone="error">New account creation is currently unavailable.</AuthNotice>
+        <AuthNotice tone="error">
+          {region && !region.allowed
+            ? <>New accounts can only be created in {listCountries(region)}. If you already have an account, you can sign in from anywhere.</>
+            : 'New account creation is currently unavailable.'}
+        </AuthNotice>
         <p className="text-center text-sm text-gray-600"><Link to="/login" className="font-medium text-blue-600 hover:underline">Back to sign in</Link></p>
       </AuthShell>
     );

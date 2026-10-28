@@ -48,7 +48,8 @@
     "typecheck:app": "tsc -p tsconfig.app.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:region-ranges": "node scripts/build-region-ranges.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.9.0",

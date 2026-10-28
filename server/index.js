@@ -14,7 +14,7 @@ import { waitForDatabase, pool } from './db.js';
 import { assertRegistrationHasEmail, assertSafeConfig } from './configCheck.js';
 import { preflightHeaders } from './cors.js';
 import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
-import { handleError, HttpError, readJson, routePath, sendJson } from './http.js';
+import { getBearerToken, handleError, HttpError, readJson, routePath, sendJson } from './http.js';
 import {
   housekeepingStatus,
   runHousekeepingNow,
@@ -26,6 +26,7 @@ import { projectorFunction } from './projector.js';
 import { executeRpc } from './rpc.js';
 import { listObjects, removeObjects, servePublicObject, uploadObject } from './storage.js';
 import { isApiPath, serveFrontend } from './static.js';
+import { assertRegionAccess, assertSignUpRegion, regionStatus } from './regionGuard.js';
 import {
   beginApplicationRequest,
   createAndDownloadBackup,
@@ -138,6 +139,9 @@ const server = http.createServer(async (request, response) => {
     if (await handleHelperApiRequest(request, response)) {
       return;
     }
+
+    // Outside the allowed countries, only people with a session (and signing in itself) reach the API.
+    assertRegionAccess(request, pathname, Boolean(getBearerToken(request)));
 
     if (pathname === '/api/health' && request.method === 'GET') {
       await pool.query('SELECT 1');
@@ -423,6 +427,8 @@ const server = http.createServer(async (request, response) => {
     if (pathname === '/api/auth/sign-up' && request.method === 'POST') {
       const actor = await currentUser(request, false);
       const body = await readJson(request);
+      // Only an administrator can create an account for someone outside the allowed countries.
+      if (!actor) assertSignUpRegion(request);
       if (!actor && checkSignup(request, body) === 'bot') {
         // A bot filled in the hidden field: answer as if it worked, and create nothing.
         sendJson(response, 201, { user: null, session: null, verificationRequired: true });
@@ -432,7 +438,8 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (pathname === '/api/auth/config' && request.method === 'GET') {
-      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true', emailEnabled: mailEnabled(), legal: legalContact() });
+      const region = regionStatus(request);
+      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true' && region.allowed, emailEnabled: mailEnabled(), legal: legalContact(), region });
       return;
     }
     if (pathname === '/api/auth/password-reset/request' && request.method === 'POST') {

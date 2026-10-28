@@ -813,10 +813,23 @@ const localAuth = {
   stopAutoRefresh() {},
 };
 
+/** Whether the visitor is in a country the site is offered in. `limited` is false when the limit is off. */
+export interface RegionStatus {
+  limited: boolean;
+  allowed: boolean;
+  countries: Array<{ code: string; name: string }>;
+}
+
+/** "Estonia, Finland and Sweden" */
+export const listCountries = (region?: RegionStatus | null) => {
+  const names = (region?.countries ?? []).map((country) => country.name);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? '';
+};
+
 /** Public account endpoints: registration settings, email confirmation and password reset by email. */
 export const accountApi = {
   async config() {
-    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean; legal?: { operator: string; contactEmail: string; termsVersion: string } }>('/auth/config');
+    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean; legal?: { operator: string; contactEmail: string; termsVersion: string }; region?: RegionStatus }>('/auth/config');
     return { data: result.data, error: result.error };
   },
   async requestPasswordReset(email: string) {

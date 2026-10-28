@@ -22,6 +22,15 @@ export function Privacy() {
       <h2>Why, and on what basis</h2>
       <p>We use this data to give you an account and run the service you asked for (contract), to keep the site secure and working, such as limiting repeated sign-in attempts and fixing errors (legitimate interest), and to send the emails described below.</p>
 
+      <h2>Where the site is offered</h2>
+      <p>
+        New accounts can be created in Estonia, Finland, Latvia, Lithuania and Sweden. To check this, the server looks up which
+        country your network address belongs to when you open the site without being signed in or create an account. The lookup
+        happens on the server against a list of address ranges; your address is not sent anywhere else, and the result is not
+        stored. People who already have an account can sign in from anywhere. The address list is{' '}
+        <a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a>, used under the CC BY 4.0 licence.
+      </p>
+
       <h2>Emails</h2>
       <p>The site sends only service emails: confirming a new account or a new email address, and password-reset links. They go through the operator&apos;s email provider. There is no advertising and no newsletter.</p>
 
