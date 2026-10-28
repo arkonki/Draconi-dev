@@ -3,8 +3,9 @@ import { parseNoteLink } from '../../lib/noteLinks';
 
 // Regex patterns
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
-const BOLD_REGEX = /\*\*(.*?)\*\*/g;
-const ITALIC_REGEX = /\*(.*?)\*/g;
+// Bold and italic may run over a line break, as Shift+Enter makes them easy to write that way.
+const BOLD_REGEX = /\*\*([\s\S]+?)\*\*/g;
+const ITALIC_REGEX = /\*([^*]+?)\*/g;
 const CODE_REGEX = /`([^`]+)`/g;
 
 export const MessageContent = ({ content }: { content: string }) => {

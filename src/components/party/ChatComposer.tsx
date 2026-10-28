@@ -158,8 +158,8 @@ export function ChatComposer({ value, onChange, onSend, isSending, maxLength, po
         </div>
 
         <div className="flex-1" />
-        <span className={`hidden text-[10px] sm:block ${nearLimit ? 'font-semibold text-amber-600' : 'text-gray-400'}`}>
-          {nearLimit ? `${value.length}/${maxLength}` : 'Enter to send · Shift+Enter for a new line'}
+        <span className={`hidden whitespace-nowrap text-[10px] sm:block ${nearLimit ? 'font-semibold text-amber-600' : 'text-gray-400'}`} title="Enter sends the message. Shift+Enter starts a new line.">
+          {nearLimit ? `${value.length}/${maxLength}` : 'Shift+Enter: new line'}
         </span>
       </div>
 
