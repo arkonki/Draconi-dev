@@ -1,3 +1,4 @@
+import { emitAlert } from './alertBus.js';
 import { verifyUserPassword } from './auth.js';
 import { pool, withTransaction } from './db.js';
 import { HttpError } from './http.js';
@@ -69,6 +70,7 @@ export async function deleteMyAccount(request, user, { password } = {}) {
     return { deleted: true };
   });
   invalidateAccessContextCache();
+  emitAlert('account_deleted', { username: user.username });
   // The images people uploaded go with them. A failure here must not undo a deletion that already happened.
   if (imagePaths.length > 0) await removeObjects('images', imagePaths).catch((error) => console.error(`Unable to remove a deleted account's images: ${error.message}`));
   return result;

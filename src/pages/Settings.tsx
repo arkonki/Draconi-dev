@@ -22,6 +22,7 @@ import { NotificationSettings } from '../components/settings/NotificationSetting
 import { LocalizationSettings } from '../components/settings/LocalizationSettings';
 import { AdminSettings } from '../components/settings/AdminSettings';
 import { SmtpSettings } from '../components/settings/SmtpSettings';
+import { AdminAlertsSettings } from '../components/settings/AdminAlertsSettings';
 import { AccountDataSettings } from '../components/settings/AccountDataSettings';
 import { GameDataManager } from '../components/admin/GameDataManager';
 import { RecoverySettings } from '../components/settings/RecoverySettings';
@@ -91,9 +92,9 @@ const menuItems: SettingsMenuItem[] = [
   },
   {
     id: 'email',
-    label: 'Email (SMTP)',
+    label: 'Email & Alerts',
     icon: Mail,
-    description: 'Outgoing email for sign-up and password reset',
+    description: 'Outgoing email and administrator alerts',
     adminOnly: true,
     category: 'admin'
   },
@@ -161,7 +162,7 @@ export function Settings() {
       case 'localization': return <LocalizationSettings />;
       case 'game-data': return <GameDataManager />;
       case 'recovery': return <RecoverySettings />;
-      case 'email': return <SmtpSettings />;
+      case 'email': return <><SmtpSettings /><AdminAlertsSettings /></>;
       case 'connections': return <><BuiltInAiSettings /><ConnectionSettings /></>;
       case 'admin': return <AdminSettings onOpenBackups={() => handleSectionChange('recovery')} />;
       default: return <ProfileSettings />;

@@ -4,6 +4,7 @@ import { pool, withTransaction } from './db.js';
 import { assertSafeBootstrapPassword } from './configCheck.js';
 import { getBearerToken, HttpError } from './http.js';
 import { requestEmailChange, sendVerificationEmail } from './accountEmails.js';
+import { emitAlert } from './alertBus.js';
 import { TERMS_VERSION } from './legal.js';
 import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
 import { mailEnabled } from './mailer.js';
@@ -218,6 +219,7 @@ export async function signUp(actor, { email, password, options = {} }) {
     return result.rows[0];
   });
 
+  if (!actor) emitAlert('user_registered', { username: user.username, email: user.email });
   if (needsVerification) {
     await sendVerificationEmail(user);
     return { user: publicUser(user), session: null, verificationRequired: true };

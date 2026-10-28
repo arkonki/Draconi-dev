@@ -314,6 +314,22 @@ Without `SMTP_HOST` the server behaves as before: no confirmation step, and pass
 In production, `ALLOW_REGISTRATION=true` without working email settings (saved in the app or in `.env`) stops the server at start, so sign-ups cannot
 become accounts nobody can recover.
 
+## Administrator alerts
+
+With email set up, the server emails the administrators when something needs attention. Choose the events, add extra
+recipients and send a test under **Settings > Email & Alerts**; all active administrators are recipients automatically.
+
+| Event | Sent |
+| --- | --- |
+| Database deadlock, automatic backup failed, new health warning, sign-ups paused for the day | at once (a repeating problem is one email, later a count) |
+| New account, sign-in lockout, sign-up blocked, account deleted | as a summary every `ADMIN_ALERT_DIGEST_MINUTES` (default 10) |
+| Server started | at once, off by default (it fires on every deployment) |
+
+"Health warning" comes from the same checks as the admin overview (old backups, low disk, slow site, and so on),
+looked at every 30 minutes; a problem that is already known when the server starts is not repeated unless it is critical.
+No more than `ADMIN_ALERT_MAX_PER_HOUR` (default 20) alert emails are sent per hour, whatever happens.
+Alerts need working SMTP and are only as reliable as the server itself: they cannot report that the server is down.
+
 ## Opening the site to the public
 
 Before setting `ALLOW_REGISTRATION=true`:

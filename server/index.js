@@ -2,6 +2,8 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { requestPasswordReset, resendVerification, resetPassword as resetPasswordWithToken, verifyEmail } from './accountEmails.js';
 import { deleteMyAccount, exportMyData } from './accountData.js';
+import { getAlertsAdminView, loadAlertSettings, saveAlertSettings, sendTestAlert, startAdminAlerts } from './adminAlerts.js';
+import { emitAlert } from './alertBus.js';
 import { checkSignup } from './signupGuard.js';
 import { legalContact } from './legal.js';
 import { bootstrapAdmin, currentUser, hashPassword, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
@@ -249,6 +251,18 @@ const server = http.createServer(async (request, response) => {
 
     if (pathname === '/api/admin/users' && request.method === 'GET') {
       sendJson(response, 200, await listUsers(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/alerts' && request.method === 'GET') {
+      sendJson(response, 200, await getAlertsAdminView(await currentUser(request)));
+      return;
+    }
+    if (pathname === '/api/admin/alerts' && request.method === 'PUT') {
+      sendJson(response, 200, await saveAlertSettings(await currentUser(request), await readJson(request, 20_000)));
+      return;
+    }
+    if (pathname === '/api/admin/alerts/test' && request.method === 'POST') {
+      sendJson(response, 200, await sendTestAlert(await currentUser(request)));
       return;
     }
     if (pathname === '/api/admin/smtp' && request.method === 'GET') {
@@ -537,10 +551,13 @@ await runMigrations();
 await bootstrapAdmin();
 await loadStoredSmtp();
 startSmtpRefresh();
+await loadAlertSettings();
+startAdminAlerts();
 assertRegistrationHasEmail();
 const realtimeServer = await attachRealtimeServer(server);
 server.listen(PORT, host, () => {
   console.log(`Dragonbane local API listening on ${host}:${PORT}`);
+  emitAlert('server_started', { version: process.env.npm_package_version || '' });
 });
 startHousekeeping();
 await startAutomaticBackups();

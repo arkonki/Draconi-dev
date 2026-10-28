@@ -1,3 +1,4 @@
+import { emitAlert } from './alertBus.js';
 import { clientAddress, HttpError } from './http.js';
 
 // Public sign-up is the one endpoint anybody can call, so it is limited three ways: a hidden form field that only
@@ -43,11 +44,13 @@ export function checkSignup(request, body, now = Date.now()) {
   if (daily.resetAt <= now) daily = { count: 0, resetAt: now + DAY_MS };
 
   if (maxPerAddress > 0 && entry.count >= maxPerAddress) {
+    emitAlert('signup_blocked', { address: key }, { key });
     const error = new HttpError(429, 'Too many sign-up attempts from this address. Try again later.', 'RATE_LIMITED');
     error.headers = { 'retry-after': String(Math.ceil((entry.resetAt - now) / 1000)) };
     throw error;
   }
   if (maxPerDay > 0 && daily.count >= maxPerDay) {
+    emitAlert('signups_paused', { limit: maxPerDay });
     const error = new HttpError(503, 'New registrations are paused for today. Please try again tomorrow.', 'SIGNUPS_PAUSED');
     error.headers = { 'retry-after': String(Math.ceil((daily.resetAt - now) / 1000)) };
     throw error;

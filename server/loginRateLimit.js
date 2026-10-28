@@ -1,3 +1,4 @@
+import { emitAlert } from './alertBus.js';
 import { clientAddress, HttpError } from './http.js';
 
 const WINDOW_MS = Number(process.env.LOGIN_RATE_WINDOW_SECONDS || 900) * 1000;
@@ -39,6 +40,7 @@ export function assertLoginAllowed(request, email, now = Date.now()) {
   const blocked = (account && account.count >= MAX_FAILURES_PER_ACCOUNT)
     || (address && address.count >= MAX_FAILURES_PER_ADDRESS);
   if (!blocked) return;
+  emitAlert('login_lockout', { account: String(email || '').trim().toLowerCase(), address: clientAddress(request) }, { key: `${String(email || '').trim().toLowerCase()}|${clientAddress(request)}` });
   const resetAt = Math.max(
     account && account.count >= MAX_FAILURES_PER_ACCOUNT ? account.resetAt : 0,
     address && address.count >= MAX_FAILURES_PER_ADDRESS ? address.resetAt : 0,

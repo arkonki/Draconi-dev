@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import pg from 'pg';
+import { emitAlert } from './alertBus.js';
 
 const { Pool } = pg;
 
@@ -59,6 +60,7 @@ function recordQuery(startedAt, command, error = null) {
   if (error) metrics.queryErrors += 1;
   if (error?.code === DEADLOCK_CODE) {
     metrics.deadlockCount += 1;
+    emitAlert('deadlock', { detail: String(error.detail || '').slice(0, 400) });
     // PostgreSQL's own message names the two blocked transactions; the queries are in its server log at the same time.
     console.warn(JSON.stringify({ level: 'warn', event: 'database_deadlock', command, detail: String(error.detail || '').slice(0, 400) }));
   }

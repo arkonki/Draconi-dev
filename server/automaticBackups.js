@@ -1,5 +1,6 @@
 import { readdir, rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
+import { emitAlert } from './alertBus.js';
 import { pool } from './db.js';
 import { HttpError } from './http.js';
 import {
@@ -147,6 +148,7 @@ async function run(reason, { failIfBusy = false } = {}) {
     return result;
   } catch (error) {
     state.lastError = error instanceof Error ? error.message : String(error);
+    emitAlert('backup_failed', { message: state.lastError });
     throw error;
   } finally {
     state.lastCompletedAt = new Date().toISOString();
