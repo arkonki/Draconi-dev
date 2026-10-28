@@ -1761,7 +1761,7 @@ function DragonbaneCombatantCard({ combatant, isSelected, isSwapSource, onSelect
           {isDefeated && (<div className="flex items-center gap-1 px-2 py-0.5 rounded bg-stone-700 text-white"><Skull size={10} /><span className="text-[10px] font-bold uppercase">Defeated</span></div>)}
           <div className={`flex items-center gap-1 transition-opacity ${hasActed ? 'opacity-50 hover:opacity-100' : ''}`} onPointerDownCapture={e => e.stopPropagation()}>
             {!hasActed && !isDefeated && (<button className={`p-1 rounded transition-colors ${isSwapSource ? 'bg-purple-600 text-white' : 'text-stone-400 hover:text-purple-600 hover:bg-purple-50'}`} title="Swap Initiative (Wait)" onClick={() => onSwapRequest(combatant.id)}><ArrowUpDown size={14} /></button>)}
-            {!isDefeated && <button className={`p-1 rounded transition-colors ${hasActed ? 'text-stone-400 hover:bg-stone-200' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800'}`} title={hasActed ? "Unflip Card" : "Flip Card (End Turn/Reaction)"} onClick={() => onFlipCard(combatant.id, hasActed)}>{hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}</button>}
+            {!isDefeated && canEdit && <button className={`p-1 rounded transition-colors ${hasActed ? 'text-stone-400 hover:bg-stone-200' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800'}`} title={hasActed ? "Unflip Card" : "Flip Card (End Turn/Reaction)"} onClick={() => onFlipCard(combatant.id, hasActed)}>{hasActed ? <RotateCcw size={14} /> : <ShieldAlert size={14} />}</button>}
             {canOpenCharacterSheet && (
               <button
                 className="p-1 rounded transition-colors text-stone-400 hover:text-blue-700 hover:bg-blue-50"

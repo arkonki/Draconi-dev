@@ -356,7 +356,12 @@ export function canWrite(table, row, ctx, inserting = false) {
     return row.created_by === ctx.user.id && (!row.party_id || partyWriteAccess(ctx, row.party_id));
   }
   if (table === 'compendium_templates') return row.created_by === ctx.user.id;
-  if (table === 'encounter_combatants') return partyWriteAccess(ctx, ctx.encounterParty.get(row.encounter_id));
+  if (table === 'encounter_combatants') {
+    const partyId = ctx.encounterParty.get(row.encounter_id);
+    if (partyGmAccess(ctx, partyId)) return true;
+    // Players change only their own characters in a fight; the GM adds, removes and runs everyone else.
+    return !inserting && partyWriteAccess(ctx, partyId) && Boolean(row.character_id) && ctx.characterIds.has(row.character_id);
+  }
   if (table === 'party_map_pins' || table === 'party_map_drawings') return partyWriteAccess(ctx, ctx.mapParty.get(row.map_id));
   if (table === 'party_display_sessions') return partyGmAccess(ctx, row.party_id);
   if (table === 'party_display_slots') return partyGmAccess(ctx, ctx.sessionParty.get(row.session_id));
@@ -790,6 +795,20 @@ async function lockVitalRows(table, ids, prepared, client) {
   }
 }
 
+/** What a player may change on their own character in a fight: turn, initiative, HP, WP and statuses. */
+export const PLAYER_COMBATANT_FIELDS = new Set([
+  'current_hp', 'current_wp', 'initiative_roll', 'initiative_slots', 'completed_initiative_slots', 'has_acted', 'status_effects',
+]);
+
+/** Throws unless every combatant may be changed (or removed) this way by this person. */
+export function assertCombatantChange(rows, ctx, action, fields = []) {
+  const runsAll = rows.every((row) => partyGmAccess(ctx, ctx.encounterParty.get(row.encounter_id)));
+  if (runsAll) return;
+  if (action === 'delete') throw new HttpError(403, 'Only the GM can remove someone from a fight');
+  const other = fields.find((field) => !PLAYER_COMBATANT_FIELDS.has(field));
+  if (other) throw new HttpError(403, `Only the GM can change ${other} in a fight`);
+}
+
 export const MAX_MESSAGE_CHARS = 4000;
 
 /** A chat message must say something and stay within what every member's browser is sent. */
@@ -860,6 +879,7 @@ export async function executeDataQuery(user, request) {
     const ids = candidates.map((row) => row.id);
     if (ids.length === 0) return [];
 
+    if (table === 'encounter_combatants' && action === 'delete') assertCombatantChange(candidates, transactionCtx, 'delete');
     if (action === 'delete') {
       const { rows } = await client.query(`DELETE FROM "${table}" WHERE id = ANY($1::uuid[]) RETURNING *`, [ids]);
       return rows.map((row) => outwardAliases(table, row));
@@ -868,6 +888,7 @@ export async function executeDataQuery(user, request) {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
+      if (table === 'encounter_combatants') assertCombatantChange(candidates, transactionCtx, 'update', Object.keys(prepared));
       if (table === 'messages') {
         // Only the words of a plain message can be edited; a poke or share stays what the server made it.
         delete prepared.kind;

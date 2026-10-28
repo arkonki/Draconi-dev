@@ -6,6 +6,7 @@ import {
   buildAuthorizedSelectQuery,
   canRead,
   canWrite,
+  assertCombatantChange,
   assertMessageContent,
   materializeAccessContext,
   normalizeNumericOutput,
@@ -245,5 +246,36 @@ describe('chat message limits', () => {
     expect(() => assertMessageContent({ content: '   ' })).toThrow('cannot be empty');
     expect(() => assertMessageContent({ content: 'x'.repeat(4001) })).toThrow('under 4000 characters');
     expect(() => assertMessageContent({ party_id: 'p' })).not.toThrow();
+  });
+});
+
+describe('fight combatants', () => {
+  const ctxFor = (role, characterIds = []) => materializeAccessContext({ id: role, role: 'player' }, {
+    party_access: [{ party_id: 'party', role, owned: role === 'owner' }],
+    character_ids: characterIds,
+    encounters: [{ id: 'fight', party_id: 'party' }],
+    maps: [], sessions: [],
+  });
+  const gm = ctxFor('owner');
+  const player = ctxFor('player', ['hero']);
+  const mine = { id: 'c1', encounter_id: 'fight', character_id: 'hero' };
+  const monster = { id: 'c2', encounter_id: 'fight', character_id: null, monster_id: 'orc' };
+  const ally = { id: 'c3', encounter_id: 'fight', character_id: 'friend' };
+
+  it('lets a player change only their own character, and the GM anyone', () => {
+    expect(canWrite('encounter_combatants', mine, player)).toBe(true);
+    expect(canWrite('encounter_combatants', monster, player)).toBe(false);
+    expect(canWrite('encounter_combatants', ally, player)).toBe(false);
+    expect(canWrite('encounter_combatants', mine, player, true)).toBe(false);
+    expect(canWrite('encounter_combatants', monster, gm)).toBe(true);
+    expect(canWrite('encounter_combatants', monster, gm, true)).toBe(true);
+  });
+
+  it('keeps a player to turn, initiative, HP, WP and statuses, and removing to the GM', () => {
+    expect(() => assertCombatantChange([mine], player, 'update', ['current_hp', 'has_acted', 'status_effects'])).not.toThrow();
+    expect(() => assertCombatantChange([mine], player, 'update', ['max_hp'])).toThrow('Only the GM can change max_hp');
+    expect(() => assertCombatantChange([mine], player, 'delete')).toThrow('Only the GM can remove');
+    expect(() => assertCombatantChange([monster], gm, 'update', ['max_hp', 'display_name'])).not.toThrow();
+    expect(() => assertCombatantChange([monster], gm, 'delete')).not.toThrow();
   });
 });
