@@ -788,6 +788,16 @@ async function lockVitalRows(table, ids, prepared, client) {
   }
 }
 
+export const MAX_MESSAGE_CHARS = 4000;
+
+/** A chat message must say something and stay within what every member's browser is sent. */
+export function assertMessageContent(prepared) {
+  if (!('content' in prepared)) return;
+  const content = String(prepared.content ?? '');
+  if (!content.trim()) throw new HttpError(400, 'A message cannot be empty', 'EMPTY_MESSAGE');
+  if (content.length > MAX_MESSAGE_CHARS) throw new HttpError(400, `Keep a message under ${MAX_MESSAGE_CHARS} characters`, 'MESSAGE_TOO_LONG');
+}
+
 async function insertOne(table, input, ctx, client, onConflict) {
   // Journal updates must authorize the existing entry and preserve its author.
   if (table === 'notes' && onConflict) throw new HttpError(400, 'Use an explicit journal update instead of upsert');
@@ -796,6 +806,7 @@ async function insertOne(table, input, ctx, client, onConflict) {
   if (!canWrite(table, { ...owned, ...prepared }, ctx, true)) throw new HttpError(403, 'Permission denied');
   if (table === 'parties') await assertCanCreateCampaign(client, ctx.user);
   if (table === 'notes') validateNoteUpdate({ ...owned, character_id: null }, prepared, ctx);
+  if (table === 'messages') assertMessageContent({ content: '', ...prepared });
   const keys = Object.keys(prepared);
   if (keys.length === 0) throw new HttpError(400, 'No valid fields were supplied');
   const identifiers = keys.map((key) => `"${key}"`).join(', ');
@@ -853,6 +864,7 @@ export async function executeDataQuery(user, request) {
       const prepared = await preparePayload(table, payload, client);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
+      if (table === 'messages') assertMessageContent(prepared);
       // A campaign's entry stays in that campaign: a GM cannot move it to another campaign or into the shared list.
       if (CAMPAIGN_OWNABLE_REFERENCE.has(table) && !transactionCtx.admin) delete prepared.party_id;
       if (table === 'notes') {

@@ -8,7 +8,9 @@ import { useAuth } from '../../contexts/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { PartyChat } from '../party/PartyChat';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../shared/DropdownMenu';
-import { fetchParties } from '../../lib/api/parties';
+import { fetchParties, fetchPartyById } from '../../lib/api/parties';
+import { useMatch } from 'react-router-dom';
+import { queryKeys } from '../../lib/queryKeys';
 import type { CampaignMembership, CampaignRole } from '../../lib/api/parties';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import {
@@ -153,15 +155,22 @@ interface PartySummary {
 
 interface IncomingMessage {
   party_id?: string;
+  user_id?: string;
 }
 
-export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMembers }: { forcedPartyId?: string, forcedPartyName?: string, forcedMembers?: Character[] }) {
-  const { user } = useAuth();
+/**
+ * The floating chat and combat drawer. It is mounted once for the whole app: on a party page it shows that party,
+ * elsewhere the party the person picked, or their character's party.
+ */
+export function EncounterChatView() {
+  const { user, isAdmin } = useAuth();
+  const routePartyId = useMatch('/party/:id')?.params.id ?? null;
+  const forcedPartyId = routePartyId && routePartyId !== 'join' ? routePartyId : null;
   const { character, activeEncounter, encounterCombatants, isLoadingEncounter, fetchActiveEncounter } = useCharacterSheetStore();
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'combat' | 'chat'>('combat');
-  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(forcedPartyId || null);
+  const [pickedPartyId, setPickedPartyId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
   // ...
@@ -189,16 +198,21 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
     enabled: !!user
   });
 
-  // 2. Set Default Party
-  useEffect(() => {
-    if (forcedPartyId) {
-      if (selectedPartyId !== forcedPartyId) setSelectedPartyId(forcedPartyId);
-    } else if (character?.party_id) {
-      if (selectedPartyId !== character.party_id) setSelectedPartyId(character.party_id);
-    } else if (myParties.length > 0 && !selectedPartyId) {
-      setSelectedPartyId(myParties[0].id);
-    }
-  }, [character?.party_id, myParties, forcedPartyId]);
+  // The party page's own party (it shares PartyView's cached query), for an admin viewing a party they are not in.
+  const { data: routeParty } = useQuery({
+    queryKey: queryKeys.party(forcedPartyId ?? undefined),
+    queryFn: () => fetchPartyById(forcedPartyId ?? undefined),
+    enabled: Boolean(forcedPartyId),
+  });
+
+  // 2. Which party: the page's, then the one picked here (while it is still one of theirs), then the character's,
+  // then the first. Worked out on every render, so a picked party is never overwritten by data loading later.
+  const pickedStillMine = pickedPartyId !== null && myParties.some((party) => party.id === pickedPartyId);
+  const selectedPartyId = forcedPartyId
+    || (pickedStillMine ? pickedPartyId : null)
+    || character?.party_id
+    || myParties[0]?.id
+    || null;
 
   // Clear unread when opening chat
   useEffect(() => {
@@ -209,32 +223,28 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
 
   const targetPartyId = forcedPartyId || character?.party_id || null;
   const targetCharId = character?.id || 'dm-observer';
-  const unreadBindings = useMemo(() => ([
+  const unreadBindings = useMemo(() => (selectedPartyId ? [
     {
       bindingId: 'message-insert',
       event: 'INSERT' as const,
       schema: 'public' as const,
       table: 'messages',
+      filter: `party_id=eq.${selectedPartyId}`,
     },
-  ]), []);
+  ] : []), [selectedPartyId]);
 
+  // Unread counts only the party this drawer shows, and never the person's own messages.
+  useEffect(() => { setUnreadCount(0); }, [selectedPartyId]);
   useRealtimeChannel({
-    key: 'global-chat-monitor',
+    key: `drawer-chat-unread-${selectedPartyId ?? 'none'}`,
     bindings: unreadBindings,
     enabled: Boolean(selectedPartyId),
     reportToSync: false,
     fallbackRefetchMs: 20000,
     onEvent: (_bindingId, payload) => {
       const msg = payload.new as IncomingMessage;
-      const messagePartyId = msg.party_id;
-      const isRelevant = typeof messagePartyId === 'string' &&
-        ((myParties.some((party) => party.id === messagePartyId)) || (forcedPartyId === messagePartyId));
-
-      if (isRelevant) {
-        if (!isOpen || (isOpen && activeTab !== 'chat') || (isOpen && selectedPartyId !== messagePartyId)) {
-          setUnreadCount((prev) => prev + 1);
-        }
-      }
+      if (msg.party_id !== selectedPartyId || msg.user_id === user?.id) return;
+      if (!isOpen || activeTab !== 'chat') setUnreadCount((prev) => prev + 1);
     },
   });
 
@@ -315,10 +325,12 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
 
   // Resolve current party details (either from Fetch or Forced)
   const partyFromList = myParties.find(p => p.id === selectedPartyId);
-  const currentPartyName = partyFromList?.name || forcedPartyName || 'Party View';
-  const currentPartyMembers = partyFromList?.members || forcedMembers || [];
-  const currentCampaignMembers = partyFromList?.campaignMembers || [];
-  const isChatReadOnly = partyFromList?.campaignRole === 'observer';
+  const pageParty = routeParty && routeParty.id === selectedPartyId ? routeParty : null;
+  const currentPartyName = partyFromList?.name || pageParty?.name || 'Party View';
+  const currentPartyMembers: Character[] = partyFromList?.members || pageParty?.members || [];
+  const currentCampaignMembers = partyFromList?.campaignMembers || pageParty?.campaign_memberships || [];
+  // The same rule as the Chat tab: observers read, admins may always write.
+  const isChatReadOnly = (partyFromList?.campaignRole ?? pageParty?.campaign_role) === 'observer' && !isAdmin();
 
   const sortedCombatants = [...(encounterCombatants || [])].sort((a, b) => (a.initiative_roll ?? 1000) - (b.initiative_roll ?? 1000));
 
@@ -367,7 +379,7 @@ export function EncounterChatView({ forcedPartyId, forcedPartyName, forcedMember
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-48 bg-stone-700 text-white border-stone-600 z-[110]">
                       {myParties.map(p => (
-                        <DropdownMenuItem key={p.id} onSelect={() => setSelectedPartyId(p.id)} className="hover:bg-stone-600 focus:bg-stone-600 cursor-pointer">
+                        <DropdownMenuItem key={p.id} onSelect={() => setPickedPartyId(p.id)} className="hover:bg-stone-600 focus:bg-stone-600 cursor-pointer">
                           {p.name}
                         </DropdownMenuItem>
                       ))}

@@ -16,7 +16,6 @@ import { useConfirm } from '../hooks/useConfirm';
 import { ConfirmationDialog } from '../components/shared/ConfirmationDialog';
 import { PartyMemberList } from '../components/party/PartyMemberList';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/shared/DropdownMenu';
-import { EncounterChatView } from '../components/party/EncounterChatView';
 import { Breadcrumbs, BreadcrumbItem } from '../components/shared/Breadcrumbs';
 import { Home } from 'lucide-react';
 import { ProjectorDisplayManager } from '../components/party/ProjectorDisplayManager';
@@ -188,7 +187,7 @@ export function PartyView() {
     bindings: badgeBindings,
     enabled: Boolean(partyId),
     fallbackRefetchMs: 20000,
-    onEvent: (bindingId) => {
+    onEvent: (bindingId, payload) => {
       if (bindingId === 'campaign-role-change') {
         void queryClient.invalidateQueries({ queryKey: queryKeys.party(partyId), exact: true });
         void queryClient.invalidateQueries({ queryKey: queryKeys.parties });
@@ -199,6 +198,8 @@ export function PartyView() {
         void queryClient.invalidateQueries({ queryKey: queryKeys.timeTracker(partyId), exact: true });
         return;
       }
+      // Your own messages are never unread.
+      if ((payload.new as { user_id?: string } | null)?.user_id === user?.id) return;
       setActiveTab((currentTab) => {
         if (currentTab !== 'chat') {
           setUnreadCount((prev) => prev + 1);
@@ -661,7 +662,6 @@ export function PartyView() {
         isOpen={isSoloSettingsOpen}
         onClose={() => setIsSoloSettingsOpen(false)}
       />
-      {partyId && <EncounterChatView forcedPartyId={partyId} forcedPartyName={party.name} forcedMembers={party.members} />}
     </div>
   );
 }

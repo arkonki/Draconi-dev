@@ -8,6 +8,9 @@ export interface Message {
   created_at: string;
 }
 
+/** The longest chat message the server accepts. */
+export const MAX_MESSAGE_CHARS = 4000;
+
 export function appendMessageIfMissing(messages: Message[], incoming: Message) {
   return messages.some((message) => message.id === incoming.id)
     ? messages

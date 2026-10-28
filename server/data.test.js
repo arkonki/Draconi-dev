@@ -6,6 +6,7 @@ import {
   buildAuthorizedSelectQuery,
   canRead,
   canWrite,
+  assertMessageContent,
   materializeAccessContext,
   normalizeNumericOutput,
 } from './data.js';
@@ -235,5 +236,14 @@ describe('shared table access', () => {
     const columns = new Map([['party_id', { data_type: 'uuid', udt_name: 'uuid' }], ['visible', { data_type: 'boolean', udt_name: 'bool' }]]);
     const playerQuery = buildAuthorizedSelectQuery('table_items', player, columns);
     expect(playerQuery.text).toMatch(/"visible" = true/);
+  });
+});
+
+describe('chat message limits', () => {
+  it('accepts a normal message and refuses empty or oversized ones', () => {
+    expect(() => assertMessageContent({ content: 'Hello' })).not.toThrow();
+    expect(() => assertMessageContent({ content: '   ' })).toThrow('cannot be empty');
+    expect(() => assertMessageContent({ content: 'x'.repeat(4001) })).toThrow('under 4000 characters');
+    expect(() => assertMessageContent({ party_id: 'p' })).not.toThrow();
   });
 });

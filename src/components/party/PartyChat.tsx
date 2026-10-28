@@ -8,6 +8,7 @@ import {
   getPartyMessages,
   sendMessage,
   deleteMessage,
+  MAX_MESSAGE_CHARS,
   Message,
 } from '../../lib/api/chat';
 import { Button } from '../shared/Button';
@@ -19,6 +20,7 @@ import type { CampaignMembership } from '../../lib/api/parties';
 import { getNotePath } from '../../lib/noteLinks';
 import { QUERY_STALE_TIME, queryKeys } from '../../lib/queryKeys';
 import { useConfirm } from '../../hooks/useConfirm';
+import { findPokeTarget } from '../../lib/pokeTarget';
 
 // ... (RPG_EMOJIS and getAvatarColor helper remain the same) ...
 const RPG_EMOJIS = ["⚔️", "🛡️", "🏹", "🪄", "🎲", "📜", "💰", "💀", "🐉", "🧙‍♂️", "🧝", "🍺", "🍖", "🔥", "✨", "❤️", "👍", "👎"];
@@ -183,12 +185,12 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
 
     // Poke Logic
     if (content.startsWith('/poke ')) {
-      const targetName = content.substring(6).toLowerCase();
-      const targetMember = members.find(m => m.name.toLowerCase().includes(targetName));
-      if (targetMember) {
-        finalContent = `<<<POKE:${targetMember.user_id}>>> 👉 Poked ${targetMember.name}!`;
+      const typed = content.substring(6).trim();
+      const target = findPokeTarget(typed, members, campaignMembers);
+      if (target) {
+        finalContent = `<<<POKE:${target.userId}>>> 👉 Poked ${target.name}!`;
       } else {
-        alert(`Could not find member "${targetName}"`);
+        alert(`Could not find member "${typed}"`);
         return;
       }
     }
@@ -388,7 +390,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
            <div className="w-px h-4 bg-gray-200 mx-1"></div>
            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`p-1.5 hover:bg-gray-100 rounded ${showEmojiPicker ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-600'}`} title="Emoji"><Smile size={16}/></button>
            <div className="flex-1"></div>
-           <div className="text-[10px] text-gray-400 hidden sm:block">/poke @name to poke</div>
+           <div className="text-[10px] text-gray-400 hidden sm:block">/poke @name to poke · {newMessage.length > MAX_MESSAGE_CHARS - 200 ? `${newMessage.length}/${MAX_MESSAGE_CHARS}` : ''}</div>
         </div>
 
         {showEmojiPicker && (
@@ -407,6 +409,7 @@ export function PartyChat({ partyId, members, campaignMembers = [], readOnly = f
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               placeholder="Message..."
+              maxLength={MAX_MESSAGE_CHARS}
               disabled={isSending}
               className="w-full text-base border border-gray-300 rounded-2xl pl-4 pr-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:bg-gray-100 transition-all shadow-sm"
             />

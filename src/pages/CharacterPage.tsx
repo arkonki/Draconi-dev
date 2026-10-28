@@ -6,7 +6,6 @@ import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorMessage } from '../components/shared/ErrorMessage';
 import { useCharacterSheetStore } from '../stores/characterSheetStore';
 import { CharacterSheet } from '../components/character/CharacterSheet';
-import { EncounterChatView } from '../components/party/EncounterChatView';
 import { Breadcrumbs } from '../components/shared/Breadcrumbs';
 import { Home, User, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -127,7 +126,6 @@ export function CharacterPage() {
     <>
       <Breadcrumbs items={breadcrumbs} maxItems={3} />
       <CharacterSheet />
-      <EncounterChatView />
     </>
   );
 }
