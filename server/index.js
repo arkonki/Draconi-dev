@@ -6,7 +6,7 @@ import { getAlertsAdminView, loadAlertSettings, saveAlertSettings, sendTestAlert
 import { emitAlert } from './alertBus.js';
 import { checkSignup } from './signupGuard.js';
 import { legalContact } from './legal.js';
-import { bootstrapAdmin, currentUser, hashPassword, publicUser, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
+import { bootstrapAdmin, currentUser, hashPassword, publicUser, registrationPlaces, sessionForRequest, signIn, signOut, signUp, updateAuthUser } from './auth.js';
 import { mailEnabled } from './mailer.js';
 import { clearSmtp, getSmtpAdminView, loadStoredSmtp, saveSmtp, sendSmtpTest, startSmtpRefresh } from './smtpSettings.js';
 import { executeDataQuery, authorizedChangeEvents } from './data.js';
@@ -439,7 +439,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname === '/api/auth/config' && request.method === 'GET') {
       const region = regionStatus(request);
-      sendJson(response, 200, { registrationOpen: process.env.ALLOW_REGISTRATION === 'true' && region.allowed, emailEnabled: mailEnabled(), legal: legalContact(), region });
+      const places = await registrationPlaces();
+      sendJson(response, 200, {
+        registrationOpen: process.env.ALLOW_REGISTRATION === 'true' && region.allowed && !places.full,
+        registrationFull: places.full,
+        emailEnabled: mailEnabled(),
+        legal: legalContact(),
+        region,
+      });
       return;
     }
     if (pathname === '/api/auth/password-reset/request' && request.method === 'POST') {

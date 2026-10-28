@@ -17,6 +17,7 @@ export function Login() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [region, setRegion] = useState<RegionStatus | null>(null);
+  const [registrationFull, setRegistrationFull] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
@@ -39,6 +40,7 @@ export function Login() {
       setRegistrationOpen(Boolean(data?.registrationOpen));
       setEmailEnabled(Boolean(data?.emailEnabled));
       setRegion(data?.region ?? null);
+      setRegistrationFull(Boolean(data?.registrationFull));
     });
   }, []);
 
@@ -235,7 +237,9 @@ export function Login() {
             ? <span>New here? <Link to="/register" className="font-medium text-blue-600 hover:underline">Create an account</Link></span>
             : region && !region.allowed
               ? <span>This site is offered in {listCountries(region)}. New accounts can only be created there, but you can sign in to an existing account from anywhere.</span>
-              : <span>New account creation is currently unavailable.</span>}
+              : registrationFull
+                ? <span>All places on this site are taken for now, so new accounts cannot be created.</span>
+                : <span>New account creation is currently unavailable.</span>}
         </div>
       </div>
     </div>

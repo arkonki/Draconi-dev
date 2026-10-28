@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { describe, expect, it } from 'vitest';
-import { hashPassword, resolveSignUpRole, verifyPassword } from './auth.js';
+import { hashPassword, resolveSignUpRole, verifyPassword, maxUsers, registrationPlaces } from './auth.js';
 
 describe('password verification', () => {
   it('verifies native scrypt hashes', () => {
@@ -44,5 +44,33 @@ describe('account creation authorization', () => {
 
   it('never grants a requested elevated role during public registration', () => {
     expect(resolveSignUpRole(null, 'admin', true)).toBe('player');
+  });
+});
+
+describe('account limit', () => {
+  const clientWith = (count) => ({ query: async () => ({ rows: [{ n: count }] }) });
+  const withLimit = async (value, run) => {
+    const before = process.env.MAX_USERS;
+    if (value === undefined) delete process.env.MAX_USERS; else process.env.MAX_USERS = value;
+    try { return await run(); } finally {
+      if (before === undefined) delete process.env.MAX_USERS; else process.env.MAX_USERS = before;
+    }
+  };
+
+  it('defaults to 50 accounts and treats 0 as no limit', () => {
+    expect(maxUsers({})).toBe(50);
+    expect(maxUsers({ MAX_USERS: '120' })).toBe(120);
+    expect(maxUsers({ MAX_USERS: '0' })).toBe(0);
+    expect(maxUsers({ MAX_USERS: 'lots' })).toBe(50);
+  });
+
+  it('closes sign-up once the site has that many accounts', async () => {
+    await withLimit(undefined, async () => {
+      expect(await registrationPlaces(clientWith(49))).toEqual({ limit: 50, full: false });
+      expect(await registrationPlaces(clientWith(50))).toEqual({ limit: 50, full: true });
+    });
+    await withLimit('0', async () => {
+      expect(await registrationPlaces(clientWith(5000))).toEqual({ limit: null, full: false });
+    });
   });
 });

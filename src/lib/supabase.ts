@@ -829,7 +829,7 @@ export const listCountries = (region?: RegionStatus | null) => {
 /** Public account endpoints: registration settings, email confirmation and password reset by email. */
 export const accountApi = {
   async config() {
-    const result = await apiRequest<{ registrationOpen: boolean; emailEnabled: boolean; legal?: { operator: string; contactEmail: string; termsVersion: string }; region?: RegionStatus }>('/auth/config');
+    const result = await apiRequest<{ registrationOpen: boolean; registrationFull?: boolean; emailEnabled: boolean; legal?: { operator: string; contactEmail: string; termsVersion: string }; region?: RegionStatus }>('/auth/config');
     return { data: result.data, error: result.error };
   },
   async requestPasswordReset(email: string) {

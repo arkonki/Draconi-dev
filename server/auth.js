@@ -184,6 +184,20 @@ export function resolveSignUpRole(actor, requestedRole, registrationAllowed) {
   return ['player', 'dm', 'admin'].includes(requestedRole) ? requestedRole : 'player';
 }
 
+/** How many accounts the site may have before its own sign-up closes; 0 means no limit. Admins can always add more. */
+export function maxUsers(env = process.env) {
+  const value = Number(env.MAX_USERS ?? 50);
+  return Number.isInteger(value) && value >= 0 ? value : 50;
+}
+
+/** Whether self-service sign-up still has room, counting every account the site has. */
+export async function registrationPlaces(client = pool) {
+  const limit = maxUsers();
+  if (limit === 0) return { limit: null, full: false };
+  const { rows } = await client.query('SELECT count(*)::int AS n FROM users');
+  return { limit, full: rows[0].n >= limit };
+}
+
 export async function signUp(actor, { email, password, options = {} }) {
   const registrationAllowed = process.env.ALLOW_REGISTRATION === 'true';
   const requestedRole = options?.data?.role;
@@ -207,6 +221,13 @@ export async function signUp(actor, { email, password, options = {} }) {
   // Accounts an administrator creates, and servers without email, are usable immediately.
   const needsVerification = !actor && mailEnabled();
   const user = await withTransaction(async (client) => {
+    if (!actor) {
+      // One sign-up at a time past this point, so two people cannot both take the last place.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('draconi_signup_places'))");
+      if ((await registrationPlaces(client)).full) {
+        throw new HttpError(403, 'All places on this site are taken for now, so new accounts cannot be created.', 'REGISTRATION_FULL');
+      }
+    }
     const result = await client.query(
       `INSERT INTO users (email, username, role, is_email_verified, terms_accepted_at, terms_version)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,

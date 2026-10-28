@@ -9,6 +9,7 @@ export function Register() {
   const navigate = useNavigate();
   const [open, setOpen] = useState<boolean | null>(null);
   const [region, setRegion] = useState<RegionStatus | null>(null);
+  const [full, setFull] = useState(false);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,6 +24,7 @@ export function Register() {
     accountApi.config().then(({ data }) => {
       setOpen(Boolean(data?.registrationOpen));
       setRegion(data?.region ?? null);
+      setFull(Boolean(data?.registrationFull));
     });
   }, []);
 
@@ -55,7 +57,9 @@ export function Register() {
         <AuthNotice tone="error">
           {region && !region.allowed
             ? <>New accounts can only be created in {listCountries(region)}. If you already have an account, you can sign in from anywhere.</>
-            : 'New account creation is currently unavailable.'}
+            : full
+              ? 'All places on this site are taken for now, so new accounts cannot be created.'
+              : 'New account creation is currently unavailable.'}
         </AuthNotice>
         <p className="text-center text-sm text-gray-600"><Link to="/login" className="font-medium text-blue-600 hover:underline">Back to sign in</Link></p>
       </AuthShell>
