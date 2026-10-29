@@ -14,6 +14,8 @@ import { Save, AlertCircle, Info, ChevronRight, ChevronLeft, Check, Circle, X, U
 import { useNavigate } from 'react-router-dom';
 import { AttributeName } from '../../types/character';
 import { useQueryClient } from '@tanstack/react-query';
+import { fetchItems, type GameItem } from '../../lib/api/items';
+import { startingInventoryItem } from '../../lib/startingGear';
 
 type WizardStepId = 'kin' | 'profession' | 'identity' | 'attributes' | 'magic' | 'skills' | 'gear' | 'appearance' | 'review';
 
@@ -267,33 +269,13 @@ export function CharacterCreationWizard({ onComplete, onCancel }: CharacterCreat
       const startingItemsRaw = finalCharacterState.startingEquipment?.items || [];
       const startingMoney = finalCharacterState.equipment?.money || { gold: 0, silver: 0, copper: 0 };
 
+      const gameItems = await queryClient.fetchQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems() });
       const initialInventory = startingItemsRaw.map(item => {
-        let name = '';
-        let quantity = 1;
-
-        if (typeof item === 'string') {
-            const quantityRegex = /(?:(\d+)\s*x\s+)|(?:x\s*(\d+))|(?:[([]x?(\d+)[)\]])|^(\d+)\s+/;
-            const match = item.match(quantityRegex);
-            
-            if (match) {
-                const qStr = match[1] || match[2] || match[3] || match[4];
-                if (qStr) quantity = parseInt(qStr, 10);
-                name = item.replace(match[0], '').trim();
-            } else {
-                name = item.trim();
-            }
-        } else if (typeof item === 'object' && item !== null) {
-            name = item.name || '';
-            quantity = item.quantity || 1;
+        if (typeof item === 'string') return startingInventoryItem(item, gameItems, generateId());
+        if (typeof item === 'object' && item !== null && item.name) {
+          return { id: generateId(), name: item.name, quantity: item.quantity || 1 };
         }
-
-        if (!name) return null;
-
-        return {
-          id: generateId(),
-          name: name,
-          quantity: quantity,
-        };
+        return null;
       }).filter((i): i is NonNullable<typeof i> => i !== null);
 
       const validEquipment = {

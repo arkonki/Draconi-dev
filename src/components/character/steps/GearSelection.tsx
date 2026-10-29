@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import { LoadingSpinner } from '../../shared/LoadingSpinner';
 import { ErrorMessage } from '../../shared/ErrorMessage';
 import { GameItem, fetchItems } from '../../../lib/api/items';
+import { findGearItem, parseGearLine } from '../../../lib/startingGear';
 import { normalizeCurrency } from '../../../lib/equipment';
 import { InventoryItem, Money } from '../../../types/character';
 
@@ -119,9 +120,8 @@ export function GearSelection() {
 
   const findItemDetails = (itemName: string): GameItem | undefined => {
     const baseItemName = itemName.split(' or ')[0].trim();
-    // Remove "10 " or "D6 " from start for lookup
-    const nameWithoutCount = baseItemName.replace(/^(\d+|D\d+|\d+D\d+)\s+/, '');
-    return allItems.find(item => item.name.toLowerCase() === nameWithoutCount.toLowerCase());
+    // Rolled amounts ("D6 Field Rations") and counts ("Dagger x2") are not part of the name.
+    return findGearItem(parseGearLine(baseItemName.replace(/^(D\d+|\d+D\d+)\s+/i, '')).name, allItems);
   };
 
   const rollDice = (count: number, sides: number): number => {
