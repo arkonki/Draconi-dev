@@ -18,7 +18,7 @@ import { AccessibleDialog } from '../shared/AccessibleDialog';
 import { calculateEncumbrance, getStrengthFromCharacter } from '../../lib/encumbrance';
 import { HeavyEncumbranceIndicator } from './HeavyEncumbranceIndicator';
 import { findItemDefinition, resolveItemSlots } from '../../../shared/encumbrance.js';
-import { shopCartTotal, shopPriceInCopper, shopPurchaseContents, type ShopCartLine } from '../../lib/shopCart';
+import { isService, shopCartTotal, shopPriceInCopper, shopPurchaseContents, type ShopCartLine } from '../../lib/shopCart';
 import { ShopCartPanel } from './ShopCartPanel';
 
 // --- CONSTANTS ---
@@ -402,7 +402,12 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         setCheckoutError(null);
         try {
             const equipment = structuredClone(character.equipment);
+            const servicesUsed: string[] = [];
             for (const line of cart) {
+                if (isService(line.item)) {
+                    servicesUsed.push(line.quantity > 1 ? `${line.item.name} ×${line.quantity}` : line.item.name);
+                    continue;
+                }
                 const contents = shopPurchaseContents(line.item);
                 const newItem: InventoryItem = {
                     name: contents.name, quantity: contents.quantity * line.quantity,
@@ -414,7 +419,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
             equipment.money = newMoney;
             await handleUpdateEquipment(equipment);
             setCart([]);
-            setPurchaseNotice(`Purchase complete. Spent ${formatCost(copperToCurrency(total))}.`);
+            setPurchaseNotice(`Purchase complete. Spent ${formatCost(copperToCurrency(total))}.${servicesUsed.length ? ` Used right away: ${servicesUsed.join(', ')}.` : ''}`);
             setActivePanel('main');
             setActiveTab('inventory');
             setActiveInventoryTab('main');

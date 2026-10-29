@@ -17,6 +17,8 @@ import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { useConfirm } from '../../hooks/useConfirm';
 import { addItemsToPartyStash } from '../../lib/api/partyStash';
 import { listingContents } from '../../../shared/encumbrance.js';
+import { makeMastercrafted } from '../../lib/mastercrafted';
+import { isService } from '../../lib/shopCart';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -124,6 +126,8 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
   });
   const [customQty, setCustomQty] = useState(1);
   const [saveCustomToDb, setSaveCustomToDb] = useState(false);
+  // The weapon as it was before it was made mastercrafted, so unticking puts it back.
+  const [mastercraftBase, setMastercraftBase] = useState<Partial<GameItem> | null>(null);
   const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000 });
   const hasAiKey = Boolean(aiSettings.data?.hasKey);
   const [aiWish, setAiWish] = useState('');
@@ -144,7 +148,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
   const filteredItems = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const search = searchTerm.toLowerCase();
-    return allItems.filter(item => !item.always_available && item.name.toLowerCase().includes(search)).slice(0, 50);
+    return allItems.filter(item => !item.always_available && !isService(item) && item.name.toLowerCase().includes(search)).slice(0, 50);
   }, [searchTerm, allItems]);
 
   // Items picked from the list come as the shop sells them (Bandages: a pack of 10); custom loot is counted in units.
@@ -172,6 +176,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
     }
     setCustomQty(1);
     setSaveCustomToDb(false);
+    setMastercraftBase(null);
     setAiWish('');
     setAiError(null);
     setBeforeEnhance(null);
@@ -190,6 +195,18 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
       setAiError(err instanceof Error ? err.message : 'Could not enhance the item.');
     } finally {
       setIsEnhancing(false);
+    }
+  };
+
+  // Mastercrafted stats must travel with the weapon, so it is always saved to the campaign's item list.
+  const handleToggleMastercrafted = (on: boolean) => {
+    if (on) {
+      setMastercraftBase(customForm);
+      setCustomForm(makeMastercrafted(customForm));
+      setSaveCustomToDb(true);
+    } else if (mastercraftBase) {
+      setCustomForm(mastercraftBase);
+      setMastercraftBase(null);
     }
   };
 
@@ -220,6 +237,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
       handleStageItem(newItem, quantity);
       setIsCustomizing(false);
       setCustomForm({});
+      setMastercraftBase(null);
     } catch (err) {
       console.error("Failed to create custom item", err);
       alert(err instanceof Error && /duplicate|unique/i.test(err.message)
@@ -288,6 +306,14 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
                         <div><label htmlFor="loot-custom-grip" className="block text-xs font-semibold text-red-700">Grip</label><input id="loot-custom-grip" className="w-full p-1 border rounded text-sm" value={customForm.grip} onChange={e => setCustomForm({ ...customForm, grip: e.target.value })} /></div>
                         <div><label htmlFor="loot-custom-durability" className="block text-xs font-semibold text-red-700">Durability</label><input id="loot-custom-durability" className="w-full p-1 border rounded text-sm" value={customForm.durability} onChange={e => setCustomForm({ ...customForm, durability: e.target.value })} /></div>
                         <div><label htmlFor="loot-custom-range" className="block text-xs font-semibold text-red-700">Range</label><input id="loot-custom-range" className="w-full p-1 border rounded text-sm" value={customForm.range} onChange={e => setCustomForm({ ...customForm, range: e.target.value })} /></div>
+                        <div><label htmlFor="loot-custom-strength" className="block text-xs font-semibold text-red-700">STR requirement</label><input id="loot-custom-strength" className="w-full p-1 border rounded text-sm" value={String(customForm.strength_requirement ?? '')} onChange={e => setCustomForm({ ...customForm, strength_requirement: e.target.value })} placeholder="—" /></div>
+                      </div>
+                      <div className="flex items-start gap-2 border-t border-red-100 pt-3">
+                        <input id="loot-custom-mastercrafted" type="checkbox" className="mt-0.5" checked={mastercraftBase !== null} onChange={e => handleToggleMastercrafted(e.target.checked)} />
+                        <label htmlFor="loot-custom-mastercrafted" className="text-xs text-red-800 cursor-pointer">
+                          <span className="font-bold">Mastercrafted</span> · ten times the cost, 3 less STR needed, 3 more durability.
+                          <span className="block text-red-700/80">Saved to this campaign's item list so its stats stay with it.</span>
+                        </label>
                       </div>
                     </div>
                   )}
@@ -300,7 +326,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
                   </div>
                   <div><label htmlFor="loot-custom-effect" className="block text-xs font-bold text-gray-500 uppercase mb-1">Effect / Description</label><textarea id="loot-custom-effect" className="w-full p-2 border rounded text-sm h-20" value={customForm.effect} onChange={e => setCustomForm({ ...customForm, effect: e.target.value })} /></div>
                   <div className="flex items-start gap-2 p-3 rounded border border-gray-200 bg-gray-50">
-                    <input id="loot-custom-save-db" type="checkbox" className="mt-1" checked={saveCustomToDb} onChange={e => setSaveCustomToDb(e.target.checked)} />
+                    <input id="loot-custom-save-db" type="checkbox" className="mt-1" checked={saveCustomToDb} disabled={mastercraftBase !== null} onChange={e => setSaveCustomToDb(e.target.checked)} />
                     <div className="text-sm">
                       <label htmlFor="loot-custom-save-db" className="font-semibold text-gray-800 cursor-pointer">Save to this campaign's item list</label>
                       <p className="text-xs text-gray-500">{saveCustomToDb ? 'You can add it again later. Only this campaign can see it.' : 'One-off loot: only this stash gets it. Stats are kept in its description.'}</p>

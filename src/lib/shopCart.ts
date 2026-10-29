@@ -16,6 +16,11 @@ export function shopPriceInCopper(item: GameItem): number | null {
   return /^0\s+(gold|silver|copper|g|s|c)$/i.test(cost) ? 0 : null;
 }
 
+/** Services (a meal, a room, a bath) are paid for and used on the spot, so they never go into an inventory. */
+export function isService(item: Pick<GameItem, 'category'>): boolean {
+  return String(item.category || '').trim().toUpperCase() === 'SERVICES';
+}
+
 export function shopPurchaseContents(item: GameItem): { name: string; quantity: number } {
   return listingContents(item);
 }

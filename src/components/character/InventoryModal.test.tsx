@@ -46,6 +46,7 @@ const gameItems = [
   { id: 'game-arrows', name: 'Arrows (20)', category: 'RANGED WEAPONS', weight: 1, cost: '1 silver', description: 'A bundle of arrows.' },
   { id: 'game-bow', name: 'Short bow', category: 'RANGED WEAPONS', weight: 1, encumbrance_modifier: 1 },
   { id: 'game-dagger', name: 'Dagger', category: 'MELEE WEAPONS', weight: 1, encumbrance_modifier: 1 },
+  { id: 'game-stew', name: 'Bowl of Stew', category: 'SERVICES', weight: 0, cost: '5 copper', description: 'Covers the daily need of food.' },
   {
     id: 'game-tent',
     name: 'Tent, Large',
@@ -209,6 +210,20 @@ describe('InventoryModal', () => {
     await waitFor(() => expect(mocks.updateCharacterData).toHaveBeenCalledOnce());
     const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
     expect(equipment.inventory).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Arrows', quantity: 20, weight: 0.05, weightBasis: 'unit', definitionId: 'game-arrows' })]));
+  });
+
+  it('uses services on purchase instead of adding them to the inventory', async () => {
+    renderInventory();
+    await screen.findByRole('button', { name: 'Show details for Rope' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Shop' }));
+    fireEvent.change(screen.getByPlaceholderText('Search everything in shop...'), { target: { value: 'Stew' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Bowl of Stew to cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review cart' }));
+    expect(screen.getByText('Used right away, not added to the inventory')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }));
+    await screen.findByText('Purchase complete. Spent 5 copper. Used right away: Bowl of Stew.');
+    const equipment = mocks.updateCharacterData.mock.calls[0][0].equipment;
+    expect(equipment.inventory.some((item: { name: string }) => item.name === 'Bowl of Stew')).toBe(false);
   });
 
   it('reviews and adjusts multiple selections, then saves all gear and money in one purchase', async () => {

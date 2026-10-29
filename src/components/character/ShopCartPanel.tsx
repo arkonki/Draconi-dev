@@ -1,7 +1,7 @@
 import { ArrowLeft, Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react';
 import type { Money } from '../../types/character';
 import { copperToCurrency, currencyToCopper, formatCost } from '../../lib/equipment';
-import { shopCartTotal, shopPriceInCopper, shopPurchaseContents, type ShopCartLine } from '../../lib/shopCart';
+import { isService, shopCartTotal, shopPriceInCopper, shopPurchaseContents, type ShopCartLine } from '../../lib/shopCart';
 import { Button } from '../shared/Button';
 
 interface Props {
@@ -37,7 +37,7 @@ export function ShopCartPanel({ lines, money, busy, error, onBack, onQuantity, o
               const contents = shopPurchaseContents(item);
               return <li key={item.id} aria-label={`Cart item: ${item.name}`} className="rounded-xl border bg-white p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0"><h4 className="text-sm font-bold text-gray-800">{item.name}</h4><p className="mt-1 text-xs text-gray-500">{price === null ? 'Price unavailable' : `${costLabel(price)} per purchase`}</p><p className="mt-1 text-xs text-indigo-700">Adds {contents.quantity * quantity} × {contents.name}</p></div>
+                  <div className="min-w-0"><h4 className="text-sm font-bold text-gray-800">{item.name}</h4><p className="mt-1 text-xs text-gray-500">{price === null ? 'Price unavailable' : `${costLabel(price)} per purchase`}</p><p className="mt-1 text-xs text-indigo-700">{isService(item) ? 'Used right away, not added to the inventory' : `Adds ${contents.quantity * quantity} × ${contents.name}`}</p></div>
                   <button type="button" aria-label={`Remove ${item.name} from cart`} onClick={() => onRemove(item.id)} disabled={busy} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><Trash2 size={16} /></button>
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3">
