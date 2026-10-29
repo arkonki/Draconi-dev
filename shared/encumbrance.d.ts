@@ -38,6 +38,9 @@ export interface SlotEncumbrance {
 }
 export function finiteNonNegative(value: unknown): number | null;
 export function itemBundle(name?: string): { name: string; size: number };
+export function listingUnits(definition?: { name?: string; quantity?: unknown } | null): number;
+export function listingContents(definition?: { name?: string; quantity?: unknown } | null): { name: string; quantity: number };
+export function isStoredPack(item?: { name?: string; quantity?: unknown } | null): boolean;
 export function findItemDefinition<T extends { id?: string; name?: string }>(item: string | { name?: string; originalName?: string; definitionId?: string }, definitions: T[]): T | undefined;
-export function resolveItemSlots(item: string | { weight?: unknown; name?: string; originalName?: string; weightBasis?: string }, definition?: { name?: string; weight?: unknown }): { unitWeight: number; unknownWeight: boolean; bundleSize: number };
+export function resolveItemSlots(item: string | { weight?: unknown; name?: string; originalName?: string; weightBasis?: string }, definition?: { name?: string; weight?: unknown; quantity?: unknown }): { unitWeight: number; unknownWeight: boolean; bundleSize: number };
 export function calculateSlotEncumbrance(input: { strength: unknown; actorId?: string; inventory?: SlotItem[]; equipped?: SlotItem[] }): SlotEncumbrance;

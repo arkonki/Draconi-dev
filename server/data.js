@@ -3,6 +3,7 @@ import { assertCanCreateCampaign, canCampaignRoleWrite, isCampaignGmRole } from 
 import { HttpError } from './http.js';
 import { canEditNote } from '../shared/noteAccess.js';
 import { prepareChatMessage } from './chatMessages.js';
+import { itemBundle } from '../shared/encumbrance.js';
 import { assertUserActionAllowed, assertUserQueryAllowed, assertUserUpdateAllowed, projectUserRow } from './userAccess.js';
 
 const TABLES = new Set([
@@ -812,6 +813,13 @@ export function assertCombatantChange(rows, ctx, action, fields = []) {
 export const MAX_MESSAGE_CHARS = 4000;
 
 /** A chat message must say something and stay within what every member's browser is sent. */
+/** Item names never carry a count: "Bandages (10)" is saved as "Bandages" with 10 units to a purchase. */
+export function normalizeItemListing(prepared) {
+  if (typeof prepared.name !== 'string') return prepared;
+  const bundle = itemBundle(prepared.name);
+  return bundle.size > 1 ? { ...prepared, name: bundle.name, quantity: bundle.size } : prepared;
+}
+
 export function assertMessageContent(prepared) {
   if (!('content' in prepared)) return;
   const content = String(prepared.content ?? '');
@@ -826,6 +834,7 @@ async function insertOne(table, input, ctx, client, onConflict) {
   // Pokes and shares are checked and given their text by the server; plain text may not carry the old tags.
   if (table === 'messages') owned = { ...owned, ...await prepareChatMessage(client, owned) };
   let prepared = await preparePayload(table, owned, client);
+  if (table === 'game_items') prepared = normalizeItemListing(prepared);
   if (!canWrite(table, { ...owned, ...prepared }, ctx, true)) throw new HttpError(403, 'Permission denied');
   if (table === 'parties') await assertCanCreateCampaign(client, ctx.user);
   if (table === 'notes') validateNoteUpdate({ ...owned, character_id: null }, prepared, ctx);
@@ -885,7 +894,8 @@ export async function executeDataQuery(user, request) {
       return rows.map((row) => outwardAliases(table, row));
     }
     if (action === 'update') {
-      const prepared = await preparePayload(table, payload, client);
+      let prepared = await preparePayload(table, payload, client);
+      if (table === 'game_items') prepared = normalizeItemListing(prepared);
       delete prepared.id;
       if (table === 'users') assertUserUpdateAllowed(Object.keys(prepared));
       if (table === 'encounter_combatants') assertCombatantChange(candidates, transactionCtx, 'update', Object.keys(prepared));

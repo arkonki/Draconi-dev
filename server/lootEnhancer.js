@@ -3,6 +3,7 @@ import { HttpError } from './http.js';
 import { loadCampaignAccess } from './campaignRoles.js';
 import { callModel } from './aiSettings.js';
 import { normalizeNarrationLanguage, plainLanguageInstruction } from './soloNarrationLanguage.js';
+import { itemBundle } from '../shared/encumbrance.js';
 
 // "Enhance with AI" in the loot window: the GM sketches a custom item and their own model fills in a name, a
 // description and Dragonbane stats. Nothing is saved here; the GM reviews the result in the form first.
@@ -34,6 +35,7 @@ export const ITEM_SYSTEM_PROMPT = [
   'You help a Game Master of the Dragonbane tabletop roleplaying game turn a rough idea into a finished loot item.',
   'Reply with one JSON object and nothing else, no commentary and no code fence. Its shape:',
   '{"name": "<evocative item name>", "category": "<one of the given categories>", "cost": "<price such as 3 gold, 8 silver or 20 copper>", "weight": <number, 0 for tiny things, 1 for a normal item>, "effect": "<what it looks like, its history in a sentence, and exactly what it does in play>", "damage": "<only for weapons, such as 2D6>", "grip": "<only for weapons: 1H or 2H>", "range": "<only for weapons: STR for melee or a number of meters>", "durability": "<only for weapons and shields, a number>", "armor_rating": "<only for armor and helmets, a number>", "features": "<only for weapons, comma separated such as Piercing, Long>"}',
+  'The item is one unit: the GM picks how many to hand out, so never put a count in the name ("Bandages", not "Bandages (10)"), and give the cost and weight of one.',
   'Leave a field as an empty string when it does not apply. Keep what the GM already wrote unless they ask for a change, and build on it.',
   'Balance the item against the reference items when they are given: magic is rare and costly in Dragonbane, so a mundane find should stay mundane, and a magical one should have one clear effect with a limit or a price, such as costing willpower points.',
   'Use only fantasy suited to Dragonbane: grounded, a little dark, no technology.',
@@ -92,6 +94,7 @@ export function parseEnhancedItem(text) {
     const value = Array.isArray(raw[field]) ? raw[field].join(', ') : raw[field];
     item[field] = typeof value === 'string' || typeof value === 'number' ? clip(value, length) : '';
   }
+  item.name = itemBundle(item.name).name;
   if (!item.name) return null;
   item.category = item.category.toUpperCase() || 'LOOT';
   // The stash prices items by reading "<number> gold/silver/copper", so anything else is no price at all.

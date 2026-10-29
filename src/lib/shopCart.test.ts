@@ -22,5 +22,6 @@ describe('shop cart', () => {
     expect(shopPurchaseContents(item('Arrows (20)'))).toEqual({ name: 'Arrows', quantity: 20 });
     expect(shopPurchaseContents(item('Rope (10 m)'))).toEqual({ name: 'Rope (10 m)', quantity: 1 });
     expect(shopPurchaseContents(item('Torches', '1 silver', 4))).toEqual({ name: 'Torches', quantity: 4 });
+    expect(shopPurchaseContents(item('Bandages', '5 silver', 10))).toEqual({ name: 'Bandages', quantity: 10 });
   });
 });

@@ -77,7 +77,7 @@ export function StoryContentActions({ partyId, markdown }: { partyId: string; ma
   const itemEntries = items.map((item, index): Entry => ({
     key: `item-${index}-${item.name}`,
     label: item.name,
-    run: () => addItemsToPartyStash(partyId, [{ ...item, quantity: 1 }]),
+    run: () => addItemsToPartyStash(partyId, [item]),
   }));
   const monsterEntries = monsters.map((monster, index): Entry => ({
     key: `monster-${index}-${monster.name}`,

@@ -58,6 +58,7 @@ export const STORY_HELPER_SYSTEM_PROMPT = [
   '  - ```item  exactly like this, one block per item, so the GM can add it to the party stash:',
   '    ### Item name',
   '    *CATEGORY* (one of the ITEM CATEGORIES given below, or LOOT)',
+  '    **Quantity:** 10  (only when there are several, such as bandages or arrows; the name, Cost and Weight are for one)',
   '    ___',
   '    **Cost:** 3 gold · **Weight:** 1',
   '    **Damage:** 2D6 · **Grip:** 1H · **Range:** STR · **Durability:** 9 · **Features:** Piercing  (weapons only)',
@@ -65,7 +66,7 @@ export const STORY_HELPER_SYSTEM_PROMPT = [
   '    ___',
   '    **Effect:** what it looks like and what it does in play.',
   '  - ```note  for private GM notes.',
-  '- Coins belong in plain text, not in item blocks.',
+  '- Coins belong in plain text, not in item blocks. Never put a count in an item name: "Bandages", not "Bandages (10)".',
   '',
   'CAMPAIGN DETAILS:',
   'The campaign so far and the characters are given as background. Build on them and never contradict them.',
@@ -107,7 +108,7 @@ export function buildStoryHelperMessages({ task, characters = [], includeDescrip
   const instruction = plainLanguageInstruction(language, glossary);
   const system = [
     STORY_HELPER_SYSTEM_PROMPT,
-    instruction ? `${instruction} Keep the block names (npc, monster, spell, item, note), the table headings and the bold labels in blocks (Cost, Weight, Damage, Grip, Range, Durability, Features, Armor Rating, Effect, Skills, Abilities, Movement, HP, WP, Armor, Appearance, Personality, Motivation, Weapons, Monster Attacks) in English, and write costs as gold, silver or copper, because the app reads them.` : '',
+    instruction ? `${instruction} Keep the block names (npc, monster, spell, item, note), the table headings and the bold labels in blocks (Quantity, Cost, Weight, Damage, Grip, Range, Durability, Features, Armor Rating, Effect, Skills, Abilities, Movement, HP, WP, Armor, Appearance, Personality, Motivation, Weapons, Monster Attacks) in English, and write costs as gold, silver or copper, because the app reads them.` : '',
   ].filter(Boolean).join('\n');
 
   const context = [];

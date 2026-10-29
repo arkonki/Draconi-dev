@@ -16,6 +16,7 @@ import { parseCost } from '../../lib/equipment';
 import { useRealtimeChannel } from '../../hooks/useRealtimeChannel';
 import { useConfirm } from '../../hooks/useConfirm';
 import { addItemsToPartyStash } from '../../lib/api/partyStash';
+import { listingContents } from '../../../shared/encumbrance.js';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -39,6 +40,9 @@ const generateId = (): string => {
 
 // One-off loot only exists in this party's stash; it is never written to game_items.
 const ONE_OFF_ID_PREFIX = 'one-off-';
+
+/** Loot waiting to be added: `quantity` picks of `unitsEach` units, named as one unit. */
+interface StagedLoot { item: GameItem; name: string; unitsEach: number; quantity: number }
 const isOneOffItem = (item: GameItem) => item.id.startsWith(ONE_OFF_ID_PREFIX);
 
 // The stash only keeps name, category and description, so fold a one-off item's stats into its description.
@@ -103,13 +107,13 @@ interface LootAssignmentModalProps {
   partyId: string;
   onClose: () => void;
   allItems: GameItem[];
-  onAssignLoot: (loot: { item: GameItem; quantity: number }[]) => Promise<void>;
+  onAssignLoot: (loot: StagedLoot[]) => Promise<void>;
 }
 
 const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootAssignmentModalProps) => {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [stagedLoot, setStagedLoot] = useState<Map<string, { item: GameItem; quantity: number }>>(new Map());
+  const [stagedLoot, setStagedLoot] = useState<Map<string, StagedLoot>>(new Map());
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [isCustomizing, setIsCustomizing] = useState(false);
@@ -143,11 +147,13 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
     return allItems.filter(item => item.name.toLowerCase().includes(search)).slice(0, 50);
   }, [searchTerm, allItems]);
 
-  const handleStageItem = (item: GameItem, quantity: number) => {
+  // Items picked from the list come as the shop sells them (Bandages: a pack of 10); custom loot is counted in units.
+  const handleStageItem = (item: GameItem, quantity: number, asListed = false) => {
     if (quantity <= 0) return;
     const newStaged = new Map(stagedLoot);
     const existing = newStaged.get(item.id);
-    newStaged.set(item.id, { item, quantity: (existing?.quantity || 0) + quantity });
+    const contents = asListed ? listingContents(item) : { name: item.name, quantity: 1 };
+    newStaged.set(item.id, { item, name: contents.name, unitsEach: contents.quantity, quantity: (existing?.quantity || 0) + quantity });
     setStagedLoot(newStaged);
     setSearchTerm('');
   };
@@ -326,7 +332,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={() => handleStartCustomizing(item)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" title="Clone & Customize"><Pencil size={16} /></button>
-                        <Button size="sm" variant="secondary" icon={Plus} onClick={() => handleStageItem(item, 1)}>Add</Button>
+                        <Button size="sm" variant="secondary" icon={Plus} onClick={() => handleStageItem(item, 1, true)}>Add</Button>
                       </div>
                     </div>
                   ))}
@@ -339,12 +345,13 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
           <div className="w-full md:w-1/2 flex flex-col bg-gray-50">
             <div className="p-3 bg-blue-50 border-b border-blue-100"><h4 className="font-bold text-blue-900 text-sm uppercase">Pending Loot ({stagedLoot.size})</h4></div>
             <div className="flex-grow overflow-y-auto p-3 space-y-2">
-              {Array.from(stagedLoot.values()).map(({ item, quantity }) => (
+              {Array.from(stagedLoot.values()).map(({ item, name, unitsEach, quantity }) => (
                 <div key={item.id} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-sm animate-in slide-in-from-left-2">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded flex items-center justify-center font-bold text-xs">{quantity}x</div>
                     <div className="min-w-0">
-                      <p className="font-medium text-sm text-gray-900 truncate">{item.name}</p>
+                      <p className="font-medium text-sm text-gray-900 truncate">{name}</p>
+                      {unitsEach > 1 && <p className="text-[10px] text-gray-500">{quantity} × pack of {unitsEach} = {quantity * unitsEach} in the stash</p>}
                       {isOneOffItem(item) && <p className="text-[10px] font-bold uppercase text-amber-600">One-off · {item.category}</p>}
                     </div>
                   </div>
@@ -525,13 +532,13 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
   });
 
   // --- HANDLER: Assign Loot to Party ---
-  const handleAssignLoot = async (loot: { item: GameItem; quantity: number }[]) => {
+  const handleAssignLoot = async (loot: StagedLoot[]) => {
     try {
-      await addItemsToPartyStash(partyId, loot.map(({ item, quantity }) => ({
-        name: coerceItemName(item.name),
+      await addItemsToPartyStash(partyId, loot.map(({ item, name, unitsEach, quantity }) => ({
+        name: coerceItemName(name),
         category: item.category,
         description: item.effect || item.description || '',
-        quantity,
+        quantity: quantity * unitsEach,
       })));
       await loadData();
     } catch (err) { console.error('Failed to assign loot.', err); }
@@ -679,7 +686,8 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
               name: safeItemName,
               quantity: qty,
               category: partyItem.category || baseDetails?.category || 'LOOT',
-              description: partyItem.description || baseDetails?.effect || ''
+              description: partyItem.description || baseDetails?.effect || '',
+              ...(baseDetails?.id ? { definitionId: baseDetails.id } : {}),
             });
           }
         }

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateEncumbrance as uiEncumbrance } from '../src/lib/encumbrance.ts';
 import { calculateEncumbrance as mcpEncumbrance, normalizeCharacterEquipment } from '../server/helper/actors.js';
-import { itemBundle, resolveItemSlots } from './encumbrance.js';
+import { itemBundle, listingContents, resolveItemSlots } from './encumbrance.js';
 
 const actorId = '3ced9760-b661-4a31-b219-8a754e815b55';
 const definitions = [
@@ -56,5 +56,20 @@ describe('shared encumbrance rules and UI/MCP parity', () => {
   it('does not split measurement-based item names or divide custom weights', () => {
     expect(itemBundle('Rope (10 m)')).toEqual({ name: 'Rope (10 m)', size: 1 });
     expect(resolveItemSlots({ name: 'Arrows', weight: 0.25 }, definitions[3]).unitWeight).toBe(0.25);
+  });
+
+  it('splits a purchase into units and gives each unit its share of the weight', () => {
+    const bandages = { id: 'bandages', name: 'Bandages', quantity: 10, weight: 0.1 };
+    const rope = { id: 'rope', name: 'Rope (hemp), 10 meters', quantity: 1, weight: 1 };
+    expect(listingContents(bandages)).toEqual({ name: 'Bandages', quantity: 10 });
+    expect(listingContents({ name: 'Bandages (10)', quantity: 1 })).toEqual({ name: 'Bandages', quantity: 10 });
+    expect(listingContents(rope)).toEqual({ name: 'Rope (hemp), 10 meters', quantity: 1 });
+    expect(resolveItemSlots({ name: 'Bandages' }, bandages).unitWeight).toBeCloseTo(0.01);
+    expect(resolveItemSlots({ name: 'Rope (hemp), 10 meters' }, rope).unitWeight).toBe(1);
+    // A looted pack is still the whole pack; old shop purchases kept the pack's name on single units.
+    expect(resolveItemSlots({ name: 'Bandages (10)' }, bandages).unitWeight).toBe(0.1);
+    expect(resolveItemSlots({ name: 'Bandages (10)', quantity: 20 }, bandages).unitWeight).toBeCloseTo(0.01);
+    // Legacy shop purchases copied the purchase's weight onto each unit.
+    expect(resolveItemSlots({ name: 'Bandages', weight: 0.1 }, bandages).unitWeight).toBeCloseTo(0.01);
   });
 });

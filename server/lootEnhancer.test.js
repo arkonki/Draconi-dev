@@ -38,6 +38,10 @@ describe('loot item enhancer', () => {
     expect(item).toMatchObject({ name: 'Old Key', category: 'LOOT', weight: 0, damage: '', features: ['Rusty'] });
   });
 
+  it('names one unit, without a count', () => {
+    expect(parseEnhancedItem(JSON.stringify({ name: 'Bandages (10)' })).name).toBe('Bandages');
+  });
+
   it('gives up without a name or JSON', () => {
     expect(parseEnhancedItem('I cannot help with that.')).toBeNull();
     expect(parseEnhancedItem(JSON.stringify({ ...good, name: '' }))).toBeNull();

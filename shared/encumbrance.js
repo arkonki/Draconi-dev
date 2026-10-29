@@ -14,28 +14,51 @@ export function itemBundle(name = '') {
     : { name: String(name).trim(), size: 1 };
 }
 
+// One catalogue row is one purchase: `quantity` units (Bandages: 10, a 10 m rope: 1) that weigh `weight` slots in
+// all. Older rows wrote the count into the name instead, as in "Bandages (10)", so that still counts.
+export function listingUnits(definition) {
+  const bundle = itemBundle(definition?.name);
+  if (bundle.size > 1) return bundle.size;
+  const count = Number(definition?.quantity);
+  return Number.isSafeInteger(count) && count > 0 ? count : 1;
+}
+
+// What one purchase of a catalogue item puts in an inventory: that many single units, named without the count.
+export function listingContents(definition) {
+  return { name: itemBundle(definition?.name).name, quantity: listingUnits(definition) };
+}
+
+// A stored "Bandages (10)" x1 from the loot window is a whole pack, so it weighs what the purchase does. Old shop
+// purchases kept the name but counted single units ("Arrows (20)" x20), so a whole number of packs means units.
+export function isStoredPack(item) {
+  const size = itemBundle(item?.name).size;
+  const quantity = finiteNonNegative(item?.quantity) ?? 1;
+  return size > 1 && !(quantity >= size && quantity % size === 0);
+}
+
 export function findItemDefinition(item, definitions = []) {
   const record = typeof item === 'string' ? { name: item } : item || {};
   const id = record.definitionId || record.definition_id;
-  const named = String(record.name || record.originalName || '').trim().toLowerCase();
+  const names = [record.name, record.originalName].map(name => String(name || '').trim().toLowerCase()).filter(Boolean);
+  const nameOf = definition => String(definition.name || '').trim().toLowerCase();
   return (id && definitions.find(definition => definition.id === id))
-    || definitions.find(definition => String(definition.name || '').trim().toLowerCase() === named)
-    || definitions.find(definition => itemBundle(definition.name).name.toLowerCase() === itemBundle(named).name.toLowerCase());
+    || names.map(named => definitions.find(definition => nameOf(definition) === named)).find(Boolean)
+    || names.map(named => definitions.find(definition => itemBundle(nameOf(definition)).name === itemBundle(named).name)).find(Boolean);
 }
 
 export function resolveItemSlots(item, definition) {
   const record = typeof item === 'string' ? { name: item } : item || {};
   const savedWeight = finiteNonNegative(record.weight);
   const catalogueWeight = finiteNonNegative(definition?.weight);
-  const bundle = itemBundle(definition?.name || record.originalName || record.name);
-  let unitWeight = savedWeight ?? catalogueWeight ?? 1;
-  // Legacy shop purchases stored a bundle's weight on every individual.
-  // Explicit unit weights and custom overrides must not be divided twice.
-  if (bundle.size > 1 && record.weightBasis !== 'unit'
-      && (savedWeight === null || record.weightBasis === 'bundle' || savedWeight === catalogueWeight)) {
-    unitWeight /= bundle.size;
-  }
-  return { unitWeight, unknownWeight: savedWeight === null && catalogueWeight === null, bundleSize: bundle.size };
+  const unitsInListing = definition ? listingUnits(definition) : 1;
+  const perItem = isStoredPack(record) ? 1 : unitsInListing;
+  let unitWeight;
+  if (savedWeight === null) unitWeight = (catalogueWeight ?? 1) / perItem;
+  else if (record.weightBasis === 'unit') unitWeight = savedWeight;
+  // Legacy shop purchases copied the purchase's weight onto every unit; any other saved weight is a custom unit weight.
+  else if (record.weightBasis === 'bundle' || savedWeight === catalogueWeight) unitWeight = savedWeight / perItem;
+  else unitWeight = savedWeight;
+  return { unitWeight, unknownWeight: savedWeight === null && catalogueWeight === null, bundleSize: unitsInListing };
 }
 
 const cleanLoad = value => Math.round((value + Number.EPSILON) * 10000) / 10000;

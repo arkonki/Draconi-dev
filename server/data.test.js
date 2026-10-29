@@ -9,6 +9,7 @@ import {
   assertCombatantChange,
   assertMessageContent,
   materializeAccessContext,
+  normalizeItemListing,
   normalizeNumericOutput,
 } from './data.js';
 
@@ -277,5 +278,13 @@ describe('fight combatants', () => {
     expect(() => assertCombatantChange([mine], player, 'delete')).toThrow('Only the GM can remove');
     expect(() => assertCombatantChange([monster], gm, 'update', ['max_hp', 'display_name'])).not.toThrow();
     expect(() => assertCombatantChange([monster], gm, 'delete')).not.toThrow();
+  });
+});
+
+describe('item listings', () => {
+  it('moves a count out of the name and into units per purchase', () => {
+    expect(normalizeItemListing({ name: 'Bandages (10)', quantity: 1, weight: 0.1 })).toEqual({ name: 'Bandages', quantity: 10, weight: 0.1 });
+    expect(normalizeItemListing({ name: 'Rope (10 m)', quantity: 1 })).toEqual({ name: 'Rope (10 m)', quantity: 1 });
+    expect(normalizeItemListing({ weight: 2 })).toEqual({ weight: 2 });
   });
 });

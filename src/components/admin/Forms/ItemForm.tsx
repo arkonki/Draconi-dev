@@ -181,12 +181,12 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Encumbrance slots</label>
           <input type="number" value={itemData.weight ?? ''} onChange={(e) => onChange('weight', e.target.value === '' ? undefined : parseFloat(e.target.value))} className="w-full px-3 py-2 border rounded-md" min="0" step="0.01" />
-          <p className="mt-1 text-xs text-gray-500">Not kilograms: ordinary items use 1 slot, tiny items 0, and heavy items more. For a named bundle such as Arrows (20), enter the whole bundle's slots.</p>
+          <p className="mt-1 text-xs text-gray-500">Not kilograms: ordinary items use 1 slot, tiny items 0, and heavy items more. For items sold several at a time, such as Bandages, enter the slots for the whole purchase.</p>
         </div>
 
         {/* Quantity / Count */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Count / Uses</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Units per purchase</label>
           <input
             type="number"
             value={itemData.quantity || 1}
@@ -195,6 +195,7 @@ export function ItemForm({ entry, onChange }: ItemFormProps) {
             min="1"
             placeholder="Default 1"
           />
+          <p className="mt-1 text-xs text-gray-500">How many one purchase gives: Bandages 10, a 10 m rope 1. Keep the count out of the name; the inventory shows it.</p>
         </div>
       </div>
 
