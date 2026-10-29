@@ -155,6 +155,7 @@ export function EquipmentSection({ character }: { character: Character }) {
   const { updateCharacterData } = useCharacterSheetStore();
   const [editingItem, setEditingItem] = useState<{ item: GameItem; category: ItemCategory } | null>(null);
   const [activeDescriptionTooltip, setActiveDescriptionTooltip] = useState<DescriptionTooltipState | null>(null);
+  const [weaponTab, setWeaponTab] = useState<'weapons' | 'improvised'>('weapons');
   const { data: allItems = [], isLoading } = useQuery<GameItem[]>({ queryKey: ['gameItems'], queryFn: () => fetchItems(), staleTime: Infinity });
 
   useEffect(() => {
@@ -411,11 +412,20 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
 
   const totalArmorRating = calculateTotalArmor();
   const equippedWeapons = character.equipment?.equipped?.weapons || [];
-  // Every hero can fight bare-handed or with whatever lies at hand, without owning a weapon.
-  const attackRows: Array<(typeof equippedWeapons)[number] & { alwaysAvailable?: boolean }> = [
-    ...equippedWeapons,
-    ...allItems.filter(item => item.always_available && !item.party_id).map(item => ({ name: item.name, alwaysAvailable: true })),
-  ];
+  // Every hero can fight bare-handed, so Unarmed always sits with their weapons. Grabbing whatever lies at hand (a
+  // blunt object) is a choice made in the moment, so those attacks wait on their own tab.
+  type AttackRow = (typeof equippedWeapons)[number] & { alwaysAvailable?: boolean; improvised?: boolean };
+  const alwaysAvailable = allItems.filter(item => item.always_available && !item.party_id);
+  const isUnarmed = (item: GameItem) => item.name.trim().toLowerCase() === 'unarmed';
+  const unarmedRows: AttackRow[] = alwaysAvailable.filter(isUnarmed).map(item => ({ name: item.name, alwaysAvailable: true }));
+  const improvisedRows: AttackRow[] = alwaysAvailable.filter(item => !isUnarmed(item)).map(item => ({ name: item.name, alwaysAvailable: true, improvised: true }));
+  const attackRows: AttackRow[] = weaponTab === 'improvised' ? improvisedRows : [...equippedWeapons, ...unarmedRows];
+  const characterStrength = Number(character.attributes?.STR) || 0;
+  // A weapon needing more STR than the hero has is flagged next to its name.
+  const strengthShortfall = (item: GameItem | undefined) => {
+    const needed = Number(item?.strength_requirement);
+    return Number.isFinite(needed) && needed > characterStrength ? needed : null;
+  };
   const parsedSkillLevels = parseSkillLevels(character.skill_levels);
   const bodyArmor = resolveItem(character.equipment?.equipped?.armor);
   const helmet = resolveItem(character.equipment?.equipped?.helmet);
@@ -474,7 +484,15 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
       </div>
 
       <div className="bg-white rounded-sm border border-stone-300 shadow-sm overflow-hidden">
-        <div className="bg-[#f4f1ea] p-3 border-b border-stone-300 flex items-center justify-between"><h3 className="font-serif font-bold text-lg flex items-center gap-2 text-[#8b2e2e]"><Sword className="w-5 h-5 fill-current" /> Weapons</h3></div>
+        <div className="bg-[#f4f1ea] p-3 border-b border-stone-300 flex flex-wrap items-center justify-between gap-2"><h3 className="font-serif font-bold text-lg flex items-center gap-2 text-[#8b2e2e]"><Sword className="w-5 h-5 fill-current" /> Weapons</h3>
+          {improvisedRows.length > 0 && (
+            <div role="tablist" aria-label="Weapon lists" className="flex gap-1">
+              <button type="button" role="tab" aria-selected={weaponTab === 'weapons'} onClick={() => setWeaponTab('weapons')} className={`rounded-sm px-2.5 py-1 text-xs font-bold transition-colors ${weaponTab === 'weapons' ? 'bg-[#8b2e2e] text-white' : 'text-[#8b2e2e] hover:bg-[#8b2e2e]/10'}`}>At hand</button>
+              <button type="button" role="tab" aria-selected={weaponTab === 'improvised'} onClick={() => setWeaponTab('improvised')} className={`rounded-sm px-2.5 py-1 text-xs font-bold transition-colors ${weaponTab === 'improvised' ? 'bg-[#8b2e2e] text-white' : 'text-[#8b2e2e] hover:bg-[#8b2e2e]/10'}`}>Improvised weapons ({improvisedRows.length})</button>
+            </div>
+          )}
+        </div>
+        {weaponTab === 'improvised' && <p className="border-b border-stone-200 bg-[#f9f7f2] px-4 py-2 text-xs text-stone-600">Grab whatever lies at hand: a bottle or chair leg is a light blunt object, a bench or log a heavy one. Attacks use BRAWLING.</p>}
         {isLoading ? <div className="p-4"><LoadingSpinner size="sm" /></div> : attackRows.length === 0 ? <p className="p-6 text-sm text-stone-400 italic text-center">No weapons equipped.</p> : (
           <>
             <div className="md:hidden p-3 space-y-3">
@@ -525,7 +543,8 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                             disabled={!weaponDetails || weapon.alwaysAvailable}
                           >
                             {weapon.name}
-                            {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">Always available</span>}
+                            {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">{weapon.improvised ? 'Improvised' : 'Always available'}</span>}
+                            {strengthShortfall(weaponDetails) && <span className="ml-1.5 align-middle rounded bg-amber-100 px-1 text-[9px] font-bold uppercase tracking-wider text-amber-800">Needs STR {strengthShortfall(weaponDetails)}</span>}
                           </button>
                           {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                           {renderItemDescriptionTooltipTrigger(hoverDescription, `mobile-weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}
@@ -634,7 +653,8 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                               disabled={!weaponDetails || weapon.alwaysAvailable}
                             >
                               {weapon.name}
-                              {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">Always available</span>}
+                              {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">{weapon.improvised ? 'Improvised' : 'Always available'}</span>}
+                              {strengthShortfall(weaponDetails) && <span className="ml-1.5 align-middle rounded bg-amber-100 px-1 text-[9px] font-bold uppercase tracking-wider text-amber-800">Needs STR {strengthShortfall(weaponDetails)}</span>}
                               {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                             </button>
                             {renderItemDescriptionTooltipTrigger(hoverDescription, `weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}
