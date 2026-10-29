@@ -144,7 +144,7 @@ const LootAssignmentModal = ({ partyId, onClose, allItems, onAssignLoot }: LootA
   const filteredItems = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const search = searchTerm.toLowerCase();
-    return allItems.filter(item => item.name.toLowerCase().includes(search)).slice(0, 50);
+    return allItems.filter(item => !item.always_available && item.name.toLowerCase().includes(search)).slice(0, 50);
   }, [searchTerm, allItems]);
 
   // Items picked from the list come as the shop sells them (Bandages: a pack of 10); custom loot is counted in units.

@@ -1111,11 +1111,11 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                 {shopSearch ? (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         {allGameItems
-                                            .filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase()))
+                                            .filter(item => !item.is_custom && !item.always_available && item.name.toLowerCase().includes(shopSearch.toLowerCase()))
                                             .sort((a, b) => a.name.localeCompare(b.name))
                                             .map(item => <ShopItemCard key={item.id} item={item} onAdd={handleAddToCart} characterStrength={getStrengthFromCharacter(character)} />)
                                         }
-                                        {allGameItems.filter(item => !item.is_custom && item.name.toLowerCase().includes(shopSearch.toLowerCase())).length === 0 && (
+                                        {allGameItems.filter(item => !item.is_custom && !item.always_available && item.name.toLowerCase().includes(shopSearch.toLowerCase())).length === 0 && (
                                             <div className="col-span-full text-center py-10 text-gray-400">
                                                 <Search size={32} className="mx-auto mb-2 opacity-30" />
                                                 <p>No items found matching "{shopSearch}"</p>
@@ -1189,7 +1189,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                                 <div className="shop-item-grid grid grid-cols-1 sm:grid-cols-2 gap-3 pb-20">
                                                     {allGameItems
                                                         .filter(item => {
-                                                            if (item.is_custom) return false;
+                                                            if (item.is_custom || item.always_available) return false;
                                                             // Filter by Group Categories
                                                             if (!selectedShopGroup.categories.includes(item.category?.toUpperCase())) return false;
                                                             // Filter by specific sub-category tab if active

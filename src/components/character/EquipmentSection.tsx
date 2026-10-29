@@ -411,6 +411,11 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
 
   const totalArmorRating = calculateTotalArmor();
   const equippedWeapons = character.equipment?.equipped?.weapons || [];
+  // Every hero can fight bare-handed or with whatever lies at hand, without owning a weapon.
+  const attackRows: Array<(typeof equippedWeapons)[number] & { alwaysAvailable?: boolean }> = [
+    ...equippedWeapons,
+    ...allItems.filter(item => item.always_available && !item.party_id).map(item => ({ name: item.name, alwaysAvailable: true })),
+  ];
   const parsedSkillLevels = parseSkillLevels(character.skill_levels);
   const bodyArmor = resolveItem(character.equipment?.equipped?.armor);
   const helmet = resolveItem(character.equipment?.equipped?.helmet);
@@ -470,10 +475,10 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
 
       <div className="bg-white rounded-sm border border-stone-300 shadow-sm overflow-hidden">
         <div className="bg-[#f4f1ea] p-3 border-b border-stone-300 flex items-center justify-between"><h3 className="font-serif font-bold text-lg flex items-center gap-2 text-[#8b2e2e]"><Sword className="w-5 h-5 fill-current" /> Weapons</h3></div>
-        {isLoading ? <div className="p-4"><LoadingSpinner size="sm" /></div> : equippedWeapons.length === 0 ? <p className="p-6 text-sm text-stone-400 italic text-center">No weapons equipped.</p> : (
+        {isLoading ? <div className="p-4"><LoadingSpinner size="sm" /></div> : attackRows.length === 0 ? <p className="p-6 text-sm text-stone-400 italic text-center">No weapons equipped.</p> : (
           <>
             <div className="md:hidden p-3 space-y-3">
-              {equippedWeapons.map((weapon, index) => {
+              {attackRows.map((weapon, index) => {
                 const weaponDetails = resolveItem(weapon.name);
                 const hoverDescription = getItemHoverDescription(weaponDetails);
                 const rawSkillName = parseBaseSkillName(typeof weaponDetails?.skill === 'string' ? weaponDetails.skill : null);
@@ -517,9 +522,10 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                               if (weaponDetails) setEditingItem({ item: weaponDetails, category: 'weapon' });
                             }}
                             className={`font-serif font-bold text-left ${isBroken ? 'text-red-800 line-through decoration-red-800' : 'text-stone-900'}`}
-                            disabled={!weaponDetails}
+                            disabled={!weaponDetails || weapon.alwaysAvailable}
                           >
                             {weapon.name}
+                            {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">Always available</span>}
                           </button>
                           {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                           {renderItemDescriptionTooltipTrigger(hoverDescription, `mobile-weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}
@@ -581,7 +587,7 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                   </tr>
                 </thead>
                 <tbody className="text-sm font-sans text-stone-800 divide-y divide-stone-200">
-                  {equippedWeapons.map((weapon, index) => {
+                  {attackRows.map((weapon, index) => {
                     const weaponDetails = resolveItem(weapon.name);
                     const hoverDescription = getItemHoverDescription(weaponDetails);
                     const rawSkillName = parseBaseSkillName(typeof weaponDetails?.skill === 'string' ? weaponDetails.skill : null);
@@ -625,9 +631,10 @@ const getTooltipLayout = (triggerEl: HTMLElement | null) => {
                                 if (weaponDetails) setEditingItem({ item: weaponDetails, category: 'weapon' });
                               }}
                               className={`text-left hover:underline disabled:cursor-default flex items-center gap-1.5 ${isBroken ? 'text-red-800 decoration-red-800 line-through' : 'hover:text-[#1a472a]'}`}
-                              disabled={!weaponDetails}
+                              disabled={!weaponDetails || weapon.alwaysAvailable}
                             >
                               {weapon.name}
+                              {weapon.alwaysAvailable && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider text-stone-400">Always available</span>}
                               {!isBroken && isItemEnhanced(weaponDetails, 'weapon') && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
                             </button>
                             {renderItemDescriptionTooltipTrigger(hoverDescription, `weapon-${weaponDetails?.id ?? weapon.name}-${index}`)}

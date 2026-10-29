@@ -9,16 +9,18 @@ CREATE TEMP TABLE item_unit_changes (
   old_name text NOT NULL,
   new_name text NOT NULL,
   units integer NOT NULL,      -- 'named': units in the pack; 'measured': the old quantity
-  old_unit_weight numeric
+  old_unit_weight numeric,     -- 'measured': the old weight of one meter
+  old_weight numeric           -- 'named': the old catalogue weight
 ) ON COMMIT DROP;
 
--- 1. "Bandages (10)" becomes "Bandages" with 10 units. Its weight already covers the whole pack. A name that would
---    clash with another item in the same list is left alone.
-INSERT INTO item_unit_changes (id, kind, old_name, new_name, units)
-SELECT g.id, 'named', g.name, m[1], m[2]::integer
+-- 1. "Bandages (10)" and "Perfume (10 doses)" become "Bandages" and "Perfume" with 10 units. A name that would clash
+--    with another item in the same list is left alone.
+INSERT INTO item_unit_changes (id, kind, old_name, new_name, units, old_weight)
+SELECT g.id, 'named', g.name, m[1], m[2]::integer, g.weight
 FROM game_items g
-CROSS JOIN LATERAL regexp_match(btrim(g.name), '^(.*\S)\s*\((\d+)\)$') AS m
+CROSS JOIN LATERAL regexp_match(btrim(g.name), '^(.*\S)\s*\((\d+)\s*([[:alpha:]]*)\)$') AS m
 WHERE m IS NOT NULL AND m[2]::integer > 1 AND m[2]::integer < 10000
+  AND m[3] !~* '^(m|meters?|ft|feet|kg|l|liters?)$'
   AND NOT EXISTS (
     SELECT 1 FROM game_items other
     WHERE other.id <> g.id AND other.party_id IS NOT DISTINCT FROM g.party_id AND lower(other.name) = lower(m[1])
@@ -40,13 +42,14 @@ WHERE g.quantity > 1
   AND g.id NOT IN (SELECT id FROM item_unit_changes)
   AND g.name ~* ('(^|\D)' || g.quantity || '\s*(m|meters?|metres?)\M');
 
+-- Listings with a quantity held the weight of one unit (Bandages (10): 0.1 each); it becomes the weight of the whole
+-- purchase. A pack named with a different count than its quantity already had the pack's weight.
+UPDATE game_items g SET weight = trim_scale(g.weight * g.quantity)
+WHERE g.quantity > 1 AND g.weight IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM item_unit_changes c WHERE c.id = g.id AND c.kind = 'named' AND c.units <> g.quantity);
+
 UPDATE game_items g SET name = c.new_name, quantity = c.units
 FROM item_unit_changes c WHERE c.id = g.id AND c.kind = 'named';
-
--- Quantity listings held the weight of one unit; it becomes the weight of the whole purchase.
-UPDATE game_items SET weight = trim_scale(weight * quantity)
-WHERE quantity > 1 AND weight IS NOT NULL
-  AND id NOT IN (SELECT id FROM item_unit_changes WHERE kind = 'named');
 
 UPDATE game_items g SET quantity = 1, is_consumable = false
 FROM item_unit_changes c WHERE c.id = g.id AND c.kind = 'measured';
@@ -56,31 +59,37 @@ CREATE FUNCTION pg_temp.item_in_units(entry jsonb) RETURNS jsonb
 LANGUAGE plpgsql AS $$
 DECLARE
   change item_unit_changes%ROWTYPE;
-  quantity numeric;
-  weight numeric;
+  saved_quantity numeric;
+  saved_weight numeric;
   result jsonb := entry;
 BEGIN
   IF jsonb_typeof(entry) <> 'object' THEN RETURN entry; END IF;
-  quantity := CASE WHEN entry->>'quantity' ~ '^\d+(\.\d+)?$' THEN (entry->>'quantity')::numeric ELSE 1 END;
-  weight := CASE WHEN entry->>'weight' ~ '^\d+(\.\d+)?$' THEN (entry->>'weight')::numeric END;
+  saved_quantity := CASE WHEN entry->>'quantity' ~ '^\d+(\.\d+)?$' THEN (entry->>'quantity')::numeric ELSE 1 END;
+  saved_weight := CASE WHEN entry->>'weight' ~ '^\d+(\.\d+)?$' THEN (entry->>'weight')::numeric END;
 
   SELECT c.* INTO change FROM item_unit_changes c JOIN game_items g ON g.id = c.id
   WHERE c.kind = 'named' AND lower(c.old_name) = lower(btrim(entry->>'name'))
   ORDER BY g.party_id NULLS FIRST LIMIT 1;
   -- A looted "Bandages (10)" x1 is one pack; old shop purchases kept that name on single units ("Arrows (20)" x20),
   -- so a whole number of packs is already counted in units (isStoredPack in shared/encumbrance.js).
-  IF FOUND AND quantity >= change.units AND mod(quantity, change.units) = 0 THEN
+  -- Their saved weights were copied from the old catalogue row, so the corrected catalogue decides instead.
+  IF FOUND AND coalesce(entry->>'weightBasis', '') <> 'unit' THEN result := result - 'weight' - 'weightBasis'; END IF;
+  IF FOUND AND saved_quantity >= change.units AND mod(saved_quantity, change.units) = 0 THEN
     result := result || jsonb_build_object('name', change.new_name);
     IF NOT result ? 'definitionId' THEN result := result || jsonb_build_object('definitionId', change.id::text); END IF;
     RETURN result;
   ELSIF FOUND THEN
-    result := result || jsonb_build_object('name', change.new_name, 'quantity', trim_scale(quantity * change.units));
+    result := result || jsonb_build_object('name', change.new_name, 'quantity', trim_scale(saved_quantity * change.units));
     IF NOT result ? 'definitionId' THEN result := result || jsonb_build_object('definitionId', change.id::text); END IF;
-    IF weight IS NOT NULL AND coalesce(entry->>'weightBasis', '') <> 'unit' THEN
-      result := result || jsonb_build_object('weight', trim_scale(weight / change.units), 'weightBasis', 'unit');
-    END IF;
     RETURN result;
   END IF;
+
+  -- Recent shop purchases are already single "Bandages", but saved the old catalogue weight divided by the pack.
+  SELECT c.* INTO change FROM item_unit_changes c JOIN game_items g ON g.id = c.id
+  WHERE c.kind = 'named' AND entry->>'weightBasis' = 'unit' AND saved_weight = trim_scale(c.old_weight / c.units)
+    AND (entry->>'definitionId' = c.id::text OR lower(btrim(entry->>'name')) = lower(c.new_name))
+  ORDER BY g.party_id NULLS FIRST LIMIT 1;
+  IF FOUND THEN RETURN result - 'weight' - 'weightBasis'; END IF;
 
   SELECT c.* INTO change FROM item_unit_changes c JOIN game_items g ON g.id = c.id
   WHERE c.kind = 'measured'
@@ -88,9 +97,9 @@ BEGIN
       OR lower(btrim(entry->>'name')) = lower(btrim(c.old_name))
       OR lower(btrim(entry->>'originalName')) = lower(btrim(c.old_name)))
   ORDER BY g.party_id NULLS FIRST LIMIT 1;
-  IF FOUND AND quantity >= change.units AND mod(quantity, change.units) = 0
-     AND (weight IS NULL OR weight = change.old_unit_weight) THEN
-    result := (result - 'weight' - 'weightBasis') || jsonb_build_object('quantity', trim_scale(quantity / change.units));
+  IF FOUND AND saved_quantity >= change.units AND mod(saved_quantity, change.units) = 0
+     AND (saved_weight IS NULL OR saved_weight = change.old_unit_weight) THEN
+    result := (result - 'weight' - 'weightBasis') || jsonb_build_object('quantity', trim_scale(saved_quantity / change.units));
     IF NOT result ? 'definitionId' THEN result := result || jsonb_build_object('definitionId', change.id::text); END IF;
   END IF;
   RETURN result;
