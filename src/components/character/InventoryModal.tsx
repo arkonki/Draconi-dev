@@ -694,12 +694,20 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                 </div>
                 {((eq.containers?.length || 0) > 0 || (eq.animals?.length || 0) > 0) && (
                     <div className="mt-3 border-t border-slate-200 pt-3">
-                        <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Worn packs & mounts</h3>
+                        <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Packs, containers & mounts</h3>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                             {(eq.containers || []).map((container: InventoryItem, index: number) => {
                                 const bonus = encumbrance.capacityBonuses.find(entry => entry.id === container.id && entry.name === container.name)?.slots;
                                 const storage = container.id ? encumbrance.containerStats[container.id] : undefined;
-                                return <LoadoutSlot key={container.id || `container-${index}`} icon={Backpack} label={storage?.storageKind === 'mount' ? 'Mount bag' : storage?.storageKind === 'external' ? 'Stored container' : 'Worn pack'} item={container} onUnequip={() => handleUnequipItem(container.name, 'container', container.id)} subItems={<><span className="mt-1 text-[10px] text-gray-500">{bonus ? `+${bonus} carrying slots` : storage?.storageKind === 'mount' ? 'Contents carried by mount' : storage?.storageKind === 'external' ? 'Contents stored elsewhere' : 'Contents count toward carried load'}</span>{container.id && storage?.storageKind !== 'mount' && <button type="button" onClick={() => handleToggleContainerPlaced(container.id!)} className="mt-1 self-start text-[10px] font-bold text-indigo-600 hover:underline">{storage?.storageKind === 'external' ? 'Pick up' : 'Set down (not carried)'}</button>}</>} />;
+                                const mount = container.equippedOn ? (eq.animals || []).find((animal: InventoryItem) => animal.id === container.equippedOn) : undefined;
+                                const mountBonus = Number(getItemData(container)?.encumbrance_modifier) || 0;
+                                // Packs and bags only add slots; a chest or basket holds things and is either carried or set down.
+                                const label = mount ? `Bag on ${mount.name}` : !storage ? 'Worn pack' : storage.storageKind === 'external' ? 'Set down' : 'Carried container';
+                                const detail = mount ? `+${mountBonus} slots for the mount`
+                                    : !storage ? (bonus ? `+${bonus} carrying slots` : 'Adds no carrying slots')
+                                    : storage.storageKind === 'external' ? `Holds ${storage.load} / ${storage.capacity} · not carried`
+                                    : `Holds ${storage.load} / ${storage.capacity} · counts toward your load`;
+                                return <LoadoutSlot key={container.id || `container-${index}`} icon={Backpack} label={label} item={container} onUnequip={() => handleUnequipItem(container.name, 'container', container.id)} subItems={<><span className="mt-1 text-[10px] text-gray-500">{detail}</span>{container.id && storage && storage.storageKind !== 'mount' && <button type="button" onClick={() => handleToggleContainerPlaced(container.id!)} className="mt-1 self-start text-[10px] font-bold text-indigo-600 hover:underline">{storage.storageKind === 'external' ? 'Pick up' : 'Set down (not carried)'}</button>}</>} />;
                             })}
                             {(eq.animals || []).map((animal: InventoryItem, index: number) => <LoadoutSlot key={animal.id || `animal-${index}`} icon={Anchor} label="Mount / pack animal" item={animal} onUnequip={() => handleUnequipItem(animal.name, 'animal', animal.id)} subItems={<span className="mt-1 text-[10px] text-gray-500">Cargo does not count toward your load</span>} />)}
                         </div>
@@ -734,7 +742,8 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
         const currentContainerId = item.containerId;
         const moveTargets = equippedContainers.filter((c: InventoryItem) => c.id !== currentContainerId);
         // If we are in a container, we can also move back to "Main Inventory" (which is effectively null containerId)
-        const canMoveToMain = !!currentContainerId;
+        const canMoveToMain = !!currentContainerId && !!encumbrance.containerStats[currentContainerId];
+        const isVehicle = String(itemDetails?.category || '').toUpperCase() === 'MEANS OF TRAVEL';
 
         return (
             <div key={item.id} className="inventory-item-row p-2.5 sm:p-3 border border-gray-200 rounded-xl flex flex-col gap-2 bg-white relative shadow-sm hover:shadow-md transition-shadow">
@@ -832,6 +841,9 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                     </div>
                 )}
 
+                {isVehicle && (
+                    <p className="text-[11px] text-gray-500">Vehicles belong to the party: put it in the party stash to load cargo onto it.</p>
+                )}
                 {description && isDetailsExpanded && (
                     <div className="text-xs text-gray-600 leading-relaxed italic border-t border-gray-100 pt-2">
                         {description}
@@ -933,7 +945,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                                 {renderLoadout()}
                                 <div className="border-b bg-indigo-50/50 px-4 py-2 text-xs text-gray-600" aria-label="Encumbrance breakdown">
                                     <p><strong>{encumbrance.load} carried slots / {encumbrance.capacity} capacity</strong> · STR {getStrengthFromCharacter(character)} → {encumbrance.baseCapacity} base{encumbrance.capacityBonuses.map((bonus, index) => <span key={bonus.id || index}> + {bonus.slots} {bonus.name}</span>)}{encumbrance.coinLoad > 0 && <span> · coins take {encumbrance.coinLoad} {encumbrance.coinLoad === 1 ? 'slot' : 'slots'}</span>}</p>
-                                    <p className="mt-1">Worn equipment is excluded. Contents of carried packs still count; mount cargo and items left elsewhere do not.</p>
+                                    <p className="mt-1">Worn equipment is excluded. A carried chest or basket counts, and so do its contents; mount cargo and things set down do not.</p>
                                     {encumbrance.unresolvedContainerItemIds.length > 0 && <p className="mt-1 text-amber-800">Some items reference missing containers. They are shown in Main Inventory and still count unless explicitly stored elsewhere.</p>}
                                 </div>
 

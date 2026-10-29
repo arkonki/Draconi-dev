@@ -72,15 +72,13 @@ describe('shared character encumbrance', () => {
     expect(calculateEncumbrance(hero, [item('Arrows (20)', 1)]).load).toBe(1);
   });
 
-  it('includes carried backpack contents regardless of the storage flag', () => {
-    for (const is_container of [false, true]) {
-      const hero = character(11, [{ id: 'rope', name: 'Rope', quantity: 8, containerId: 'pack' }], {
-        containers: [{ id: 'pack', name: 'Backpack', quantity: 1 }],
-      });
-      const result = calculateEncumbrance(hero, [item('Rope', 1), item('Backpack', 1, { is_container, encumbrance_modifier: 2 })]);
-      expect(result).toMatchObject({ baseCapacity: 6, capacity: 8, load: 8, isEncumbered: false });
-      expect(result.containerStats.pack).toMatchObject({ load: 8, countsTowardCarriedLoad: true });
-    }
+  it('treats a worn backpack as extra carrying slots, not as storage of its own', () => {
+    const hero = character(11, [{ id: 'rope', name: 'Rope', quantity: 8, containerId: 'pack' }], {
+      containers: [{ id: 'pack', name: 'Backpack', quantity: 1 }],
+    });
+    const result = calculateEncumbrance(hero, [item('Rope', 1), item('Backpack', 1, { encumbrance_modifier: 2 })]);
+    expect(result).toMatchObject({ baseCapacity: 6, capacity: 8, load: 8, isEncumbered: false });
+    expect(result.containerStats.pack).toBeUndefined();
   });
 
   it('counts missing-container and missing-weight items conservatively, preserving explicit zero', () => {
@@ -116,8 +114,9 @@ describe('shared character encumbrance', () => {
     });
     const result = calculateEncumbrance(hero, [item('Rope', 1), item('Horse', 0, { is_container: true, container_capacity: 20 }), item('Saddle bag', 1, { encumbrance_modifier: 2 })]);
     expect(result).toMatchObject({ capacity: 6, load: 3, externalLoad: 16 });
-    expect(result.containerStats.horse.capacity).toBe(22);
-    expect(result.containerStats.bag).toMatchObject({ load: 9, storageKind: 'mount', countsTowardCarriedLoad: false });
+    // A saddle bag adds to its mount; what was put in the bag is the mount's load.
+    expect(result.containerStats.horse).toMatchObject({ capacity: 22, load: 9, storageKind: 'mount' });
+    expect(result.containerStats.bag).toBeUndefined();
   });
 
   it('does not count contents of a set-down basket toward carried load, and counts them again once picked up', () => {
@@ -130,8 +129,9 @@ describe('shared character encumbrance', () => {
     const setDown = calculateEncumbrance(character(12, stuff, basket({ temporarilyPlaced: true, carriedByActorId: null })), defs);
     expect(setDown).toMatchObject({ load: 2, externalLoad: 5 });
     expect(setDown.containerStats.basket).toMatchObject({ load: 5, storageKind: 'external', countsTowardCarriedLoad: false });
+    // Carried, the basket's contents count and so does the basket itself.
     const carried = calculateEncumbrance(character(12, stuff, basket({ temporarilyPlaced: false, carriedByActorId: 'hero' })), defs);
-    expect(carried).toMatchObject({ load: 7, externalLoad: 0 });
+    expect(carried).toMatchObject({ load: 8, externalLoad: 0 });
   });
 
   it('accepts legacy JSON fields and handles missing or malformed equipment without crashing the sheet', () => {

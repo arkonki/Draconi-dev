@@ -234,7 +234,7 @@ describe('Dragonbane Helper actor equipment', () => {
         weapons: [],
         containers: [{
           id: '11111111-1111-4111-8111-111111111111',
-          name: 'Backpack',
+          name: 'Basket',
           is_container: true,
           container_capacity: 4,
         }],
@@ -246,9 +246,10 @@ describe('Dragonbane Helper actor equipment', () => {
       inventory: equipment.inventory,
       equipment: equipment.equipment,
     });
+    // Rations 5 (two slots), rope 2 and the carried basket itself 1.
     expect(result).toMatchObject({
       capacity: 5,
-      totalCarriedLoad: 4,
+      totalCarriedLoad: 5,
       isEncumbered: false,
       containerLoads: [{ load: 2, capacity: 4, isOverloaded: false }],
     });
@@ -261,20 +262,21 @@ describe('Dragonbane Helper actor equipment', () => {
         weapons: [],
         containers: [{
           id: '11111111-1111-4111-8111-111111111111',
-          name: 'Backpack',
+          name: 'Basket',
           is_container: true,
         }],
       },
     });
     const result = calculateEncumbrance({
       type: 'pc',
-      attributes: { STR: 2 },
+      attributes: { STR: 4 },
       inventory: equipment.inventory,
       equipment: equipment.equipment,
     });
 
+    // The rope and the carried basket, both of unknown weight, count 1 each.
     expect(result).toMatchObject({
-      totalCarriedLoad: 1,
+      totalCarriedLoad: 2,
       isEncumbered: false,
       containerLoads: [{ capacity: 10, isOverloaded: false }],
       unknownWeightItemIds: [equipment.inventory[0].id],

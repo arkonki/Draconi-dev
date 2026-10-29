@@ -1,7 +1,8 @@
 import { supabase } from '../supabase';
 
 // Adding things to a party's stash. Items with the same name and description stack, so the same loot added twice
-// shows as one row with a larger quantity. Every addition is written to the stash history.
+// shows as one row with a larger quantity. New things go into the stash itself, never onto a vehicle's cargo. Every
+// addition is written to the stash history.
 
 export interface StashAddition {
   name: string;
@@ -25,9 +26,10 @@ export async function addItemsToPartyStash(partyId: string, additions: StashAddi
   if (merged.size === 0) return;
 
   // Read the stash now rather than trusting what a screen loaded earlier, so additions from others are not lost.
-  const { data, error } = await supabase.from('party_inventory').select('id, name, quantity, description').eq('party_id', partyId);
+  const { data, error } = await supabase.from('party_inventory').select('id, name, quantity, description, stored_in').eq('party_id', partyId);
   if (error) throw error;
-  const stash = new Map(((data ?? []) as Array<{ id: string; name: string; quantity: number; description?: string | null }>)
+  const stash = new Map(((data ?? []) as Array<{ id: string; name: string; quantity: number; description?: string | null; stored_in?: string | null }>)
+    .filter((row) => !row.stored_in)
     .map((row) => [stackKey(String(row.name), row.description), row]));
 
   const rowsToUpdate: Array<{ id: string; quantity: number }> = [];

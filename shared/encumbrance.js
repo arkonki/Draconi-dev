@@ -91,6 +91,8 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
   const capacity = baseCapacity + capacityBonuses.reduce((sum, bonus) => sum + bonus.slots, 0);
   const containerStats = {};
   for (const [id, item] of providers) {
+    // A backpack or saddle bag only adds carrying slots; real storage is a mount or a container such as a chest.
+    if (item.slot !== 'animal' && !item.isContainer) continue;
     const mounted = item.slot === 'animal' || (item.equippedOn && providers.get(item.equippedOn)?.slot === 'animal');
     let containerCapacity = finiteNonNegative(item.containerCapacity);
     if (!containerCapacity) containerCapacity = item.isContainer ? 10 : capacity;
@@ -105,6 +107,11 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
       isOverloaded: false,
     };
   }
+  // Older items may sit "in" a backpack or saddle bag; they belong to whatever carries that bag.
+  const storageFor = (id, seen = new Set()) => {
+    if (!id || seen.has(id)) return undefined;
+    return containerStats[id] || storageFor(providers.get(id)?.equippedOn, new Set([...seen, id]));
+  };
   let load = 0;
   let rationCount = 0;
   let externalLoad = 0;
@@ -120,17 +127,21 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
     if (item.id) itemLocations[item.id] = external ? 'external' : 'carried';
     if (item.unknownWeight) unknownWeightItemIds.push(item.id);
     if (item.containerId && !providers.has(item.containerId)) unresolvedContainerItemIds.push(item.id);
-    const container = containerStats[item.containerId];
+    const container = storageFor(item.containerId);
     if (container) {
-      if (ration) containerRations[item.containerId] = (containerRations[item.containerId] || 0) + quantity;
+      if (ration) containerRations[container.id] = (containerRations[container.id] || 0) + quantity;
       else container.load += itemLoad;
     }
     if (external) externalLoad += itemLoad;
     else if (ration) rationCount += quantity;
     else load += itemLoad;
   }
+  // A chest or basket you carry weighs what it weighs on top of its contents; worn packs and bags do not.
+  const carriedContainerLoad = equipped
+    .filter(item => item.slot === 'container' && item.isContainer && !isExternal(item))
+    .reduce((sum, item) => sum + (finiteNonNegative(item.weight) ?? 1) * (finiteNonNegative(item.quantity) ?? 1), 0);
   const coinLoad = Math.floor((finiteNonNegative(coins) ?? 0) / 100);
-  load = cleanLoad(load + Math.ceil(rationCount / 4) + coinLoad);
+  load = cleanLoad(load + Math.ceil(rationCount / 4) + coinLoad + carriedContainerLoad);
   for (const container of Object.values(containerStats)) {
     container.load = cleanLoad(container.load + Math.ceil((containerRations[container.id] || 0) / 4));
     container.isOverloaded = container.load > container.capacity;

@@ -19,6 +19,7 @@ import { addItemsToPartyStash } from '../../lib/api/partyStash';
 import { listingContents } from '../../../shared/encumbrance.js';
 import { makeMastercrafted } from '../../lib/mastercrafted';
 import { isService } from '../../lib/shopCart';
+import { isDraftAnimal, vehicleCargo } from '../../lib/partyVehicles';
 
 // --- HELPERS ---
 const coerceItemName = (name: unknown): string => {
@@ -89,6 +90,8 @@ interface PartyInventoryTableItem {
   description?: string;
   category?: string;
   party_id: string;
+  /** The stash vehicle this is loaded onto, if any. */
+  stored_in?: string | null;
 }
 
 interface TransactionLog {
@@ -422,6 +425,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
     const ordered = [...allItems.filter(item => !item.party_id), ...allItems.filter(item => item.party_id)];
     return new Map(ordered.map(item => [normalizeName(item.name), item]));
   }, [allItems]);
+
   const membersById = useMemo(() => {
     return new Map(members.map(member => [member.id, member]));
   }, [members]);
@@ -510,7 +514,8 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
               quantity: Math.max(0, Number(row.quantity) || 0),
               description: typeof row.description === 'string' ? row.description : '',
               category: typeof row.category === 'string' ? row.category : undefined,
-              party_id: String(row.party_id || partyId)
+              party_id: String(row.party_id || partyId),
+              stored_in: typeof row.stored_in === 'string' ? row.stored_in : null,
             };
           })
           .filter((row): row is PartyInventoryTableItem => row !== null)
@@ -556,6 +561,52 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
       await loadData();
     },
   });
+
+  // Vehicles in the stash carry the party's cargo. Horses and donkeys ridden by members or kept in the stash can pull them.
+  const definitionFor = useCallback((name: string) => allItemsByName.get(normalizeName(name)), [allItemsByName]);
+  const draftAvailable = useMemo(() => (
+    members.reduce((sum, member) => sum + (member.equipment?.equipped?.animals || []).filter(animal => isDraftAnimal(String(animal?.name || ''))).length, 0)
+    + inventory.filter(row => isDraftAnimal(row.name) && String(definitionFor(row.name)?.category || row.category || '').toUpperCase() === 'ANIMALS')
+      .reduce((sum, row) => sum + row.quantity, 0)
+  ), [members, inventory, definitionFor]);
+  const vehicles = useMemo(() => vehicleCargo(inventory, definitionFor, draftAvailable), [inventory, definitionFor, draftAvailable]);
+  const vehicleIds = useMemo(() => new Set(vehicles.map(vehicle => vehicle.id)), [vehicles]);
+  const selectedRows = useMemo(() => inventory.filter(row => selectedItemIdSet.has(row.id)), [inventory, selectedItemIdSet]);
+  const loadableSelection = selectedRows.filter(row => !vehicleIds.has(row.id) && !isCurrencyItem(row.name));
+
+  // Loading moves the chosen amount onto a vehicle (or back into the stash), stacking with what is already there.
+  const handleMoveSelected = async (target: string | null) => {
+    const rows = loadableSelection.filter(row => (row.stored_in ?? null) !== target);
+    if (!rows.length) return;
+    try {
+      for (const row of rows) {
+        const amount = Math.min(Math.max(1, transferQuantities[row.id] || row.quantity), row.quantity);
+        const destination = inventory.find(other => other.id !== row.id && (other.stored_in ?? null) === target
+          && getItemStackKey(other.name, other.description) === getItemStackKey(row.name, row.description));
+        if (amount === row.quantity && !destination) {
+          await supabase.from('party_inventory').update({ stored_in: target }).eq('id', row.id);
+          continue;
+        }
+        if (destination) await supabase.from('party_inventory').update({ quantity: destination.quantity + amount }).eq('id', destination.id);
+        else await supabase.from('party_inventory').insert([{ party_id: partyId, name: row.name, quantity: amount, category: row.category || 'LOOT', description: row.description || '', stored_in: target }]);
+        if (amount === row.quantity) await supabase.from('party_inventory').delete().eq('id', row.id);
+        else await supabase.from('party_inventory').update({ quantity: row.quantity - amount }).eq('id', row.id);
+      }
+      setSelectedItemIds([]);
+      setTransferQuantities({});
+      await loadData();
+    } catch (err) { console.error('Failed to load cargo.', err); }
+  };
+
+  const renderStashRow = (item: PartyInventoryTableItem) => (
+    <button type="button" key={item.id} onClick={() => toggleItemSelection(item.id)} className={`w-full p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIdSet.has(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
+      <div className="flex items-center gap-3">
+        <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIdSet.has(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
+        <div><p className={`font-medium text-sm ${selectedItemIdSet.has(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>{item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}</div>
+      </div>
+      {item.description && <div className="hidden group-hover:block max-w-xs text-xs text-gray-500 truncate ml-4">{item.description}</div>}
+    </button>
+  );
 
   // --- HANDLER: Assign Loot to Party ---
   const handleAssignLoot = async (loot: StagedLoot[]) => {
@@ -797,7 +848,7 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
 
       // Add to Party DB
       // Stack if Name AND Description match
-      const existingPartyItem = inventory.find(i =>
+      const existingPartyItem = inventory.find(i => !i.stored_in &&
         getItemStackKey(i.name, i.description) === getItemStackKey(safeCharItemName, charItem.description)
       );
 
@@ -951,26 +1002,46 @@ export function PartyInventory({ partyId, members, isDM }: PartyInventoryProps) 
             <select className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-indigo-500" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>{categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}</select>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/30">
-            {loading && inventory.length === 0 ? <LoadingSpinner /> : filteredInventory.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-gray-400"><Package size={48} className="opacity-20 mb-2" /><p>Stash is empty or no match.</p></div> : filteredInventory.map(item => (
-              <button type="button" key={item.id} onClick={() => toggleItemSelection(item.id)} className={`w-full p-3 rounded-lg border cursor-pointer flex justify-between items-center transition-all group ${selectedItemIdSet.has(item.id) ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded flex items-center justify-center font-bold text-xs ${selectedItemIdSet.has(item.id) ? 'bg-indigo-200 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>{item.quantity}</div>
-                  <div><p className={`font-medium text-sm ${selectedItemIdSet.has(item.id) ? 'text-indigo-900' : 'text-gray-900'}`}>{item.name}</p>{item.category && <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">{item.category}</p>}</div>
-                </div>
-                {item.description && <div className="hidden group-hover:block max-w-xs text-xs text-gray-500 truncate ml-4">{item.description}</div>}
-              </button>
-            ))
-            }
+            {loading && inventory.length === 0 ? <LoadingSpinner /> : filteredInventory.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-gray-400"><Package size={48} className="opacity-20 mb-2" /><p>Stash is empty or no match.</p></div> : (
+              <>
+                {filteredInventory.filter(item => !vehicleIds.has(item.id) && !(item.stored_in && vehicleIds.has(item.stored_in))).map(renderStashRow)}
+                {vehicles.map(vehicle => {
+                  const row = inventoryById.get(vehicle.id);
+                  const cargo = filteredInventory.filter(item => item.stored_in === vehicle.id);
+                  if (!row || (!filteredInventory.includes(row) && cargo.length === 0)) return null;
+                  const short = vehicle.draftNeeded - vehicle.draftAvailable;
+                  return (
+                    <section key={vehicle.id} aria-label={`${vehicle.name} cargo`} className="mt-3 rounded-lg border border-amber-200 bg-amber-50/40 p-2 space-y-2">
+                      {renderStashRow(row)}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px]">
+                        <span className={vehicle.isOverloaded ? 'font-bold text-red-600' : 'font-semibold text-gray-600'}>Cargo {vehicle.load} / {vehicle.capacity}{vehicle.isOverloaded ? ' · overloaded' : ''}</span>
+                        {short > 0 && <span className="font-semibold text-amber-700">Needs {vehicle.draftNeeded === 1 ? 'a horse or donkey' : `${vehicle.draftNeeded} horses or donkeys`} to pull it</span>}
+                      </div>
+                      {cargo.length > 0
+                        ? <div className="ml-3 space-y-2 border-l-2 border-amber-200 pl-2">{cargo.map(renderStashRow)}</div>
+                        : <p className="ml-3 text-[11px] italic text-gray-400">Nothing loaded. Select stash items, then use Load onto.</p>}
+                    </section>
+                  );
+                })}
+              </>
+            )}
           </div>
           {/* DELETE & SELL FOOTER */}
-          {selectedItemIds.length > 0 && isDM && (
-            <div className="p-3 border-t bg-indigo-50 flex justify-between items-center animate-in slide-in-from-bottom-2 z-20">
+          {selectedItemIds.length > 0 && (isDM || (vehicles.length > 0 && loadableSelection.length > 0)) && (
+            <div className="p-3 border-t bg-indigo-50 flex flex-wrap justify-between items-center gap-2 animate-in slide-in-from-bottom-2 z-20">
               <div className="text-xs font-bold text-indigo-900 flex items-center gap-2">
                 <span>{selectedItemIds.length} selected</span>
               </div>
-              <div className="flex gap-2">
-                <Button variant="danger" size="sm" onClick={handleDeleteSelected}>Delete</Button>
-                <Button variant="primary" size="sm" icon={Coins} onClick={() => setIsSellModalOpen(true)}>Sell Selected</Button>
+              <div className="flex flex-wrap gap-2">
+                {vehicles.length > 0 && loadableSelection.length > 0 && (
+                  <select aria-label="Load selected items onto" value="" onChange={e => { const target = e.target.value; if (target) void handleMoveSelected(target === 'stash' ? null : target); }} className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-semibold text-indigo-800">
+                    <option value="">Load onto…</option>
+                    {vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.id}>{vehicle.name} ({vehicle.load} / {vehicle.capacity})</option>)}
+                    {loadableSelection.some(row => row.stored_in) && <option value="stash">Unload into the stash</option>}
+                  </select>
+                )}
+                {isDM && <Button variant="danger" size="sm" onClick={handleDeleteSelected}>Delete</Button>}
+                {isDM && <Button variant="primary" size="sm" icon={Coins} onClick={() => setIsSellModalOpen(true)}>Sell Selected</Button>}
               </div>
             </div>
           )}

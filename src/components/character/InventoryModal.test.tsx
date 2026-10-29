@@ -173,16 +173,15 @@ describe('InventoryModal', () => {
     expect(equipment.inventory).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Backpack' })]));
   });
 
-  it('shows carried backpack contents and keeps their load in the character total', async () => {
+  it('lists items once put in a worn backpack with everything else carried, since the pack only adds slots', async () => {
     character.equipment.equipped.containers = [{ id: 'pack', name: 'Backpack', quantity: 1 }];
     character.equipment.inventory[0].containerId = 'pack';
     character.equipment.inventory[0].quantity = 7;
     renderInventory();
     await screen.findByText('7 / 8 Load');
-    expect(screen.queryByRole('button', { name: 'Show details for Rope' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Backpack storage' }));
     expect(screen.getByRole('button', { name: 'Show details for Rope' })).toBeVisible();
-    expect(screen.getByText('These contents also count toward your total carried load.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Open Backpack storage' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Some items reference missing containers/)).not.toBeInTheDocument();
   });
 
   it('shows orphaned container items in Main Inventory instead of hiding them', async () => {
