@@ -927,7 +927,7 @@ export function InventoryModal({ onClose }: { onClose: () => void }) {
                             <div className="inventory-tab-body pb-4">
                                 {renderLoadout()}
                                 <div className="border-b bg-indigo-50/50 px-4 py-2 text-xs text-gray-600" aria-label="Encumbrance breakdown">
-                                    <p><strong>{encumbrance.load} carried slots / {encumbrance.capacity} capacity</strong> · STR {getStrengthFromCharacter(character)} → {encumbrance.baseCapacity} base{encumbrance.capacityBonuses.map((bonus, index) => <span key={bonus.id || index}> + {bonus.slots} {bonus.name}</span>)}</p>
+                                    <p><strong>{encumbrance.load} carried slots / {encumbrance.capacity} capacity</strong> · STR {getStrengthFromCharacter(character)} → {encumbrance.baseCapacity} base{encumbrance.capacityBonuses.map((bonus, index) => <span key={bonus.id || index}> + {bonus.slots} {bonus.name}</span>)}{encumbrance.coinLoad > 0 && <span> · coins take {encumbrance.coinLoad} {encumbrance.coinLoad === 1 ? 'slot' : 'slots'}</span>}</p>
                                     <p className="mt-1">Worn equipment is excluded. Contents of carried packs still count; mount cargo and items left elsewhere do not.</p>
                                     {encumbrance.unresolvedContainerItemIds.length > 0 && <p className="mt-1 text-amber-800">Some items reference missing containers. They are shown in Main Inventory and still count unless explicitly stored elsewhere.</p>}
                                 </div>

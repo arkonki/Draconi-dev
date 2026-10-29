@@ -29,6 +29,8 @@ export interface SlotEncumbrance {
   capacityBonuses: { id?: string; name: string; slots: number }[];
   capacity: number;
   load: number;
+  /** Slots taken by coins (one per full 100); already part of `load`. */
+  coinLoad: number;
   isEncumbered: boolean;
   externalLoad: number;
   containerStats: Record<string, ContainerStats>;
@@ -43,4 +45,5 @@ export function listingContents(definition?: { name?: string; quantity?: unknown
 export function isStoredPack(item?: { name?: string; quantity?: unknown } | null): boolean;
 export function findItemDefinition<T extends { id?: string; name?: string }>(item: string | { name?: string; originalName?: string; definitionId?: string }, definitions: T[]): T | undefined;
 export function resolveItemSlots(item: string | { weight?: unknown; name?: string; originalName?: string; weightBasis?: string }, definition?: { name?: string; weight?: unknown; quantity?: unknown }): { unitWeight: number; unknownWeight: boolean; bundleSize: number };
-export function calculateSlotEncumbrance(input: { strength: unknown; actorId?: string; inventory?: SlotItem[]; equipped?: SlotItem[] }): SlotEncumbrance;
+export function coinCount(money?: { gold?: unknown; silver?: unknown; copper?: unknown } | null): number;
+export function calculateSlotEncumbrance(input: { strength: unknown; actorId?: string; inventory?: SlotItem[]; equipped?: SlotItem[]; coins?: number }): SlotEncumbrance;

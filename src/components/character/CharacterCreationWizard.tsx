@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { AttributeName } from '../../types/character';
 import { useQueryClient } from '@tanstack/react-query';
 import { fetchItems, type GameItem } from '../../lib/api/items';
-import { startingInventoryItem } from '../../lib/startingGear';
+import { equipStartingGear, startingInventoryItem } from '../../lib/startingGear';
 
 type WizardStepId = 'kin' | 'profession' | 'identity' | 'attributes' | 'magic' | 'skills' | 'gear' | 'appearance' | 'review';
 
@@ -284,15 +284,8 @@ export function CharacterCreationWizard({ onComplete, onCancel }: CharacterCreat
             silver: startingMoney.silver || 0,
             copper: startingMoney.copper || 0
         },
-        equipped: {
-          armor: undefined,
-          helmet: undefined,
-          weapons: [],
-          wornClothes: [],
-          containers: [],
-          animals: []
-        },
-        inventory: initialInventory
+        // Weapons, armor, a backpack and animals start equipped, so the hero is ready to fight and carry.
+        ...equipStartingGear(initialInventory, gameItems, generateId),
       };
 
       // --- 4. Build Payload ---

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateEncumbrance as uiEncumbrance } from '../src/lib/encumbrance.ts';
 import { calculateEncumbrance as mcpEncumbrance, normalizeCharacterEquipment } from '../server/helper/actors.js';
-import { itemBundle, listingContents, resolveItemSlots } from './encumbrance.js';
+import { calculateSlotEncumbrance, coinCount, itemBundle, listingContents, resolveItemSlots } from './encumbrance.js';
 
 const actorId = '3ced9760-b661-4a31-b219-8a754e815b55';
 const definitions = [
@@ -29,11 +29,12 @@ describe('shared encumbrance rules and UI/MCP parity', () => {
     { name: 'null weight defaults to one', inventory: [{ name: 'Unknown', quantity: 8, weight: null }] },
     { name: 'zero weight and quantity preserved', inventory: [{ name: 'Tiny', quantity: 50, weight: 0 }, { name: 'Rope', quantity: 0 }] },
     { name: 'cached items excluded', inventory: [{ name: 'Rope', quantity: 8, temporarilyPlaced: true }] },
+    { name: 'coins weigh one slot per full hundred', inventory: [{ name: 'Rope', quantity: 2 }], money: { gold: 3, silver: 150, copper: 60 } },
     { name: 'items carried by another actor excluded', inventory: [{ name: 'Rope', quantity: 8, carriedByActorId: 'another-actor' }] },
   ];
   for (const example of cases) {
     it(example.name, () => {
-      const document = { inventory: example.inventory, equipped: { weapons: [], ...example.equipped } };
+      const document = { inventory: example.inventory, equipped: { weapons: [], ...example.equipped }, money: example.money };
       const character = { id: actorId, attributes: { STR: example.strength ?? 11 }, equipment: document };
       const ui = uiEncumbrance(character, definitions);
       const normalized = normalizeCharacterEquipment(actorId, document, { definitions });
@@ -71,5 +72,12 @@ describe('shared encumbrance rules and UI/MCP parity', () => {
     expect(resolveItemSlots({ name: 'Bandages (10)', quantity: 20 }, bandages).unitWeight).toBeCloseTo(0.01);
     // Legacy shop purchases copied the purchase's weight onto each unit.
     expect(resolveItemSlots({ name: 'Bandages', weight: 0.1 }, bandages).unitWeight).toBeCloseTo(0.01);
+  });
+
+  it('counts coins as tiny until there are a hundred', () => {
+    expect(coinCount({ gold: 3, silver: 150, copper: 60 })).toBe(213);
+    expect(calculateSlotEncumbrance({ strength: 10, coins: 99 })).toMatchObject({ load: 0, coinLoad: 0 });
+    expect(calculateSlotEncumbrance({ strength: 10, coins: 100 })).toMatchObject({ load: 1, coinLoad: 1 });
+    expect(calculateSlotEncumbrance({ strength: 10, coins: 299 })).toMatchObject({ load: 2, coinLoad: 2 });
   });
 });

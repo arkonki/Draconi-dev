@@ -1,6 +1,6 @@
 import { conditionId, equipmentItemId, inventoryItemId } from './identifiers.js';
 import { HelperError } from './errors.js';
-import { calculateSlotEncumbrance, findItemDefinition, itemBundle, resolveItemSlots } from '../../shared/encumbrance.js';
+import { calculateSlotEncumbrance, coinCount, findItemDefinition, itemBundle, resolveItemSlots } from '../../shared/encumbrance.js';
 
 function conditionRecord(actorId, key, entry = {}) {
   return {
@@ -263,6 +263,7 @@ export function normalizeCharacterEquipment(actorId, equipment, {
       },
     },
     inventory: normalizedInventory,
+    coinCount: coinCount(document.money),
     weapons,
     armor,
     bodyArmor,
@@ -299,12 +300,13 @@ export function calculateEncumbrance(actor) {
     strength, actorId: actor.id,
     inventory: (actor.inventory || []).map(mapItem),
     equipped: (actor.equipment || []).filter(item => item.slot !== 'inventory').map(mapItem),
+    coins: actor.coinCount ?? 0,
   });
   return {
     schemaVersion: 'encumbrance-v1',
     capacity: result.capacity, baseCapacity: result.baseCapacity,
     capacityBonuses: result.capacityBonuses,
-    totalCarriedLoad: result.load, threshold: result.capacity,
+    totalCarriedLoad: result.load, coinLoad: result.coinLoad, threshold: result.capacity,
     isEncumbered: result.isEncumbered,
     containerLoads: Object.values(result.containerStats),
     externalLoad: result.externalLoad,
@@ -418,6 +420,7 @@ function characterActor(row, combatant, definitions = []) {
       shield: equipment.shield,
       armorStatus: equipment.armorStatus,
       inventory: equipment.inventory,
+      coinCount: equipment.coinCount,
       specialItems: equipment.specialItems,
       heldItems: equipment.heldItems,
       equipment: equipment.equipment,

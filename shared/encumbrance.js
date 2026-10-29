@@ -61,9 +61,15 @@ export function resolveItemSlots(item, definition) {
   return { unitWeight, unknownWeight: savedWeight === null && catalogueWeight === null, bundleSize: unitsInListing };
 }
 
+// Single coins are tiny items until there are 100 of them: 100-199 coins weigh as one item, 200-299 as two, and so on.
+export function coinCount(money) {
+  if (!money || typeof money !== 'object') return 0;
+  return ['gold', 'silver', 'copper'].reduce((sum, key) => sum + Math.floor(finiteNonNegative(money[key]) ?? 0), 0);
+}
+
 const cleanLoad = value => Math.round((value + Number.EPSILON) * 10000) / 10000;
 
-export function calculateSlotEncumbrance({ strength, actorId, inventory = [], equipped = [] }) {
+export function calculateSlotEncumbrance({ strength, actorId, inventory = [], equipped = [], coins = 0 }) {
   const baseCapacity = Math.ceil((finiteNonNegative(strength) ?? 0) / 2);
   const providers = new Map(equipped.filter(item => item.id && ['container', 'animal'].includes(item.slot)).map(item => [item.id, item]));
   const unresolvedContainerItemIds = [];
@@ -123,13 +129,14 @@ export function calculateSlotEncumbrance({ strength, actorId, inventory = [], eq
     else if (ration) rationCount += quantity;
     else load += itemLoad;
   }
-  load = cleanLoad(load + Math.ceil(rationCount / 4));
+  const coinLoad = Math.floor((finiteNonNegative(coins) ?? 0) / 100);
+  load = cleanLoad(load + Math.ceil(rationCount / 4) + coinLoad);
   for (const container of Object.values(containerStats)) {
     container.load = cleanLoad(container.load + Math.ceil((containerRations[container.id] || 0) / 4));
     container.isOverloaded = container.load > container.capacity;
   }
   return {
-    baseCapacity, capacityBonuses, capacity, load, isEncumbered: load > capacity,
+    baseCapacity, capacityBonuses, capacity, load, coinLoad, isEncumbered: load > capacity,
     externalLoad: cleanLoad(externalLoad), containerStats,
     unknownWeightItemIds, unresolvedContainerItemIds, itemLocations,
   };

@@ -1,6 +1,6 @@
 import type { Character, InventoryItem } from '../types/character';
 import type { GameItem } from './api/items';
-import { calculateSlotEncumbrance, findItemDefinition, resolveItemSlots, finiteNonNegative } from '../../shared/encumbrance.js';
+import { calculateSlotEncumbrance, coinCount, findItemDefinition, resolveItemSlots, finiteNonNegative } from '../../shared/encumbrance.js';
 import type { SlotItem, SlotEncumbrance } from '../../shared/encumbrance.js';
 
 export type Encumbrance = SlotEncumbrance;
@@ -44,7 +44,7 @@ export const calculateEncumbrance = (character: Character | null, allGameItems: 
       ...(worn.animals || []).filter(Boolean).map((item: InventoryItem) => mapItem(item, 'animal')),
     ];
     return calculateSlotEncumbrance({
-      strength, actorId: character.id, equipped,
+      strength, actorId: character.id, equipped, coins: coinCount(equipment.money),
       inventory: (equipment.inventory || []).filter((item: InventoryItem) => item?.name).map((item: InventoryItem) => mapItem(item, 'inventory')),
     });
   } catch { return empty(); }
