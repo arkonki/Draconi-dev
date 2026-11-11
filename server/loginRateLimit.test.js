@@ -38,4 +38,19 @@ describe('login rate limit', () => {
     expect(clientAddress(request('6.6.6.6, 5.5.5.5'))).toBe('5.5.5.5');
     expect(clientAddress(request())).toBe('10.0.0.9');
   });
+
+  it('looks past a second proxy of our own when told there are two', () => {
+    const two = { TRUSTED_PROXY_COUNT: '2' };
+    // visitor, then the outer proxy as seen by nginx
+    expect(clientAddress(request('7.7.7.7, 10.0.0.2'), two)).toBe('7.7.7.7');
+    // a forged entry in front does not move the answer
+    expect(clientAddress(request('6.6.6.6, 7.7.7.7, 10.0.0.2'), two)).toBe('7.7.7.7');
+    // the request skipped the outer proxy
+    expect(clientAddress(request('7.7.7.7'), two)).toBe('7.7.7.7');
+  });
+
+  it('ignores the forwarded header when there is no proxy', () => {
+    expect(clientAddress(request('6.6.6.6'), { TRUSTED_PROXY_COUNT: '0' })).toBe('10.0.0.9');
+    expect(() => clientAddress(request(), { TRUSTED_PROXY_COUNT: 'many' })).toThrow('TRUSTED_PROXY_COUNT');
+  });
 });

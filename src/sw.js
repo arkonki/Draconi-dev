@@ -52,6 +52,22 @@ registerRoute(
   }),
 );
 
+// Parts of the app that are not downloaded up front (the markdown editor, the PDF export) are kept once they have
+// been used, so they also open offline afterwards. Their file names change whenever their content does, so a
+// stored copy never goes stale. Everything in the precache is answered before this route is reached.
+registerRoute(
+  ({ request, url }) => (request.destination === 'script' || request.destination === 'style')
+    && url.origin === self.location.origin
+    && url.pathname.startsWith(`${APP_BASE}assets/`),
+  new CacheFirst({
+    cacheName: 'lazy-assets-v1',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [200] }),
+      new ExpirationPlugin({ maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 60, purgeOnQuotaError: true }),
+    ],
+  }),
+);
+
 // 2. Google Fonts Caching (Migrated from your vite config)
 // Cache Google Fonts Stylesheets
 registerRoute(

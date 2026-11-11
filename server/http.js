@@ -33,11 +33,32 @@ export async function readJson(request, maxBytes = 2_000_000) {
   }
 }
 
-// The right-most X-Forwarded-For entry is the one appended by the nearest proxy (nginx),
-// so unlike the left-most entry it cannot be forged by the client.
-export function clientAddress(request) {
+/**
+ * How many proxies of your own stand between the internet and this server (TRUSTED_PROXY_COUNT). 1, the default,
+ * is the bundled nginx or an Apache front end on its own. Use 2 when another proxy or load balancer of yours sits
+ * in front of that one, and 0 when the server is reached directly with no proxy at all.
+ */
+export function trustedProxyCount(env = process.env) {
+  const raw = env.TRUSTED_PROXY_COUNT;
+  if (raw === undefined || raw === '') return 1;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 10) {
+    throw new Error('TRUSTED_PROXY_COUNT must be an integer between 0 and 10');
+  }
+  return value;
+}
+
+// Each proxy appends the address it received the request from to X-Forwarded-For, so the entries added by our own
+// proxies are the last ones and cannot be forged; anything further left was supplied by the client. With one proxy
+// the visitor is the last entry. With two, the last entry is only the outer proxy, the same for every visitor,
+// which would make every per-address limit count all visitors as one; the visitor is then the entry before it.
+export function clientAddress(request, env = process.env) {
+  const direct = request.socket?.remoteAddress || 'unknown';
+  const proxies = trustedProxyCount(env);
+  if (proxies === 0) return direct;
   const forwarded = String(request.headers?.['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean);
-  return forwarded.at(-1) || request.socket?.remoteAddress || 'unknown';
+  // Fewer entries than proxies means the request skipped the outer ones; the first entry is then the nearest to the visitor.
+  return forwarded.at(-proxies) || forwarded[0] || direct;
 }
 
 export function getBearerToken(request) {

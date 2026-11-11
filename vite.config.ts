@@ -61,14 +61,21 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.js',
       
-      // --- FIX: Increase cache limit to 5MB ---
+      // Everything listed in the precache is downloaded the first time someone opens the app, whether or not they
+      // ever use it. The PDF export and the markdown editor (compendium and story notes) are left out: they are fetched when first needed, and the service worker then keeps the scripts for
+      // offline use (see the "assets" route in src/sw.js).
       injectManifest: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
         globIgnores: [
           'assets/pdf-*.js',
           'assets/CharacterSheetPdf-*.js',
+          'assets/md-editor-*.js',
         ],
       },
+      // The install icons are read by the browser from the manifest when the app is installed. Only the one the
+      // service worker shows in notifications is kept for offline use.
+      includeManifestIcons: false,
+      includeAssets: ['icons/icon-192x192.png'],
 
       devOptions: {
         enabled: true,
@@ -174,6 +181,14 @@ export default defineConfig({
     
     rollupOptions: {
       output: {
+        // The markdown editor and its syntax highlighter are the largest part of the app and are only used when
+        // someone edits a compendium page or a story note. The chunk Rollup already makes for them is given a name
+        // of its own, so that it can be kept out of the precache (see globIgnores above). It is only renamed here:
+        // forcing these packages into a manual chunk drags the markdown renderer shared by most pages in with them.
+        chunkFileNames(chunk) {
+          const holdsEditor = chunk.moduleIds.some((id) => id.replace(/\\/g, '/').includes('/node_modules/@uiw/react-md-editor/'));
+          return holdsEditor ? 'assets/md-editor-[hash].js' : 'assets/[name]-[hash].js';
+        },
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
 
