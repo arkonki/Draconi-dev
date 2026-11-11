@@ -156,6 +156,10 @@ try {
   assert.ok(storyRequest[0].content.includes('Game Master of a Dragonbane'), 'the instructions are written by the server');
   assert.ok(storyRequest[1].content.endsWith("THE GM'S REQUEST\nDescribe a tavern."), 'the request comes last, as the GM wrote it');
   assert.ok(storyRequest[1].content.includes('LOCATION OR SCENE: The Sleeping Dragon inn'), 'with the scene the GM gave');
+  assert.ok(storyRequest[0].content.includes('cannot be parried unless the attack says so'), 'the rules are Dragonbane\'s');
+  assert.ok(/SKILLS: .*Awareness/.test(storyRequest[1].content), 'with the skills the game has, so none are invented');
+  assert.ok(seenRequests.at(-1).max_tokens >= 4000, 'and room for a long answer');
+  assert.equal(story.truncated, false, 'a finished answer is not marked as cut off');
   await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: '   ', partyId: storyParty.id } }), 400, 'an empty prompt');
   const counted = (await ok(call('GET', '/account/ai', { token: tokens.alice }), 200, 'usage')).usageThisMonth;
   assert.deepEqual({ calls: counted.calls, promptTokens: counted.promptTokens, completionTokens: counted.completionTokens }, { calls: 1, promptTokens: 321, completionTokens: 45 });

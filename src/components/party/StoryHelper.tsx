@@ -321,8 +321,11 @@ export function StoryHelperApp({ partyId }: { partyId: string }) {
         location: contextLocation,
         npcs: contextNpc,
       });
-      if (answer.text?.trim()) setResponse(answer.text);
-      else setGenerateError('The AI came back empty. Try again.');
+      if (answer.text?.trim()) {
+        setResponse(answer.text);
+        // A block that was cut off has no end, so it is neither shown as a card nor offered for saving.
+        if (answer.truncated) setGenerateError('The answer was cut off before it was finished, so its last part may be missing. Ask for less at once, or ask again for the rest.');
+      } else setGenerateError('The AI came back empty. Try again.');
     } catch (err: unknown) {
       console.error(err);
       setGenerateError(err instanceof Error ? err.message : 'Could not generate.');

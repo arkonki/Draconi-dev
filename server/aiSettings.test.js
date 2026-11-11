@@ -21,7 +21,8 @@ describe('AI settings', () => {
 
   it('reads an answer with its usage and cost', () => {
     const result = interpretModelResponse(200, { choices: [{ message: { content: '  The door creaks.  ' } }], usage: { prompt_tokens: 120, completion_tokens: 40, cost: 0.0004 } });
-    expect(result).toEqual({ text: 'The door creaks.', usage: { promptTokens: 120, completionTokens: 40, cachedTokens: 0, costUsd: 0.0004 } });
+    expect(result).toEqual({ text: 'The door creaks.', usage: { promptTokens: 120, completionTokens: 40, cachedTokens: 0, costUsd: 0.0004 }, truncated: false });
+    expect(interpretModelResponse(200, { choices: [{ finish_reason: 'length', message: { content: 'The door cr' } }] }).truncated).toBe(true);
     expect(interpretModelResponse(200, { choices: [{ message: { content: 'ok' } }] }).usage).toEqual({ promptTokens: 0, completionTokens: 0, cachedTokens: 0, costUsd: null });
   });
 

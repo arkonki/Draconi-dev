@@ -143,7 +143,8 @@ export function interpretModelResponse(status, payload) {
     }
     throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
   }
-  return { text, usage: readUsage(payload?.usage) };
+  // `truncated`: the model ran out of allowance in the middle of its answer, so the end is missing.
+  return { text, usage: readUsage(payload?.usage), truncated: choice?.finish_reason === 'length' };
 }
 
 const recentCalls = new Map();
@@ -318,7 +319,7 @@ export function modelCallFailure(error) {
  * Sends a conversation to the person's model and records what it cost. `purpose` says what it was for ('story',
  * 'solo'), `partyId` which campaign.
  */
-export async function callModel(user, { messages, purpose, partyId = null, temperature = 0.7, maxTokens = 1200 }, { fetchImpl = fetch } = {}) {
+export async function callModel(user, { messages, purpose, partyId = null, temperature = 0.7, maxTokens = 1200, timeoutMs = REQUEST_TIMEOUT_MS }, { fetchImpl = fetch } = {}) {
   const { apiKey, model } = await prepareCall(user);
   let response;
   try {
@@ -326,7 +327,7 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
       method: 'POST',
       headers: requestHeaders(apiKey),
       body: JSON.stringify({ model, messages: withCacheControl(model, messages), temperature, max_tokens: maxTokens, usage: { include: true } }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     throw modelCallFailure(error);
@@ -334,7 +335,7 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
   const payload = await response.json().catch(() => ({}));
   const result = interpretModelResponse(response.status, payload);
   await recordUsage(user, { partyId, purpose, model, usage: result.usage });
-  return { text: result.text, model, usage: result.usage };
+  return { text: result.text, model, usage: result.usage, truncated: result.truncated };
 }
 
 /**

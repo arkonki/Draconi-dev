@@ -70,3 +70,38 @@ describe('story monsters', () => {
     expect(parseStoryMonsters('```monster\nNo name\n```')).toEqual([]);
   });
 });
+
+describe('answers that stray from the format', () => {
+  const wyrm = parseStoryMonsters([
+    '```monster',
+    '### Marsh Wyrm',
+    '*Beast*',
+    '| Ferocity | Size | Move | Armour | Hit Points |',
+    '|:---:|:---:|:---:|:---:|:---:|',
+    '| 2 | huge | 16 | 4 | 48 |',
+    '#### Monster Attacks',
+    '| D6 | Attack |',
+    '|:---|:---|',
+    '| 1–2 | **Bite:** 2D10 piercing damage. |',
+    '| 3 — 4 | **Tail Sweep:** Everyone within 4 meters takes 2D6 bludgeoning damage. |',
+    '| 5-6 | **Roar:** A WIL roll or become Scared. |',
+    '```',
+  ].join('\n'))[0];
+
+  it('reads other spellings of the stat headings', () => {
+    expect(wyrm.stats).toMatchObject({ FEROCITY: 2, SIZE: 'Huge', MOVEMENT: 16, ARMOR: 4, HP: 48 });
+  });
+
+  it('keeps attack rows whose ranges use a long dash', () => {
+    expect(wyrm.attacks?.map((attack) => `${attack.roll_values} ${attack.name}`)).toEqual(['1-2 Bite', '3-4 Tail Sweep', '5-6 Roar']);
+  });
+
+  it('keeps an NPC damage bonus in the form the fight reads', () => {
+    const npc = (bonus: string) => parseStoryMonsters(['```npc', '### Guard', '*Human Fighter*', `**Movement:** 10 · **HP:** 12 · **WP:** 9 · **Armor:** 2 · **Damage Bonus:** ${bonus}`, '```'].join('\n'))[0];
+    expect(npc('str+d4').stats.DAMAGE_BONUS).toBe('STR +D4');
+    expect(npc('AGL +D6').stats.DAMAGE_BONUS).toBe('AGL +D6');
+    expect(npc('None').stats.DAMAGE_BONUS).toBeUndefined();
+    expect(npc('STR +D4').stats).toMatchObject({ MOVEMENT: 10, HP: 12, WP: 9, ARMOR: 2 });
+  });
+});
+

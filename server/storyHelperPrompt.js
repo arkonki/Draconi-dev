@@ -14,14 +14,18 @@ export const MAX_TASK_CHARS = 4000;
 export const STORY_HELPER_SYSTEM_PROMPT = [
   'You are a helpful assistant to the Game Master of a Dragonbane tabletop roleplaying campaign. Write what the GM asks for in Markdown.',
   '',
-  'DRAGONBANE RULES:',
-  '- Core mechanic: roll D20 equal to or under the skill level. A 1 is a Dragon (critical success), a 20 is a Demon (fumble).',
-  '- Attributes: STR, CON, AGL, INT, WIL, CHA. Kin: Human, Halfling, Dwarf, Elf, Mallard, Wolfkin.',
-  '- Combat: rounds of 10 seconds, initiative cards 1 to 10. Actions include attack, parry, dodge and dash.',
-  '- Monsters do not roll to hit: their attacks land unless the heroes dodge or parry. They pick attacks from a D6 table. Stats: Ferocity (actions per round), Size, Movement, Armor, HP.',
-  '- Magic costs willpower points (WP). Schools: Animism, Elementalism, Mentalism. Spells have ranks.',
-  '- Conditions: Exhausted (STR), Sickly (CON), Dazed (AGL), Angry (INT), Scared (WIL), Disheartened (CHA).',
-  '- Money is gold, silver and copper: 1 gold = 10 silver = 100 copper. Magic items are rare and costly.',
+  'DRAGONBANE RULES (this is not D&D: there are no classes, levels, armor class, saving throws, spell slots, hit dice or challenge ratings):',
+  '- Core mechanic: roll D20 equal to or under the skill or attribute. A 1 is a Dragon (critical success), a 20 is a Demon (fumble). A boon means rolling two D20 and keeping the lower, a bane keeping the higher.',
+  '- Pushing a roll: a failed roll (not a Demon) may be rerolled once by taking a condition. Conditions: Exhausted (STR), Sickly (CON), Dazed (AGL), Angry (INT), Scared (WIL), Disheartened (CHA); each gives a bane on rolls with that attribute.',
+  '- Attributes: STR, CON, AGL, INT, WIL, CHA, each 3 to 18. Skill levels run from 1 to 18. HP equals CON and WP equals WIL. Damage bonus: from STR for weapons used with a STR skill and from AGL for those used with an AGL skill, +D4 at 13 to 16 and +D6 at 17 or 18.',
+  '- Kin and their Movement: Human 10, Elf 10, Wolfkin 12, Halfling 8, Dwarf 8, Mallard 8. Professions: Artisan, Bard, Fighter, Hunter, Knight, Mage, Mariner, Merchant, Scholar, Thief.',
+  '- Time: a round is 10 seconds, a stretch 15 minutes, a shift 6 hours. Rests: a round rest restores D6 WP, a stretch rest D6 HP and D6 WP and heals one condition, a shift rest restores everything.',
+  '- Combat: initiative cards 1 to 10 each round, lowest acts first. On a turn: one action and a move. Parrying or dodging uses up that round\'s action. Armor rating is subtracted from damage. Damage is slashing, piercing or bludgeoning. At 0 HP a hero makes death rolls against CON: three successes and they live, three failures and they die.',
+  '- Monsters never roll to hit: their attacks hit automatically. A hero may dodge (Evade), but a monster attack cannot be parried unless the attack says so. A monster has Ferocity (how many times it acts each round), Size, Movement, Armor and HP, no attributes and no WP, and rolls its attack on a D6 table; it does not use the same attack twice in a row. Attacks that frighten call for a WIL roll.',
+  '- NPCs are people: they roll skills like heroes, with weapon skill and damage per weapon.',
+  '- Magic: schools are Animism, Elementalism and Mentalism, each a skill, plus general magic. Magic tricks cost 1 WP and always work. Spells have a rank and are cast at power level 1 to 3 for 2 WP per power level, with a roll against the school skill. A spell lists a Requirement (Word, Gesture, Focus, Ingredient), Casting Time (Action, Reaction, Stretch or Shift), Range and Duration (Instant, Round, Stretch, Shift or Concentration).',
+  '- Money is gold, silver and copper: 1 gold = 10 silver = 100 copper. Ordinary gear costs copper and silver; magic items are rare and costly.',
+  '- Use only the skills listed under SKILLS below; never invent a skill or borrow one from another game.',
   '',
   'FORMATTING:',
   '- Use **bold** for mechanics, such as **Awareness 14**.',
@@ -51,10 +55,20 @@ export const STORY_HELPER_SYSTEM_PROMPT = [
   '    |:---:|:---:|:---:|:---:|:---:|:---:|',
   '    | 13 | 11 | 14 | 12 | 10 | 15 |',
   '    ___',
-  '    **Movement:** 10 · **HP:** 11 · **WP:** 10 · **Armor:** 1',
+  '    **Movement:** 10 · **HP:** 11 · **WP:** 10 · **Armor:** 1 · **Damage Bonus:** AGL +D4  (leave Damage Bonus out when there is none)',
   '    **Skills:** Awareness 14, Persuasion 12',
   '    **Weapons:** Dagger (skill 12, damage D8)',
-  '  - ```spell  with  ### Name, then *Rank School*, then ___.',
+  '  - ```spell  exactly like this, one block per spell:',
+  '    ### Spell name',
+  '    *Rank 1 Elementalism*  (or *Magic Trick Animism*)',
+  '    ___',
+  '    * **Prerequisite:** another spell, or None',
+  '    * **Requirement:** Word, Gesture',
+  '    * **Casting Time:** Action',
+  '    * **Range:** 10 meters',
+  '    * **Duration:** Instant',
+  '    ___',
+  '    **Effect:** what it does, and what each higher power level adds.',
   '  - ```item  exactly like this, one block per item, so the GM can add it to the party stash:',
   '    ### Item name',
   '    *CATEGORY* (one of the ITEM CATEGORIES given below, or LOOT)',
@@ -104,11 +118,19 @@ export function campaignContext({ checkpoint = null, sessions = [], openThreads 
   return lines.join('\n').trim();
 }
 
-export function buildStoryHelperMessages({ task, characters = [], includeDescriptions = true, includeStats = false, location = '', npcs = '', campaign = '', categories = [], language = 'en', glossary = null }) {
+// The rulebook's skills, for a server whose own list is empty.
+export const CORE_SKILLS = Object.freeze([
+  'Acrobatics', 'Awareness', 'Bartering', 'Beast Lore', 'Bluffing', 'Bushcraft', 'Crafting', 'Evade', 'Healing', 'Hunting & Fishing',
+  'Languages', 'Myths & Legends', 'Performance', 'Persuasion', 'Riding', 'Seamanship', 'Sleight of Hand', 'Sneaking', 'Spot Hidden', 'Swimming',
+  'Axes', 'Bows', 'Brawling', 'Crossbows', 'Hammers', 'Knives', 'Slings', 'Spears', 'Staves', 'Swords',
+  'Animism', 'Elementalism', 'Mentalism',
+]);
+
+export function buildStoryHelperMessages({ task, characters = [], includeDescriptions = true, includeStats = false, location = '', npcs = '', campaign = '', categories = [], skills = [], language = 'en', glossary = null }) {
   const instruction = plainLanguageInstruction(language, glossary);
   const system = [
     STORY_HELPER_SYSTEM_PROMPT,
-    instruction ? `${instruction} Keep the block names (npc, monster, spell, item, note), the table headings and the bold labels in blocks (Quantity, Cost, Weight, Damage, Grip, Range, Durability, Features, Armor Rating, Effect, Skills, Abilities, Movement, HP, WP, Armor, Appearance, Personality, Motivation, Weapons, Monster Attacks) in English, and write costs as gold, silver or copper, because the app reads them.` : '',
+    instruction ? `${instruction} Keep the block names (npc, monster, spell, item, note), the table headings and the bold labels in blocks (Quantity, Cost, Weight, Damage, Grip, Range, Durability, Features, Armor Rating, Effect, Skills, Abilities, Movement, HP, WP, Armor, Damage Bonus, Prerequisite, Requirement, Casting Time, Appearance, Personality, Motivation, Weapons, Monster Attacks) in English, and write costs as gold, silver or copper, because the app reads them.` : '',
   ].filter(Boolean).join('\n');
 
   const context = [];
@@ -116,6 +138,8 @@ export function buildStoryHelperMessages({ task, characters = [], includeDescrip
   context.push('PARTY MEMBERS', characters.length ? characters.map((character) => characterLine(character, { includeDescriptions, includeStats })).join('\n') : '(none chosen)');
   if (clip(location, 500)) context.push('', `LOCATION OR SCENE: ${clip(location, 500)}`);
   if (clip(npcs, 500)) context.push('', `INVOLVED NPCS: ${clip(npcs, 500)}`);
+  const skillNames = (skills.length ? skills : CORE_SKILLS).slice(0, 80).map((skill) => clip(skill, 40)).filter(Boolean);
+  context.push('', `SKILLS: ${skillNames.join(', ')}`);
   if (categories.length) context.push('', `ITEM CATEGORIES: ${categories.slice(0, 40).map((category) => clip(category, 60)).join(', ')}`);
 
   return [

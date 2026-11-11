@@ -8,6 +8,15 @@ const BLOCK = /```(monster|npc)[^\S\n]*\n([\s\S]*?)```/g;
 const plain = (text: string) => text.replace(/\*\*/g, '').trim();
 const cells = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => plain(cell));
 const isDivider = (line: string) => /^\|?\s*:?-{2,}/.test(line.trim());
+// Models write ranges with whatever dash they like; the attack table reads a plain hyphen.
+const rollRange = (value: string) => plain(value).replace(/\s*[\u2010-\u2015\u2212]\s*/g, '-').replace(/\s*-\s*/g, '-').replace(/^d\d+\s*[:=]?\s*/i, '');
+/** The value under any of these headings, so "Armour" or "Hit Points" in place of "Armor" or "HP" still counts. */
+const pick = (values: Map<string, string>, ...names: string[]) => names.map((name) => values.get(name)).find((value) => value !== undefined);
+/** "STR +D4", however the model spaced or cased it; anything else is not a damage bonus. */
+const damageBonus = (value: string | undefined) => {
+  const match = String(value ?? '').match(/\b(STR|AGL)\s*\+?\s*(D\d+)\b/i);
+  return match ? `${match[1].toUpperCase()} +${match[2].toUpperCase()}` : undefined;
+};
 const number = (value: string | undefined) => {
   const match = String(value ?? '').match(/-?\d+/);
   return match ? Number(match[0]) : 0;
@@ -43,7 +52,7 @@ function attackTable(lines: string[]): MonsterAttackEntry[] {
     .filter((line) => line.trim().startsWith('|') && !isDivider(line))
     .map((line) => {
       const raw = line.trim().replace(/^\||\|$/g, '').split('|');
-      const roll = plain(raw[0] ?? '');
+      const roll = rollRange(raw[0] ?? '');
       const body = (raw.slice(1).join('|') ?? '').trim();
       const match = body.match(/^\*\*(.+?):?\*\*:?\s*(.*)$/);
       return { roll_values: roll, name: plain(match ? match[1] : body.split(':')[0]).replace(/:$/, ''), description: plain(match ? match[2] : body.split(':').slice(1).join(':')), effects: [] };
@@ -75,10 +84,11 @@ function monsterFrom(kind: 'monster' | 'npc', body: string): MonsterData | null 
       TYPE: subtitle,
       FEROCITY: 1,
       SIZE: 'Normal',
-      MOVEMENT: number(values.get('movement')),
-      ARMOR: number(values.get('armor')),
-      HP: Math.max(1, number(values.get('hp'))),
-      WP: number(values.get('wp')),
+      MOVEMENT: number(pick(values, 'movement', 'move')),
+      ARMOR: number(pick(values, 'armor', 'armour', 'armor rating')),
+      HP: Math.max(1, number(pick(values, 'hp', 'hit points'))),
+      WP: number(pick(values, 'wp', 'willpower points', 'willpower')),
+      DAMAGE_BONUS: damageBonus(values.get('damage bonus')),
       SKILLS: values.get('skills') ?? '',
       GEAR: values.get('weapons') ?? values.get('gear') ?? '',
     };
@@ -96,9 +106,9 @@ function monsterFrom(kind: 'monster' | 'npc', body: string): MonsterData | null 
   const stats: MonsterStats = {
     FEROCITY: Math.max(1, number(table.get('ferocity')) || 1),
     SIZE: sizeOf(table.get('size') ?? subtitle.split(/\s+/)[0]),
-    MOVEMENT: number(table.get('movement')),
-    ARMOR: number(table.get('armor')),
-    HP: Math.max(1, number(table.get('hp'))),
+    MOVEMENT: number(pick(table, 'movement', 'move')),
+    ARMOR: number(pick(table, 'armor', 'armour')),
+    HP: Math.max(1, number(pick(table, 'hp', 'hit points'))),
     SKILLS: values.get('skills') ?? '',
   };
   return {

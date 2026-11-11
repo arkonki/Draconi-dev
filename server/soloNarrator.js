@@ -473,7 +473,7 @@ export async function generateStory(user, { prompt, partyId, characterIds = [], 
   if (!access?.isGm) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
 
   const ids = (Array.isArray(characterIds) ? characterIds : []).map(String).filter((id) => UUID.test(id)).slice(0, 20);
-  const [{ rows: characters }, { rows: categoryRows }, history, narration] = await Promise.all([
+  const [{ rows: characters }, { rows: categoryRows }, { rows: skillRows }, history, narration] = await Promise.all([
     // Only characters in this campaign, whatever ids were sent.
     ids.length
       ? pool.query(
@@ -485,6 +485,8 @@ export async function generateStory(user, { prompt, partyId, characterIds = [], 
       )
       : { rows: [] },
     pool.query('SELECT DISTINCT category FROM game_items WHERE party_id IS NULL AND category IS NOT NULL ORDER BY category'),
+    // The skills this server's game data has, so the model names real ones instead of inventing them.
+    pool.query('SELECT name FROM game_skills ORDER BY name'),
     getSessionHistory(user, partyId, { limit: 3 }).catch(() => ({ sessions: [], latestCheckpoint: null })),
     campaignLanguage(partyId),
   ]);
@@ -505,15 +507,19 @@ export async function generateStory(user, { prompt, partyId, characterIds = [], 
       npcs,
       campaign,
       categories: categoryRows.map((row) => row.category),
+      skills: skillRows.map((row) => row.name),
       language: narration.language,
       glossary: narration.glossary,
     }),
     purpose: 'story',
     partyId,
     temperature: 0.7,
-    maxTokens: 2500,
+    // An encounter with a few stat blocks is long, and models that think first spend the same allowance on thinking.
+    // The answer is not streamed, so it also gets twice the usual time to arrive.
+    maxTokens: 4000,
+    timeoutMs: 120_000,
   });
-  return { text: result.text, model: result.model, usage: result.usage };
+  return { text: result.text, model: result.model, usage: result.usage, truncated: result.truncated };
 }
 
 // A recap is at most 200 words, but the allowance has to cover more than the words: languages such as Estonian take

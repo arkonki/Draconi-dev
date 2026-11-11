@@ -45,3 +45,29 @@ describe('story helper prompt', () => {
     expect(system.content).toContain('the table headings and the bold labels in blocks');
   });
 });
+
+describe('Dragonbane rules in the Story Helper', () => {
+  it('says monster attacks hit on their own and cannot be parried', () => {
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('their attacks hit automatically');
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('cannot be parried unless the attack says so');
+    expect(STORY_HELPER_SYSTEM_PROMPT).not.toContain('dodge or parry');
+  });
+
+  it('keeps the model away from another game\'s terms and gives it the numbers it needs', () => {
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('this is not D&D');
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('2 WP per power level');
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('Human 10, Elf 10, Wolfkin 12, Halfling 8, Dwarf 8, Mallard 8');
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('**Damage Bonus:**');
+    expect(STORY_HELPER_SYSTEM_PROMPT).toContain('**Casting Time:**');
+  });
+
+  it('lists the skills the server has, or the rulebook\'s when it has none', () => {
+    const own = buildStoryHelperMessages({ task: 'An NPC', skills: ['Awareness', 'Swords'] })[1].content;
+    expect(own).toContain('SKILLS: Awareness, Swords');
+    const fallback = buildStoryHelperMessages({ task: 'An NPC' })[1].content;
+    expect(fallback).toContain('Spot Hidden');
+    expect(fallback).toContain('Crossbows');
+    expect(fallback.endsWith("THE GM'S REQUEST\nAn NPC")).toBe(true);
+  });
+});
+

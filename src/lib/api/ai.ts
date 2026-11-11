@@ -18,6 +18,8 @@ export interface AiAnswer {
   text: string;
   model: string;
   usage: { promptTokens: number; completionTokens: number; costUsd: number | null };
+  /** The model ran out of room in the middle of its answer, so the end is missing. */
+  truncated?: boolean;
 }
 
 /** A rule action the narrator proposed, already checked by the server. The player decides whether to use it. */
