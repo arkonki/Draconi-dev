@@ -51,12 +51,11 @@ jobs:
         run: docker compose up --build -d --wait --wait-timeout 240
       - name: Health check through nginx
         run: curl --fail --silent http://localhost:8080/api/health
-      # Sign-in, permissions, roles, fights, the shared table, realtime delivery and the rest, against the running
-      # stack with a real database. The images were built in the step above, so they are not rebuilt here.
-      # The AI suite is left out until scripts/ai-smoke.mjs is brought up to date: it still calls the Story Helper
-      # without a campaign, which the server has required since the prompts moved there.
+      # Sign-in, permissions, roles, fights, the shared table, realtime delivery, the built-in AI and the rest,
+      # against the running stack with a real database. The AI suite brings its own stand-in for OpenRouter, so no
+      # key or money is involved. The images were built in the step above, so they are not rebuilt here.
       - name: Live tests against the running stack
-        run: bash scripts/test-live.sh --no-build --only user-admin,admin-overview,party-management,roles,combat,table,connections,workflow,game-data-usage,security,housekeeping,realtime
+        run: bash scripts/test-live.sh --no-build
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --tail 200

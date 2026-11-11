@@ -137,12 +137,21 @@ try {
   results.keyStorage = 'passed';
 
   // --- The Story Helper ---
-  await ok(call('POST', '/ai/story', { token: tokens.bob, body: { prompt: 'A tavern' } }), 409, 'no key, no story');
-  const story = await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Describe a tavern.' } }), 200, 'a story');
+  // It writes for a campaign, and only for that campaign's GM, so each of them gets a campaign of their own first.
+  const storyParty = (await ok(rpc(tokens.alice, 'create_campaign', { p_name: `AI Story ${suffix}` }), 200, 'a campaign for the Story Helper')).data;
+  const bobParty = (await ok(rpc(tokens.bob, 'create_campaign', { p_name: `AI Bob ${suffix}` }), 200, 'a campaign for Bob')).data;
+  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'A tavern' } }), 400, 'a story needs a campaign');
+  await ok(call('POST', '/ai/story', { token: tokens.bob, body: { prompt: 'A tavern', partyId: storyParty.id } }), 403, 'only the GM of a campaign asks for its stories');
+  await ok(call('POST', '/ai/story', { token: tokens.bob, body: { prompt: 'A tavern', partyId: bobParty.id } }), 409, 'no key, no story');
+  const story = await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Describe a tavern.', partyId: storyParty.id, location: 'The Sleeping Dragon inn' } }), 200, 'a story');
   assert.match(story.text, /bridge/);
   assert.equal(seenRequests.at(-1).model, 'openai/gpt-4o-mini', 'the chosen model is used');
-  assert.equal(seenRequests.at(-1).messages.at(-1).content, 'Describe a tavern.');
-  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: '   ' } }), 400, 'an empty prompt');
+  const storyRequest = seenRequests.at(-1).messages;
+  assert.deepEqual(storyRequest.map((entry) => entry.role), ['system', 'user'], 'the fixed instructions, then the request');
+  assert.ok(storyRequest[0].content.includes('Game Master of a Dragonbane'), 'the instructions are written by the server');
+  assert.ok(storyRequest[1].content.endsWith("THE GM'S REQUEST\nDescribe a tavern."), 'the request comes last, as the GM wrote it');
+  assert.ok(storyRequest[1].content.includes('LOCATION OR SCENE: The Sleeping Dragon inn'), 'with the scene the GM gave');
+  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: '   ', partyId: storyParty.id } }), 400, 'an empty prompt');
   const counted = (await ok(call('GET', '/account/ai', { token: tokens.alice }), 200, 'usage')).usageThisMonth;
   assert.deepEqual({ calls: counted.calls, promptTokens: counted.promptTokens, completionTokens: counted.completionTokens }, { calls: 1, promptTokens: 321, completionTokens: 45 });
   assert.equal(counted.costUsd, 0.0002);
@@ -564,21 +573,21 @@ try {
   const capped = await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyTokenCap: 1000 } }), 200, 'a token limit');
   assert.equal(capped.limits.monthlyTokenCap, 1000);
   assert.equal(capped.limits.reached, true, 'the month already used more than that');
-  const blocked = await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the limit' } });
+  const blocked = await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the limit', partyId: storyParty.id } });
   assert.equal(blocked.status, 402, 'a call over the limit is refused');
   assert.equal(blocked.payload.error.code, 'AI_LIMIT_REACHED');
   assert.match(blocked.payload.error.message, /1,000 tokens/);
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'hi' }), 402, 'the narrator stops at the limit too');
   await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyTokenCap: null, monthlyCostCapUsd: 0.0005 } }), 200, 'switch to a money limit');
-  assert.equal((await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the money limit' } })).status, 402, 'the money limit counts reported costs');
+  assert.equal((await call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Over the money limit', partyId: storyParty.id } })).status, 402, 'the money limit counts reported costs');
   const lifted = await ok(call('PUT', '/account/ai', { token: tokens.alice, body: { monthlyCostCapUsd: null } }), 200, 'remove the limits');
   assert.deepEqual([lifted.limits.monthlyCostCapUsd, lifted.limits.monthlyTokenCap, lifted.limits.reached], [null, null, false]);
-  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Free again' } }), 200, 'works again without limits');
+  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Free again', partyId: storyParty.id } }), 200, 'works again without limits');
   results.monthlyLimits = 'passed';
 
   // --- Removing the key ---
   assert.equal((await ok(call('DELETE', '/account/ai', { token: tokens.alice }), 200, 'remove')).hasKey, false);
-  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Again' } }), 409, 'no story without a key');
+  await ok(call('POST', '/ai/story', { token: tokens.alice, body: { prompt: 'Again', partyId: storyParty.id } }), 409, 'no story without a key');
   await ok(narrate(tokens.alice, { partyId: party.id, message: 'hi' }), 409, 'no narrator without a key');
   results.removal = 'passed';
 
