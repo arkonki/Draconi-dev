@@ -858,11 +858,28 @@ async function insertOne(table, input, ctx, client, onConflict) {
   return outwardAliases(table, rows[0] || null);
 }
 
+/**
+ * A change or removal must say which rows it means. Without a filter it would reach every row the person may
+ * touch, so one forgotten `.eq()` in a client could wipe all of someone's notes or characters.
+ */
+export function assertNarrowedChange(filters) {
+  const narrows = (filter) => {
+    if (!filter || typeof filter !== 'object') return false;
+    if (filter.operator === 'match') return Object.keys(filter.value || {}).length > 0;
+    if (filter.operator === 'or') return String(filter.value || '').split(',').some(Boolean);
+    return Boolean(filter.column);
+  };
+  if (!Array.isArray(filters) || !filters.some(narrows)) {
+    throw new HttpError(400, 'An update or delete needs at least one filter', 'FILTER_REQUIRED');
+  }
+}
+
 export async function executeDataQuery(user, request) {
   const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict } = request;
   assertTable(table);
   if (table === 'notes' && action === 'upsert') throw new HttpError(400, 'Use an explicit journal update instead of upsert');
   if (table === 'users') assertUserActionAllowed(action);
+  if (action === 'update' || action === 'delete') assertNarrowedChange(filters);
 
   if (action === 'select') {
     const ctx = await accessContext(user);

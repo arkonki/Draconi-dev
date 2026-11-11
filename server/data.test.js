@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
+  assertNarrowedChange,
+  executeDataQuery,
   applyOrders,
   bindingMatchesChange,
   buildAuthorizedSelectQuery,
@@ -286,5 +288,25 @@ describe('item listings', () => {
     expect(normalizeItemListing({ name: 'Bandages (10)', quantity: 1, weight: 0.1 })).toEqual({ name: 'Bandages', quantity: 10, weight: 0.1 });
     expect(normalizeItemListing({ name: 'Rope (10 m)', quantity: 1 })).toEqual({ name: 'Rope (10 m)', quantity: 1 });
     expect(normalizeItemListing({ weight: 2 })).toEqual({ weight: 2 });
+  });
+});
+
+describe('changes must name their rows', () => {
+  it('refuses an update or delete that carries no filter', async () => {
+    for (const filters of [undefined, [], [{ operator: 'match', value: {} }], [{ operator: 'or', value: '' }], [{ operator: 'eq' }]]) {
+      expect(() => assertNarrowedChange(filters)).toThrow('needs at least one filter');
+    }
+    // Refused before the database is touched.
+    await expect(executeDataQuery({ id: 'user' }, { table: 'notes', action: 'delete' }))
+      .rejects.toMatchObject({ status: 400, code: 'FILTER_REQUIRED' });
+    await expect(executeDataQuery({ id: 'user' }, { table: 'characters', action: 'update', payload: { name: 'x' }, filters: [] }))
+      .rejects.toMatchObject({ status: 400, code: 'FILTER_REQUIRED' });
+  });
+
+  it('accepts any filter that narrows the rows', () => {
+    expect(() => assertNarrowedChange([{ operator: 'eq', column: 'id', value: '1' }])).not.toThrow();
+    expect(() => assertNarrowedChange([{ operator: 'in', column: 'id', value: ['1'] }])).not.toThrow();
+    expect(() => assertNarrowedChange([{ operator: 'match', value: { party_id: '1' } }])).not.toThrow();
+    expect(() => assertNarrowedChange([{ operator: 'or', value: 'id.eq.1,id.eq.2' }])).not.toThrow();
   });
 });

@@ -3,20 +3,27 @@ import { describe, expect, it } from 'vitest';
 import { hashPassword, resolveSignUpRole, verifyPassword, maxUsers, registrationPlaces } from './auth.js';
 
 describe('password verification', () => {
-  it('verifies native scrypt hashes', () => {
-    const encoded = hashPassword('local-password');
-    expect(verifyPassword('local-password', encoded)).toBe(true);
-    expect(verifyPassword('wrong-password', encoded)).toBe(false);
+  it('verifies native scrypt hashes', async () => {
+    const encoded = await hashPassword('local-password');
+    expect(encoded).toMatch(/^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
+    expect(await verifyPassword('local-password', encoded)).toBe(true);
+    expect(await verifyPassword('wrong-password', encoded)).toBe(false);
   });
 
-  it('verifies migrated Supabase bcrypt hashes', () => {
+  it('verifies migrated Supabase bcrypt hashes', async () => {
     const encoded = bcrypt.hashSync('restored-password', 10);
-    expect(verifyPassword('restored-password', encoded)).toBe(true);
-    expect(verifyPassword('wrong-password', encoded)).toBe(false);
+    expect(await verifyPassword('restored-password', encoded)).toBe(true);
+    expect(await verifyPassword('wrong-password', encoded)).toBe(false);
   });
 
-  it('rejects malformed legacy hashes', () => {
-    expect(verifyPassword('anything', '$2a$not-a-valid-hash')).toBe(false);
+  it('rejects malformed legacy hashes', async () => {
+    expect(await verifyPassword('anything', '$2a$not-a-valid-hash')).toBe(false);
+    expect(await verifyPassword('anything', 'scrypt$abcd$')).toBe(false);
+    expect(await verifyPassword('anything', '')).toBe(false);
+  });
+
+  it('refuses to hash a password that is too short', async () => {
+    await expect(hashPassword('short')).rejects.toThrow('at least 8 characters');
   });
 });
 

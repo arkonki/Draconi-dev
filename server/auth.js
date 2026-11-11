@@ -1,4 +1,5 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
 import { assertSafeBootstrapPassword } from './configCheck.js';
@@ -24,23 +25,27 @@ function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function encodeScryptPassword(password) {
+// Password hashing runs on the worker pool, never on the event loop: a synchronous hash would hold up every other
+// request and the realtime socket for as long as each sign-in takes.
+const scryptAsync = promisify(scrypt);
+
+async function encodeScryptPassword(password) {
   const salt = randomBytes(16).toString('hex');
-  const derived = scryptSync(password, salt, 64).toString('hex');
+  const derived = (await scryptAsync(password, salt, 64)).toString('hex');
   return `scrypt$${salt}$${derived}`;
 }
 
-export function hashPassword(password) {
+export async function hashPassword(password) {
   if (typeof password !== 'string' || password.length < 8) {
     throw new HttpError(400, 'Password must contain at least 8 characters');
   }
   return encodeScryptPassword(password);
 }
 
-export function verifyPassword(password, encoded) {
+export async function verifyPassword(password, encoded) {
   if (/^\$2[aby]\$\d{2}\$/.test(String(encoded || ''))) {
     try {
-      return bcrypt.compareSync(String(password || ''), encoded);
+      return await bcrypt.compare(String(password || ''), encoded);
     } catch {
       return false;
     }
@@ -48,7 +53,8 @@ export function verifyPassword(password, encoded) {
   const [algorithm, salt, expectedHex] = String(encoded || '').split('$');
   if (algorithm !== 'scrypt' || !salt || !expectedHex) return false;
   const expected = Buffer.from(expectedHex, 'hex');
-  const actual = scryptSync(password, salt, expected.length);
+  if (expected.length === 0) return false;
+  const actual = await scryptAsync(String(password ?? ''), salt, expected.length);
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
@@ -128,7 +134,7 @@ export async function authenticateAccessToken(token, required = true) {
 
 export async function verifyUserPassword(userId, password) {
   const { rows } = await pool.query('SELECT password_hash FROM app_credentials WHERE user_id = $1', [userId]);
-  return Boolean(rows[0] && verifyPassword(String(password || ''), rows[0].password_hash));
+  return Boolean(rows[0] && await verifyPassword(String(password || ''), rows[0].password_hash));
 }
 
 export async function authenticateCredentials(email, password) {
@@ -139,13 +145,17 @@ export async function authenticateCredentials(email, password) {
     [normalizeEmail(email)],
   );
   const user = rows[0];
-  if (!user || !verifyPassword(String(password || ''), user.password_hash)) return null;
+  if (!user || !(await verifyPassword(String(password || ''), user.password_hash))) return null;
 
+  // Hashed before the transaction opens, so no database connection is held while the hash is computed.
+  const upgradedHash = String(user.password_hash).startsWith('scrypt$')
+    ? null
+    : await encodeScryptPassword(String(password || ''));
   await withTransaction(async (client) => {
-    if (!String(user.password_hash).startsWith('scrypt$')) {
+    if (upgradedHash) {
       await client.query(
         'UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2',
-        [encodeScryptPassword(String(password || '')), user.id],
+        [upgradedHash, user.id],
       );
     }
     await client.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
@@ -220,6 +230,8 @@ export async function signUp(actor, { email, password, options = {} }) {
   // Anyone signing up on their own must prove they own the address first, whenever email is set up.
   // Accounts an administrator creates, and servers without email, are usable immediately.
   const needsVerification = !actor && mailEnabled();
+  // Hashed before the transaction, so the sign-up lock and a database connection are not held while it is computed.
+  const passwordHash = await hashPassword(password);
   const user = await withTransaction(async (client) => {
     if (!actor) {
       // One sign-up at a time past this point, so two people cannot both take the last place.
@@ -235,7 +247,7 @@ export async function signUp(actor, { email, password, options = {} }) {
     );
     await client.query(
       'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',
-      [result.rows[0].id, hashPassword(password)],
+      [result.rows[0].id, passwordHash],
     );
     return result.rows[0];
   });
@@ -276,7 +288,7 @@ export async function updateAuthUser(request, changes) {
 
   let emailChangePending = null;
   if (wantsPassword) {
-    const passwordHash = hashPassword(changes.password);
+    const passwordHash = await hashPassword(changes.password);
     await withTransaction(async (client) => {
       await client.query('UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2', [passwordHash, user.id]);
       // Every other device is signed out; this one stays.
@@ -331,6 +343,7 @@ export async function bootstrapAdmin() {
   );
   if (rows[0].has_admin || rows[0].email_taken) return;
   assertSafeBootstrapPassword(password);
+  const passwordHash = await hashPassword(password);
   await withTransaction(async (client) => {
     const result = await client.query(
       `INSERT INTO users (email, username, role, is_email_verified)
@@ -339,7 +352,7 @@ export async function bootstrapAdmin() {
     );
     await client.query(
       'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',
-      [result.rows[0].id, hashPassword(password)],
+      [result.rows[0].id, passwordHash],
     );
   });
   console.log(`Created bootstrap administrator ${email}`);

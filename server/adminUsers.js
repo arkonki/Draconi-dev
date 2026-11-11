@@ -220,7 +220,7 @@ export async function resetPassword(actor, id, { password } = {}) {
     throw new HttpError(400, 'Password must contain at least 8 characters', 'WEAK_PASSWORD');
   }
   const temporaryPassword = password || generateTemporaryPassword();
-  const hash = hashPassword(temporaryPassword);
+  const hash = await hashPassword(temporaryPassword);
   const revoked = await withTransaction(async (client) => {
     const target = await loadTarget(client, id, { lock: true });
     const hadCredentials = (await client.query('SELECT 1 FROM app_credentials WHERE user_id = $1', [id])).rowCount > 0;

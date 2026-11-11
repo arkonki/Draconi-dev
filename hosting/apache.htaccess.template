@@ -12,6 +12,12 @@ DirectoryIndex index.html
   Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on'"
 </IfModule>
 
+# Compress text on the way out: the JavaScript and CSS bundles, and the JSON the proxied API returns.
+# Images are already compressed, and the narrator's event stream (text/event-stream) must not be buffered.
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json application/manifest+json image/svg+xml
+</IfModule>
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
 

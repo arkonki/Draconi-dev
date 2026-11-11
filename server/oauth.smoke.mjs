@@ -31,7 +31,7 @@ try {
   userId = inserted.rows[0].id;
   await pool.query(
     'INSERT INTO app_credentials (user_id, password_hash) VALUES ($1, $2)',
-    [userId, hashPassword(password)],
+    [userId, await hashPassword(password)],
   );
 
   const metadata = await json(await fetch(`${apiBaseUrl}/.well-known/oauth-authorization-server`), 200);

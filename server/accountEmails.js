@@ -164,7 +164,7 @@ export async function verifyEmail({ token }) {
 // `hashPassword` is passed in by auth.js (which owns the password rules) to avoid a circular import.
 export async function resetPassword({ token, password }, hashPassword) {
   if (typeof token !== 'string' || !token) throw new HttpError(400, 'This link is invalid or has expired. Request a new one.', 'TOKEN_INVALID');
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
   await withTransaction(async (client) => {
     const { user_id: userId } = await consumeToken(client, token, ['reset_password']);
     await client.query('UPDATE app_credentials SET password_hash = $1, updated_at = now() WHERE user_id = $2', [passwordHash, userId]);
