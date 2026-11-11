@@ -393,6 +393,9 @@ try {
   assert.equal((await ok(mode(tokens.alice, 'ask'), 200, 'ask first')).mode, 'ask');
   assert.equal((await ok(conversation(tokens.alice), 200, 'conversation')).mode, 'ask', 'the page can read the mode');
   const hp = async () => (await soloSnapshotEarly()).playerCharacter.hp.current;
+  // The damage is rolled by the server, so a few unlucky rolls could leave the hero at 0 with nothing left to lose.
+  // Each check that expects hit points to fall starts from a healthy hero.
+  const heal = () => database.query('UPDATE characters SET current_hp = max_hp WHERE id = $1', [hero.id]);
   const lastTools = () => seenRequests.at(-1);
 
   // Tier 1: a roll runs at once, and the narrator is given the result in the same reply.
@@ -406,6 +409,7 @@ try {
   assert.ok((await database.query("SELECT count(*)::int AS n FROM solo_narrator_turns WHERE id = $1 AND tool_calls IS NOT NULL", [rolledTurn.id])).rows[0].n === 1, 'what the narrator did is kept with the reply');
 
   // Tier 2: a change waits for the player, and nothing has happened until it is approved.
+  await heal();
   const hpBefore = await hp();
   const waiting = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage the rock' }), 200, 'a turn with a change');
   assert.equal(waiting.awaiting, 1);
@@ -461,6 +465,7 @@ try {
 
   // Trust: the campaign lets the narrator act on its own.
   await ok(mode(tokens.alice, 'trust'), 200, 'trust');
+  await heal();
   const hpTrust = await hp();
   const trusted = await ok(narrate(tokens.alice, { partyId: party.id, message: 'TOOLTEST damage trusted' }), 200, 'a change in trust mode');
   assert.equal(trusted.awaiting, 0);
