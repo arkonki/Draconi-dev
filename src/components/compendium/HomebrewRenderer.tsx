@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import { optimizedImageUrl } from '../../lib/images';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import remarkHomebrewery from '../../lib/remark-homebrewery';
 import { Shield, Skull, Scroll, Flame, Diamond } from 'lucide-react';
 
 interface MarkdownRendererProps { content: string; className?: string; }
@@ -18,8 +17,8 @@ type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & {
 
 const MonsterBlock = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="my-6 md:my-8 border-y-[3px] border-teal-800 bg-[#f4f1ea] p-3 md:p-4 shadow-sm relative font-sans text-sm leading-relaxed text-gray-900 break-inside-avoid overflow-hidden rounded-sm">
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-teal-800 text-[#f4f1ea] px-3 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm flex items-center gap-2 shadow-sm whitespace-nowrap z-10"><Skull size={10} className="text-teal-200" />Creature / NPC<Skull size={10} className="text-teal-200" /></div>
+    <div className="my-6 md:my-8 border-y-[3px] border-teal-800 bg-[#f4f1ea] p-3 md:p-4 shadow-sm relative font-sans text-sm leading-relaxed text-gray-900 break-inside-avoid rounded-sm">
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-teal-800 text-[#f4f1ea] px-3 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm flex items-center gap-2 shadow-sm whitespace-nowrap z-10"><Skull size={10} className="text-teal-200" />Monster<Skull size={10} className="text-teal-200" /></div>
       <div className="prose prose-sm max-w-none 
         prose-h1:font-serif prose-h1:text-teal-900 prose-h1:border-b prose-h1:border-teal-800/20 prose-h1:pb-2 prose-h1:text-xl md:prose-h1:text-2xl prose-h1:mt-2
         prose-h2:text-teal-800 prose-h2:text-[10px] md:prose-h2:text-xs prose-h2:font-bold prose-h2:uppercase prose-h2:tracking-wider prose-h2:mt-4 prose-h2:mb-1
@@ -76,7 +75,7 @@ const ItemBlock = ({ children }: { children: React.ReactNode }) => {
 
 const SpellBlock = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="my-6 mx-0 md:mx-1 border border-teal-600/50 bg-white shadow-[3px_3px_0px_0px_rgba(15,118,110,0.15)] p-3 relative overflow-hidden break-inside-avoid rounded-sm">
+    <div className="my-6 mx-0 md:mx-1 border border-teal-600/50 bg-white font-serif text-gray-900 shadow-[3px_3px_0px_0px_rgba(15,118,110,0.15)] p-3 relative overflow-hidden break-inside-avoid rounded-sm">
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-400 via-teal-600 to-teal-400" />
       <div className="absolute -bottom-4 -right-4 text-teal-50 opacity-10 rotate-12 pointer-events-none"><Flame size={80} className="md:w-24 md:h-24" /></div>
       <div className="relative z-10 prose prose-sm max-w-none prose-h1:font-serif prose-h1:text-teal-800 prose-h1:mb-2 prose-h1:text-lg md:prose-h1:text-xl prose-h1:mt-0 prose-p:text-gray-700 prose-strong:text-teal-700">{children}</div>
@@ -99,7 +98,7 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
   return (
     <div className={`phb font-serif text-gray-900 leading-relaxed w-full overflow-x-hidden ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkHomebrewery]}
+        remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
           h1: ({ children }) => (<h1 className="text-2xl md:text-4xl font-extrabold text-teal-900 uppercase tracking-wide border-b-2 border-teal-900/30 pb-3 md:pb-4 mb-6 md:mb-8 mt-4 md:mt-6 text-center font-serif break-words">{children}</h1>),
@@ -123,6 +122,14 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
           th: ({ children }) => <th className="px-1.5 py-2 md:px-4 md:py-2.5 font-bold align-bottom">{children}</th>,
           td: ({ children }) => <td className="px-1.5 py-2 md:px-4 md:py-2 align-top text-gray-700">{children}</td>,
 
+          // A fenced block is wrapped in <pre>, which would give the cards below a typewriter font and keep their
+          // line breaks as typed. The cards are let out of it; ordinary code keeps it.
+          pre: ({ children }) => {
+            const child = React.Children.toArray(children)[0];
+            const language = React.isValidElement<{ className?: string }>(child) ? child.props.className ?? '' : '';
+            if (/language-(monster|npc|item|spell|note)\b/.test(language)) return <>{children}</>;
+            return <pre className="my-4 overflow-x-auto rounded bg-gray-100 p-3 text-sm">{children}</pre>;
+          },
           code({ className, children, ...props }: MarkdownCodeProps) {
             const match = /language-(\w+)/.exec(className || '');
             const type = match ? match[1] : '';
@@ -141,7 +148,11 @@ export function HomebrewRenderer({ content, className = '' }: MarkdownRendererPr
                 tr: ({ children }) => <tr className="border-b border-gray-300/10">{children}</tr>,
                 td: ({ children }) => <td className="p-1 align-top">{children}</td>,
                 th: ({ children }) => <th className="p-1 font-bold text-[10px] uppercase opacity-70 align-bottom">{children}</th>,
-                p: ({ children }) => <p className="mb-2 whitespace-normal break-words">{children}</p>
+                p: ({ children }) => <p className="mb-2 whitespace-normal break-words !indent-0">{children}</p>,
+                // Inside a card a "___" line is a thin rule between its parts, not the page's large divider.
+                hr: () => <div className="my-3 h-px w-full bg-teal-800/20" />,
+                ul: ({ children }) => <ul className="my-2 list-disc space-y-0.5 pl-5">{children}</ul>,
+                li: ({ children }) => <li className="my-0 leading-6">{children}</li>,
               };
 
               if (type === 'monster') return <MonsterBlock><ReactMarkdown remarkPlugins={[remarkGfm]} components={nestedComponents}>{contentString}</ReactMarkdown></MonsterBlock>;

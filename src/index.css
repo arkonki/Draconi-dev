@@ -100,7 +100,7 @@
     line-height: .8em;
 }
 
-.phb blockquote, .phb .note-block {
+.phb blockquote {
     font-family: ScalySans !important;
     box-sizing: border-box;
     margin-bottom: 1em;
@@ -142,30 +142,6 @@
 
 /* === COMPONENT-SPECIFIC STYLES === */
 
-/* Monster Block */
-.phb .monster-block {
-    background-color: #fdf1dc;
-    padding: .3em;
-    border-width: 1px;
-    border-style: solid;
-    border-image: url('https://raw.githubusercontent.com/Daxiongmao87/foundry-vtt-5e-phb-journal-styling/main/images/monster-block-wrap-imitation.png') 10;
-    box-shadow: 1px 4px 14px #888;
-}
-.phb .monster-block p { margin-bottom: .4em; line-height: 1.3em; }
-.phb .monster-block table { font-family: 'BookSanity'; font-size: 1em; }
-
-/* Spell Block */
-.phb .spell-block {
-    background: #f8f5d8;
-    border-radius: 7px;
-    padding: .3em;
-    border: 1px solid #DDD;
-    box-shadow: 1px 4px 14px #888;
-}
-.phb .spell-block h4 { border: none; font-family: ScalySans; font-size: 1.2em; -webkit-text-stroke-width: 0; }
-.phb .spell-block h4+p { font-style: italic; text-indent: 0; }
-
-
 /* === TABLE STYLES (ALL ADDITIONS) === */
 
 /* 1. GENERAL TABLE STYLES */
@@ -194,30 +170,6 @@
 .phb table:not(.monster-block table) tbody tr:nth-child(odd) {
     background-color: #fdf1dc;
 }
-
-/* 2. NOTE BLOCK TABLE FIX */
-/* These rules are more specific and ONLY apply to tables inside a note-block */
-.phb .note-block table {
-    width: 100%;
-    background-color: transparent;
-    border-collapse: separate;
-    border-spacing: 0;
-    margin-top: 1em;
-}
-.phb .note-block table thead {
-    display: none;
-}
-.phb .note-block table td {
-    padding: 5px;
-    vertical-align: top;
-    background-color: transparent !important;
-    border: none;
-}
-/* Add a subtle vertical line ONLY between the two columns */
-.phb .note-block table td:first-child {
-    border-right: 1px solid #c9ad6a;
-}
-
 
 /* === FONT DEFINITIONS === */
 /* Self-hosted from /public/fonts (CC-BY-SA-4.0, see public/fonts/CREDITS.md).  */

@@ -3,9 +3,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Check, KeyRound, Plus, Skull } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { parseStoryItems } from '../../lib/storyItems';
-import { parseStoryMonsters } from '../../lib/storyMonsters';
+import { linkNpcToGameData, parseStoryMonsters, type GameDataForNpcs } from '../../lib/storyMonsters';
 import { addItemsToPartyStash } from '../../lib/api/partyStash';
 import { createCampaignMonster } from '../../lib/api/monsters';
+import { fetchItems } from '../../lib/api/items';
+import { supabase } from '../../lib/supabase';
 import { queryKeys } from '../../lib/queryKeys';
 
 interface Entry {
@@ -65,6 +67,19 @@ function ActionRow({ icon: Icon, title, entries, tone }: { icon: typeof KeyRound
   );
 }
 
+async function loadGameDataForNpcs(): Promise<GameDataForNpcs> {
+  const [items, skills] = await Promise.all([
+    fetchItems(),
+    supabase.from('game_skills').select('*').order('name'),
+  ]);
+  if (skills.error) throw new Error(skills.error.message);
+  const rows = (skills.data ?? []) as Array<{ id: string; name: string; attribute?: string | null; base_attribute?: string | null }>;
+  return {
+    items: items.map((item) => ({ ...item, id: String(item.id) })),
+    skills: rows.map((row) => ({ id: row.id, name: row.name, attribute: row.attribute ?? row.base_attribute ?? null })),
+  };
+}
+
 /**
  * What a Story Helper answer can be turned into: its item blocks go to the party stash, its monster and NPC blocks to
  * the campaign's own bestiary, where the encounter view can bring them into a fight.
@@ -83,7 +98,13 @@ export function StoryContentActions({ partyId, markdown }: { partyId: string; ma
     key: `monster-${index}-${monster.name}`,
     label: `${monster.name}${monster.stats.IS_NPC ? ' (NPC)' : ''}`,
     run: async () => {
-      await createCampaignMonster(partyId, monster);
+      // An NPC's weapons and skills are tied to the game's own items and skills where the names match, so the
+      // fight shows the real weapon with its grip, range and features. If the lists cannot be read, the NPC is
+      // saved as the block gave it.
+      const gameData = monster.stats.IS_NPC
+        ? await queryClient.fetchQuery({ queryKey: ['story-npc-game-data'], queryFn: loadGameDataForNpcs, staleTime: 5 * 60_000 }).catch(() => null)
+        : null;
+      await createCampaignMonster(partyId, gameData ? linkNpcToGameData(monster, gameData) : monster);
       await queryClient.invalidateQueries({ queryKey: queryKeys.monsters });
     },
   }));

@@ -1,4 +1,4 @@
-import type { MonsterAttackEntry, MonsterData, MonsterSize, MonsterStats } from '../types/bestiary';
+import type { MonsterAttackEntry, MonsterData, MonsterGearItem, MonsterSize, MonsterSkillEntry, MonsterStats } from '../types/bestiary';
 import { MONSTER_SIZES } from '../types/bestiary';
 
 // Reads the ```monster and ```npc blocks the Story Helper writes, so the GM can keep them in the campaign's own
@@ -21,6 +21,159 @@ const number = (value: string | undefined) => {
   const match = String(value ?? '').match(/-?\d+/);
   return match ? Number(match[0]) : 0;
 };
+
+// The weapon skill a weapon is used with, for when the block names the weapon but not its skill. The fight needs it
+// to know whether the NPC's damage bonus (from STR or from AGL) applies.
+const WEAPON_SKILL_HINTS: Array<[RegExp, string]> = [
+  [/crossbow/i, 'Crossbows'],
+  [/\bbow\b|longbow|short ?bow/i, 'Bows'],
+  [/sling/i, 'Slings'],
+  [/dagger|knife|knives|stiletto|dirk/i, 'Knives'],
+  [/sword|sabre|saber|scimitar|rapier|falchion/i, 'Swords'],
+  [/axe|hatchet/i, 'Axes'],
+  [/spear|lance|trident|pike|halberd|javelin/i, 'Spears'],
+  [/staff|stave|quarterstaff/i, 'Staves'],
+  [/hammer|mace|club|flail|morning ?star|maul|cudgel/i, 'Hammers'],
+  [/unarmed|fist|punch|kick|claw|bite|brawl/i, 'Brawling'],
+];
+
+/** Splits "A (x, y), B (z)" at the commas between entries, leaving the ones inside brackets alone. */
+function splitOutsideBrackets(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const character of text) {
+    if (character === '(') depth += 1;
+    if (character === ')') depth = Math.max(0, depth - 1);
+    if ((character === ',' || character === ';') && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/** "Awareness 14, Hunting & Fishing 12" → named skills with their levels. Entries without a level are left out. */
+export function parseSkillList(text: string | undefined): Array<{ name: string; level: number }> {
+  return splitOutsideBrackets(String(text ?? ''))
+    .map((entry) => plain(entry).match(/^(.+?)\s*[:(]?\s*(\d{1,2})\)?$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => ({ name: match[1].trim(), level: Math.min(Math.max(Number(match[2]), 1), 18) }))
+    .filter((skill) => skill.name.length > 0 && skill.name.length <= 60);
+}
+
+export interface StoryWeapon {
+  name: string;
+  /** The weapon skill it is used with, named in the block or worked out from the weapon's name. */
+  skill: string | null;
+  level: number | null;
+  damage: string | null;
+  range: string | null;
+}
+
+/**
+ * "Broadsword (Swords 14, damage 2D6), Short bow (skill 12, damage D10, range 30)" → one entry per weapon. Both ways
+ * of writing the skill are read: by name with its level, or as a bare "skill 12".
+ */
+export function parseNpcWeapons(text: string | undefined): StoryWeapon[] {
+  return splitOutsideBrackets(String(text ?? '')).map((entry) => {
+    const text = plain(entry);
+    const match = text.match(/^([^()]+?)\s*(?:\((.*)\))?$/);
+    const name = (match?.[1] ?? text).trim();
+    const details = match?.[2] ?? '';
+    let skill: string | null = null;
+    let level: number | null = null;
+    let damage: string | null = null;
+    let range: string | null = null;
+    for (const detail of details.split(',').map((part) => part.trim()).filter(Boolean)) {
+      const dice = detail.match(/(\d*\s*D\s*\d+(?:\s*\+\s*\d+)?)/i);
+      const leveled = detail.match(/^(.+?)\s+(\d{1,2})$/);
+      if (/^(damage|dmg)\b/i.test(detail) && dice) damage = dice[1].replace(/\s+/g, '').toUpperCase();
+      else if (/^range\b/i.test(detail)) range = detail.replace(/^range\s*:?\s*/i, '').trim() || null;
+      else if (leveled) {
+        level = Math.min(Math.max(Number(leveled[2]), 1), 18);
+        if (!/^skill$/i.test(leveled[1].trim())) skill = leveled[1].trim();
+      } else if (dice && !damage) damage = dice[1].replace(/\s+/g, '').toUpperCase();
+    }
+    if (!skill) skill = WEAPON_SKILL_HINTS.find(([pattern]) => pattern.test(name))?.[1] ?? null;
+    return { name, skill, level, damage, range };
+  }).filter((weapon) => weapon.name.length > 0 && weapon.name.length <= 80);
+}
+
+/**
+ * The structured skills and gear of an NPC: what the fight shows as skill buttons and as weapons with a "Use" button.
+ * A weapon's own skill is added to the skills when the block did not list it, so its attack can be rolled.
+ */
+function npcStructure(skillsText: string | undefined, weaponsText: string | undefined): { skills: MonsterSkillEntry[]; gear: MonsterGearItem[] } {
+  const weapons = parseNpcWeapons(weaponsText);
+  const named = parseSkillList(skillsText);
+  for (const weapon of weapons) {
+    if (weapon.skill && weapon.level && !named.some((skill) => skill.name.toLowerCase() === weapon.skill!.toLowerCase())) {
+      named.push({ name: weapon.skill, level: weapon.level });
+    }
+  }
+  return {
+    skills: named.map((skill, index) => ({ skill_id: `story-skill-${index}`, name: skill.name, level: skill.level, attribute: null })),
+    gear: weapons.map((weapon, index) => ({
+      item_id: `story-weapon-${index}`,
+      name: weapon.name,
+      category: weapon.skill && ['bows', 'crossbows', 'slings'].includes(weapon.skill.toLowerCase()) ? 'RANGED WEAPONS' : 'MELEE WEAPONS',
+      quantity: 1,
+      ...(weapon.damage ? { damage: weapon.damage } : {}),
+      ...(weapon.range ? { range: weapon.range } : {}),
+      ...(weapon.skill ? { skill: weapon.skill } : {}),
+    })),
+  };
+}
+
+export interface GameDataForNpcs {
+  items: Array<{ id: string; name: string; category?: string; description?: string; damage?: string; armor_rating?: number | string; range?: string | number; grip?: string; durability?: number | string; features?: string | string[]; effect?: string; skill?: string }>;
+  skills: Array<{ id: string; name: string; attribute?: string | null }>;
+}
+
+/**
+ * Ties an NPC read from a block to the game's own data: a weapon that is in the item list becomes that item (with
+ * its grip, range, durability and features), and a skill the game has gets its real id and attribute. What has no
+ * match stays as the block gave it, so nothing the GM asked for is lost.
+ */
+export function linkNpcToGameData(monster: MonsterData, { items, skills }: GameDataForNpcs): MonsterData {
+  if (!monster.stats.IS_NPC) return monster;
+  const key = (value: string) => value.trim().toLowerCase();
+  const itemsByName = new Map(items.map((item) => [key(item.name), item]));
+  const skillsByName = new Map(skills.map((skill) => [key(skill.name), skill]));
+  const usedItemIds = new Set<string>();
+  const gear = (monster.stats.GEAR_ITEMS ?? []).map((gearItem) => {
+    const match = itemsByName.get(key(gearItem.name));
+    if (!match || usedItemIds.has(match.id)) return gearItem;
+    usedItemIds.add(match.id);
+    return {
+      ...gearItem,
+      item_id: match.id,
+      name: match.name,
+      category: match.category ?? gearItem.category,
+      description: match.description,
+      damage: match.damage || gearItem.damage,
+      armor_rating: match.armor_rating,
+      range: match.range ?? gearItem.range,
+      grip: match.grip,
+      durability: match.durability,
+      features: match.features,
+      effect: match.effect,
+      skill: match.skill || gearItem.skill,
+    };
+  });
+  const usedSkillIds = new Set<string>();
+  const skillEntries = (monster.stats.SKILL_ENTRIES ?? []).map((entry) => {
+    const match = skillsByName.get(key(entry.name));
+    if (!match || usedSkillIds.has(match.id)) return entry;
+    usedSkillIds.add(match.id);
+    return { ...entry, skill_id: match.id, name: match.name, attribute: match.attribute ?? entry.attribute ?? null };
+  });
+  return { ...monster, stats: { ...monster.stats, GEAR_ITEMS: gear, SKILL_ENTRIES: skillEntries } };
+}
 
 /** "**Movement:** 12 · **HP:** 11" → { movement: '12', hp: '11' } */
 function labelled(lines: string[]): Map<string, string> {
@@ -79,6 +232,7 @@ function monsterFrom(kind: 'monster' | 'npc', body: string): MonsterData | null 
   if (kind === 'npc') {
     const attributes = ['STR', 'CON', 'AGL', 'INT', 'WIL', 'CHA'].filter((key) => table.has(key.toLowerCase())).map((key) => `${key} ${table.get(key.toLowerCase())}`);
     const descriptionKeys = ['appearance', 'personality', 'motivation'];
+    const structure = npcStructure(values.get('skills'), values.get('weapons') ?? values.get('gear'));
     const stats: MonsterStats = {
       IS_NPC: true,
       TYPE: subtitle,
@@ -91,6 +245,9 @@ function monsterFrom(kind: 'monster' | 'npc', body: string): MonsterData | null 
       DAMAGE_BONUS: damageBonus(values.get('damage bonus')),
       SKILLS: values.get('skills') ?? '',
       GEAR: values.get('weapons') ?? values.get('gear') ?? '',
+      // The same skills and weapons in the form the fight can roll.
+      ...(structure.skills.length ? { SKILL_ENTRIES: structure.skills } : {}),
+      ...(structure.gear.length ? { GEAR_ITEMS: structure.gear } : {}),
     };
     return {
       name: name.slice(0, 120),

@@ -99,7 +99,7 @@ ___
 ___
 **Movement:** 12 · **HP:** 11 · **WP:** 10 · **Armor:** 1
 **Skills:** Awareness 14, Persuasion 12
-**Weapons:** Dagger (skill 12, damage D8)
+**Weapons:** Dagger (Knives 12, damage D8)
 \`\`\``;
 
 const itemTemplate = `\`\`\`item

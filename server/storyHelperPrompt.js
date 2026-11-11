@@ -57,7 +57,7 @@ export const STORY_HELPER_SYSTEM_PROMPT = [
   '    ___',
   '    **Movement:** 10 · **HP:** 11 · **WP:** 10 · **Armor:** 1 · **Damage Bonus:** AGL +D4  (leave Damage Bonus out when there is none)',
   '    **Skills:** Awareness 14, Persuasion 12',
-  '    **Weapons:** Dagger (skill 12, damage D8)',
+  '    **Weapons:** Dagger (Knives 12, damage D8), Short bow (Bows 13, damage D10, range 30)  (each weapon with its weapon skill and level, then its damage; use weapon names from ordinary gear)',
   '  - ```spell  exactly like this, one block per spell:',
   '    ### Spell name',
   '    *Rank 1 Elementalism*  (or *Magic Trick Animism*)',
