@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, FileText, Flame, Pause, Play, Plus, Sparkles, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Bed, BellRing, CalendarClock, Check, Dices, FileText, Flame, Pause, Play, Plus, Sparkles, StickyNote, Trash2, Undo2, X } from 'lucide-react';
 import { Button } from '../shared/Button';
 import { ErrorMessage } from '../shared/ErrorMessage';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -19,6 +19,7 @@ import {
 import { fetchRandomTables } from '../../lib/api/randomTables';
 import { draftSessionRecap } from '../../lib/api/sessionRecap';
 import { fetchAiSettings, polishRecap } from '../../lib/api/ai';
+import { saveSessionRecapNote } from '../../lib/api/partyNotes';
 import { formatCampaignClock } from '../../lib/game/campaignTimeFormat';
 import { rollOnTable } from '../../lib/game/randomTableUtils';
 import { rollDiceExpression } from '../../lib/game/diceExpression';
@@ -57,6 +58,29 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
   // The text before the last polish, so it can be put back.
   const [beforePolish, setBeforePolish] = useState<string | null>(null);
   const [polishError, setPolishError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  // The recap of the session that was just ended, kept so it can still be saved as a party note afterwards.
+  const [endedRecap, setEndedRecap] = useState<{ title: string; summary: string } | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
+  const [savedNoteTitle, setSavedNoteTitle] = useState<string | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const saveRecapAsNote = async (title: string, recap: string) => {
+    setSavingNote(true);
+    setNoteError(null);
+    try {
+      setSavedNoteTitle((await saveSessionRecapNote(partyId, title, recap)).title);
+    } catch (failure) {
+      setNoteError(failure instanceof Error ? failure.message : 'Could not save the recap as a party note.');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+  const noteFeedback = (
+    <>
+      {savedNoteTitle && <p role="status" className="text-sm text-emerald-700">Saved to the party notes as “{savedNoteTitle}”.</p>}
+      {noteError && <p role="alert" className="text-sm text-red-700">{noteError}</p>}
+    </>
+  );
   const aiSettings = useQuery({ queryKey: ['ai-settings'], queryFn: fetchAiSettings, staleTime: 15_000, enabled: isOpen });
   const [advanceAmount, setAdvanceAmount] = useState(1);
   const [reminderLabel, setReminderLabel] = useState('Encounter check');
@@ -320,14 +344,18 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                 </div>
                 {state.activeSession ? (
                   <div className="space-y-3">
-                    <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={summary.includes('\n') ? 10 : 3}
+                    <textarea value={summary} onChange={(event) => { setSummary(event.target.value); setSavedNoteTitle(null); }} rows={summary.includes('\n') ? 10 : 3}
                       placeholder="Session summary (required)" className="w-full rounded-md border border-stone-300 p-3" />
                     <Button size="sm" variant="secondary" icon={FileText} loading={drafting} disabled={mutation.isPending}
                       onClick={async () => {
                         if (summary.trim() && !(await confirm({ title: 'Replace what you wrote?', description: 'The draft takes the place of the current summary.', confirmText: 'Replace with draft' }))) return;
                         setDrafting(true);
+                        setDraftError(null);
                         try {
                           setSummary(await draftSessionRecap(partyId, state.activeSession!, `Day ${clock.day}, ${clock.shift.toLowerCase()}`));
+                          setSavedNoteTitle(null);
+                        } catch (failure) {
+                          setDraftError(failure instanceof Error ? failure.message : 'Could not put the draft together.');
                         } finally {
                           setDrafting(false);
                         }
@@ -344,6 +372,7 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                           const answer = await polishRecap(partyId, original);
                           setBeforePolish(original);
                           setSummary(answer.text);
+                          setSavedNoteTitle(null);
                         } catch (failure) {
                           setPolishError(failure instanceof Error ? failure.message : 'Could not polish the summary.');
                         } finally {
@@ -355,18 +384,46 @@ export function SessionManager({ isOpen, onClose, partyId, partyName }: SessionM
                     {beforePolish !== null && (
                       <Button size="sm" variant="ghost" icon={Undo2} onClick={() => { setSummary(beforePolish); setBeforePolish(null); }}>Undo polish</Button>
                     )}
-                    {polishError && <p role="alert" className="text-sm text-red-700">{polishError}</p>}
+                    <Button size="sm" variant="secondary" icon={StickyNote} loading={savingNote} disabled={!summary.trim() || mutation.isPending}
+                      title="Keep this summary as a note the whole party can read"
+                      onClick={() => void saveRecapAsNote(state.activeSession!.title, summary)}>
+                      Save as party note
+                    </Button>
+                    {draftError && <p role="alert" className="text-sm text-red-700">{draftError}</p>}
+                    {polishError && <p role="alert" className="text-sm text-red-700">{polishError} Your text is unchanged, and the session can be ended without polishing.</p>}
+                    {noteFeedback}
                     <textarea value={unresolvedThreads} onChange={(event) => setUnresolvedThreads(event.target.value)} rows={2}
                       placeholder="Unresolved threads, one per line" className="w-full rounded-md border border-stone-300 p-3" />
                     <Button variant="danger" disabled={!summary.trim() || mutation.isPending}
-                      onClick={() => run(() => endCampaignSession(partyId, state.activeSession!.id, state.campaignRevision, {
-                        summary: summary.trim(), unresolvedThreads: unresolvedThreads.split('\n').map((line) => line.trim()).filter(Boolean),
-                      }))}>
+                      onClick={() => run(async () => {
+                        const ended = { title: state.activeSession!.title, summary: summary.trim() };
+                        await endCampaignSession(partyId, state.activeSession!.id, state.campaignRevision, {
+                          summary: ended.summary, unresolvedThreads: unresolvedThreads.split('\n').map((line) => line.trim()).filter(Boolean),
+                        });
+                        // Only once the session is really over: until then the form keeps what was written.
+                        setEndedRecap(ended);
+                        setSummary('');
+                        setUnresolvedThreads('');
+                        setBeforePolish(null);
+                        setPolishError(null);
+                        setNoteError(null);
+                      })}>
                       End session
                     </Button>
                   </div>
                 ) : (
                   <div className="grid md:grid-cols-2 gap-3">
+                    {endedRecap && (
+                      <div className="md:col-span-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-sm font-semibold text-emerald-900">“{endedRecap.title}” has ended. Its summary is saved with the session.</p>
+                        <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-stone-700">{endedRecap.summary}</p>
+                        <Button size="sm" variant="secondary" icon={StickyNote} loading={savingNote} disabled={Boolean(savedNoteTitle)}
+                          onClick={() => void saveRecapAsNote(endedRecap.title, endedRecap.summary)}>
+                          {savedNoteTitle ? 'Saved as party note' : 'Save as party note'}
+                        </Button>
+                        {noteFeedback}
+                      </div>
+                    )}
                     <input value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)}
                       placeholder="Session title" className="rounded-md border border-stone-300 px-3 py-2" />
                     <input value={gmNotes} onChange={(event) => setGmNotes(event.target.value)}

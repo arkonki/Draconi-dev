@@ -80,6 +80,11 @@ const mock = http.createServer((request, response) => {
       response.end('data: [DONE]\n\n');
       return;
     }
+    // Two answers real models give that used to break the recap: the text sent as a list of parts, and nothing at
+    // all because the allowance ran out while the model was still thinking.
+    const asked = String(parsed.messages?.at(-1)?.content ?? '');
+    if (asked.includes('RECAPTEST parts')) { response.end(JSON.stringify({ choices: [{ message: { content: [{ type: 'text', text: 'The party ' }, { type: 'text', text: 'held the gate.' }] } }], usage })); return; }
+    if (asked.includes('RECAPTEST cut')) { response.end(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '' } }], usage })); return; }
     response.end(JSON.stringify({ choices: [{ message: { content: text } }], usage }));
   });
 });
@@ -570,6 +575,19 @@ try {
   await ok(polish(tokens.alice, { partyId: party.id, draft: '  ' }), 400, 'nothing to polish');
   await ok(polish(tokens.bob, { partyId: party.id, draft: 'x' }), 403, 'a stranger cannot polish');
   assert.ok((await database.query("SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'recap'")).rows[0].n >= 1);
+  assert.ok(seenRequests.at(-1).max_tokens >= 1500, 'the model gets room to think and to write in a wordy language');
+  assert.equal((await ok(polish(tokens.alice, { partyId: party.id, draft: 'RECAPTEST parts' }), 200, 'an answer sent in parts')).text, 'The party held the gate.');
+  const cutShort = await polish(tokens.alice, { partyId: party.id, draft: 'RECAPTEST cut' });
+  assert.equal(cutShort.status, 502);
+  assert.equal(cutShort.payload.error.code, 'AI_ANSWER_CUT_SHORT', 'an answer that ran out of room says so');
+
+  // The recap is kept as a note the party can read.
+  const recapNote = (await ok(query(tokens.alice, { table: 'notes', action: 'insert', payload: [{ title: `Recap ${suffix}`, content: polished.text, category: 'Session recaps', party_id: party.id }] }), 200, 'save the recap as a party note')).data[0];
+  assert.equal(recapNote.party_id, party.id);
+  const partyNotes = (await ok(query(tokens.alice, { table: 'notes', action: 'select', filters: [{ operator: 'eq', column: 'party_id', value: party.id }] }), 200, 'the party notes')).data;
+  assert.ok(partyNotes.some((note) => note.id === recapNote.id && note.category === 'Session recaps' && /fought bravely/.test(note.content)), 'the recap is among the party notes');
+  const strangerNotes = (await ok(query(tokens.bob, { table: 'notes', action: 'select', filters: [{ operator: 'eq', column: 'party_id', value: party.id }] }), 200, 'a stranger asks')).data;
+  assert.equal(strangerNotes.length, 0, 'someone outside the campaign does not see it');
   results.recapPolish = 'passed';
 
   // --- Monthly limits ---

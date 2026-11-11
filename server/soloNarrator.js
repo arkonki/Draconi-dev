@@ -516,6 +516,11 @@ export async function generateStory(user, { prompt, partyId, characterIds = [], 
   return { text: result.text, model: result.model, usage: result.usage };
 }
 
+// A recap is at most 200 words, but the allowance has to cover more than the words: languages such as Estonian take
+// two to three tokens a word, and models that think first spend the same allowance on thinking. With too little,
+// the recap came back cut off in the middle of a sentence, or empty.
+const RECAP_MAX_TOKENS = 2000;
+
 /** Turns the session recap draft into readable prose with the GM's own model. The GM edits the result before using it. */
 export async function polishRecap(user, { partyId, draft } = {}) {
   const text = stripRecapNotes(draft);
@@ -523,7 +528,7 @@ export async function polishRecap(user, { partyId, draft } = {}) {
   if (!UUID.test(String(partyId || ''))) throw new HttpError(400, 'partyId is required', 'INVALID_CAMPAIGN');
   const access = await loadCampaignAccess(pool, user, partyId);
   if (!access?.isGm) throw new HttpError(403, 'Permission denied', 'FORBIDDEN');
-  const result = await callModel(user, { messages: buildRecapMessages(text, ...Object.values(await campaignLanguage(partyId))), purpose: 'recap', partyId, temperature: 0.5, maxTokens: 500 });
+  const result = await callModel(user, { messages: buildRecapMessages(text, ...Object.values(await campaignLanguage(partyId))), purpose: 'recap', partyId, temperature: 0.5, maxTokens: RECAP_MAX_TOKENS });
   return { text: result.text, model: result.model, usage: result.usage };
 }
 

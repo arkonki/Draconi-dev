@@ -123,7 +123,12 @@ export class AiApiError extends Error {
 async function send<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authenticatedApiFetch(path, init);
   const payload = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: string } };
-  if (!response.ok) throw new AiApiError(payload.error?.message || response.statusText || 'Request failed', payload.error?.code);
+  if (!response.ok) {
+    // A proxy in front of the server answers with a page of its own when the server takes too long or is down.
+    const gateway = !payload.error && [502, 503, 504].includes(response.status);
+    const fallback = gateway ? 'The server took too long to answer. Try again in a moment.' : response.statusText || 'Request failed';
+    throw new AiApiError(payload.error?.message || fallback, payload.error?.code ?? (gateway ? 'GATEWAY_TIMEOUT' : undefined));
+  }
   return payload;
 }
 

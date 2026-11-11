@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
-import { allowCall, capReached, createSseParser, estimateTokens, interpretModelResponse, keyHint, parseSettingsUpdate, readUsage, withCacheControl } from './aiSettings.js';
+import { describe, expect, it, vi } from 'vitest';
+import { allowCall, answerText, capReached, createSseParser, estimateTokens, interpretModelResponse, keyHint, modelCallFailure, parseSettingsUpdate, readUsage, withCacheControl } from './aiSettings.js';
 
 describe('AI settings', () => {
   it('accepts a key and a model, and trims them', () => {
@@ -97,5 +97,28 @@ describe('AI settings', () => {
     expect(marked[0]).toEqual({ role: 'system', content: [{ type: 'text', text: 'Fixed instructions', cache_control: { type: 'ephemeral' } }] });
     expect(marked[1]).toBe(messages[1]);
     expect(withCacheControl('anthropic/claude-3.5-haiku', [{ role: 'user', content: 'x' }])).toEqual([{ role: 'user', content: 'x' }]);
+  });
+});
+
+describe('answers that arrive in an unusual shape', () => {
+  it('reads an answer sent as a list of parts', () => {
+    expect(answerText([{ type: 'text', text: 'The party ' }, { type: 'image_url', image_url: {} }, { type: 'text', text: 'won.' }])).toBe('The party won.');
+    expect(answerText([{ text: ' Plain part ' }])).toBe('Plain part');
+    expect(answerText(null)).toBe('');
+    expect(interpretModelResponse(200, { choices: [{ message: { content: [{ type: 'text', text: 'A recap.' }] } }] }).text).toBe('A recap.');
+  });
+
+  it('says so when the model spent its allowance on thinking and wrote nothing', () => {
+    const cutShort = () => interpretModelResponse(200, { choices: [{ finish_reason: 'length', message: { content: '' } }] });
+    expect(cutShort).toThrow(/used up its allowance/);
+    try { cutShort(); } catch (error) { expect(error.code).toBe('AI_ANSWER_CUT_SHORT'); }
+    expect(() => interpretModelResponse(200, { choices: [{ finish_reason: 'stop', message: { content: '' } }] })).toThrow(/empty answer/);
+  });
+
+  it('tells a slow answer from a service that cannot be reached', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(modelCallFailure(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))).toMatchObject({ status: 504, code: 'AI_TIMEOUT' });
+    expect(modelCallFailure(new TypeError('fetch failed'))).toMatchObject({ status: 502, code: 'AI_UNREACHABLE' });
+    vi.restoreAllMocks();
   });
 });

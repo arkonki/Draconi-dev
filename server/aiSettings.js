@@ -112,6 +112,17 @@ export function withCacheControl(model, messages) {
 }
 
 /** Turns the provider's answer into text and usage, or a clear error. Pure. */
+/** The answer as plain text. Most models send a string; some send a list of parts, of which the text ones count. */
+export function answerText(content) {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => (typeof part === 'string' ? part : part?.type === 'text' || part?.type === undefined ? part?.text : ''))
+    .filter((part) => typeof part === 'string')
+    .join('')
+    .trim();
+}
+
 export function interpretModelResponse(status, payload) {
   if (status === 401 || status === 403) {
     throw new HttpError(502, 'OpenRouter did not accept your API key. Check it in Settings → AI Assistants.', 'AI_KEY_REJECTED');
@@ -122,9 +133,17 @@ export function interpretModelResponse(status, payload) {
     const detail = String(payload?.error?.message ?? '').slice(0, 200);
     throw new HttpError(502, `The AI service returned an error${detail ? `: ${detail}` : ` (${status})`}.`, 'AI_PROVIDER_ERROR');
   }
-  const text = payload?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
-  return { text: text.trim(), usage: readUsage(payload?.usage) };
+  const choice = payload?.choices?.[0];
+  const text = answerText(choice?.message?.content);
+  if (!text) {
+    // Models that think before they answer spend the same allowance on thinking. When it runs out first, the answer
+    // is empty; say so, because "try another model" is what helps, not "try again".
+    if (choice?.finish_reason === 'length') {
+      throw new HttpError(502, 'The model used up its allowance before it wrote an answer. Try again, or choose a different model in Settings → AI Assistants.', 'AI_ANSWER_CUT_SHORT');
+    }
+    throw new HttpError(502, 'The AI service returned an empty answer.', 'AI_EMPTY_ANSWER');
+  }
+  return { text, usage: readUsage(payload?.usage) };
 }
 
 const recentCalls = new Map();
@@ -286,6 +305,15 @@ async function recordUsage(user, { partyId, purpose, model, usage }) {
   );
 }
 
+/** Why a request to the AI service never got an answer: it took too long, or the service could not be reached at all. */
+export function modelCallFailure(error) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return new HttpError(504, 'The AI service did not answer in time. Try again, or choose a faster model in Settings → AI Assistants.', 'AI_TIMEOUT');
+  }
+  console.warn(JSON.stringify({ level: 'warn', event: 'ai_service_unreachable', message: String(error?.cause?.message || error?.message || error).slice(0, 300) }));
+  return new HttpError(502, 'The AI service could not be reached. Try again in a moment.', 'AI_UNREACHABLE');
+}
+
 /**
  * Sends a conversation to the person's model and records what it cost. `purpose` says what it was for ('story',
  * 'solo'), `partyId` which campaign.
@@ -300,8 +328,8 @@ export async function callModel(user, { messages, purpose, partyId = null, tempe
       body: JSON.stringify({ model, messages: withCacheControl(model, messages), temperature, max_tokens: maxTokens, usage: { include: true } }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    throw new HttpError(504, 'The AI service did not answer in time.', 'AI_TIMEOUT');
+  } catch (error) {
+    throw modelCallFailure(error);
   }
   const payload = await response.json().catch(() => ({}));
   const result = interpretModelResponse(response.status, payload);
