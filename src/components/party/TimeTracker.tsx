@@ -297,7 +297,6 @@ export function TimeTrackerView({ partyId, onTabChange }: { partyId: string, onT
   // --- RANDOM ENCOUNTER LOGIC ---
   const generateEncounter = () => {
     // 1. Try to find a custom table first
-    console.log('Generating encounter from ID:', selectedTableId);
 
     const customTable = customTables?.find(t => t.id === selectedTableId);
 

@@ -44,6 +44,14 @@ export default tseslint.config(
       // If you encounter hook-related linting issues later, we may need to adjust rules here.
     },
   },
+  // The app's own code reports problems with console.warn and console.error; console.log is for debugging and
+  // does not belong in what ships.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+    },
+  },
   // Accessibility configuration
   {
     files: ['**/*.{ts,tsx}'],

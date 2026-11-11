@@ -2270,7 +2270,7 @@ export function PartyEncounterView({ partyId, partyMembers, isDM }: PartyEncount
   /*
   const handleRemove = (id: string) => {
     const c = combatants.find(x => x.id === id);
-    if (c && c.monster_id && combatantsData) { const siblings = getSiblings(c, combatantsData); siblings.forEach((sib: any) => removeCombatantMu.mutate(sib.id)); } else { removeCombatantMu.mutate(id); }
+    if (c && c.monster_id && combatantsData) { const siblings = getSiblings(c, combatantsData); siblings.forEach((sib) => removeCombatantMu.mutate(sib.id)); } else { removeCombatantMu.mutate(id); }
   };
   */
 

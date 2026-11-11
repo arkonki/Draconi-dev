@@ -12,4 +12,3 @@
 //   };
 // };
 
-console.log('Vitest setup file loaded.');

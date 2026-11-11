@@ -70,6 +70,12 @@ export function routePath(request) {
   return new URL(request.url, 'http://localhost').pathname;
 }
 
+const INVALID_DATA_MESSAGES = {
+  23503: 'This refers to something that does not exist, or is still used elsewhere.',
+  23514: 'One of the values is not allowed.',
+  '22P02': 'One of the values has the wrong format.',
+};
+
 export function handleError(response, error) {
   if (error instanceof HttpError) {
     sendJson(response, error.status, { error: { message: error.message, code: error.code } }, error.headers);
@@ -79,8 +85,19 @@ export function handleError(response, error) {
     sendJson(response, 409, { error: { message: 'A record with this value already exists', code: error.code } });
     return;
   }
-  if (error?.code === '23503' || error?.code === '23514' || error?.code === '22P02') {
-    sendJson(response, 400, { error: { message: error.message, code: error.code } });
+  const invalid = INVALID_DATA_MESSAGES[error?.code];
+  if (invalid) {
+    // PostgreSQL's own message names tables, columns and constraints. It goes to the server log; the client is
+    // told what kind of problem it was, with the same code as before.
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'invalid_data_rejected',
+      code: error.code,
+      constraint: error.constraint || null,
+      message: String(error.message || '').slice(0, 400),
+      requestId: response.req?.requestId || null,
+    }));
+    sendJson(response, 400, { error: { message: invalid, code: error.code } });
     return;
   }
   console.error(error);

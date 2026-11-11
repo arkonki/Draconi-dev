@@ -58,7 +58,6 @@
 
           try {
             tableName = getTableName(category);
-            console.log(`[useGameData] Attempting to load category: ${category}, using table: ${tableName}`);
 
             let queryBuilder = supabase.from(tableName);
 
@@ -78,7 +77,6 @@
 
             queryBuilder = queryBuilder.order('name');
 
-            console.log(`[useGameData] Executing query for table: ${tableName}`);
             const { data, error: fetchError } = await queryBuilder;
 
             if (fetchError) {
@@ -100,7 +98,6 @@
               return processedItem as GameDataEntry;
             });
 
-            console.log(`[useGameData] Loaded ${formattedData.length} entries for ${category} from ${tableName}`);
             setEntries(formattedData);
 
           } catch (err: unknown) {
@@ -199,7 +196,6 @@
             }
             // --- End Transformations ---
 
-            console.log(`[useGameData] Saving entry to ${tableName} (ID: ${id || 'new'}):`, dataToSave);
 
             let savedData: GameDataEntry | null = null;
 
@@ -228,7 +224,6 @@
               // This situation should ideally not happen if .select().single() is used correctly.
               onSuccess(id ? { ...editingEntry, id } : { ...editingEntry });
             } else {
-              console.log(`[useGameData] Save operation successful for ${category} (ID: ${savedData.id})`);
               onSuccess(savedData);
             }
             await loadEntries(category);
@@ -257,7 +252,6 @@
             setLoading(true);
 
             tableName = getTableName(category);
-            console.log(`[useGameData] Deleting entry from ${tableName}, ID: ${id}`);
 
             const { error: deleteError } = await supabase
               .from(tableName)
@@ -269,7 +263,6 @@
                 throw deleteError;
             }
 
-            console.log(`[useGameData] Delete successful for ID: ${id} in ${category}`);
             await loadEntries(category);
 
           } catch (err: unknown) {
@@ -288,7 +281,6 @@
         }, [getTableName, loadEntries]);
 
         const switchCategory = useCallback((newCategory: DataCategory) => {
-          console.log(`[useGameData] Switching category from ${activeCategory} to ${newCategory}`);
           setActiveCategory(newCategory);
           loadEntries(newCategory);
         }, [activeCategory, loadEntries]);
@@ -296,7 +288,6 @@
         const reloadEntries = useCallback(() => loadEntries(activeCategory), [activeCategory, loadEntries]);
 
         useEffect(() => {
-          console.log(`[useGameData] Initial load effect for category: ${initialCategory}`);
           try {
               getTableName(initialCategory);
               loadEntries(initialCategory);

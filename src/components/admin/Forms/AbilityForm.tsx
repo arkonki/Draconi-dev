@@ -32,10 +32,8 @@ export const AbilityForm: React.FC<AbilityFormProps> = ({ entry, onChange }) => 
     if (isSkillNameRequirement(initialReq)) {
       // Already in the correct format
       nameBasedReqs = initialReq;
-      console.log("AbilityForm: Initial requirement is already name-based:", initialReq);
     } else if (isSkillUuidRequirement(initialReq)) {
       // Needs conversion from UUID to Name
-      console.log("AbilityForm: Initial requirement is UUID-based, converting:", initialReq);
       const skillMapById = new Map(allSkills.map(s => [s.id, s.name]));
       for (const [uuid, level] of Object.entries(initialReq)) {
         const skillName = skillMapById.get(uuid);
@@ -46,10 +44,8 @@ export const AbilityForm: React.FC<AbilityFormProps> = ({ entry, onChange }) => 
           // Optionally handle missing skills, e.g., skip or add a placeholder
         }
       }
-       console.log("AbilityForm: Converted to name-based requirements:", nameBasedReqs);
     } else if (typeof initialReq === 'string' || initialReq === null || initialReq === undefined) {
        // Simple string, null, or undefined - no skills selected initially
-       console.log("AbilityForm: Initial requirement is simple string, null, or undefined:", initialReq);
        nameBasedReqs = {};
     } else {
         console.warn("AbilityForm: Unrecognized requirement format during initialization:", initialReq);
