@@ -2,6 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertNarrowedChange,
+  boundedQueryLimit,
+  maxQueryRows,
+  unchangedSince,
   executeDataQuery,
   applyOrders,
   bindingMatchesChange,
@@ -349,5 +352,36 @@ describe('access cache invalidation', () => {
 
   it('ignores tables that never decide access', () => {
     expect(changeInvalidatesAccessContext('messages', true)).toBe(false);
+  });
+});
+
+describe('read ceiling', () => {
+  it('uses the ceiling when no limit is asked for and never goes above it', () => {
+    expect(boundedQueryLimit(undefined, 5000)).toBe(5000);
+    expect(boundedQueryLimit(null, 5000)).toBe(5000);
+    expect(boundedQueryLimit('many', 5000)).toBe(5000);
+    expect(boundedQueryLimit(1_000_000, 5000)).toBe(5000);
+  });
+
+  it('keeps a smaller limit that was asked for', () => {
+    expect(boundedQueryLimit(25, 5000)).toBe(25);
+    expect(boundedQueryLimit(0, 5000)).toBe(0);
+    expect(boundedQueryLimit(-3, 5000)).toBe(0);
+  });
+
+  it('reads the ceiling from the environment and rejects nonsense', () => {
+    expect(maxQueryRows({})).toBe(5000);
+    expect(maxQueryRows({ DATA_QUERY_MAX_ROWS: '200' })).toBe(200);
+    expect(() => maxQueryRows({ DATA_QUERY_MAX_ROWS: '0' })).toThrow('DATA_QUERY_MAX_ROWS');
+  });
+});
+
+describe('saving only what nobody else changed', () => {
+  it('matches the time the browser last saw, to the millisecond', () => {
+    const stored = new Date('2026-03-01T10:00:00.123Z');
+    expect(unchangedSince(stored, '2026-03-01T10:00:00.123Z')).toBe(true);
+    expect(unchangedSince(stored, '2026-03-01T12:00:00.123+02:00')).toBe(true);
+    expect(unchangedSince(stored, '2026-03-01T10:00:00.124Z')).toBe(false);
+    expect(unchangedSince(stored, 'yesterday')).toBe(false);
   });
 });

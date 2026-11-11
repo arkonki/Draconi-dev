@@ -217,39 +217,60 @@ export function resetDatabaseMetrics() {
 
 // `retryDeadlocks` re-runs the whole callback after a Postgres deadlock rollback. Only use it
 // when the callback has no side effects outside this transaction.
+// Rolls back without letting a failed rollback replace the error that caused it. A rollback fails when the
+// connection itself is gone; the caller needs the original error, and the pool needs to know the connection is bad.
+// Returns the rollback error, or null when the rollback worked.
+async function rollbackQuietly(client, label) {
+  try {
+    await client.query('ROLLBACK');
+    return null;
+  } catch (rollbackError) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'database_rollback_failed',
+      label,
+      message: String(rollbackError?.message || rollbackError).slice(0, 400),
+    }));
+    return rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+  }
+}
+
 export async function withTransaction(callback, { retryDeadlocks = 0, label = 'transaction' } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     const client = await pool.connect();
+    let broken = null;
     try {
       await client.query('BEGIN');
       const result = await callback(client);
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK');
+      broken = await rollbackQuietly(client, label);
       if (error?.code === DEADLOCK_CODE && attempt < retryDeadlocks) {
         console.warn(JSON.stringify({ level: 'warn', event: 'database_deadlock_retry', label, attempt: attempt + 1 }));
         continue;
       }
       throw error;
     } finally {
-      client.release();
+      // A connection whose rollback failed is in an unknown state: it is closed, not handed to the next request.
+      client.release(broken || undefined);
     }
   }
 }
 
 export async function withReadSnapshot(callback) {
   const client = await pool.connect();
+  let broken = null;
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    broken = await rollbackQuietly(client, 'read-snapshot');
     throw error;
   } finally {
-    client.release();
+    client.release(broken || undefined);
   }
 }
 

@@ -14,6 +14,7 @@ import { waitForDatabase, pool } from './db.js';
 import { assertRegistrationHasEmail, assertSafeConfig } from './configCheck.js';
 import { preflightHeaders } from './cors.js';
 import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from './loginRateLimit.js';
+import { assertDataRateAllowed } from './requestRateLimit.js';
 import { getBearerToken, handleError, HttpError, readJson, routePath, sendJson } from './http.js';
 import {
   housekeepingStatus,
@@ -501,6 +502,7 @@ const server = http.createServer(async (request, response) => {
 
     if (pathname === '/api/data/query' && request.method === 'POST') {
       const user = await currentUser(request);
+      assertDataRateAllowed(user);
       sendJson(response, 200, { data: await executeDataQuery(user, await readJson(request)) });
       return;
     }
@@ -508,6 +510,7 @@ const server = http.createServer(async (request, response) => {
     const rpcMatch = matchPath(pathname, /^\/api\/rpc\/([^/]+)$/);
     if (rpcMatch && request.method === 'POST') {
       const user = await currentUser(request);
+      assertDataRateAllowed(user);
       sendJson(response, 200, { data: await executeRpc(user, rpcMatch[0], await readJson(request)) });
       return;
     }

@@ -90,6 +90,7 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
   private maximum: number | undefined;
   private payload: unknown;
   private conflictTarget: string | undefined;
+  private unchangedSince: string | undefined;
 
   constructor(private readonly table: string) {}
 
@@ -180,6 +181,15 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
     return this;
   }
 
+  /**
+   * Makes an update apply only if the row still has this `updated_at`, the one it had when it was loaded. If someone
+   * else changed it in the meantime the server answers with the error code STALE_WRITE and changes nothing.
+   */
+  ifUnchangedSince(updatedAt: string | null | undefined) {
+    this.unchangedSince = updatedAt || undefined;
+    return this;
+  }
+
   returns<TResult>() {
     return this as unknown as LocalQueryBuilder<TResult>;
   }
@@ -228,6 +238,7 @@ class LocalQueryBuilder<T = QueryRow[]> implements PromiseLike<QueryResult<T>> {
         limit: this.maximum,
         payload: this.payload,
         onConflict: this.conflictTarget,
+        ifUnchangedSince: this.unchangedSince,
       }),
     });
     return {

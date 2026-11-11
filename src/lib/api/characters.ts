@@ -192,7 +192,24 @@ export async function fetchCharacterById(id: string, userId: string): Promise<Ch
   }
 }
 
-export async function updateCharacter(characterId: string, updates: Partial<Character>): Promise<Character | null> {
+/** The character was changed by someone else (or on another device) after this browser loaded it. */
+export class StaleCharacterError extends Error {
+  constructor(message = 'This character was changed somewhere else since you loaded it.') {
+    super(message);
+    this.name = 'StaleCharacterError';
+  }
+}
+
+/**
+ * Saves the given fields. With `ifUnchangedSince` (the `updated_at` the character had when it was loaded) the save
+ * is refused with a StaleCharacterError if anyone changed the character in the meantime, instead of silently
+ * overwriting what they did.
+ */
+export async function updateCharacter(
+  characterId: string,
+  updates: Partial<Character>,
+  options: { ifUnchangedSince?: string | null } = {},
+): Promise<Character | null> {
   const dbUpdates: Record<string, unknown> = { ...updates };
 
   if ('heroic_abilities' in dbUpdates) {
@@ -226,9 +243,11 @@ export async function updateCharacter(characterId: string, updates: Partial<Char
     .from('characters')
     .update(dbUpdates)
     .eq('id', characterId)
+    .ifUnchangedSince(options.ifUnchangedSince)
     .select(CHARACTER_SELECT_QUERY)
     .maybeSingle();
 
+  if (error?.code === 'STALE_WRITE') throw new StaleCharacterError();
   if (error) throw new Error(error.message || 'Failed to update character');
   if (!data) {
     throw new Error('Character not found or permission denied');

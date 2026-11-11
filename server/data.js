@@ -46,6 +46,28 @@ if (!Number.isInteger(AUTH_CONTEXT_CACHE_MS) || AUTH_CONTEXT_CACHE_MS < 0 || AUT
   throw new Error('AUTH_CONTEXT_CACHE_MS must be an integer between 0 and 60000');
 }
 
+// The most rows one read returns. No screen needs more, and without a ceiling a single request could pull a whole
+// table into memory on the server and in the browser. A read that reaches it is logged, so a list that has truly
+// outgrown the ceiling is noticed instead of quietly losing rows.
+export function maxQueryRows(env = process.env) {
+  const raw = env.DATA_QUERY_MAX_ROWS;
+  if (raw === undefined || raw === '') return 5_000;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 1_000_000) {
+    throw new Error('DATA_QUERY_MAX_ROWS must be an integer between 1 and 1000000');
+  }
+  return value;
+}
+
+const MAX_QUERY_ROWS = maxQueryRows();
+
+/** The limit a read runs with: what was asked for, never more than the ceiling. */
+export function boundedQueryLimit(requested, maximum = MAX_QUERY_ROWS) {
+  const asked = Number(requested);
+  if (requested === undefined || requested === null || !Number.isFinite(asked)) return maximum;
+  return Math.min(Math.max(0, Math.trunc(asked)), maximum);
+}
+
 const accessContextCache = new Map();
 let accessContextGeneration = 0;
 const accessContextMetrics = {
@@ -874,6 +896,30 @@ async function insertOne(table, input, ctx, client, onConflict) {
   return outwardAliases(table, rows[0] || null);
 }
 
+/** Whether a row was last changed at the moment the client says it last saw it, to the millisecond a browser keeps. */
+export function unchangedSince(updatedAt, expected) {
+  const seen = expected instanceof Date ? expected.getTime() : Date.parse(String(expected));
+  const actual = updatedAt instanceof Date ? updatedAt.getTime() : Date.parse(String(updatedAt));
+  return Number.isFinite(seen) && Number.isFinite(actual) && Math.trunc(seen) === Math.trunc(actual);
+}
+
+/**
+ * Lets a client say "save this only if nobody changed the row since I loaded it". The rows are locked first, so two
+ * people saving at once cannot both pass: the second waits, then sees the first one's change and is refused.
+ */
+async function assertUnchangedSince(table, ids, expected, client) {
+  const columns = await columnsFor(table, client);
+  if (!columns.has('updated_at')) throw new HttpError(400, `${table} does not record when a row was changed`);
+  if (!Number.isFinite(Date.parse(String(expected)))) throw new HttpError(400, 'ifUnchangedSince must be a date and time');
+  const { rows } = await client.query(
+    `SELECT id, updated_at FROM "${table}" WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+    [ids],
+  );
+  if (rows.length !== ids.length || rows.some((row) => !unchangedSince(row.updated_at, expected))) {
+    throw new HttpError(409, 'This was changed somewhere else since you loaded it.', 'STALE_WRITE');
+  }
+}
+
 /**
  * A change or removal must say which rows it means. Without a filter it would reach every row the person may
  * touch, so one forgotten `.eq()` in a client could wipe all of someone's notes or characters.
@@ -891,7 +937,7 @@ export function assertNarrowedChange(filters) {
 }
 
 export async function executeDataQuery(user, request) {
-  const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict } = request;
+  const { table, action = 'select', filters = [], orders = [], limit, payload, onConflict, ifUnchangedSince } = request;
   assertTable(table);
   if (table === 'notes' && action === 'upsert') throw new HttpError(400, 'Use an explicit journal update instead of upsert');
   if (table === 'users') assertUserActionAllowed(action);
@@ -899,7 +945,13 @@ export async function executeDataQuery(user, request) {
 
   if (action === 'select') {
     const ctx = await accessContext(user);
-    return authorizedRows(table, ctx, pool, { filters, orders, limit });
+    const bounded = boundedQueryLimit(limit);
+    // One row more than the ceiling is asked for, only to tell "exactly the ceiling" from "there was more".
+    const capped = bounded === MAX_QUERY_ROWS;
+    const rows = await authorizedRows(table, ctx, pool, { filters, orders, limit: capped ? bounded + 1 : bounded });
+    if (!capped || rows.length <= bounded) return rows;
+    console.warn(JSON.stringify({ level: 'warn', event: 'data_query_truncated', table, maximum: bounded, userId: user.id }));
+    return rows.slice(0, bounded);
   }
 
   // Inserts and deletes always count; an update only when it writes an ownership or membership column.
@@ -956,6 +1008,9 @@ export async function executeDataQuery(user, request) {
       affectsAccess = keys.some((key) => ACCESS_COLUMNS.has(key));
       const assignments = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
       await lockVitalRows(table, ids, prepared, client);
+      if (ifUnchangedSince !== undefined && ifUnchangedSince !== null) {
+        await assertUnchangedSince(table, ids, ifUnchangedSince, client);
+      }
       const { rows } = await client.query(
         `UPDATE "${table}" SET ${assignments} WHERE id = ANY($${keys.length + 1}::uuid[]) RETURNING *`,
         [...keys.map((key) => prepared[key]), ids],

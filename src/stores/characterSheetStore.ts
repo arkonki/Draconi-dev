@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { Character, InventoryItem, EquippedItems, AttributeName, CharacterSpells, GameItem, Ability, Equipment } from '../types/character';
 import { Spell, MagicSchool } from '../types/magic';
-import { updateCharacter, fetchCharacterById } from '../lib/api/characters';
+import { updateCharacter, fetchCharacterById, StaleCharacterError } from '../lib/api/characters';
 import { fetchItems } from '../lib/api/items';
 import { fetchActiveEncounterForParty, fetchEncounterCombatants, updateCombatant as apiUpdateCombatant } from '../lib/api/encounters';
 import { queryClient } from '../lib/queryClient';
@@ -22,6 +22,56 @@ const currentEquipment = (character: Character | null | undefined): Equipment =>
   money: { gold: 0, silver: 0, copper: 0 },
   ...character?.equipment,
 });
+
+// Saves from one sheet go out one at a time, in the order they were made. Each one then carries the `updated_at`
+// its predecessor returned, so quick edits in a row are never mistaken for someone else's change.
+let saveQueue: Promise<void> = Promise.resolve();
+
+// Whether two field values hold the same data, whatever order their keys are in.
+const sameValue = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if ((left ?? null) === null && (right ?? null) === null) return true;
+  if (typeof left !== 'object' || typeof right !== 'object' || left === null || right === null) return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((entry, index) => sameValue(entry, right[index]));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  return [...keys].every((key) => sameValue(leftRecord[key], rightRecord[key]));
+};
+
+const STALE_SAVE_ATTEMPTS = 3;
+
+/**
+ * Saves fields of a character without overwriting what someone else did in the meantime. The save says which
+ * version of the character this sheet has; if the server has a newer one, the sheet loads it and looks at the
+ * fields being saved. Untouched by the other person (they changed hit points, this saves notes): the save is simply
+ * sent again. Changed by them too: nothing is saved, and the caller gets the newer character and a
+ * StaleCharacterError, so the player sees the other change instead of erasing it.
+ */
+async function saveWithoutOverwriting(
+  loaded: Character,
+  updates: Partial<Character>,
+): Promise<{ saved: Character | null; newer: Character | null }> {
+  let base = loaded;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // The last attempt saves regardless: the fields were just checked, and a busy fight must not block a save forever.
+      const guarded = attempt < STALE_SAVE_ATTEMPTS;
+      return { saved: await updateCharacter(base.id!, updates, { ifUnchangedSince: guarded ? base.updated_at : null }), newer: null };
+    } catch (error) {
+      if (!(error instanceof StaleCharacterError)) throw error;
+      const fresh = await fetchCharacterById(base.id!, base.user_id);
+      if (!fresh) throw error;
+      const record = (character: Character) => character as unknown as Record<string, unknown>;
+      const untouched = Object.keys(updates).every((key) => sameValue(record(fresh)[key], record(base)[key]));
+      if (!untouched) return { saved: null, newer: fresh };
+      base = fresh;
+    }
+  }
+}
 
 interface PartySummary {
   id: string;
@@ -287,16 +337,29 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
 
   // --- CENTRALIZED SAVE & SYNC ---
   _saveCharacter: async (updates) => {
-    const { character, _syncToCombatant } = get();
-    if (!character?.id) {
+    const { _syncToCombatant } = get();
+    if (!get().character?.id) {
       const errorMsg = 'Cannot save: Character ID is missing.';
       set({ saveError: errorMsg });
       throw new Error(errorMsg);
     }
     set({ isSaving: true, saveError: null });
+    // Wait for the saves made before this one, whether they worked or not.
+    const previous = saveQueue;
+    let finished: () => void = () => undefined;
+    saveQueue = new Promise<void>((resolve) => { finished = resolve; });
+    await previous;
     try {
       // A. Update the Character Database
-      const savedCharacter = await updateCharacter(character.id, updates);
+      const character = get().character;
+      if (!character?.id) throw new Error('Cannot save: Character ID is missing.');
+      const { saved: savedCharacter, newer } = await saveWithoutOverwriting(character, updates);
+      if (newer) {
+        // Someone else changed the same fields. Show their version; the player decides what to do next.
+        syncCharacterCaches(newer);
+        set({ character: newer });
+        throw new StaleCharacterError('This character was changed somewhere else, so your change was not saved. The sheet now shows the latest version - check it and try again.');
+      }
       if (!savedCharacter) {
         throw new Error('Failed to save character');
       }
@@ -323,6 +386,8 @@ export const useCharacterSheetStore = create<CharacterSheetState>((set, get) => 
       const errorMessage = err instanceof Error ? err.message : 'Failed to save character';
       set({ saveError: errorMessage, isSaving: false });
       throw err;
+    } finally {
+      finished();
     }
   },
 
