@@ -198,8 +198,10 @@ describe('realtime WebSocket server', () => {
 describe('PostgreSQL realtime notification payloads', () => {
   it('accepts metadata JSON and legacy numeric payloads', () => {
     expect(parseChangeNotification('{"id":42,"table":"messages"}'))
-      .toEqual({ id: 42, table: 'messages' });
-    expect(parseChangeNotification('43')).toEqual({ id: 43, table: null });
+      .toEqual({ id: 42, table: 'messages', access: true });
+    expect(parseChangeNotification('{"id":44,"table":"characters","access":false}'))
+      .toEqual({ id: 44, table: 'characters', access: false });
+    expect(parseChangeNotification('43')).toEqual({ id: 43, table: null, access: true });
     expect(parseChangeNotification('invalid')).toBeNull();
   });
 });

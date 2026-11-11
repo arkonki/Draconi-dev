@@ -36,6 +36,11 @@ const ACCESS_CONTEXT_TABLES = new Set([
   'encounters', 'party_display_sessions',
 ]);
 
+// The columns that decide who owns a row or which campaign it belongs to. An update that leaves all of them alone
+// cannot change anyone's access, so the cached access contexts stay valid through it. Keep this list in step with
+// log_app_change() in the migrations, which makes the same decision for changes that arrive as notifications.
+const ACCESS_COLUMNS = new Set(['user_id', 'party_id', 'created_by', 'role', 'character_id']);
+
 const AUTH_CONTEXT_CACHE_MS = Number(process.env.AUTH_CONTEXT_CACHE_MS || 5_000);
 if (!Number.isInteger(AUTH_CONTEXT_CACHE_MS) || AUTH_CONTEXT_CACHE_MS < 0 || AUTH_CONTEXT_CACHE_MS > 60_000) {
   throw new Error('AUTH_CONTEXT_CACHE_MS must be an integer between 0 and 60000');
@@ -253,8 +258,19 @@ export function invalidateAccessContextCache(userIds = null) {
   for (const userId of userIds) accessContextCache.delete(userId);
 }
 
-export function changeInvalidatesAccessContext(table) {
-  return ACCESS_CONTEXT_TABLES.has(table);
+/**
+ * Whether a change to this table can alter someone's access. `affectsAccess` is false only when the change is
+ * known to be an update that touched none of the ownership or membership columns, such as hit points lost in
+ * a fight; anything unknown counts as a change that matters.
+ */
+export function changeInvalidatesAccessContext(table, affectsAccess = true) {
+  return ACCESS_CONTEXT_TABLES.has(table) && affectsAccess !== false;
+}
+
+/** The row as it was before an update: the row after it, with the changed columns put back. */
+export function restoreChangeEvent(event) {
+  if (event?.event_type !== 'UPDATE' || !event.new_record || !event.old_record) return event;
+  return { ...event, old_record: { ...event.new_record, ...event.old_record } };
 }
 
 export function authorizationCacheSnapshot() {
@@ -886,6 +902,9 @@ export async function executeDataQuery(user, request) {
     return authorizedRows(table, ctx, pool, { filters, orders, limit });
   }
 
+  // Inserts and deletes always count; an update only when it writes an ownership or membership column.
+  let affectsAccess = action !== 'update';
+
   const result = await withTransaction(async (client) => {
     await client.query(
       `SELECT set_config('draconi.source_user_id', $1, true),
@@ -934,6 +953,7 @@ export async function executeDataQuery(user, request) {
       }
       const keys = Object.keys(prepared);
       if (keys.length === 0) return candidates;
+      affectsAccess = keys.some((key) => ACCESS_COLUMNS.has(key));
       const assignments = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
       await lockVitalRows(table, ids, prepared, client);
       const { rows } = await client.query(
@@ -945,7 +965,7 @@ export async function executeDataQuery(user, request) {
     }
     throw new HttpError(400, `Unsupported action: ${action}`);
   }, { retryDeadlocks: 2, label: `data:${table}:${action}` });
-  if (ACCESS_CONTEXT_TABLES.has(table)) invalidateAccessContextCache();
+  if (changeInvalidatesAccessContext(table, affectsAccess)) invalidateAccessContextCache();
   return result;
 }
 
@@ -994,7 +1014,7 @@ export async function readChangeEventBatch(afterId, tables, throughId = null, li
     values,
   );
   return {
-    events: rows,
+    events: rows.map(restoreChangeEvent),
     lastId: Number(rows.at(-1)?.id ?? cursor),
     hasMore: rows.length === boundedLimit,
   };

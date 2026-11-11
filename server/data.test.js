@@ -8,6 +8,8 @@ import {
   buildAuthorizedSelectQuery,
   canRead,
   canWrite,
+  changeInvalidatesAccessContext,
+  restoreChangeEvent,
   assertCombatantChange,
   assertMessageContent,
   materializeAccessContext,
@@ -308,5 +310,44 @@ describe('changes must name their rows', () => {
     expect(() => assertNarrowedChange([{ operator: 'in', column: 'id', value: ['1'] }])).not.toThrow();
     expect(() => assertNarrowedChange([{ operator: 'match', value: { party_id: '1' } }])).not.toThrow();
     expect(() => assertNarrowedChange([{ operator: 'or', value: 'id.eq.1,id.eq.2' }])).not.toThrow();
+  });
+});
+
+describe('compact change events', () => {
+  it('rebuilds the row before an update from the row after it and the changed columns', () => {
+    const event = {
+      event_type: 'UPDATE',
+      new_record: { id: 'c1', name: 'Hero', current_hp: 7, conditions: null },
+      old_record: { current_hp: 12, conditions: { dazed: true } },
+    };
+    expect(restoreChangeEvent(event).old_record).toEqual({ id: 'c1', name: 'Hero', current_hp: 12, conditions: { dazed: true } });
+    // The stored event is left as it was.
+    expect(event.old_record).toEqual({ current_hp: 12, conditions: { dazed: true } });
+  });
+
+  it('keeps a full old row from before the log was compacted, and leaves inserts and deletes alone', () => {
+    const full = { event_type: 'UPDATE', new_record: { id: 'c1', hp: 7 }, old_record: { id: 'c1', hp: 12 } };
+    expect(restoreChangeEvent(full).old_record).toEqual({ id: 'c1', hp: 12 });
+    const inserted = { event_type: 'INSERT', new_record: { id: 'c1' }, old_record: null };
+    expect(restoreChangeEvent(inserted)).toBe(inserted);
+    const deleted = { event_type: 'DELETE', new_record: null, old_record: { id: 'c1', title: 'Gone' } };
+    expect(restoreChangeEvent(deleted)).toBe(deleted);
+  });
+});
+
+describe('access cache invalidation', () => {
+  it('keeps the cache through updates that cannot change access', () => {
+    expect(changeInvalidatesAccessContext('characters', false)).toBe(false);
+    expect(changeInvalidatesAccessContext('encounters', false)).toBe(false);
+  });
+
+  it('drops the cache for inserts, deletes, ownership changes and anything unknown', () => {
+    expect(changeInvalidatesAccessContext('characters', true)).toBe(true);
+    expect(changeInvalidatesAccessContext('characters')).toBe(true);
+    expect(changeInvalidatesAccessContext('campaign_memberships', undefined)).toBe(true);
+  });
+
+  it('ignores tables that never decide access', () => {
+    expect(changeInvalidatesAccessContext('messages', true)).toBe(false);
   });
 });

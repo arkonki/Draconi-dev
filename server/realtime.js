@@ -106,13 +106,14 @@ export function parseChangeNotification(payload) {
     const parsed = JSON.parse(payload);
     const id = Number(parsed?.id);
     if (Number.isSafeInteger(id) && id >= 0) {
-      return { id, table: typeof parsed.table === 'string' ? parsed.table : null };
+      // `access` is false only when the database knows the change cannot alter who may see what.
+      return { id, table: typeof parsed.table === 'string' ? parsed.table : null, access: parsed.access !== false };
     }
   } catch {
     // Legacy notifications contain only the numeric change-event ID.
   }
   const id = Number(payload);
-  return Number.isSafeInteger(id) && id >= 0 ? { id, table: null } : null;
+  return Number.isSafeInteger(id) && id >= 0 ? { id, table: null, access: true } : null;
 }
 
 function sendMessage(socket, message) {
@@ -388,7 +389,7 @@ export async function attachRealtimeServer(server, options = {}) {
     }
     if (change?.table) pendingTables.add(change.table);
     else pendingUnknownTable = true;
-    if (!change?.table || changeInvalidatesAccessContext(change.table)) {
+    if (!change?.table || changeInvalidatesAccessContext(change.table, change.access)) {
       invalidateAccessContextCache();
     }
     if (batchTimer !== null || sharedFlushPromise) {
