@@ -134,7 +134,7 @@ describe('Game Session & Time modal', () => {
       const summary = await openSessionPanel();
       fireEvent.change(summary, { target: { value: '  The party crossed the vale.  ' } });
 
-      fireEvent.click(screen.getAllByRole('button', { name: 'End session' }).at(-1)!);
+      fireEvent.click(screen.getAllByRole('button', { name: 'End session' }).slice(-1)[0]);
 
       expect(await screen.findByText('“The Misty Vale” has ended. Its summary is saved with the session.')).toBeInTheDocument();
       expect(mockedEndSession).toHaveBeenCalledWith('party-1', 'session-1', 4, { summary: 'The party crossed the vale.', unresolvedThreads: [] });
@@ -148,7 +148,7 @@ describe('Game Session & Time modal', () => {
       const summary = await openSessionPanel();
       fireEvent.change(summary, { target: { value: 'The party crossed the vale.' } });
 
-      fireEvent.click(screen.getAllByRole('button', { name: 'End session' }).at(-1)!);
+      fireEvent.click(screen.getAllByRole('button', { name: 'End session' }).slice(-1)[0]);
 
       expect(await screen.findByText('Could not end the session.')).toBeInTheDocument();
       expect(screen.getByPlaceholderText('Session summary (required)')).toHaveValue('The party crossed the vale.');
