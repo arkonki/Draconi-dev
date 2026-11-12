@@ -1,6 +1,7 @@
 import { pool, withTransaction } from './db.js';
 import { assertCanCreateCampaign, canCampaignRoleWrite, isCampaignGmRole } from './campaignRoles.js';
 import { HttpError } from './http.js';
+import { createChangeEventHorizon } from './changeHorizon.js';
 import { canEditNote } from '../shared/noteAccess.js';
 import { prepareChatMessage } from './chatMessages.js';
 import { itemBundle } from '../shared/encumbrance.js';
@@ -1040,9 +1041,34 @@ export function bindingMatchesChange(binding, event, row) {
   return expected === undefined || String(row[column]) === expected;
 }
 
-export async function latestChangeEventId(client = pool) {
-  const { rows } = await client.query('SELECT COALESCE(MAX(id), 0) AS last_id FROM app_change_events');
-  return Number(rows[0].last_id);
+const HORIZON_START_ATTEMPTS = 200;
+const HORIZON_START_DELAY_MS = 25;
+
+const advanceChangeEventHorizon = createChangeEventHorizon({
+  readLastAllocatedId: async () => {
+    const { rows } = await pool.query('SELECT last_value, is_called FROM app_change_events_id_seq');
+    return rows[0].is_called ? Number(rows[0].last_value) : 0;
+  },
+  readSnapshot: async () => {
+    const { rows } = await pool.query(
+      `SELECT pg_snapshot_xmin(snapshot)::text AS xmin, pg_snapshot_xmax(snapshot)::text AS xmax
+       FROM pg_current_snapshot() AS snapshot`,
+    );
+    return { xmin: BigInt(rows[0].xmin), xmax: BigInt(rows[0].xmax) };
+  },
+});
+
+/**
+ * The highest change-event id that is safe to read up to: no event at or below it can still be
+ * committed. Readers must not move a cursor past it, or a slower transaction's event is skipped.
+ */
+export async function changeEventHorizon() {
+  for (let attempt = 0; attempt < HORIZON_START_ATTEMPTS; attempt += 1) {
+    const horizon = await advanceChangeEventHorizon();
+    if (horizon.safeId !== null) return horizon;
+    await new Promise((resolve) => setTimeout(resolve, HORIZON_START_DELAY_MS));
+  }
+  throw new HttpError(503, 'Realtime events are not ready yet', 'REALTIME_UNAVAILABLE');
 }
 
 export async function readChangeEventBatch(afterId, tables, throughId = null, limit = 250, client = pool) {
@@ -1097,15 +1123,16 @@ export async function authorizeChangeEventBatch(user, events, bindings) {
 
 export async function authorizedChangeEvents(user, afterId, bindings) {
   const tables = realtimeTables(bindings);
+  const { safeId } = await changeEventHorizon();
   if (afterId === null || afterId === undefined) {
-    return { events: [], lastId: await latestChangeEventId() };
+    return { events: [], lastId: safeId };
   }
 
   const cursor = Number(afterId);
   if (!Number.isSafeInteger(cursor) || cursor < 0) throw new HttpError(400, 'Invalid realtime event cursor');
-  if (tables.length === 0) return { events: [], lastId: cursor };
+  if (tables.length === 0 || safeId <= cursor) return { events: [], lastId: cursor };
 
-  const batch = await readChangeEventBatch(cursor, tables);
+  const batch = await readChangeEventBatch(cursor, tables, safeId);
   const filtered = await authorizeChangeEventBatch(user, batch.events, bindings);
-  return { events: filtered.events, lastId: batch.lastId };
+  return { events: filtered.events, lastId: batch.hasMore ? batch.lastId : safeId };
 }

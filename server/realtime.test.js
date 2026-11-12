@@ -72,7 +72,7 @@ describe('realtime WebSocket server', () => {
       readEvents,
       readEventBatch,
       authorizeEvents,
-      latestEventId: vi.fn(async () => events.at(-1)?.id ?? 10),
+      eventHorizon: vi.fn(async () => ({ safeId: events.at(-1)?.id ?? 10, pending: false })),
       startChangeListener: vi.fn(async (onChange) => {
         notifyChange = onChange;
         return async () => {};
@@ -155,7 +155,7 @@ describe('realtime WebSocket server', () => {
       readEvents,
       readEventBatch,
       authorizeEvents,
-      latestEventId: vi.fn(async () => events.at(-1)?.id ?? 20),
+      eventHorizon: vi.fn(async () => ({ safeId: events.at(-1)?.id ?? 20, pending: false })),
       startChangeListener: vi.fn(async (onChange) => {
         notifyChange = onChange;
         return async () => {};
@@ -192,6 +192,73 @@ describe('realtime WebSocket server', () => {
     first.close();
     second.close();
     await Promise.all([once(first, 'close'), once(second, 'close')]);
+  });
+});
+
+describe('realtime delivery around slow transactions', () => {
+  it('delivers an event that commits after a later one instead of skipping it', async () => {
+    let notifyChange = () => {};
+    let events = [];
+    let horizon = { safeId: 30, pending: false };
+    const event = (id) => ({
+      id,
+      table_name: 'messages',
+      event_type: 'INSERT',
+      created_at: '2026-11-12T00:00:00.000Z',
+      new_record: { id: `message-${id}`, party_id: 'party-1' },
+      old_record: null,
+    });
+    const server = http.createServer();
+    const realtime = await attachRealtimeServer(server, {
+      authenticate: vi.fn(async (token) => ({ id: `user:${token}` })),
+      readEvents: vi.fn(async (_user, afterId) => ({ events: [], lastId: afterId ?? horizon.safeId })),
+      readEventBatch: vi.fn(async (afterId, tables, throughId) => {
+        const pending = events.filter((item) => item.id > afterId && item.id <= throughId);
+        return { events: pending, lastId: pending.at(-1)?.id ?? afterId, hasMore: false };
+      }),
+      authorizeEvents: vi.fn(async (_user, pending) => ({
+        events: pending,
+        rejectedByAuthorization: 0,
+        rejectedByBinding: 0,
+      })),
+      eventHorizon: vi.fn(async () => horizon),
+      startChangeListener: vi.fn(async (onChange) => {
+        notifyChange = onChange;
+        return async () => {};
+      }),
+      logger: { error: vi.fn(), warn: vi.fn() },
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    cleanup.push(async () => {
+      await realtime.close();
+      await new Promise((resolve) => server.close(resolve));
+    });
+
+    const socket = await openSubscribedSocket(server, 'token', [{ event: '*', schema: 'public', table: 'messages' }]);
+    const received = [];
+    socket.on('message', (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'events') received.push(message);
+    });
+
+    // Event 32 is committed and notified while the transaction that owns id 31 is still open.
+    events = [event(32)];
+    horizon = { safeId: 30, pending: true };
+    notifyChange({ id: 32, table: 'messages' });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(received.flatMap((message) => message.events)).toEqual([]);
+    expect(received.every((message) => message.lastId <= 30)).toBe(true);
+
+    // The slow transaction commits. No further notification is needed for the retry to find both.
+    events = [event(31), event(32)];
+    horizon = { safeId: 32, pending: false };
+    await vi.waitFor(() => {
+      expect(received.flatMap((message) => message.events.map((item) => item.id))).toEqual([31, 32]);
+    }, { timeout: 2000 });
+
+    socket.close();
+    await once(socket, 'close');
   });
 });
 

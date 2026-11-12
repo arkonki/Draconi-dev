@@ -44,6 +44,7 @@ Keep the self-hosted Node.js/PostgreSQL app responsive when several players, a G
 - Notifications for party, membership, character, map, encounter, and projector-session changes invalidate authorization contexts immediately.
 - The admin performance endpoint reports socket counts, notifications, coalesced signals, shared queries, fetched and delivered events, skipped clients, authorization rejections, and delivery errors.
 - HTTP polling remains as a compatibility and reconnect fallback.
+- Realtime readers stop at a change-event horizon (`server/changeHorizon.js`): event ids are assigned before commit, so cursors only advance over ids whose transactions have all finished. A slow transaction can no longer make its event disappear behind a faster one; events above the horizon are delivered when that transaction ends. The admin performance endpoint counts these waits as `horizonWaits`.
 - Queries inside a single PostgreSQL transaction or read snapshot are serialized, avoiding concurrent `client.query()` calls that are deprecated by the `pg` driver and can make snapshot behavior unreliable.
 
 ### Phase 5 — Frontend request consolidation (complete)

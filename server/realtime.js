@@ -5,8 +5,8 @@ import {
   authorizeChangeEventBatch,
   authorizedChangeEvents,
   changeInvalidatesAccessContext,
+  changeEventHorizon,
   invalidateAccessContextCache,
-  latestChangeEventId,
   readChangeEventBatch,
 } from './data.js';
 import { HttpError } from './http.js';
@@ -21,6 +21,8 @@ const LISTENER_RECONNECT_MS = 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EVENT_BATCH_LIMIT = 250;
 const EVENT_BATCH_DELAY_MS = 10;
+const HORIZON_RETRY_MS = 25;
+const HORIZON_MAX_RETRY_MS = 500;
 const METRIC_SAMPLE_SIZE = (() => {
   const parsed = Number(process.env.PERFORMANCE_SAMPLE_SIZE || 1_024);
   return Number.isInteger(parsed) && parsed >= 32 && parsed <= 4_096 ? parsed : 1_024;
@@ -35,6 +37,7 @@ const realtimeMetrics = {
   notificationsReceived: 0,
   notificationBatches: 0,
   coalescedSignals: 0,
+  horizonWaits: 0,
   sharedEventQueries: 0,
   catchUpQueries: 0,
   eventsFetched: 0,
@@ -227,7 +230,7 @@ export async function attachRealtimeServer(server, options = {}) {
   const readEvents = options.readEvents || authorizedChangeEvents;
   const readEventBatch = options.readEventBatch || readChangeEventBatch;
   const authorizeEvents = options.authorizeEvents || authorizeChangeEventBatch;
-  const getLatestEventId = options.latestEventId || latestChangeEventId;
+  const getEventHorizon = options.eventHorizon || changeEventHorizon;
   const startChangeListener = options.startChangeListener || startPostgresChangeListener;
   const logger = options.logger || console;
   const webSocketServer = new WebSocketServer({
@@ -240,10 +243,9 @@ export async function attachRealtimeServer(server, options = {}) {
   let closing = false;
   let batchTimer = null;
   let sharedFlushPromise = null;
+  let batchTimerIsRetry = false;
   let pendingSignal = false;
-  let pendingUnknownTable = false;
-  let pendingMaximumId = null;
-  const pendingTables = new Set();
+  let horizonRetryMs = HORIZON_RETRY_MS;
 
   const flushClient = async (state) => {
     if (!state.user || !state.bindings || state.socket.readyState !== WebSocket.OPEN) return;
@@ -319,30 +321,40 @@ export async function attachRealtimeServer(server, options = {}) {
     }
   };
 
+  const armSharedFlush = (delay, isRetry = false) => {
+    if (closing || batchTimer !== null) return;
+    batchTimerIsRetry = isRetry;
+    batchTimer = setTimeout(() => {
+      batchTimer = null;
+      pendingSignal = true;
+      void flushSharedEvents();
+    }, delay);
+    batchTimer.unref?.();
+  };
+
   const flushSharedEvents = async () => {
     if (sharedFlushPromise || closing) return;
+    let waitingForHorizon = false;
     sharedFlushPromise = (async () => {
       while (pendingSignal && !closing) {
         pendingSignal = false;
-        const unknownTable = pendingUnknownTable;
-        pendingUnknownTable = false;
-        const signaledMaximum = pendingMaximumId;
-        pendingMaximumId = null;
-        const signaledTables = new Set(pendingTables);
-        pendingTables.clear();
+        waitingForHorizon = false;
 
         const states = [...clients].filter((state) => state.user && state.bindings
           && state.socket.readyState === WebSocket.OPEN);
         if (states.length === 0) continue;
 
-        const targetId = signaledMaximum ?? await getLatestEventId();
+        // Never read past the horizon: an event below it may still be waiting for its commit, and
+        // moving the cursors over it would drop that event for every client.
+        const horizon = await getEventHorizon();
+        waitingForHorizon = horizon.pending;
+        const targetId = horizon.safeId;
         const minimumCursor = Math.min(...states.map((state) => Number(state.afterId || 0)));
         if (!Number.isSafeInteger(targetId) || targetId <= minimumCursor) continue;
 
-        const subscribedTables = new Set(states.flatMap((state) => state.bindings.map((binding) => binding.table)));
-        const tables = unknownTable
-          ? [...subscribedTables]
-          : [...signaledTables].filter((table) => subscribedTables.has(table));
+        // Every subscribed table is read, not only the notified ones: the notification for an
+        // event inside this range can still be on its way.
+        const tables = [...new Set(states.flatMap((state) => state.bindings.map((binding) => binding.table)))];
         realtimeMetrics.notificationBatches += 1;
 
         if (tables.length === 0) {
@@ -372,35 +384,38 @@ export async function attachRealtimeServer(server, options = {}) {
       clients.forEach((state) => state.socket.close(1011, 'Realtime delivery failed'));
     }).finally(() => {
       sharedFlushPromise = null;
-      if (pendingSignal && !closing) scheduleSharedFlush(null);
+      if (pendingSignal) {
+        armSharedFlush(EVENT_BATCH_DELAY_MS);
+      } else if (waitingForHorizon) {
+        // Events above the horizon are waiting for an open transaction; look again without a signal.
+        realtimeMetrics.horizonWaits += 1;
+        armSharedFlush(horizonRetryMs, true);
+        horizonRetryMs = Math.min(HORIZON_MAX_RETRY_MS, horizonRetryMs * 2);
+      }
+      if (!waitingForHorizon) horizonRetryMs = HORIZON_RETRY_MS;
     });
     await sharedFlushPromise;
+  };
+
+  const requestSharedFlush = () => {
+    pendingSignal = true;
+    if (batchTimer !== null && batchTimerIsRetry) {
+      clearTimeout(batchTimer);
+      batchTimer = null;
+    }
+    if (batchTimer !== null || sharedFlushPromise) return false;
+    armSharedFlush(EVENT_BATCH_DELAY_MS);
+    return true;
   };
 
   const scheduleSharedFlush = (change) => {
     if (closing) return;
     realtimeMetrics.listenerSignals += 1;
-    pendingSignal = true;
-    if (change?.id !== undefined) {
-      realtimeMetrics.notificationsReceived += 1;
-      pendingMaximumId = Math.max(pendingMaximumId ?? 0, change.id);
-    } else {
-      pendingUnknownTable = true;
-    }
-    if (change?.table) pendingTables.add(change.table);
-    else pendingUnknownTable = true;
+    if (change?.id !== undefined) realtimeMetrics.notificationsReceived += 1;
     if (!change?.table || changeInvalidatesAccessContext(change.table, change.access)) {
       invalidateAccessContextCache();
     }
-    if (batchTimer !== null || sharedFlushPromise) {
-      realtimeMetrics.coalescedSignals += 1;
-      return;
-    }
-    batchTimer = setTimeout(() => {
-      batchTimer = null;
-      void flushSharedEvents();
-    }, EVENT_BATCH_DELAY_MS);
-    batchTimer.unref?.();
+    if (!requestSharedFlush()) realtimeMetrics.coalescedSignals += 1;
   };
 
   const closeClientsForListenerRestart = () => {
@@ -494,6 +509,8 @@ export async function attachRealtimeServer(server, options = {}) {
           lastId: result.lastId,
         });
         void flushClient(state);
+        // Events held back by the horizon at this moment arrive through the shared flush.
+        if (!closing) requestSharedFlush();
       })().catch((error) => closeWithError(socket, error));
     });
 
